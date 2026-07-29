@@ -10,6 +10,7 @@ publish/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/launch.json
+!.vscode/settings.json
 *.user
 *.suo
 .DS_Store

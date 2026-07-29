@@ -218,7 +218,7 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 | 2.1 | Desktop sign-in/register/change-password screens (RCL), refresh token in MAUI `SecureStorage`, silent restore on cold start, sign-out revokes | M | cold-start silent restore works; tokens never written unencrypted |
 | 2.2 | Web sign-in (same RCL screens), refresh token in browser storage, token attach via `IAuthTokenProvider` in one HTTP chokepoint, silent refresh on 401 | S | same UI code signs in on web |
 | 2.3 ✅ | Tenant guard: one tenant per user created at registration, permanent binding, `/me` endpoint | S | cross-tenant access rejected in integration tests — *done 2026-07-28* |
-| 2.4 | Encrypted `UserSetting` store (AES-256-GCM) + settings sync; per-device UI state stays local | M | settings roam across machines; key rotation documented |
+| 2.4 ✅ | Encrypted `UserSetting` store (AES-256-GCM) + settings sync; per-device UI state stays local | M | settings roam across machines; key rotation documented — *done 2026-07-28: authenticated encryption w/ tamper tests; secret values never returned by any endpoint* |
 | 2.5 | BYO Foundry credentials: settings UI, encrypted storage, `/ai/status` probe listing deployments, guided setup doc | M | invalid endpoint/key surfaces actionable error before first generation |
 
 ### E3 — Design system (M)
@@ -259,7 +259,7 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 | 6.4 | Social fan-out: 6 platforms, per-platform rules + hard caps, hashtags policy | M | validators reject over-limit posts before review |
 | 6.5 | Email sequence, newsletter, landing page, show notes generators | M | each returns citations + passes validators |
 | 6.6 | Clip suggester: in/out timestamps + platform fit + hook text | M | timestamps land within source duration; ranked list |
-| 6.7 | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container |
+| 6.7 | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container — *Azure image deployments already provisioned (2026-07-28): `gpt-image-2` and `mai-image-2.5pro`; wire them into the model-alias table in B5* |
 | 6.8 | Brand-voice: exemplar ingestion → distilled style card; injected into every generator | M | A/B: generated copy matches style card on rubric |
 | 6.9 | Deterministic validators + review gate; prompt-transparency log dialog | S | "Mark reviewed" blocked until validators pass |
 

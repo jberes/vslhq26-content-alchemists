@@ -40,6 +40,12 @@ public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncL
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:Castmill", _sql.GetConnectionString());
         builder.UseSetting("Jwt:SigningKey", SigningKey);
+        builder.UseSetting("Castmill:EncryptionKey",
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        // Fake connection string: SAS minting is offline crypto, so blob
+        // endpoints are fully testable without an Azure account.
+        builder.UseSetting("Storage:ConnectionString", BlobSasTests.FakeConnectionString);
+        builder.UseSetting("Storage:AccountName", "");
         // High enough that functional tests never trip it; the rate-limit test
         // uses its own factory with a tiny limit.
         builder.UseSetting("RateLimits:AuthPerMinute", "1000");

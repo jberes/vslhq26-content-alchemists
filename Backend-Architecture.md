@@ -154,7 +154,7 @@ flowchart LR
 - Correlation-ID middleware; rate-limit policies; integration-test harness (Testcontainers SQL).
 - **Check-in gate:** integration tests prove register → login → authorized call → refresh → logout-revocation, G1 (cross-tenant access fails), and 412-on-stale-ETag; a trace in App Insights shows client-supplied correlation ID.
 
-### Phase B3 — Secrets & storage *(size M)* — ⬜ next up
+### Phase B3 — Secrets & storage *(size M)* — ✅ complete 2026-07-28 *(SAS is user-delegation via Entra RBAC — no storage account key exists anywhere; shared-key connection string supported as fallback; public-container publish path deferred to B7 where it's consumed)*
 - AES-256-GCM `UserSetting` store + typed secret accessors; Production startup guards.
 - SAS service + `/blob` group (mint, test, list); public-container publish path with immutable cache headers.
 - **Check-in gate:** G2 audit — grep + integration tests show no key material in any response; SAS expiry and op-scoping tested.

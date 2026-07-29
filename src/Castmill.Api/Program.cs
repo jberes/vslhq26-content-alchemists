@@ -5,6 +5,8 @@ using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
+using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
 using Castmill.Core.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -40,11 +42,19 @@ if (builder.Environment.IsProduction())
     }
 }
 
+// Secret-custody guard: constructing the cipher validates Castmill:EncryptionKey
+// (present, base64, exactly 32 bytes) — a bad key stops the process here.
+var secretCipher = new SecretCipher(builder.Configuration);
+
 builder.Services.Configure<JwtOptions>(jwtSection);
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantProvider, HttpContextTenantProvider>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddSingleton<ISecretCipher>(secretCipher);
+builder.Services.AddScoped<IUserSecretsService, UserSecretsService>();
+builder.Services.AddSingleton<IBlobSasService, BlobSasService>();
 
 builder.Services.AddDbContext<CastmillDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill")));
@@ -162,6 +172,8 @@ app.MapArtifactEndpoints();
 app.MapAssetEndpoints();
 app.MapBrandEndpoints();
 app.MapSettingsEndpoints();
+app.MapSecretsEndpoints();
+app.MapBlobEndpoints();
 
 app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
     {

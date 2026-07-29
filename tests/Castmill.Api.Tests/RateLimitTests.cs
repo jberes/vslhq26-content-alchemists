@@ -18,6 +18,8 @@ public sealed class RateLimitTests
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Jwt:SigningKey", new string('k', 48));
+            builder.UseSetting("Castmill:EncryptionKey",
+                Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
             builder.UseSetting("RateLimits:AuthPerMinute", "3");
         }
     }

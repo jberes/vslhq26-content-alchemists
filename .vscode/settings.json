@@ -1,0 +1,7 @@
+{
+  // ASP.NET Core config files allow // comments (JsonCommentHandling.Skip) —
+  // validate them as JSONC so the editor doesn't flag comments as errors.
+  "files.associations": {
+    "appsettings*.json": "jsonc"
+  }
+}
