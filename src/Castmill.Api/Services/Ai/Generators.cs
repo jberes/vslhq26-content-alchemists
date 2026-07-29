@@ -95,8 +95,9 @@ public static class Generators
             """
             Produce an SEO brief for this content:
             1. "summary": a ~150-word summary of what the content covers and who it serves.
-            2. "focusKeywords": 5-10 search phrases this content could realistically rank for
-               (specific, mid/long-tail — the terms a marketer would take to a keyword tool).
+            2. "focusKeywords": 5-10 search phrases this content could realistically rank for.
+               Mix them: 2-3 short "head" terms people actually type (2-3 words, e.g.
+               "content repurposing") plus specific mid/long-tail phrases.
             3. "youtubeTitles": exactly 3 alternative SEO-friendly YouTube titles for A/B testing —
                each under 100 characters, distinct angles (curiosity, benefit, keyword-led).
             JSON schema: { "title": string, "summary": string, "focusKeywords": string[], "youtubeTitles": string[], "citations": string[] }

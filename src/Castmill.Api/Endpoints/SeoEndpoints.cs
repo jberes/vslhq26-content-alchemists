@@ -96,11 +96,12 @@ public static class SeoEndpoints
             .ToList();
         var summary = content.GetProperty("summary").GetString() ?? "";
 
-        // 2. DataForSEO: exact metrics for the AI's picks + related ideas off the top pick.
+        // 2. DataForSEO: exact metrics for the AI's picks + related ideas seeded
+        // from the shortest (most head-like) keyword — long-tail seeds rarely
+        // have suggestion coverage.
         var metrics = await provider.GetKeywordMetricsAsync(focusKeywords, ct);
-        var suggestions = focusKeywords.Count > 0
-            ? await provider.GetSuggestionsAsync(focusKeywords[0], 15, ct)
-            : [];
+        var seed = focusKeywords.OrderBy(k => k.Length).FirstOrDefault();
+        var suggestions = seed is null ? [] : await provider.GetSuggestionsAsync(seed, 15, ct);
 
         // 3. Merge + rank by opportunity (volume vs difficulty).
         var merged = metrics.Select(m => new { keyword = m, source = "ai" })

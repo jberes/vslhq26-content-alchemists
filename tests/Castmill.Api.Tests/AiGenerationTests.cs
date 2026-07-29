@@ -121,6 +121,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
         public string? ResolveDeployment(string modelAlias) => "fake-deployment";
 
+        public Task<FoundryTarget?> ResolveTargetAsync(Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<FoundryTarget?>(new FoundryTarget(
+                new FoundryCredentials("https://fake.local", "fake", "config"), "fake-deployment"));
+
         public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
             Task.FromResult<IChatClient>(new FakeChatClient());
     }

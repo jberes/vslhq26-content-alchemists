@@ -17,18 +17,18 @@ public sealed class ImageRenderer(IFoundryClientFactory clients) : IImageRendere
 
     public async Task<byte[]> RenderWebpAsync(Guid userId, string prompt, string aspectRatio, string modelAlias, CancellationToken ct)
     {
-        var credentials = await clients.ResolveCredentialsAsync(userId, ct)
-            ?? throw new AiNotConfiguredException("No Foundry credentials configured for image generation.");
-        var deployment = clients.ResolveDeployment(modelAlias)
-            ?? throw new AiNotConfiguredException($"No deployment mapped for image alias '{modelAlias}'.");
+        var target = await clients.ResolveTargetAsync(userId, modelAlias, ct)
+            ?? throw new AiNotConfiguredException($"No Foundry credentials/deployment for image alias '{modelAlias}'.");
 
-        var azureClient = new AzureOpenAIClient(new Uri(credentials.Endpoint), new ApiKeyCredential(credentials.ApiKey));
-        var imageClient = azureClient.GetImageClient(deployment);
+        var azureClient = new AzureOpenAIClient(
+            new Uri(target.Credentials.Endpoint), new ApiKeyCredential(target.Credentials.ApiKey));
+        var imageClient = azureClient.GetImageClient(target.Deployment);
 
+        // gpt-image-* models reject the response_format parameter (they always
+        // return b64) — only Size may be set.
         var generated = await imageClient.GenerateImageAsync(prompt, new ImageGenerationOptions
         {
             Size = MapSize(aspectRatio),
-            ResponseFormat = GeneratedImageFormat.Bytes,
         }, ct);
 
         return EncodeWebp(generated.Value.ImageBytes.ToArray());

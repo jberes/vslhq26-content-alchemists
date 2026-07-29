@@ -193,8 +193,9 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
 
         var keywords = plan.RootElement.GetProperty("keywords").EnumerateArray().ToList();
         Assert.True(keywords.Count >= 4); // 3 AI picks + suggestion
-        // The fake suggestion (5400 vol / 22 diff) out-ranks the flat AI metrics.
-        Assert.Equal("deployment automation tool tutorial", keywords[0].GetProperty("term").GetString());
+        // The fake suggestion (5400 vol / 22 diff) out-ranks the flat AI metrics;
+        // suggestions are seeded from the SHORTEST (most head-like) focus keyword.
+        Assert.Equal("devops dashboard tutorial", keywords[0].GetProperty("term").GetString());
         Assert.Equal("dataforseo-suggestion", keywords[0].GetProperty("source").GetString());
 
         // Plan persisted as an artifact.

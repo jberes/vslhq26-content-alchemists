@@ -29,13 +29,12 @@ public sealed class TranscriptionService(
 
     public async Task<TranscriptContent> TranscribeShortAsync(Guid userId, Stream audio, string fileName, CancellationToken ct)
     {
-        var credentials = await clients.ResolveCredentialsAsync(userId, ct)
-            ?? throw new AiNotConfiguredException("No Foundry credentials configured for transcription.");
-        var deployment = clients.ResolveDeployment("transcribe")
-            ?? throw new AiNotConfiguredException("Fill in Ai:Models:transcribe with your transcription deployment name.");
+        var target = await clients.ResolveTargetAsync(userId, "transcribe", ct)
+            ?? throw new AiNotConfiguredException("Fill in Ai:Models:transcribe (and its resource) for transcription.");
 
-        var azureClient = new AzureOpenAIClient(new Uri(credentials.Endpoint), new ApiKeyCredential(credentials.ApiKey));
-        var audioClient = azureClient.GetAudioClient(deployment);
+        var azureClient = new AzureOpenAIClient(
+            new Uri(target.Credentials.Endpoint), new ApiKeyCredential(target.Credentials.ApiKey));
+        var audioClient = azureClient.GetAudioClient(target.Deployment);
 
         var transcription = await audioClient.TranscribeAudioAsync(audio, fileName, new AudioTranscriptionOptions
         {

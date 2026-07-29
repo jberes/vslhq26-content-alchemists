@@ -8,13 +8,19 @@ namespace Castmill.Api.Services.Ai;
 
 public sealed record FoundryCredentials(string Endpoint, string ApiKey, string Source);
 
+/// <summary>Fully resolved model target: which resource to call and which deployment on it.</summary>
+public sealed record FoundryTarget(FoundryCredentials Credentials, string Deployment);
+
 public interface IFoundryClientFactory
 {
-    /// <summary>Resolved credentials: per-user encrypted secrets first, then app config (dev). Null if neither.</summary>
+    /// <summary>Default-resource credentials: per-user encrypted secrets first, then app config (dev). Null if neither.</summary>
     Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct);
+    /// <summary>Deployment name for an alias (resource prefix stripped); null when unmapped.</summary>
+    string? ResolveDeployment(string modelAlias);
+    /// <summary>Alias → endpoint+key+deployment, honoring "resource:deployment" routing.</summary>
+    Task<FoundryTarget?> ResolveTargetAsync(Guid userId, string modelAlias, CancellationToken ct);
     /// <summary>Chat client for a model alias. All generation flows through here — one seam (G4).</summary>
     Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct);
-    string? ResolveDeployment(string modelAlias);
 }
 
 public sealed class FoundryClientFactory(
@@ -41,33 +47,67 @@ public sealed class FoundryClientFactory(
         return null;
     }
 
-    public string? ResolveDeployment(string modelAlias)
+    public string? ResolveDeployment(string modelAlias) =>
+        ResolveMapping(modelAlias)?.Deployment;
+
+    public async Task<FoundryTarget?> ResolveTargetAsync(Guid userId, string modelAlias, CancellationToken ct)
     {
-        if (_options.Models.TryGetValue(modelAlias, out var deployment) && !string.IsNullOrWhiteSpace(deployment))
+        var mapping = ResolveMapping(modelAlias);
+        if (mapping is null)
         {
-            return deployment;
+            return null;
         }
-        // chat-audit intentionally falls back to chat when unset.
-        if (modelAlias.Equals("chat-audit", StringComparison.OrdinalIgnoreCase)
-            && _options.Models.TryGetValue("chat", out var chat) && !string.IsNullOrWhiteSpace(chat))
+
+        if (mapping.ResourceName is not null)
         {
-            return chat;
+            // Named-resource routing: the alias pins both endpoint and key.
+            if (!_options.Resources.TryGetValue(mapping.ResourceName, out var resource)
+                || string.IsNullOrWhiteSpace(resource.Endpoint) || string.IsNullOrWhiteSpace(resource.ApiKey))
+            {
+                throw new AiNotConfiguredException(
+                    $"Alias '{modelAlias}' routes to resource '{mapping.ResourceName}' but " +
+                    $"Ai:Resources:{mapping.ResourceName} has no Endpoint/ApiKey configured.");
+            }
+            return new FoundryTarget(
+                new FoundryCredentials(resource.Endpoint, resource.ApiKey, $"config:{mapping.ResourceName}"),
+                mapping.Deployment);
         }
-        return null;
+
+        var credentials = await ResolveCredentialsAsync(userId, ct);
+        return credentials is null ? null : new FoundryTarget(credentials, mapping.Deployment);
     }
 
     public async Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct)
     {
-        var credentials = await ResolveCredentialsAsync(userId, ct)
+        var target = await ResolveTargetAsync(userId, modelAlias, ct)
             ?? throw new AiNotConfiguredException(
-                "No Foundry credentials. Set Ai:Foundry:Endpoint/ApiKey in appsettings.Development.json " +
+                $"No Foundry credentials or deployment for alias '{modelAlias}'. " +
+                "Fill in Ai:Foundry + Ai:Models in appsettings.Development.json " +
                 "or store per-user secrets via /api/v1/settings/secrets.");
-        var deployment = ResolveDeployment(modelAlias)
-            ?? throw new AiNotConfiguredException(
-                $"No deployment mapped for model alias '{modelAlias}'. Fill in Ai:Models:{modelAlias}.");
 
-        var azureClient = new AzureOpenAIClient(new Uri(credentials.Endpoint), new ApiKeyCredential(credentials.ApiKey));
-        return azureClient.GetChatClient(deployment).AsIChatClient();
+        var azureClient = new AzureOpenAIClient(
+            new Uri(target.Credentials.Endpoint), new ApiKeyCredential(target.Credentials.ApiKey));
+        return azureClient.GetChatClient(target.Deployment).AsIChatClient();
+    }
+
+    private sealed record AliasMapping(string Deployment, string? ResourceName);
+
+    private AliasMapping? ResolveMapping(string modelAlias)
+    {
+        if (!_options.Models.TryGetValue(modelAlias, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            // chat-audit intentionally falls back to chat when unset.
+            if (modelAlias.Equals("chat-audit", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResolveMapping("chat");
+            }
+            return null;
+        }
+
+        var separator = value.IndexOf(':', StringComparison.Ordinal);
+        return separator > 0
+            ? new AliasMapping(value[(separator + 1)..], value[..separator])
+            : new AliasMapping(value, null);
     }
 }
 
