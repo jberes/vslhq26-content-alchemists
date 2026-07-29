@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Castmill API Testbed (dev only)</title>
+<style>
+  :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+  body { max-width: 860px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 2rem; }
+  fieldset { border: 1px solid #8884; border-radius: 8px; margin: 1rem 0; padding: 1rem; }
+  legend { font-weight: 600; padding: 0 .4rem; }
+  label { display: block; margin: .4rem 0 .1rem; font-size: .85rem; }
+  input { width: 100%; max-width: 360px; padding: .4rem .5rem; border: 1px solid #8886; border-radius: 6px; background: transparent; color: inherit; }
+  button { margin: .6rem .4rem 0 0; padding: .45rem .9rem; border-radius: 6px; border: 1px solid #8886; cursor: pointer; background: #4462; }
+  button:hover { background: #4464; }
+  pre { background: #8881; border: 1px solid #8883; border-radius: 8px; padding: .8rem; overflow-x: auto; font-size: .8rem; white-space: pre-wrap; word-break: break-all; }
+  .tok { font-size: .75rem; opacity: .75; }
+  .warn { background: #b8860b22; border: 1px solid #b8860b66; border-radius: 8px; padding: .6rem .8rem; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>Castmill API testbed</h1>
+<p class="warn">Dev-only page served by <code>Castmill.Api</code> in the <code>Development</code> environment. It never ships in a publish output. Tokens are kept in page memory only — refresh the page and they're gone.</p>
+
+<fieldset>
+  <legend>Account</legend>
+  <label for="email">Email</label>
+  <input id="email" type="email" value="dev@example.com" autocomplete="username">
+  <label for="password">Password (min 12 chars)</label>
+  <input id="password" type="password" value="" autocomplete="current-password" placeholder="enter a dev password">
+  <label for="displayName">Display name (register only)</label>
+  <input id="displayName" value="Dev User">
+  <div>
+    <button onclick="call('register')">Register</button>
+    <button onclick="call('login')">Login</button>
+    <button onclick="refreshToken()">Refresh</button>
+    <button onclick="me()">GET /me</button>
+    <button onclick="logout()">Logout</button>
+    <button onclick="health()">GET /health</button>
+  </div>
+</fieldset>
+
+<h2>Session</h2>
+<div class="tok" id="session">no tokens</div>
+
+<h2>Last response</h2>
+<pre id="out">—</pre>
+
+<script>
+let accessToken = null;
+let refreshTokenValue = null;
+
+function show(status, body, correlationId) {
+  document.getElementById('out').textContent =
+    `HTTP ${status}   (X-Correlation-Id: ${correlationId ?? '—'})\n\n` +
+    (typeof body === 'string' ? body : JSON.stringify(body, null, 2));
+}
+
+function setSession(data) {
+  accessToken = data.accessToken;
+  refreshTokenValue = data.refreshToken;
+  document.getElementById('session').textContent =
+    `access expires ${data.accessTokenExpiresAt} · refresh expires ${data.refreshTokenExpiresAt}`;
+}
+
+async function post(path, body, useAuth = false) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (useAuth && accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body ?? {}) });
+  const text = await res.text();
+  let json; try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+  show(res.status, json ?? '(empty)', res.headers.get('X-Correlation-Id'));
+  return { ok: res.ok, json };
+}
+
+async function call(kind) {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const body = kind === 'register'
+    ? { email, password, displayName: document.getElementById('displayName').value }
+    : { email, password };
+  const { ok, json } = await post(`/api/v1/auth/${kind}`, body);
+  if (ok && json && json.accessToken) setSession(json);
+}
+
+async function refreshToken() {
+  if (!refreshTokenValue) return show('—', 'no refresh token — login first');
+  const { ok, json } = await post('/api/v1/auth/refresh', { refreshToken: refreshTokenValue });
+  if (ok && json && json.accessToken) setSession(json);
+}
+
+async function logout() {
+  await post('/api/v1/auth/logout', null, true);
+  accessToken = null; refreshTokenValue = null;
+  document.getElementById('session').textContent = 'no tokens';
+}
+
+async function me() {
+  const headers = accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {};
+  const res = await fetch('/api/v1/me', { headers });
+  const json = await res.json().catch(() => '(empty)');
+  show(res.status, json, res.headers.get('X-Correlation-Id'));
+}
+
+async function health() {
+  const res = await fetch('/health');
+  show(res.status, await res.json(), res.headers.get('X-Correlation-Id'));
+}
+</script>
+</body>
+</html>

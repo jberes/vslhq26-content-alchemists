@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — a secret in any commit fails the build
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-test:
+    name: Build & test
+    runs-on: ubuntu-latest # Docker is available for Testcontainers SQL
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          dotnet-quality: preview
+      - name: Restore
+        run: dotnet restore
+      - name: Build (warnings are errors; NuGet audit is enforced)
+        run: dotnet build --no-restore --configuration Release
+      - name: Test
+        env:
+          # Test-only key generated per run; never a real secret.
+          Jwt__SigningKey: ci-only-${{ github.run_id }}-0123456789abcdef0123456789abcdef
+        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"

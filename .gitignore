@@ -1,0 +1,48 @@
+# --- Build output ---
+bin/
+obj/
+artifacts/
+publish/
+*.binlog
+
+# --- IDE / user state ---
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+*.user
+*.suo
+.DS_Store
+.idea/
+
+# --- SECRETS — never committed, no exceptions ---
+# Local-only config (loaded last in dev, excluded from publish)
+appsettings.Local.json
+appsettings.*.Local.json
+# Environment files
+.env
+.env.*
+*.env
+# Key material / certificates
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+# Azure publish profiles contain deployment credentials
+*.pubxml
+*.pubxml.user
+*.PublishSettings
+# Local secret stores
+secrets.json
+.azure/
+
+# --- Test / coverage ---
+TestResults/
+coverage/
+*.trx
+
+# --- Node (editor-interop, added later) ---
+node_modules/
+dist/

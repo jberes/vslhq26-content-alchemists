@@ -1,0 +1,152 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Castmill.Core.Auth;
+
+namespace Castmill.Api.Tests;
+
+[Collection("api")]
+public sealed class AuthFlowTests(CastmillApiFactory factory)
+{
+    private readonly HttpClient _client = factory.CreateClient();
+
+    private static RegisterRequest NewUser(string? email = null) => new(
+        email ?? $"user-{Guid.NewGuid():N}@example.com",
+        "correct-horse-battery-staple",
+        "Test User");
+
+    private async Task<(RegisterRequest User, AuthResponse Tokens)> RegisterAsync()
+    {
+        var user = NewUser();
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/register", user);
+        response.EnsureSuccessStatusCode();
+        var tokens = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.NotNull(tokens);
+        return (user, tokens);
+    }
+
+    [Fact]
+    public async Task Health_is_anonymous_and_returns_200()
+    {
+        var response = await _client.GetAsync("/health");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_then_me_roundtrip_returns_identity()
+    {
+        var (user, tokens) = await RegisterAsync();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/me");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var me = await response.Content.ReadFromJsonAsync<MeResponse>();
+        Assert.NotNull(me);
+        Assert.Equal(user.Email, me.Email);
+        Assert.NotEqual(Guid.Empty, me.TenantId);
+    }
+
+    [Fact]
+    public async Task Me_without_token_returns_401()
+    {
+        var response = await _client.GetAsync("/api/v1/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Login_with_wrong_password_and_unknown_user_are_indistinguishable()
+    {
+        var (user, _) = await RegisterAsync();
+
+        var wrongPassword = await _client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest(user.Email, "definitely-not-the-password"));
+        var unknownUser = await _client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest($"ghost-{Guid.NewGuid():N}@example.com", "definitely-not-the-password"));
+
+        // Same status, same (empty) body shape — no account enumeration.
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongPassword.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, unknownUser.StatusCode);
+        Assert.Equal(await wrongPassword.Content.ReadAsStringAsync(), await unknownUser.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Weak_password_is_rejected()
+    {
+        var response = await _client.PostAsJsonAsync("/api/v1/auth/register",
+            new RegisterRequest($"weak-{Guid.NewGuid():N}@example.com", "short", "Weak"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_rotates_and_reuse_revokes_the_whole_family()
+    {
+        var (_, first) = await RegisterAsync();
+
+        // Legitimate rotation succeeds.
+        var rotate = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first.RefreshToken));
+        Assert.Equal(HttpStatusCode.OK, rotate.StatusCode);
+        var second = await rotate.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.NotNull(second);
+        Assert.NotEqual(first.RefreshToken, second.RefreshToken);
+
+        // Replaying the already-used token is reuse → 401 …
+        var replay = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first.RefreshToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
+
+        // … and the reuse revoked the descendant token too (family revocation).
+        var descendant = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(second.RefreshToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, descendant.StatusCode);
+    }
+
+    [Fact]
+    public async Task Logout_revokes_refresh_tokens()
+    {
+        var (_, tokens) = await RegisterAsync();
+
+        using var logout = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/logout");
+        logout.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var logoutResponse = await _client.SendAsync(logout);
+        Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
+
+        var refresh = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(tokens.RefreshToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+    }
+
+    [Fact]
+    public async Task Change_password_revokes_old_sessions_and_old_password()
+    {
+        var (user, tokens) = await RegisterAsync();
+
+        using var change = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/change-password")
+        {
+            Content = JsonContent.Create(new ChangePasswordRequest(user.Password, "an-even-longer-new-password")),
+        };
+        change.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var changeResponse = await _client.SendAsync(change);
+        Assert.Equal(HttpStatusCode.OK, changeResponse.StatusCode);
+
+        // Pre-change refresh token is dead.
+        var refresh = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(tokens.RefreshToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
+
+        // Old password no longer signs in; new one does.
+        var oldLogin = await _client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(user.Email, user.Password));
+        Assert.Equal(HttpStatusCode.Unauthorized, oldLogin.StatusCode);
+        var newLogin = await _client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(user.Email, "an-even-longer-new-password"));
+        Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
+    }
+
+    [Fact]
+    public async Task Tampered_access_token_is_rejected()
+    {
+        var (_, tokens) = await RegisterAsync();
+        var tampered = tokens.AccessToken[..^4] + "AAAA";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/me");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tampered);
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+}
