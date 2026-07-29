@@ -46,6 +46,12 @@ public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncL
         // endpoints are fully testable without an Azure account.
         builder.UseSetting("Storage:ConnectionString", BlobSasTests.FakeConnectionString);
         builder.UseSetting("Storage:AccountName", "");
+        // Isolate tests from the developer's local appsettings.Development.json —
+        // real Foundry/SEO credentials must never leak into (or be spent by) tests.
+        builder.UseSetting("Ai:Foundry:Endpoint", "");
+        builder.UseSetting("Ai:Foundry:ApiKey", "");
+        builder.UseSetting("Ai:Models:chat", "");
+        builder.UseSetting("Seo:ApiKey", "");
         // High enough that functional tests never trip it; the rate-limit test
         // uses its own factory with a tiny limit.
         builder.UseSetting("RateLimits:AuthPerMinute", "1000");

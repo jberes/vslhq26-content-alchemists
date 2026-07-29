@@ -70,7 +70,7 @@ builder.Services.AddSingleton<IClipJobDispatcher, ClipJobDispatcher>();
 builder.Services.Configure<PublishOptions>(builder.Configuration.GetSection(PublishOptions.SectionName));
 builder.Services.Configure<SeoOptions>(builder.Configuration.GetSection(SeoOptions.SectionName));
 builder.Services.AddScoped<IPublishBrokerClient, PublishBrokerClient>();
-builder.Services.AddScoped<ISeoProvider, SeoProvider>();
+builder.Services.AddScoped<ISeoProvider, DataForSeoProvider>();
 
 // Outbound HTTP: standard resilience (retry + circuit breaker + timeout) on
 // every dependency (B8) — transient upstream blips never surface as user errors.

@@ -56,13 +56,13 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         var body = await response.Content.ReadFromJsonAsync<FanOutResponse>();
         Assert.NotNull(body);
         Assert.Equal(0, body.Failed);
-        // blog + 6 social + email + newsletter + landing + notes + clips + images = 13
-        Assert.Equal(13, body.Succeeded);
+        // blog + 6 social + email + newsletter + landing + notes + clips + seo-brief + images = 14
+        Assert.Equal(14, body.Succeeded);
 
         // Every artifact persisted; previews list them all (plus the transcript).
         var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
             $"/api/v1/campaigns/{campaignId}/artifacts");
-        Assert.Equal(14, previews!.Count);
+        Assert.Equal(15, previews!.Count);
         Assert.Contains(previews, p => p.Kind == "blog");
         Assert.Contains(previews, p => p.Kind == "social-x");
         Assert.Contains(previews, p => p.Kind == "image-prompts");
@@ -114,7 +114,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
     // ---- Fakes ---------------------------------------------------------------
 
-    private sealed class FakeFoundryFactory : IFoundryClientFactory
+    internal sealed class FakeFoundryFactory : IFoundryClientFactory
     {
         public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
             Task.FromResult<FoundryCredentials?>(new FoundryCredentials("https://fake.local", "fake", "config"));
@@ -126,7 +126,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     }
 
     /// <summary>Returns schema-valid canned JSON keyed off distinctive prompt text.</summary>
-    private sealed class FakeChatClient : IChatClient
+    internal sealed class FakeChatClient : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -170,6 +170,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             if (prompt.Contains("short vertical clips", StringComparison.Ordinal))
             {
                 return """{"title":"Clips","clips":[{"inSeconds":0,"outSeconds":2,"hook":"h","platformFit":["tiktok"]}],"citations":["S2"]}""";
+            }
+            if (prompt.Contains("Produce an SEO brief", StringComparison.Ordinal))
+            {
+                return """{"title":"SEO brief","summary":"A launch story about cutting deployment time in half with the new product and dashboard.","focusKeywords":["deployment automation tool","cut deployment time","devops dashboard"],"youtubeTitles":["We Cut Deploy Time in HALF — Here's How","The Dashboard That Halved Our Deployments","Deployment Automation That Actually Works"],"citations":["S2"]}""";
             }
             if (prompt.Contains("image-generation prompts", StringComparison.Ordinal))
             {

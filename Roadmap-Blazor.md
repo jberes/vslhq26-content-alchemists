@@ -283,10 +283,11 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 ### E9 — SEO/AEO reports (M)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 9.1 🔶 | Analysis endpoint (SERP/keyword/AI-overview provider), typed report model | M | report persists + reloads — *API side done 2026-07-28 (typed SeoAnalysis + provider-raw preservation, persisted as seo-report artifact); pick the concrete provider and fill Seo:BaseUrl/ApiKey* |
+| 9.1 ✅ | Analysis endpoint (SERP/keyword/AI-overview provider), typed report model | M | report persists + reloads — *done 2026-07-28: provider is **DataForSEO v3** (Basic auth, search-volume + keyword-suggestions endpoints), live-verified — real volume/difficulty/CPC persisted and reloaded* |
 | 9.2 | Report UI: scorecard, keyword & competitor sections on `IgbCategoryChart`, content angles | M | charts theme correctly in both modes |
 | 9.3 ✅ | Shareable public report link (public-container HTML snapshot, ~90-day SAS) | S | link opens with no auth — *done 2026-07-28: HTML-encoded snapshot published to the public container (blob-public URL instead of a 90-day SAS — user-delegation SAS caps at 7 days, so the container grants blob-level public read)* |
 | 9.4 | Blog metadata builder: head tags + JSON-LD (Article/FAQ/Video) with copy tabs | S | validates in Google Rich Results test |
+| 9.5 ✅ | **Keyword plan** — AI SEO brief from the transcript (summary + focus keywords, optional user "focus" steer) → DataForSEO metrics + related suggestions → opportunity-ranked plan artifact; plus **3 SEO-friendly YouTube titles for A/B testing** (≤100 chars, validator-enforced) | M | plan artifact persists with ranked keywords + 3 titles — *done 2026-07-28: `POST /seo/keyword-plan`; `seo-brief` joined the generation fan-out; DataForSEO leg live-verified, AI leg fake-verified (live once a chat deployment exists on the Foundry resource)* |
 
 ### E10 — Web parity & launch (M)
 | # | Story | Size | Acceptance |

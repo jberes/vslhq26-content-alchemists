@@ -91,6 +91,19 @@ public static class Generators
             ValidateClips));
 
         specs.Add(new GeneratorSpec(
+            "seo-brief",
+            """
+            Produce an SEO brief for this content:
+            1. "summary": a ~150-word summary of what the content covers and who it serves.
+            2. "focusKeywords": 5-10 search phrases this content could realistically rank for
+               (specific, mid/long-tail — the terms a marketer would take to a keyword tool).
+            3. "youtubeTitles": exactly 3 alternative SEO-friendly YouTube titles for A/B testing —
+               each under 100 characters, distinct angles (curiosity, benefit, keyword-led).
+            JSON schema: { "title": string, "summary": string, "focusKeywords": string[], "youtubeTitles": string[], "citations": string[] }
+            """,
+            ValidateSeoBrief));
+
+        specs.Add(new GeneratorSpec(
             "image-prompts",
             """
             Write image-generation prompts for this campaign: one blog hero image, one YouTube thumbnail (bold, readable at small size), and 2 supporting blog images.
@@ -180,6 +193,30 @@ public static class Generators
             {
                 return new ValidationOutcome(false, [],
                     $"Clip [{start:F1}s–{end:F1}s] falls outside the source duration (0–{maxEnd:F1}s).");
+            }
+        }
+        return new ValidationOutcome(true, []);
+    }
+
+    private static ValidationOutcome ValidateSeoBrief(JsonElement json, TranscriptContent transcript)
+    {
+        var common = ValidateCommon(json, transcript, requireString: "summary", requireArray: "focusKeywords", minItems: 3);
+        if (!common.Passed)
+        {
+            return common;
+        }
+        if (!json.TryGetProperty("youtubeTitles", out var titles) || titles.ValueKind != JsonValueKind.Array
+            || titles.GetArrayLength() != 3)
+        {
+            return new ValidationOutcome(false, [], "Exactly 3 youtubeTitles are required for A/B testing.");
+        }
+        foreach (var title in titles.EnumerateArray())
+        {
+            var text = title.GetString() ?? "";
+            if (text.Length is 0 or > 100)
+            {
+                // 100 chars is YouTube's hard title limit.
+                return new ValidationOutcome(false, [], $"YouTube title must be 1-100 chars; got {text.Length}.");
             }
         }
         return new ValidationOutcome(true, []);

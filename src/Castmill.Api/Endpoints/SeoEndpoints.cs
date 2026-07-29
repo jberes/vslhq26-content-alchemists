@@ -2,7 +2,9 @@ using System.ComponentModel.DataAnnotations;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using Castmill.Api.Auth;
 using Castmill.Api.Data;
+using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Seo;
 using Castmill.Api.Tenancy;
@@ -16,6 +18,12 @@ public sealed record SeoAnalyzeRequest(
     [property: Required, MinLength(2), MaxLength(200)] string Keyword,
     [property: MaxLength(2000), Url] string? TargetUrl);
 
+public sealed record KeywordPlanRequest(
+    [property: Required] Guid CampaignId,
+    [property: Required] Guid TranscriptArtifactId,
+    /// <summary>Optional steer: what the content should focus on ranking for.</summary>
+    [property: MaxLength(2000)] string? Focus);
+
 public static class SeoEndpoints
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -25,9 +33,121 @@ public static class SeoEndpoints
         var group = routes.MapGroup("/api/v1/seo").RequireAuthorization("TenantAllowed");
 
         group.MapPost("/analyze", AnalyzeAsync).Validate<SeoAnalyzeRequest>().RequireRateLimiting("searches");
+        group.MapPost("/keyword-plan", KeywordPlanAsync).Validate<KeywordPlanRequest>().RequireRateLimiting("ai");
         group.MapGet("/reports/{artifactId:guid}", GetReportAsync);
         group.MapPost("/reports/{artifactId:guid}/share", ShareAsync).RequireRateLimiting("writes");
         return routes;
+    }
+
+    /// <summary>
+    /// Transcript → AI SEO brief (summary, focus keywords, 3 A/B YouTube titles)
+    /// → DataForSEO metrics for those keywords + related suggestions → ranked
+    /// keyword plan persisted as a "seo-keyword-plan" artifact.
+    /// </summary>
+    private static async Task<IResult> KeywordPlanAsync(
+        KeywordPlanRequest request,
+        System.Security.Claims.ClaimsPrincipal principal,
+        IAiOrchestrator orchestrator,
+        ISeoProvider provider,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (!provider.IsConfigured)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "DataForSEO is not configured. Fill in Seo:ApiKey (base64 login:password).");
+        }
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == request.CampaignId, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+        var transcriptArtifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == request.TranscriptArtifactId && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
+        var transcript = transcriptArtifact is null
+            ? null
+            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+        if (transcript is null)
+        {
+            return Results.NotFound();
+        }
+
+        // 1. AI SEO brief — the "focus" steer flows in as the generation brief.
+        var spec = Generators.Find("seo-brief")!;
+        var brief = await orchestrator.RunGeneratorAsync(
+            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Focus, spec, ct);
+        if (!brief.Success)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status502BadGateway,
+                detail: $"SEO brief generation failed: {brief.Error}");
+        }
+        var briefArtifact = await db.Artifacts.SingleAsync(a => a.Id == brief.ArtifactId, ct);
+        using var briefDoc = JsonDocument.Parse(briefArtifact.ContentJson);
+        var content = briefDoc.RootElement.GetProperty("content");
+        var focusKeywords = content.GetProperty("focusKeywords").EnumerateArray()
+            .Where(k => k.ValueKind == JsonValueKind.String)
+            .Select(k => k.GetString()!)
+            .Take(10)
+            .ToList();
+        var youtubeTitles = content.GetProperty("youtubeTitles").EnumerateArray()
+            .Select(t => t.GetString() ?? "")
+            .ToList();
+        var summary = content.GetProperty("summary").GetString() ?? "";
+
+        // 2. DataForSEO: exact metrics for the AI's picks + related ideas off the top pick.
+        var metrics = await provider.GetKeywordMetricsAsync(focusKeywords, ct);
+        var suggestions = focusKeywords.Count > 0
+            ? await provider.GetSuggestionsAsync(focusKeywords[0], 15, ct)
+            : [];
+
+        // 3. Merge + rank by opportunity (volume vs difficulty).
+        var merged = metrics.Select(m => new { keyword = m, source = "ai" })
+            .Concat(suggestions.Select(s => new { keyword = s, source = "dataforseo-suggestion" }))
+            .GroupBy(x => x.keyword.Term, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderByDescending(x => DataForSeoProvider.Opportunity(x.keyword))
+            .Select(x => new
+            {
+                x.keyword.Term,
+                x.keyword.Volume,
+                x.keyword.Difficulty,
+                x.keyword.Competition,
+                x.keyword.Cpc,
+                x.source,
+                opportunity = Math.Round(DataForSeoProvider.Opportunity(x.keyword), 2),
+            })
+            .ToList();
+
+        var now = clock.GetUtcNow();
+        var planJson = JsonSerializer.Serialize(new
+        {
+            summary,
+            focus = request.Focus,
+            youtubeTitles,
+            keywords = merged,
+            seoBriefArtifactId = brief.ArtifactId,
+            generatedAt = now,
+        }, Json);
+
+        var plan = new Artifact
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.TenantId!.Value,
+            CampaignId = request.CampaignId,
+            Kind = "seo-keyword-plan",
+            Title = $"Keyword plan — {campaign.Name}",
+            ContentJson = planJson,
+            Version = 1,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.Artifacts.Add(plan);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/v1/campaigns/{request.CampaignId}/artifacts/{plan.Id}",
+            new { planArtifactId = plan.Id, summary, youtubeTitles, keywords = merged });
     }
 
     private static async Task<IResult> AnalyzeAsync(

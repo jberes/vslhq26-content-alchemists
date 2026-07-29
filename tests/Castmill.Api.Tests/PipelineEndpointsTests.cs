@@ -50,11 +50,20 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
     private sealed class FakeSeo : ISeoProvider
     {
         public bool IsConfigured => true;
+
+        public Task<IReadOnlyList<SeoKeyword>> GetKeywordMetricsAsync(IReadOnlyList<string> keywords, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SeoKeyword>>(
+                [.. keywords.Select(k => new SeoKeyword(k, 1200, 0, 0.4, 1.2))]);
+
+        public Task<IReadOnlyList<SeoKeyword>> GetSuggestionsAsync(string seedKeyword, int limit, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SeoKeyword>>(
+                [new SeoKeyword($"{seedKeyword} tutorial", 5400, 22, 0.3, 0.8)]);
+
         public Task<SeoAnalysis> AnalyzeAsync(string keyword, string? targetUrl, CancellationToken ct)
         {
             using var doc = JsonDocument.Parse("""{"provider":"fake"}""");
             return Task.FromResult(new SeoAnalysis(keyword, targetUrl, 72,
-                [new SeoKeyword("castmill", 1200, 34.5)], ["angle one"], doc.RootElement.Clone()));
+                [new SeoKeyword("castmill", 1200, 34.5, 0.4, 1.2)], ["angle one"], doc.RootElement.Clone()));
         }
     }
 
@@ -154,6 +163,45 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
 
         var channels = await client.GetAsync("/api/v1/publish/channels");
         Assert.Contains("Main X", await channels.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Keyword_plan_chains_ai_brief_into_dataforseo_and_ranks_by_opportunity()
+    {
+        await using var app = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.Replace(ServiceDescriptor.Scoped<ISeoProvider>(_ => new FakeSeo()));
+            s.Replace(ServiceDescriptor.Scoped<Castmill.Api.Services.Ai.IFoundryClientFactory>(
+                _ => new AiGenerationTests.FakeFoundryFactory()));
+        }));
+        var client = await AuthedClientAsync(app);
+
+        var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
+            new CampaignCreateRequest("Plan campaign", null))).Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var ingest = await client.PostAsJsonAsync($"/api/v1/ai/campaigns/{campaign.Id}/transcripts",
+            new { text = "We launched the new product. It cut deployment time in half. Customers love the new dashboard.", source = "test" });
+        using var ingested = JsonDocument.Parse(await ingest.Content.ReadAsStringAsync());
+        var transcriptId = ingested.RootElement.GetProperty("transcriptArtifactId").GetGuid();
+
+        var response = await client.PostAsJsonAsync("/api/v1/seo/keyword-plan",
+            new { campaignId = campaign.Id, transcriptArtifactId = transcriptId, focus = "rank for deployment automation" });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var plan = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        // Exactly 3 A/B YouTube titles from the AI brief.
+        Assert.Equal(3, plan.RootElement.GetProperty("youtubeTitles").GetArrayLength());
+
+        var keywords = plan.RootElement.GetProperty("keywords").EnumerateArray().ToList();
+        Assert.True(keywords.Count >= 4); // 3 AI picks + suggestion
+        // The fake suggestion (5400 vol / 22 diff) out-ranks the flat AI metrics.
+        Assert.Equal("deployment automation tool tutorial", keywords[0].GetProperty("term").GetString());
+        Assert.Equal("dataforseo-suggestion", keywords[0].GetProperty("source").GetString());
+
+        // Plan persisted as an artifact.
+        var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
+            $"/api/v1/campaigns/{campaign.Id}/artifacts");
+        Assert.Contains(previews!, p => p.Kind == "seo-keyword-plan");
+        Assert.Contains(previews!, p => p.Kind == "seo-brief");
     }
 
     [Fact]
