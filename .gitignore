@@ -16,6 +16,9 @@ publish/
 .idea/
 
 # --- SECRETS — never committed, no exceptions ---
+# Dev config holds the local connection string + signing key; the committed
+# appsettings.Development.template.json documents the required keys.
+appsettings.Development.json
 # Local-only config (loaded last in dev, excluded from publish)
 appsettings.Local.json
 appsettings.*.Local.json

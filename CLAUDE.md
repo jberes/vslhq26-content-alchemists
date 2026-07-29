@@ -10,9 +10,8 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - Frontend (later phases): all UI in a `Castmill.UI` RCL; Ignite UI for Blazor; shells are bootstrap-only.
 
 ## Security rules (non-negotiable)
-- **No secrets in the repo.** Committed `appsettings*.json` hold structure only.
-  - Dev secrets: `dotnet user-secrets` from `src/Castmill.Api` —
-    `Jwt:SigningKey` (≥32 bytes) and `ConnectionStrings:Castmill`.
+- **No secrets in the repo.** Committed `appsettings.json` holds structure only.
+  - Dev config lives in `src/Castmill.Api/appsettings.Development.json` — **gitignored and publish-excluded**; it is the single local source for `ConnectionStrings:Castmill` (Azure SQL) and `Jwt:SigningKey` (≥32 bytes). Keys documented in the committed `appsettings.Development.template.json`. User-secrets are cleared/unused — don't reintroduce them, they silently override the file.
   - Prod: App Service settings / Key Vault references.
   - CI runs gitleaks over full history; a leaked secret fails the build.
 - Auth is **ASP.NET Core Identity, email+password** (ADR-010) — no external IdP. API issues ~15-min access JWTs + rotating refresh tokens (SHA-256 hashed at rest, single-use, family-revoked on reuse, revoked on logout/password change).

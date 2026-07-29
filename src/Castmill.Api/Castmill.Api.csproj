@@ -34,6 +34,9 @@
     <!-- Local-only config must never ship in a deployment artifact -->
     <Content Remove="appsettings.Local.json" />
     <None Include="appsettings.Local.json" Condition="Exists('appsettings.Local.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <!-- Dev config is gitignored AND excluded from publish (defense in depth) -->
+    <Content Remove="appsettings.Development.json" />
+    <None Include="appsettings.Development.json" Condition="Exists('appsettings.Development.json')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <!-- Dev testbed page: available at /dev/testbed in Development, never published -->
     <Content Remove="DevTestbed\**" />
     <None Include="DevTestbed\**" CopyToPublishDirectory="Never" />

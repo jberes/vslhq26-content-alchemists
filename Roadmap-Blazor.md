@@ -201,21 +201,23 @@ Platform character limits (enforced in composer meters and validators): X 280 ·
 
 Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ weeks (one engineer + Claude Code).
 
+**Status:** ✅ complete · 🔶 partial (gap noted) · unmarked = not started. *(Last updated 2026-07-28 — B0+B2 server core shipped.)*
+
 ### E1 — Foundations (M)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 1.1 | Register `castmill.ai`; create GitHub repo, solution scaffold (all projects in §2.1), CI build on PR | S | `dotnet build` + all test projects green in Actions |
-| 1.2 | Provision Azure: App Service (Linux), Azure SQL, Storage account, Static Web App, Application Insights — as Bicep in `/infra` | M | `azd up`/pipeline provisions from scratch; `/health` returns 200 |
-| 1.3 | ASP.NET Core Identity: Identity tables in the baseline migration, `/auth` group (register, login, refresh, logout, change-password), JWT issuance + bearer validation, signing-key startup guard | M | register → login → authorized `/me` → refresh → logout-revocation proven in integration tests |
-| 1.4 | EF Core baseline migration (all §2.3 entities), tenant query filters, ETag concurrency on artifacts | M | integration tests prove cross-tenant isolation + 412 on stale ETag |
-| 1.5 | Observability: correlation-ID middleware, Server-Timing, structured logs → App Insights | S | correlation ID visible client→server in one trace |
+| 1.1 🔶 | Register `castmill.ai`; create GitHub repo, solution scaffold (all projects in §2.1), CI build on PR | S | `dotnet build` + all test projects green in Actions — *server solution + CI done 2026-07-28; domain registration + GitHub remote still pending* |
+| 1.2 🔶 | Provision Azure: App Service (Linux), Azure SQL, Storage account, Static Web App, Application Insights — as Bicep in `/infra` | M | `azd up`/pipeline provisions from scratch; `/health` returns 200 — *Azure SQL being created manually; Bicep still owed for G6* |
+| 1.3 ✅ | ASP.NET Core Identity: Identity tables in the baseline migration, `/auth` group (register, login, refresh, logout, change-password), JWT issuance + bearer validation, signing-key startup guard | M | register → login → authorized `/me` → refresh → logout-revocation proven in integration tests — *done 2026-07-28, incl. refresh-reuse family revocation* |
+| 1.4 🔶 | EF Core baseline migration (all §2.3 entities), tenant query filters, ETag concurrency on artifacts | M | integration tests prove cross-tenant isolation + 412 on stale ETag — *migration + isolation tests done; 412 test lands with the artifact endpoints (E4/B4)* |
+| 1.5 🔶 | Observability: correlation-ID middleware, Server-Timing, structured logs → App Insights | S | correlation ID visible client→server in one trace — *correlation-ID middleware done (validated, injection-safe); Server-Timing + App Insights pending Azure* |
 
 ### E2 — Auth, tenancy & secrets (M)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
 | 2.1 | Desktop sign-in/register/change-password screens (RCL), refresh token in MAUI `SecureStorage`, silent restore on cold start, sign-out revokes | M | cold-start silent restore works; tokens never written unencrypted |
 | 2.2 | Web sign-in (same RCL screens), refresh token in browser storage, token attach via `IAuthTokenProvider` in one HTTP chokepoint, silent refresh on 401 | S | same UI code signs in on web |
-| 2.3 | Tenant guard: one tenant per user created at registration, permanent binding, `/me` endpoint | S | cross-tenant access rejected in integration tests |
+| 2.3 ✅ | Tenant guard: one tenant per user created at registration, permanent binding, `/me` endpoint | S | cross-tenant access rejected in integration tests — *done 2026-07-28* |
 | 2.4 | Encrypted `UserSetting` store (AES-256-GCM) + settings sync; per-device UI state stays local | M | settings roam across machines; key rotation documented |
 | 2.5 | BYO Foundry credentials: settings UI, encrypted storage, `/ai/status` probe listing deployments, guided setup doc | M | invalid endpoint/key surfaces actionable error before first generation |
 

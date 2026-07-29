@@ -135,52 +135,54 @@ flowchart LR
 
 **Contract for every phase:** ends in a state that is *committed, CI-green, deployed to the dev environment, and demonstrable*. No phase leaves broken scaffolding for the next. Each phase lists its **check-in gate** — the proof required before the phase's PR merges.
 
-### Phase B0 — Repo & walking skeleton *(size S)*
+**Status legend:** ✅ complete · 🔶 partially complete (remaining work noted) · ⬜ not started. *(Last updated 2026-07-28.)*
+
+### Phase B0 — Repo & walking skeleton *(size S)* — ✅ complete 2026-07-28
 - Solution scaffold: `Castmill.Api`, `Castmill.Core`, test projects; editorconfig, analyzers, nullable enabled.
 - `/health` endpoint; CI workflow (build + test on PR).
 - **Check-in gate:** CI green; `curl /health` returns 200 locally.
 
-### Phase B1 — Infrastructure as code *(size M)*
+### Phase B1 — Infrastructure as code *(size M)* — 🔶 in progress (Azure SQL being provisioned manually; Bicep still owed for G6)
 - Bicep under `/infra`: App Service plan + app, Azure SQL (serverless tier to start), Storage, App Insights; deploy workflow.
 - No external identity setup — auth is self-contained in the API (ADR-010, lands in B2).
 - **Check-in gate:** empty subscription → `deploy` pipeline → `/health` live on App Service (G6 proven at skeleton scale).
 
-### Phase B2 — Identity, tenancy & data core *(size L)*
+### Phase B2 — Identity, tenancy & data core *(size L)* — ✅ complete 2026-07-28 *(two gate items deferred: the 412-stale-ETag test lands with the artifact endpoints in B4; the App Insights trace check lands with B1's Azure resources)*
 - ASP.NET Core Identity (email + password): `/auth` group (register, login, refresh, logout, change-password), app-issued access JWT + rotating refresh token, JWT bearer validation, JWT-signing-key startup guard.
 - `TenantAllowed` policy; one tenant created per user at registration (permanent binding); `/me`.
 - EF Core model (Tenant, User + Identity tables, Campaign, Artifact, Asset, BrandProfile, UserSetting, AuditEvent) + baseline migration; global query filters; ETag concurrency. Campaigns carry `OwnerId` (ADR-011).
 - Correlation-ID middleware; rate-limit policies; integration-test harness (Testcontainers SQL).
 - **Check-in gate:** integration tests prove register → login → authorized call → refresh → logout-revocation, G1 (cross-tenant access fails), and 412-on-stale-ETag; a trace in App Insights shows client-supplied correlation ID.
 
-### Phase B3 — Secrets & storage *(size M)*
+### Phase B3 — Secrets & storage *(size M)* — ⬜ next up
 - AES-256-GCM `UserSetting` store + typed secret accessors; Production startup guards.
 - SAS service + `/blob` group (mint, test, list); public-container publish path with immutable cache headers.
 - **Check-in gate:** G2 audit — grep + integration tests show no key material in any response; SAS expiry and op-scoping tested.
 
-### Phase B4 — Core resource APIs *(size L)*
+### Phase B4 — Core resource APIs *(size L)* — ⬜
 - `/campaigns`, `/artifacts` (typed-JSON content + `Preview` projection), `/assets`, `/brands`, `/settings`.
 - Endpoint-filter validation.
 - **Check-in gate:** full CRUD demonstrable via OpenAPI UI against dev; `Preview` payload for a 50-artifact campaign under 100 KB.
 
-### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)*
+### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)* — ⬜
 - `Microsoft.Extensions.AI` client layer; per-user Foundry credential resolution; model-alias remap table; `/ai/status` deployment probe.
 - Timed-transcript ingest (segment IDs); blog generator (outline → draft → cross-model audit) **with citations**; then the fan-out set (social ×6 with per-platform rules and hard char caps, email sequence, newsletter, landing page, show notes, clip suggestions, image prompts).
 - Deterministic validators (word bands, char caps, banned phrases) as a review gate; prompt-transparency ring buffer.
 - **Check-in gate:** seeded transcript → full campaign fan-out in dev, every artifact schema-valid with ≥1 citation (G4, G5); model swap demonstrated by config change only.
 - *Sub-checkpoints (each its own PR):* B5.1 client layer + probe · B5.2 transcript + blog · B5.3 social/email/landing/notes · B5.4 images · B5.5 validators + log.
 
-### Phase B6 — Media pipeline *(size L)*
+### Phase B6 — Media pipeline *(size L)* — ⬜
 - Server transcription: ≤25 MB extract+transcribe path; Azure AI Speech fast-transcription path for long/diarized media.
 - Resumable block-blob upload contract for web clients.
 - Container Apps ffmpeg job: clip export (stream-copy + re-encode, 9:16 crop, burned captions) Blob-to-Blob; job enqueue/status endpoints.
 - **Check-in gate:** browser-only flow ingests a 1 GB video → transcript → exported clip, API instances never exceeding baseline CPU (ADR-008 proven).
 
-### Phase B7 — Publishing & SEO *(size M)*
+### Phase B7 — Publishing & SEO *(size M)* — ⬜
 - Broker client (channels, schedule, cancel, queue read) with partial-failure fan-out reporting; `/publish` group.
 - SEO provider client; `/seo` analyze/report/share (public HTML snapshot, ~90-day SAS).
 - **Check-in gate:** post scheduled and cancelled on a sandbox channel from OpenAPI UI; shared report opens unauthenticated.
 
-### Phase B8 — Production hardening *(size M)*
+### Phase B8 — Production hardening *(size M)* — ⬜
 - Load pass on hot endpoints; resilience-handler tuning; App Insights dashboards + alerts (5xx rate, AI latency, rate-limit saturation).
 - Security review against §6 checklist; key-rotation runbook; penetration checklist (SAS scope, CORS, headers).
 - **Check-in gate:** WAF review recorded in this doc; alerts fire in a game-day drill; G7 trace walkthrough documented.
