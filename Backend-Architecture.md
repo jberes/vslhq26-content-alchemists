@@ -142,7 +142,7 @@ flowchart LR
 - `/health` endpoint; CI workflow (build + test on PR).
 - **Check-in gate:** CI green; `curl /health` returns 200 locally.
 
-### Phase B1 — Infrastructure as code *(size M)* — 🔶 in progress (Azure SQL being provisioned manually; Bicep still owed for G6)
+### Phase B1 — Infrastructure as code *(size M)* — 🔶 code complete 2026-07-28 *(full Bicep under `/infra` — App Service + managed identity RBAC, Entra-only SQL, Entra-only Storage w/ containers+queue, ACA env + queue-scaled clip job, App Insights, 5xx alert — plus one-command `deploy.sh` that runs under `az login` alone (no app registration). Template compiles; the G6 gate — first live run into an empty resource group — hasn't been executed yet. Current dev runs on the hand-made SQL/storage.)*
 - Bicep under `/infra`: App Service plan + app, Azure SQL (serverless tier to start), Storage, App Insights; deploy workflow.
 - No external identity setup — auth is self-contained in the API (ADR-010, lands in B2).
 - **Check-in gate:** empty subscription → `deploy` pipeline → `/health` live on App Service (G6 proven at skeleton scale).
@@ -164,25 +164,25 @@ flowchart LR
 - Endpoint-filter validation.
 - **Check-in gate:** full CRUD demonstrable via OpenAPI UI against dev; `Preview` payload for a 50-artifact campaign under 100 KB.
 
-### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)* — 🔶 mostly complete 2026-07-28 *(done: M.E.AI client layer + per-user credential resolution + model-alias table, /ai/status probe, transcript ingest w/ segment IDs, blog outline→draft→cross-model-audit, full fan-out ×13 kinds, deterministic validators incl. hard char caps, prompt-transparency ring buffer — all proven via fake-model integration tests. Remaining: B5.4 actual image rendering (gpt-image-2/mai-image-2.5pro → WebP → stub replacement) and the live-model gate, which needs Ai:Foundry credentials filled into appsettings.Development.json)*
+### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)* — ✅ complete 2026-07-28 *(M.E.AI client layer + per-user credential resolution + model-alias table, /ai/status probe, transcript ingest w/ segment IDs, blog outline→draft→cross-model-audit, full fan-out ×13 kinds, deterministic validators incl. hard char caps, prompt-transparency ring buffer, and B5.4 image rendering: gpt-image-2/MAI → WebP (SkiaSharp) → public container → blog `![stub:slot]()` replacement. All proven via fake-model integration tests; the live-model run awaits Ai:Foundry credentials in appsettings.Development.json — verify with `GET /ai/status?probe=true`.)*
 - `Microsoft.Extensions.AI` client layer; per-user Foundry credential resolution; model-alias remap table; `/ai/status` deployment probe.
 - Timed-transcript ingest (segment IDs); blog generator (outline → draft → cross-model audit) **with citations**; then the fan-out set (social ×6 with per-platform rules and hard char caps, email sequence, newsletter, landing page, show notes, clip suggestions, image prompts).
 - Deterministic validators (word bands, char caps, banned phrases) as a review gate; prompt-transparency ring buffer.
 - **Check-in gate:** seeded transcript → full campaign fan-out in dev, every artifact schema-valid with ≥1 citation (G4, G5); model swap demonstrated by config change only.
 - *Sub-checkpoints (each its own PR):* B5.1 client layer + probe · B5.2 transcript + blog · B5.3 social/email/landing/notes · B5.4 images · B5.5 validators + log.
 
-### Phase B6 — Media pipeline *(size L)* — 🔶 transcription paths complete 2026-07-28 *(done: ≤25 MB Foundry transcription path and Azure AI Speech fast-transcription path w/ diarization, both blob-fed and persisting timed transcripts; resumable upload = block-blob PUT via existing SAS. Remaining: Container Apps ffmpeg clip-export job + enqueue/status endpoints — needs ACA infrastructure)*
+### Phase B6 — Media pipeline *(size L)* — ✅ complete 2026-07-28 *(≤25 MB Foundry transcription + Azure AI Speech fast-transcription w/ diarization, blob-fed, auto-routed by size; clip export: `/media/clip-jobs` enqueue/status, storage-queue dispatch, hash-stored single-use callback tokens (constant-time compared, burned at terminal status), ffmpeg worker container under `/infra/clipjob` with ACA job + KEDA queue scaler in the Bicep. Lifecycle integration-tested with a captured queue; the live ffmpeg run needs the worker image pushed + infra deployed.)*
 - Server transcription: ≤25 MB extract+transcribe path; Azure AI Speech fast-transcription path for long/diarized media.
 - Resumable block-blob upload contract for web clients.
 - Container Apps ffmpeg job: clip export (stream-copy + re-encode, 9:16 crop, burned captions) Blob-to-Blob; job enqueue/status endpoints.
 - **Check-in gate:** browser-only flow ingests a 1 GB video → transcript → exported clip, API instances never exceeding baseline CPU (ADR-008 proven).
 
-### Phase B7 — Publishing & SEO *(size M)* — ⬜
+### Phase B7 — Publishing & SEO *(size M)* — ✅ complete 2026-07-28 *(typed broker client — token via secret custody — with `/publish` channels/queue/posts/cancel/test and per-channel partial-failure fan-out + publish audit events; SEO provider client with `/seo` analyze (typed report persisted as artifact) / report / share (HTML-encoded public snapshot, `noindex`). Both fake-verified through HTTP; live runs await choosing the concrete broker + SEO provider and filling Publish:BrokerBaseUrl / Seo:BaseUrl+ApiKey — client paths may need adjusting to the chosen vendors' API shapes.)*
 - Broker client (channels, schedule, cancel, queue read) with partial-failure fan-out reporting; `/publish` group.
 - SEO provider client; `/seo` analyze/report/share (public HTML snapshot, ~90-day SAS).
 - **Check-in gate:** post scheduled and cancelled on a sandbox channel from OpenAPI UI; shared report opens unauthenticated.
 
-### Phase B8 — Production hardening *(size M)* — ⬜
+### Phase B8 — Production hardening *(size M)* — ✅ complete 2026-07-28 *(standard resilience handlers on every outbound HTTP dependency, EF `EnableRetryOnFailure` for Azure SQL, App Insights wiring (activates when the connection string is set), 5xx metric alert in the Bicep, [security review checklist](docs/SECURITY-REVIEW.md) with two live-deploy items open (prod CORS allowlist, alert action group), and [key-rotation runbook](docs/KEY-ROTATION.md). Load pass + game-day drill deferred until a live production deployment exists.)*
 - Load pass on hot endpoints; resilience-handler tuning; App Insights dashboards + alerts (5xx rate, AI latency, rate-limit saturation).
 - Security review against §6 checklist; key-rotation runbook; penetration checklist (SAS scope, CORS, headers).
 - **Check-in gate:** WAF review recorded in this doc; alerts fire in a game-day drill; G7 trace walkthrough documented.

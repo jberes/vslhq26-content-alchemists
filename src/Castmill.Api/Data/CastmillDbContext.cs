@@ -22,6 +22,7 @@ public sealed class CastmillDbContext(
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ClipJob> ClipJobs => Set<ClipJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -77,6 +78,16 @@ public sealed class CastmillDbContext(
             e.Property(a => a.Detail).HasMaxLength(2000);
             e.HasIndex(a => new { a.TenantId, a.OccurredAt });
             e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ClipJob>(e =>
+        {
+            e.Property(j => j.Status).HasMaxLength(20);
+            e.Property(j => j.OutputBlobPath).HasMaxLength(1000);
+            e.Property(j => j.Error).HasMaxLength(2000);
+            e.Property(j => j.CallbackTokenHash).HasMaxLength(64);
+            e.HasIndex(j => new { j.TenantId, j.CreatedAt });
+            e.HasQueryFilter(j => j.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<RefreshToken>(e =>

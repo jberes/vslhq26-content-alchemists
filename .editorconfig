@@ -43,8 +43,10 @@ csharp_style_namespace_declarations = file_scoped:error
 generated_code = true
 dotnet_analyzer_diagnostic.severity = none
 
-# Test projects: underscore test names are idiomatic xUnit
+# Test projects: underscore test names are idiomatic xUnit; inline literal
+# arrays in test payloads are clearer than hoisted fields
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.xUnit1051.severity = none

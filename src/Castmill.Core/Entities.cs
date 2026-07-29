@@ -79,6 +79,34 @@ public sealed class UserSetting : ITenantScoped
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+/// <summary>
+/// Web clip-export job (ADR-008): ffmpeg runs in a Container Apps job fed by a
+/// storage queue — API instances never transcode in-process. The worker reports
+/// completion through a token-authenticated callback; only the token's SHA-256
+/// hash is stored.
+/// </summary>
+public sealed class ClipJob : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid AssetId { get; set; }
+    public double InSeconds { get; set; }
+    public double OutSeconds { get; set; }
+    /// <summary>Crop to 9:16 vertical for short-form platforms.</summary>
+    public bool CropVertical { get; set; }
+    /// <summary>Burn captions into the video (worker expects SRT).</summary>
+    public bool BurnCaptions { get; set; }
+    public string? CaptionsSrt { get; set; }
+    /// <summary>Queued | Processing | Succeeded | Failed.</summary>
+    public required string Status { get; set; }
+    public string? OutputBlobPath { get; set; }
+    public string? Error { get; set; }
+    /// <summary>SHA-256 of the worker callback token; plaintext exists only in the queue message.</summary>
+    public required string CallbackTokenHash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 /// <summary>Security-relevant events: sign-in, password change, token revocation, publish.</summary>
 public sealed class AuditEvent : ITenantScoped
 {

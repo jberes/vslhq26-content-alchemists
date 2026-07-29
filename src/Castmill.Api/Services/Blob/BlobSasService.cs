@@ -14,6 +14,7 @@ public sealed class StorageOptions
     /// <summary>Optional fallback: full connection string (shared-key SAS). Lives only in gitignored/dev config.</summary>
     public string? ConnectionString { get; set; }
     public string PrivateContainer { get; set; } = "private";
+    public string PublicContainer { get; set; } = "public";
     public int DefaultSasMinutes { get; set; } = 10;
     public int MaxSasMinutes { get; set; } = 60;
 

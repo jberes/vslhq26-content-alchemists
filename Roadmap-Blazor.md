@@ -253,13 +253,13 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 ### E6 — AI pipeline (XL)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 6.1 🔶 | Foundry client layer on `Microsoft.Extensions.AI`: chat, image, transcription; per-user credential resolution; model-alias remap table | M | one config swap retargets any generator's model — *chat + transcription done 2026-07-28 (alias table, per-user secrets → config fallback, /ai/status probe); image client pending with 6.7* |
+| 6.1 ✅ | Foundry client layer on `Microsoft.Extensions.AI`: chat, image, transcription; per-user credential resolution; model-alias remap table | M | one config swap retargets any generator's model — *done 2026-07-28: chat, image, and transcription clients behind the alias table; per-user secrets → config fallback; /ai/status probe* |
 | 6.2 ✅ | Timed-transcript ingest: segment IDs, timestamps, speaker labels (when diarized) | M | transcript renders synced to media scrubber — *server side done 2026-07-28 (paste + both transcription paths); scrubber UI is a client story* |
 | 6.3 ✅ | Blog generator: outline → draft → cross-model audit; citations; image-stub markers | L | 1,500–2,500-word draft with valid stubs + citations — *done 2026-07-28; word-band + citation validators enforced; live-model run pending Foundry creds* |
 | 6.4 ✅ | Social fan-out: 6 platforms, per-platform rules + hard caps, hashtags policy | M | validators reject over-limit posts before review — *done 2026-07-28; caps from shared PlatformLimits table* |
 | 6.5 ✅ | Email sequence, newsletter, landing page, show notes generators | M | each returns citations + passes validators — *done 2026-07-28* |
 | 6.6 ✅ | Clip suggester: in/out timestamps + platform fit + hook text | M | timestamps land within source duration; ranked list — *done 2026-07-28; in/out range validator enforced* |
-| 6.7 🔶 | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container — *image-prompts generator done 2026-07-28 (blog-hero, youtube-thumbnail, inline slots); deployments `gpt-image-2` + `mai-image-2.5pro` already in the alias table; actual generation → WebP → stub replacement remaining* |
+| 6.7 ✅ | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container — *done 2026-07-28: /ai/campaigns/{id}/render-images generates per slot (blog-hero, youtube-thumbnail, inline), WebP-encodes, publishes to the public container, and replaces blog `![stub:slot]()` markers; live render awaits Foundry creds* |
 | 6.8 | Brand-voice: exemplar ingestion → distilled style card; injected into every generator | M | A/B: generated copy matches style card on rubric |
 | 6.9 🔶 | Deterministic validators + review gate; prompt-transparency log dialog | S | "Mark reviewed" blocked until validators pass — *server validators + /ai/log ring buffer done 2026-07-28; review-gate UI is a client story* |
 
@@ -271,21 +271,21 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 | 7.3 | Desktop local transcription: Whisper.net + model download manager with progress | M | 1-hour audio transcribes locally without cloud |
 | 7.4 🔶 | Cloud transcription endpoint: extraction server-side, ≤25 MB path + Speech fast-transcription path | M | web-only user can transcribe end-to-end — *both API paths done 2026-07-28 (audio files; auto-routes >25 MB to Speech w/ diarization); server-side a/v extraction not included — video needs the Speech path or desktop extraction* |
 | 7.5 | Clip export — desktop: stream-copy + re-encode modes, 9:16 crop, burned ASS captions, faststart | L | frame-accurate re-encode; captions clear platform UI margins |
-| 7.6 | Clip export — web: Container Apps ffmpeg job against Blob source, result to Blob + download | M | same output as 7.5 from the browser |
+| 7.6 🔶 | Clip export — web: Container Apps ffmpeg job against Blob source, result to Blob + download | M | same output as 7.5 from the browser — *server side done 2026-07-28 (enqueue/status endpoints, queue dispatch, token-authenticated worker callback, ffmpeg worker + ACA job in /infra); live run needs the worker image pushed + infra deployed* |
 
 ### E8 — Publishing (M)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 8.1 | Broker integration (Buffer-class API): token settings, channel list, create/delete scheduled posts | M | schedule + cancel round-trip from The Wire |
+| 8.1 🔶 | Broker integration (Buffer-class API): token settings, channel list, create/delete scheduled posts | M | schedule + cancel round-trip from The Wire — *API side done 2026-07-28 (typed client, /publish group, partial-failure fan-out, audit events); pick the concrete broker, fill Publish:BrokerBaseUrl, and adjust client paths to its API shape* |
 | 8.2 | Composer: per-channel text variants, char meters, media attach, schedule/now | M | over-limit channels warn with exact truncation counts |
 | 8.3 | Queue view on The Wire: queued/sent/error tabs fed live from broker | S | error states actionable (retry/edit) |
 
 ### E9 — SEO/AEO reports (M)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 9.1 | Analysis endpoint (SERP/keyword/AI-overview provider), typed report model | M | report persists + reloads |
+| 9.1 🔶 | Analysis endpoint (SERP/keyword/AI-overview provider), typed report model | M | report persists + reloads — *API side done 2026-07-28 (typed SeoAnalysis + provider-raw preservation, persisted as seo-report artifact); pick the concrete provider and fill Seo:BaseUrl/ApiKey* |
 | 9.2 | Report UI: scorecard, keyword & competitor sections on `IgbCategoryChart`, content angles | M | charts theme correctly in both modes |
-| 9.3 | Shareable public report link (public-container HTML snapshot, ~90-day SAS) | S | link opens with no auth |
+| 9.3 ✅ | Shareable public report link (public-container HTML snapshot, ~90-day SAS) | S | link opens with no auth — *done 2026-07-28: HTML-encoded snapshot published to the public container (blob-public URL instead of a 90-day SAS — user-delegation SAS caps at 7 days, so the container grants blob-level public read)* |
 | 9.4 | Blog metadata builder: head tags + JSON-LD (Article/FAQ/Video) with copy tabs | S | validates in Google Rich Results test |
 
 ### E10 — Web parity & launch (M)

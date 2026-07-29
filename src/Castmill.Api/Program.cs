@@ -7,7 +7,10 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Media;
+using Castmill.Api.Services.Publish;
 using Castmill.Api.Services.Secrets;
+using Castmill.Api.Services.Seo;
 using Castmill.Api.Tenancy;
 using Castmill.Core.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -61,10 +64,32 @@ builder.Services.AddSingleton<IPromptLog, PromptLog>();
 builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
-builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.FromMinutes(5));
+builder.Services.AddScoped<IImageRenderer, ImageRenderer>();
+builder.Services.AddSingleton<IPublicContentStore, PublicContentStore>();
+builder.Services.AddSingleton<IClipJobDispatcher, ClipJobDispatcher>();
+builder.Services.Configure<PublishOptions>(builder.Configuration.GetSection(PublishOptions.SectionName));
+builder.Services.Configure<SeoOptions>(builder.Configuration.GetSection(SeoOptions.SectionName));
+builder.Services.AddScoped<IPublishBrokerClient, PublishBrokerClient>();
+builder.Services.AddScoped<ISeoProvider, SeoProvider>();
+
+// Outbound HTTP: standard resilience (retry + circuit breaker + timeout) on
+// every dependency (B8) — transient upstream blips never surface as user errors.
+builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.FromMinutes(5))
+    .AddStandardResilienceHandler();
+builder.Services.AddHttpClient("broker").AddStandardResilienceHandler();
+builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
 
 builder.Services.AddDbContext<CastmillDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill"),
+        // Transient-fault retries for Azure SQL (B8 reliability).
+        sql => sql.EnableRetryOnFailure(maxRetryCount: 5, TimeSpan.FromSeconds(10), errorNumbersToAdd: null)));
+
+// Telemetry (G7): registered only when a connection string is configured —
+// the v3 SDK refuses to start with an empty one.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["ApplicationInsights:ConnectionString"]))
+{
+    builder.Services.AddApplicationInsightsTelemetry();
+}
 
 builder.Services
     .AddIdentityCore<CastmillUser>(options =>
@@ -150,6 +175,16 @@ builder.Services.AddRateLimiter(options =>
                 PermitLimit = aiPerMinute,
                 Window = TimeSpan.FromMinutes(1),
             }));
+
+    // External search/analysis providers (SEO), per user.
+    options.AddPolicy("searches", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue("RateLimits:SearchesPerMinute", 60),
+                Window = TimeSpan.FromMinutes(1),
+            }));
 });
 
 if (builder.Environment.IsDevelopment())
@@ -193,6 +228,10 @@ app.MapSettingsEndpoints();
 app.MapSecretsEndpoints();
 app.MapBlobEndpoints();
 app.MapAiEndpoints();
+app.MapImageEndpoints();
+app.MapMediaEndpoints();
+app.MapPublishEndpoints();
+app.MapSeoEndpoints();
 
 app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
     {

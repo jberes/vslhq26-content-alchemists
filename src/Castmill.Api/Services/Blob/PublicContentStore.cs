@@ -1,0 +1,67 @@
+using Azure.Identity;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Microsoft.Extensions.Options;
+
+namespace Castmill.Api.Services.Blob;
+
+public interface IPublicContentStore
+{
+    bool IsConfigured { get; }
+    /// <summary>
+    /// Publishes bytes to the public container with immutable cache headers and
+    /// returns a stable public URL. Used for blog images (WebP) and SEO share
+    /// snapshots — content that is public by design once the user publishes.
+    /// </summary>
+    Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct);
+}
+
+public sealed class PublicContentStore : IPublicContentStore
+{
+    private readonly StorageOptions _options;
+    private readonly BlobServiceClient? _client;
+
+    public PublicContentStore(IOptions<StorageOptions> options)
+    {
+        _options = options.Value;
+        if (!string.IsNullOrWhiteSpace(_options.ConnectionString))
+        {
+            _client = new BlobServiceClient(_options.ConnectionString);
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.AccountName))
+        {
+            _client = new BlobServiceClient(
+                new Uri($"https://{_options.AccountName}.blob.core.windows.net"),
+                new DefaultAzureCredential());
+        }
+    }
+
+    public bool IsConfigured => _client is not null;
+
+    public async Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+
+        var container = _client.GetBlobContainerClient(_options.PublicContainer);
+        // Blob-level public read: URLs work in published content with no SAS.
+        // Requires "allow blob public access" on the account — the /blob/test
+        // probe surfaces an actionable error when it's disabled.
+        await container.CreateIfNotExistsAsync(PublicAccessType.Blob, cancellationToken: ct);
+
+        var blob = container.GetBlobClient(path);
+        await blob.UploadAsync(BinaryData.FromBytes(bytes), new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders
+            {
+                ContentType = contentType,
+                // Published derivatives are content-addressed by campaign/slot and
+                // never mutated — immutable caching is safe and cheap.
+                CacheControl = "public, max-age=31536000, immutable",
+            },
+        }, ct);
+        return blob.Uri;
+    }
+}
