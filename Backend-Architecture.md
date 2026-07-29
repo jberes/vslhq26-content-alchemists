@@ -147,7 +147,7 @@ flowchart LR
 - No external identity setup — auth is self-contained in the API (ADR-010, lands in B2).
 - **Check-in gate:** empty subscription → `deploy` pipeline → `/health` live on App Service (G6 proven at skeleton scale).
 
-### Phase B2 — Identity, tenancy & data core *(size L)* — ✅ complete 2026-07-28 *(two gate items deferred: the 412-stale-ETag test lands with the artifact endpoints in B4; the App Insights trace check lands with B1's Azure resources)*
+### Phase B2 — Identity, tenancy & data core *(size L)* — ✅ complete 2026-07-28 *(412-stale-ETag gate closed by B4's artifact tests; the App Insights trace check still lands with B1's Azure resources)*
 - ASP.NET Core Identity (email + password): `/auth` group (register, login, refresh, logout, change-password), app-issued access JWT + rotating refresh token, JWT bearer validation, JWT-signing-key startup guard.
 - `TenantAllowed` policy; one tenant created per user at registration (permanent binding); `/me`.
 - EF Core model (Tenant, User + Identity tables, Campaign, Artifact, Asset, BrandProfile, UserSetting, AuditEvent) + baseline migration; global query filters; ETag concurrency. Campaigns carry `OwnerId` (ADR-011).
@@ -159,7 +159,7 @@ flowchart LR
 - SAS service + `/blob` group (mint, test, list); public-container publish path with immutable cache headers.
 - **Check-in gate:** G2 audit — grep + integration tests show no key material in any response; SAS expiry and op-scoping tested.
 
-### Phase B4 — Core resource APIs *(size L)* — ⬜
+### Phase B4 — Core resource APIs *(size L)* — ✅ complete 2026-07-28 *(assets are metadata-only until B3 wires blob SAS; settings refuse the reserved `secret.` prefix until B3's encrypted store)*
 - `/campaigns`, `/artifacts` (typed-JSON content + `Preview` projection), `/assets`, `/brands`, `/settings`.
 - Endpoint-filter validation.
 - **Check-in gate:** full CRUD demonstrable via OpenAPI UI against dev; `Preview` payload for a 50-artifact campaign under 100 KB.

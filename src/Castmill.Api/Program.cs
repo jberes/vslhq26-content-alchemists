@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
+using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Tenancy;
 using Castmill.Core.Auth;
@@ -137,8 +138,10 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseRateLimiter();
+// Authentication MUST precede the rate limiter: the "writes" policy partitions
+// by user id, which is empty (one shared anonymous bucket) before auth runs.
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
@@ -154,6 +157,11 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 
 app.MapAuthEndpoints();
+app.MapCampaignEndpoints();
+app.MapArtifactEndpoints();
+app.MapAssetEndpoints();
+app.MapBrandEndpoints();
+app.MapSettingsEndpoints();
 
 app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
     {
