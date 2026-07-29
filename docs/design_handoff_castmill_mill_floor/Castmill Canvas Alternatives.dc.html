@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-5b61f1e6-7c69-463a-b807-18ce7a1e0129/styles.css">
+<script src="_ds/industry-5b61f1e6-7c69-463a-b807-18ce7a1e0129/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#e4e4e6;font-family:Barlow,system-ui,sans-serif}
+.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08);scroll-margin-top:16px}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1d1f20;color:#fff;border-radius:0;text-decoration:none}
+.dv-tname{font:600 13px/1.2 "Barlow Condensed",system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#1d1f20}
+.dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.09);color:#1d1f20;border-radius:0;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.3 Barlow,system-ui,sans-serif;color:rgba(0,0,0,.58)}
+.dv-card{max-width:100%;background:#f2f2f3;border:1px solid rgba(0,0,0,.14);overflow:hidden}
+.dv-opt:target .dv-oid{background:#5980a6;color:#fff}
+.dv-next{margin:22px 0 0;font:12px/1.5 Barlow,system-ui,sans-serif;color:rgba(0,0,0,.5)}
+.seg-row{display:flex;align-items:center;gap:8px}
+.igb{display:none}
+.igb-on .igb{display:inline-flex}
+.lane-card{cursor:default;transition:border-color .2s ease-out,background .2s ease-out}
+.lane-card:hover{border-color:#5980a6}
+.seg-hi{background:#d6ebff!important}
+</style></helmet>
+
+<div ref="{{ rootRef }}" onMouseOver="{{ onOver }}" onMouseOut="{{ onOut }}" onClick="{{ onClick }}" onChange="{{ onChange }}" onDragStart="{{ onDragStart }}" onDragOver="{{ onDragOver }}" onDrop="{{ onDrop }}" style="min-height:100vh">
+
+<div style="padding:40px 44px 8px;max-width:1000px">
+  <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6;margin-bottom:10px">Castmill · §1.3.2 Campaign Canvas · mid-fi</div>
+  <h2 style="margin:0 0 10px">Three navigation models for the centerpiece</h2>
+  <p style="font-size:14px;max-width:68ch;color:rgba(0,0,0,.72);text-wrap:pretty">Same campaign in all three: a 58-minute webinar fanned out into 14 artifacts across 7 channels. What varies is the <strong>spatial metaphor</strong> and the <strong>navigation model</strong> — free canvas, multi-pane desk, or a single vertical run sheet — because that choice decides how provenance, review state and scheduling can be shown at all.</p>
+  <p style="font-size:14px;max-width:68ch;color:rgba(0,0,0,.72);text-wrap:pretty">Rendered in the <strong>Industry</strong> system attached to this project (steel-blue wireframe, Barlow Condensed) rather than the roadmap's warm ivory/terracotta sheet — the structure is what's up for decision here, and the token sheet can be swapped underneath any of them in an afternoon. Say the word and I'll re-skin the winner in Castmill's own palette.</p>
+  <p style="font-size:13px;max-width:68ch;color:rgba(0,0,0,.55)">Status ring is a left bar: <span style="border-left:3px solid #b7b7ba;padding-left:6px">draft</span> · <span style="border-left:3px solid #94bce3;padding-left:6px">in review</span> · <span style="border-left:3px solid #416180;padding-left:6px">queued</span> · <span style="border-left:3px solid #1d2d3d;padding-left:6px">published</span></p>
+  <label class="radio" style="margin-top:8px"><input type="checkbox" data-igbtoggle="1"><span class="dot"></span>Show Ignite UI for Blazor component map</label>
+</div>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Answering both questions about <a class="dv-oid" href="#1a">1a</a></span></div>
+<p style="margin:-8px 0 18px;font:13px/1.55 Barlow,sans-serif;color:rgba(0,0,0,.62);max-width:92ch;text-wrap:pretty"><strong>Where's the list of videos?</strong> There isn't one on this screen — a campaign is exactly one source. The list of campaigns lives one level up on the Front Page (and in ⌘K). <a class="dv-oid" href="#2a">2a</a> makes that explicit with a trail and a labelled source column. <strong>What are the lines?</strong> Provenance threads: every generated artifact stores the transcript segment IDs it was written from, so the line is literally "this card came from these words." <a class="dv-oid" href="#2b">2b</a> is the same idea without any lines at all, in case the threads are more clever than clear.</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+  <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Mill Floor, explained — breadcrumb trail, labelled source column, click a card to pin its threads. Numbered notes at right.</div>
+  <div class="dv-card" style="width:1420px">
+    <div data-scope="a2" data-pin="1" style="position:relative;padding:16px 20px 20px;background:#f2f2f3;display:flex;gap:22px">
+      <svg data-threads="a2" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:6;overflow:visible"></svg>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;font:12px/1 Barlow,sans-serif;color:rgba(29,31,32,.55);margin-bottom:12px">
+          <span style="color:#416180">Front page</span><span>→</span><span style="color:#416180">Campaigns (14)</span><span>→</span><strong style="color:#1d1f20">Shipping Blazor at Scale</strong>
+          <span class="tag tag-neutral" style="font-size:9.5px;margin-left:6px">① you are here</span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:14px">
+          <div><h3 style="margin:0 0 3px">Shipping Blazor at Scale — webinar</h3><div style="display:flex;gap:6px"><span class="tag tag-neutral">58:12 source</span><span class="tag tag-outline">14 artifacts</span></div></div>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+            <div class="seg" role="group">
+              <label class="seg-opt"><input type="radio" name="zoom-a2" data-zoom2="0.7"><span>Overview</span></label>
+              <label class="seg-opt"><input type="radio" name="zoom-a2" data-zoom2="1" defaultChecked><span>100%</span></label>
+            </div>
+            <button class="btn btn-primary blueprint" type="button">Press Run<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;gap:26px;align-items:flex-start">
+          <div class="card blueprint" style="width:290px;flex:none;padding:0;gap:0;background:#f2f2f3">
+            <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="padding:10px 12px;border-bottom:1px solid rgba(29,31,32,.16)">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#5980a6">Source master · 1 of 1</span><span class="tag tag-neutral" style="font-size:9.5px">②</span></div>
+              <div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:5px;text-wrap:pretty">This column is <em>the one source</em> for this campaign and its timed transcript — not a library of videos.</div>
+            </div>
+            <div style="height:104px;background:repeating-linear-gradient(135deg,#d4d4d7 0 8px,#e9e9ea 8px 16px);display:grid;place-items:center;border-bottom:1px solid rgba(29,31,32,.16)"><div style="width:40px;height:40px;border:1px solid #5980a6;display:grid;place-items:center;background:#f2f2f3"><div style="width:0;height:0;border-left:10px solid #5980a6;border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:3px"></div></div></div>
+            <div style="padding:7px 12px;font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.55);border-bottom:1px solid rgba(29,31,32,.16)">TIMED TRANSCRIPT · 8 of 214 segments</div>
+            <div style="max-height:300px;overflow:auto">
+              <div data-seg="s01" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">00:41 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Welcome — today it's about what breaks when a Blazor app meets a real team.</div></div>
+              <div data-seg="s02" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">04:18 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">We cut first paint from 4.2s to 900ms by moving the shell to prerender.</div></div>
+              <div data-seg="s03" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">09:55 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Virtualize everything you can measure. The grid was 80% of our frame budget.</div></div>
+              <div data-seg="s04" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">17:32 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">One shared component library, two shells. Nothing lives in the host project.</div></div>
+              <div data-seg="s05" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">24:09 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">AOT publish bought us 30% on interaction latency, at four minutes of build.</div></div>
+              <div data-seg="s06" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">33:47 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Offline first was the surprise: the desktop shell made us honest about state.</div></div>
+              <div data-seg="s07" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">41:22 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">If you ship one thing this quarter, ship the measurement harness.</div></div>
+              <div data-seg="s08" style="padding:8px 12px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">51:06 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Teams underestimate the review step. Generation is cheap; trust is not.</div></div>
+            </div>
+          </div>
+          <div style="flex:1;min-width:0;overflow-x:auto">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#5980a6">Artifacts generated from it</span><span class="tag tag-neutral" style="font-size:9.5px">③ click any card to pin its threads</span></div>
+            <div data-lanes2="a2" style="transform-origin:top left;transition:transform .2s ease-out;display:flex;flex-direction:column;gap:12px;width:756px">
+              <div style="display:flex;gap:12px"><div style="width:64px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Blog</div>
+                <div class="lane-card blueprint" data-art="blog" data-cites="s02 s05 s03" style="width:206px;padding:9px 11px;border-left:3px solid #94bce3;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Shipping Blazor at Scale</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">2,140 words</div><div style="margin-top:6px;display:flex;gap:5px"><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span><span class="tag tag-neutral" style="font-size:9.5px">3 cites</span></div></div>
+                <div class="lane-card blueprint" data-art="notes" data-cites="s01 s07" style="width:150px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Show notes</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">8 chapters · 2 cites</div></div>
+              </div>
+              <div style="display:flex;gap:12px"><div style="width:64px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Social</div>
+                <div class="lane-card blueprint" data-art="li" data-cites="s02" style="width:150px;padding:9px 11px;border-left:3px solid #1d2d3d;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">LinkedIn</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">1,180 / 3,000 · 1 cite</div></div>
+                <div class="lane-card blueprint" data-art="x" data-cites="s05" style="width:150px;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">X</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">241 / 280 · 1 cite</div></div>
+                <div class="lane-card blueprint" data-art="bsky" data-cites="s07" style="width:120px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Bluesky</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">288 / 300</div></div>
+                <div class="blueprint" style="width:96px;padding:9px 11px;display:grid;place-items:center;font:600 12px/1.2 'Barlow Condensed',sans-serif;color:rgba(29,31,32,.5)"><i class="corner tl"></i><i class="corner br"></i>+3 more</div>
+              </div>
+              <div style="display:flex;gap:12px"><div style="width:64px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Email</div>
+                <div class="lane-card blueprint" data-art="seq" data-cites="s03 s05" style="width:206px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Nurture sequence · 3 parts</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">Day 0 · 3 · 8 · 2 cites</div></div>
+                <div class="lane-card blueprint" data-art="news" data-cites="s08" style="width:150px;padding:9px 11px;border-left:3px solid #94bce3;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Newsletter</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">640 words · 1 cite</div></div>
+              </div>
+              <div style="display:flex;gap:12px"><div style="width:64px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Clips</div>
+                <div class="lane-card blueprint" data-art="clip1" data-cites="s02" style="width:206px;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">4.2s → 900ms</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">04:18 → 05:02 · 9:16</div></div>
+                <div class="lane-card blueprint" data-art="clip3" data-cites="s08" style="width:150px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Trust is not cheap</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">51:06 → 51:44</div></div>
+              </div>
+              <div style="display:flex;gap:12px"><div style="width:64px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Page / SEO</div>
+                <div class="lane-card blueprint" data-art="lp" data-cites="s02 s04" style="width:206px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Landing page copy</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">Hero · 3 proof blocks · 2 cites</div></div>
+                <div class="lane-card blueprint" data-art="seo" data-cites="s03" style="width:150px;padding:9px 11px;border-left:3px solid #1d2d3d;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">SEO / AEO report</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">1 cite</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="blueprint" style="width:238px;flex:none;padding:12px 13px;background:#e9e9ea;align-self:flex-start">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#416180;margin-bottom:9px">Reading this screen</div>
+        <div style="display:flex;flex-direction:column;gap:11px;font-size:12px;color:rgba(29,31,32,.78);line-height:1.5">
+          <div><strong>① One campaign, one page.</strong> The list of sources/campaigns is the Front Page, one level up. ⌘K jumps between them without going back.</div>
+          <div><strong>② The source column is a single video</strong> with its timed transcript underneath the player. Scrubbing the player scrolls the transcript.</div>
+          <div><strong>③ The lines are provenance.</strong> Each generator returns the transcript segment IDs it drew from, stored with the artifact. Hover or click a card and Castmill draws a thread back to those exact segments — the highlighted rows — and labels them (s02, s05…). It answers "where did this sentence come from?" without opening anything.</div>
+          <div style="padding-top:9px;border-top:1px solid rgba(29,31,32,.16);color:rgba(29,31,32,.6)">If threads feel like decoration rather than proof, <a href="#2b">2b</a> drops them entirely.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="2b">
+  <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>No lines — click a card and the source it quoted appears beside it, verbatim. Provenance as a citation panel, not a diagram.</div>
+  <div class="dv-card" style="width:1180px">
+    <div data-scope="b2" data-pin="1" style="padding:16px 20px 20px;background:#f2f2f3">
+      <div style="display:flex;align-items:center;gap:8px;font:12px/1 Barlow,sans-serif;color:rgba(29,31,32,.55);margin-bottom:12px"><span style="color:#416180">Front page</span><span>→</span><span style="color:#416180">Campaigns (14)</span><span>→</span><strong style="color:#1d1f20">Shipping Blazor at Scale</strong></div>
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:14px">
+        <div><h3 style="margin:0 0 3px">Shipping Blazor at Scale — webinar</h3><div style="font-size:12.5px;color:rgba(29,31,32,.6)">Source: one 58-minute recording · 14 artifacts · click any card to see the words behind it</div></div>
+        <div style="margin-left:auto"><button class="btn btn-primary blueprint" type="button">Press Run<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i></button></div>
+      </div>
+      <div style="display:flex;gap:22px;align-items:flex-start">
+        <div style="flex:1;min-width:0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Blog · Notes</div>
+            <div class="lane-card blueprint" data-art="blog" data-name="Shipping Blazor at Scale" data-cites="s02 s05 s03" style="padding:9px 11px;border-left:3px solid #94bce3;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Shipping Blazor at Scale</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">2,140 words</div><div style="margin-top:6px"><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span></div></div>
+            <div class="lane-card blueprint" data-art="notes" data-name="Show notes" data-cites="s01 s07" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Show notes</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">8 chapters</div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Social · 6</div>
+            <div class="lane-card blueprint" data-art="li" data-name="LinkedIn post" data-cites="s02" style="padding:9px 11px;border-left:3px solid #1d2d3d;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">LinkedIn</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">1,180 / 3,000</div></div>
+            <div class="lane-card blueprint" data-art="x" data-name="X post" data-cites="s05" style="padding:9px 11px;border-left:3px solid #416180;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">X</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">241 / 280</div></div>
+            <div class="lane-card blueprint" data-art="bsky" data-name="Bluesky post" data-cites="s07" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Bluesky</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">288 / 300</div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Email · Page</div>
+            <div class="lane-card blueprint" data-art="seq" data-name="Nurture sequence" data-cites="s03 s05" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Nurture sequence</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">3 parts</div></div>
+            <div class="lane-card blueprint" data-art="news" data-name="Newsletter issue" data-cites="s08" style="padding:9px 11px;border-left:3px solid #94bce3;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Newsletter</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">640 words</div></div>
+            <div class="lane-card blueprint" data-art="lp" data-name="Landing page copy" data-cites="s02 s04" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Landing page</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">Hero · 3 proof blocks</div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Clips · Images · SEO</div>
+            <div class="lane-card blueprint" data-art="clip1" data-name="Clip · 4.2s → 900ms" data-cites="s02" style="padding:9px 11px;border-left:3px solid #416180;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Clip · 4.2s → 900ms</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">04:18 → 05:02</div></div>
+            <div class="lane-card blueprint" data-art="clip3" data-name="Clip · Trust is not cheap" data-cites="s08" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Clip · Trust is not cheap</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">51:06 → 51:44</div></div>
+            <div class="lane-card blueprint" data-art="seo" data-name="SEO / AEO report" data-cites="s03" style="padding:9px 11px;border-left:3px solid #1d2d3d;cursor:pointer"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">SEO / AEO report</div><div style="display:flex;align-items:flex-end;gap:3px;height:22px;margin-top:6px"><div style="width:8px;height:45%;background:#94bce3"></div><div style="width:8px;height:72%;background:#749dc4"></div><div style="width:8px;height:58%;background:#597ea3"></div><div style="width:8px;height:96%;background:#416180"></div></div></div>
+          </div>
+        </div>
+        <div class="card blueprint" style="width:330px;flex:none;padding:0;gap:0;background:#f2f2f3;align-self:flex-start">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="padding:10px 12px;border-bottom:1px solid rgba(29,31,32,.16)">
+            <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#5980a6">Quoted source</div>
+            <div data-quotehead="1" style="font-size:12px;color:rgba(29,31,32,.62);margin-top:5px">Click an artifact to see the exact transcript segments it was written from.</div>
+          </div>
+          <div style="padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(29,31,32,.16)">
+            <div style="width:30px;height:30px;border:1px solid #5980a6;display:grid;place-items:center;flex:none"><div style="width:0;height:0;border-left:8px solid #5980a6;border-top:5px solid transparent;border-bottom:5px solid transparent;margin-left:2px"></div></div>
+            <div style="font-size:11.5px;color:rgba(29,31,32,.6)">Play from segment · jump the master to this moment</div>
+          </div>
+          <div data-quotes="1" style="padding:4px 0;min-height:210px"></div>
+          <div style="display:none">
+            <div data-seg="s01" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">00:41 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Welcome — today it's about what breaks when a Blazor app meets a real team.</div></div>
+            <div data-seg="s02" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">04:18 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">We cut first paint from 4.2s to 900ms by moving the shell to prerender.</div></div>
+            <div data-seg="s03" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">09:55 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Virtualize everything you can measure. The grid was 80% of our frame budget.</div></div>
+            <div data-seg="s04" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">17:32 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">One shared component library, two shells. Nothing lives in the host project.</div></div>
+            <div data-seg="s05" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">24:09 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">AOT publish bought us 30% on interaction latency, at four minutes of build.</div></div>
+            <div data-seg="s06" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">33:47 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Offline first was the surprise: the desktop shell made us honest about state.</div></div>
+            <div data-seg="s07" style="padding:9px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">41:22 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">If you ship one thing this quarter, ship the measurement harness.</div></div>
+            <div data-seg="s08" style="padding:9px 12px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">51:06 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Teams underestimate the review step. Generation is cheap; trust is not.</div></div>
+          </div>
+          <div style="padding:9px 12px;border-top:1px solid rgba(29,31,32,.16);font-size:11.5px;color:rgba(29,31,32,.6)">Same data as the threads in <a href="#2a">2a</a> — shown as citations instead of geometry.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "keep <a class="dv-oid" href="#2b">2b</a>'s citation panel but put it in <a class="dv-oid" href="#1a">1a</a>'s canvas" · "show me the Front Page that lists the campaigns" · "re-skin <a class="dv-oid" href="#2a">2a</a> in Castmill's warm palette"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Campaign Canvas — navigation models</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+  <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The Mill Floor — free canvas, swimlanes fanning right from the source. Hover a card to trace provenance; zoom control top right.</div>
+  <div class="dv-card" style="width:1420px">
+    <div data-scope="a" style="position:relative;padding:18px 20px 22px;background:#f2f2f3">
+      <svg data-threads="a" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:6;overflow:visible"></svg>
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div>
+          <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">Campaign</div>
+          <h3 style="margin:4px 0 2px">Shipping Blazor at Scale — webinar</h3>
+          <div style="display:flex;gap:6px;align-items:center"><span class="tag tag-neutral">58:12 source</span><span class="tag tag-outline">14 artifacts</span><span class="tag tag-accent">9 cite the transcript</span></div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+          <span class="igb tag tag-outline" style="border-style:dashed">IgbChip · IgbBadge</span>
+          <div class="seg" role="group">
+            <label class="seg-opt"><input type="radio" name="zoom-a" data-zoom="0.6"><span>Overview</span></label>
+            <label class="seg-opt"><input type="radio" name="zoom-a" data-zoom="0.8"><span>Fit</span></label>
+            <label class="seg-opt"><input type="radio" name="zoom-a" data-zoom="1" defaultChecked><span>100%</span></label>
+          </div>
+          <button class="btn btn-primary blueprint" type="button">Press Run<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i></button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:26px;align-items:flex-start">
+        <div class="card blueprint" style="width:296px;flex:none;padding:0;gap:0">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="padding:11px 12px 9px;border-bottom:1px solid rgba(29,31,32,.16);display:flex;align-items:center;justify-content:space-between">
+            <span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#5980a6">Source master</span>
+            <span class="igb tag tag-outline" style="border-style:dashed;font-size:9px">IgbList</span>
+          </div>
+          <div style="height:132px;background:repeating-linear-gradient(135deg,#d4d4d7 0 8px,#e9e9ea 8px 16px);display:grid;place-items:center;border-bottom:1px solid rgba(29,31,32,.16)">
+            <div style="width:44px;height:44px;border:1px solid #5980a6;display:grid;place-items:center;background:#f2f2f3"><div style="width:0;height:0;border-left:11px solid #5980a6;border-top:7px solid transparent;border-bottom:7px solid transparent;margin-left:3px"></div></div>
+          </div>
+          <div style="padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(29,31,32,.16)">
+            <span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180">12:04</span>
+            <div style="flex:1;height:3px;background:#d4d4d7;position:relative"><div style="position:absolute;inset:0 79% 0 0;background:#5980a6"></div></div>
+            <span style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">58:12</span>
+          </div>
+          <div style="max-height:296px;overflow:auto">
+            <div data-seg="s01" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">00:41 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Welcome — today it's about what breaks when a Blazor app meets a real team.</div></div>
+            <div data-seg="s02" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">04:18 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">We cut first paint from 4.2s to 900ms by moving the shell to prerender.</div></div>
+            <div data-seg="s03" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">09:55 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Virtualize everything you can measure. The grid was 80% of our frame budget.</div></div>
+            <div data-seg="s04" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">17:32 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">One shared component library, two shells. Nothing lives in the host project.</div></div>
+            <div data-seg="s05" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">24:09 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">AOT publish bought us 30% on interaction latency, at four minutes of build.</div></div>
+            <div data-seg="s06" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">33:47 · DEV</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Offline first was the surprise: the desktop shell made us honest about state.</div></div>
+            <div data-seg="s07" style="padding:8px 12px;border-bottom:1px solid rgba(29,31,32,.08)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">41:22 · HOST</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">If you ship one thing this quarter, ship the measurement harness.</div></div>
+            <div data-seg="s08" style="padding:8px 12px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-bottom:3px">51:06 · MAYA</div><div style="font-size:12.5px;color:rgba(29,31,32,.85)">Teams underestimate the review step. Generation is cheap; trust is not.</div></div>
+          </div>
+        </div>
+
+        <div style="flex:1;overflow:hidden">
+          <div data-lanes="a" style="transform-origin:top left;transition:transform .2s ease-out;display:flex;flex-direction:column;gap:12px;width:1040px">
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Blog</div>
+              <div class="lane-card blueprint" data-art="blog" data-cites="s02 s05 s03" style="width:214px;padding:9px 11px;border-left:3px solid #94bce3;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Shipping Blazor at Scale</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">2,140 words · 3 image stubs</div><div style="margin-top:6px;display:flex;gap:5px"><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span><span class="tag tag-neutral" style="font-size:9.5px">3 cites</span></div></div>
+              <div class="lane-card blueprint" data-art="notes" data-cites="s01 s07" style="width:150px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Show notes</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">8 chapters</div></div>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Social</div>
+              <div class="lane-card blueprint" data-art="li" data-cites="s02" style="width:150px;padding:9px 11px;border-left:3px solid #1d2d3d;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">LinkedIn</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">1,180 / 3,000</div><div style="margin-top:6px"><span class="tag tag-neutral" style="font-size:9.5px">PUBLISHED</span></div></div>
+              <div class="lane-card blueprint" data-art="x" data-cites="s05" style="width:150px;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">X</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">241 / 280</div><div style="margin-top:6px"><span class="tag tag-outline" style="font-size:9.5px">QUEUED THU 09:00</span></div></div>
+              <div class="lane-card blueprint" data-art="bsky" data-cites="s07" style="width:118px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Bluesky</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">288 / 300</div></div>
+              <div class="lane-card blueprint" data-art="threads" data-cites="s06" style="width:118px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Threads</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">402 / 500</div></div>
+              <div class="blueprint" style="width:104px;padding:9px 11px;display:grid;place-items:center;font:600 12px/1.2 'Barlow Condensed',sans-serif;color:rgba(29,31,32,.5)"><i class="corner tl"></i><i class="corner br"></i>+2 platforms</div>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Email</div>
+              <div class="lane-card blueprint" data-art="seq" data-cites="s03 s05" style="width:214px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Nurture sequence · 3 parts</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">Day 0 · Day 3 · Day 8</div></div>
+              <div class="lane-card blueprint" data-art="news" data-cites="s08" style="width:150px;padding:9px 11px;border-left:3px solid #94bce3;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Newsletter</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">640 words</div><div style="margin-top:6px"><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span></div></div>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Clips</div>
+              <div class="lane-card blueprint" data-art="clip1" data-cites="s02" style="width:150px;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">4.2s → 900ms</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">04:18 → 05:02 · 9:16</div></div>
+              <div class="lane-card blueprint" data-art="clip2" data-cites="s06" style="width:150px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Offline made us honest</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">33:47 → 34:29</div></div>
+              <div class="lane-card blueprint" data-art="clip3" data-cites="s08" style="width:150px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Trust is not cheap</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:4px">51:06 → 51:44</div></div>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Images</div>
+              <div class="lane-card blueprint duotone" data-art="img1" data-cites="s02" style="width:118px;height:74px;border-left:3px solid #1d2d3d;background:repeating-linear-gradient(45deg,#d4d4d7 0 6px,#e9e9ea 6px 12px)"><i class="corner tl"></i><i class="corner br"></i></div>
+              <div class="lane-card blueprint duotone" data-art="img2" data-cites="s05" style="width:118px;height:74px;border-left:3px solid #1d2d3d;background:repeating-linear-gradient(45deg,#d4d4d7 0 6px,#e9e9ea 6px 12px)"><i class="corner tl"></i><i class="corner br"></i></div>
+              <div class="blueprint" style="width:118px;height:74px;display:grid;place-items:center;font:600 12px/1.2 'Barlow Condensed',sans-serif;color:rgba(29,31,32,.5)"><i class="corner tl"></i><i class="corner br"></i>gpt-image-2</div>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:12px"><div style="width:70px;flex:none;font:600 10px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55);padding-top:6px">Page / SEO</div>
+              <div class="lane-card blueprint" data-art="lp" data-cites="s02 s04" style="width:182px;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">Landing page copy</div><div style="font-size:11.5px;color:rgba(29,31,32,.6);margin-top:3px">Hero · 3 proof blocks · CTA</div></div>
+              <div class="lane-card blueprint" data-art="seo" data-cites="s03" style="width:182px;padding:9px 11px;border-left:3px solid #1d2d3d;background:#f2f2f3;position:relative"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 15px/1.15 'Barlow Condensed',sans-serif">SEO / AEO report</div><div style="display:flex;align-items:flex-end;gap:3px;height:26px;margin-top:6px"><div style="width:9px;height:40%;background:#94bce3"></div><div style="width:9px;height:70%;background:#749dc4"></div><div style="width:9px;height:55%;background:#597ea3"></div><div style="width:9px;height:95%;background:#416180"></div><div style="width:9px;height:30%;background:#94bce3"></div></div><span class="igb tag tag-outline" style="border-style:dashed;font-size:9px;position:absolute;right:6px;top:6px">IgbCategoryChart</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:16px;padding-top:10px;border-top:1px solid rgba(29,31,32,.16);display:flex;align-items:center;gap:10px;font-size:12px;color:rgba(29,31,32,.6)">
+        <span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180">PRESS RUN</span>
+        <span>Printing: LinkedIn post · 14 of 14 — run complete in 3m 41s</span>
+        <span class="igb tag tag-outline" style="border-style:dashed;margin-left:auto">IgbToast / INotifier</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="1b">
+  <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The Desk — no free canvas: three fixed panes plus the Wire dock. Click any row to sync the transcript. Dark theme.</div>
+  <div class="dv-card" style="width:1280px">
+    <div data-scope="b" style="background:#191b1c;color:#e7e7ea;--color-bg:#191b1c;--color-text:#e7e7ea;--color-surface:#222425;--color-divider:rgba(231,231,234,.18);display:flex;height:760px">
+      <div style="width:172px;flex:none;border-right:1px solid rgba(231,231,234,.18);padding:14px 12px;display:flex;flex-direction:column;gap:16px">
+        <div style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.16em">CASTMILL</div>
+        <div style="display:flex;flex-direction:column;gap:2px;font-size:13px">
+          <div style="padding:5px 7px;color:rgba(231,231,234,.6)">Front page</div>
+          <div style="padding:5px 7px;background:rgba(89,128,166,.28);border-left:2px solid #94bce3">Campaigns</div>
+          <div style="padding:5px 7px;color:rgba(231,231,234,.6)">Assets</div>
+          <div style="padding:5px 7px;color:rgba(231,231,234,.6)">Brand voice</div>
+          <div style="padding:5px 7px;color:rgba(231,231,234,.6)">Settings</div>
+        </div>
+        <div>
+          <div style="font:600 9.5px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:rgba(231,231,234,.45);margin-bottom:7px">Campaigns</div>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:12.5px">
+            <div style="padding:6px 7px;border:1px solid rgba(148,188,227,.55);background:rgba(89,128,166,.16)">Shipping Blazor at Scale<div style="font-size:11px;color:rgba(231,231,234,.5);margin-top:2px">14 artifacts · 2 in review</div></div>
+            <div style="padding:6px 7px;color:rgba(231,231,234,.7)">Q3 product podcast<div style="font-size:11px;color:rgba(231,231,234,.45);margin-top:2px">9 artifacts</div></div>
+            <div style="padding:6px 7px;color:rgba(231,231,234,.7)">Field guide webinar<div style="font-size:11px;color:rgba(231,231,234,.45);margin-top:2px">3 drafts aging</div></div>
+          </div>
+          <span class="igb tag tag-outline" style="border-style:dashed;font-size:9px;margin-top:9px;color:#94bce3;border-color:#94bce3">IgbTree</span>
+        </div>
+        <div style="margin-top:auto"><button class="btn btn-primary blueprint btn-block" type="button" style="background:#5980a6;color:#fff;border-color:#5980a6">Start a run<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i></button></div>
+      </div>
+
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <div style="padding:13px 16px;border-bottom:1px solid rgba(231,231,234,.18);display:flex;align-items:center;gap:12px">
+          <div><h4 style="margin:0">Shipping Blazor at Scale</h4><div style="font-size:11.5px;color:rgba(231,231,234,.5)">Webinar · 58:12 · brand voice: Field Manual</div></div>
+          <div style="margin-left:auto;display:flex;gap:7px;align-items:center">
+            <span class="igb tag tag-outline" style="border-style:dashed;color:#94bce3;border-color:#94bce3">IgbGrid · IgbTabs</span>
+            <button class="btn btn-secondary" type="button" style="color:#e7e7ea">Regenerate…</button>
+            <button class="btn btn-primary" type="button" style="background:#5980a6;color:#fff;border-color:#5980a6">Schedule reviewed</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:0;border-bottom:1px solid rgba(231,231,234,.18);padding:0 16px">
+          <div style="padding:9px 12px;font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;border-bottom:2px solid #94bce3">All 14</div>
+          <div style="padding:9px 12px;font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(231,231,234,.5)">In review 2</div>
+          <div style="padding:9px 12px;font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(231,231,234,.5)">Queued 3</div>
+          <div style="padding:9px 12px;font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(231,231,234,.5)">Published 4</div>
+        </div>
+        <div style="flex:1;overflow:auto;padding:0 16px">
+          <table class="table" style="color:#e7e7ea">
+            <thead><tr><th style="width:34%">Artifact</th><th>Channel</th><th>Status</th><th>Cites</th><th>Validators</th><th>Updated</th></tr></thead>
+            <tbody>
+              <tr data-art="blog" data-cites="s02 s05 s03" style="cursor:pointer;border-left:3px solid #94bce3"><td>Shipping Blazor at Scale<div style="font-size:11px;color:rgba(231,231,234,.45)">2,140 words · 3 image stubs</div></td><td>Blog</td><td><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s02 s03 s05</td><td style="color:#7e9cb8">5 / 5 pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">11 min ago</td></tr>
+              <tr data-art="li" data-cites="s02" style="cursor:pointer;border-left:3px solid #1d2d3d"><td>LinkedIn post</td><td>Social</td><td><span class="tag tag-neutral" style="font-size:9.5px">PUBLISHED</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s02</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">Yesterday</td></tr>
+              <tr data-art="x" data-cites="s05" style="cursor:pointer;border-left:3px solid #416180"><td>X post<div style="font-size:11px;color:rgba(231,231,234,.45)">241 / 280</div></td><td>Social</td><td><span class="tag tag-outline" style="font-size:9.5px;color:#94bce3;border-color:#94bce3">QUEUED</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s05</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="bsky" data-cites="s07" style="cursor:pointer;border-left:3px solid #b7b7ba"><td>Bluesky post<div style="font-size:11px;color:rgba(231,231,234,.45)">288 / 300</div></td><td>Social</td><td><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s07</td><td style="color:#d18f6a">char cap 96%</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="threads" data-cites="s06" style="cursor:pointer;border-left:3px solid #b7b7ba"><td>Threads post</td><td>Social</td><td><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s06</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="seq" data-cites="s03 s05" style="cursor:pointer;border-left:3px solid #b7b7ba"><td>Nurture sequence · 3 parts</td><td>Email</td><td><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s03 s05</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="news" data-cites="s08" style="cursor:pointer;border-left:3px solid #94bce3"><td>Newsletter issue</td><td>Email</td><td><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s08</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">40 min ago</td></tr>
+              <tr data-art="clip1" data-cites="s02" style="cursor:pointer;border-left:3px solid #416180"><td>Clip · 4.2s → 900ms<div style="font-size:11px;color:rgba(231,231,234,.45)">04:18 → 05:02 · 9:16</div></td><td>Clips</td><td><span class="tag tag-outline" style="font-size:9.5px;color:#94bce3;border-color:#94bce3">QUEUED</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s02</td><td style="color:#7e9cb8">in range</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="clip2" data-cites="s06" style="cursor:pointer;border-left:3px solid #b7b7ba"><td>Clip · Offline made us honest</td><td>Clips</td><td><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s06</td><td style="color:#7e9cb8">in range</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="lp" data-cites="s02 s04" style="cursor:pointer;border-left:3px solid #b7b7ba"><td>Landing page copy</td><td>Page</td><td><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s02 s04</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">2 h ago</td></tr>
+              <tr data-art="seo" data-cites="s03" style="cursor:pointer;border-left:3px solid #1d2d3d"><td>SEO / AEO report</td><td>SEO</td><td><span class="tag tag-neutral" style="font-size:9.5px">PUBLISHED</span></td><td style="font:11px ui-monospace,Menlo,monospace;color:#94bce3">s03</td><td style="color:#7e9cb8">pass</td><td style="font-size:12px;color:rgba(231,231,234,.5)">Yesterday</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="border-top:1px solid rgba(231,231,234,.18);padding:11px 16px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:9px"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#94bce3">The Wire · dock</span><span style="font-size:11.5px;color:rgba(231,231,234,.5)">week of 27 Jul</span><span class="igb tag tag-outline" style="border-style:dashed;margin-left:auto;color:#94bce3;border-color:#94bce3">IgbDatePicker</span></div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px">
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">MON 27</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">TUE 28</div><div style="margin-top:4px;font-size:11px;padding:3px 5px;border-left:2px solid #1d2d3d;background:rgba(231,231,234,.06)">LinkedIn 09:00</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">WED 29</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">THU 30</div><div style="margin-top:4px;font-size:11px;padding:3px 5px;border-left:2px solid #416180;background:rgba(231,231,234,.06)">X 09:00</div><div style="margin-top:4px;font-size:11px;padding:3px 5px;border-left:2px solid #416180;background:rgba(231,231,234,.06)">Clip 1 · 17:30</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">FRI 31</div><div style="margin-top:4px;font-size:11px;padding:3px 5px;border-left:2px solid #416180;background:rgba(231,231,234,.06)">Newsletter 07:00</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px;opacity:.5"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">SAT 01</div></div>
+            <div style="border:1px solid rgba(231,231,234,.18);min-height:78px;padding:5px;opacity:.5"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45)">SUN 02</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="width:318px;flex:none;border-left:1px solid rgba(231,231,234,.18);display:flex;flex-direction:column">
+        <div style="padding:12px 14px;border-bottom:1px solid rgba(231,231,234,.18);display:flex;align-items:center;justify-content:space-between"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#94bce3">Source &amp; provenance</span><span data-selname="b" style="font-size:11px;color:rgba(231,231,234,.5)">blog post</span></div>
+        <div style="height:118px;background:repeating-linear-gradient(135deg,#2b2d2e 0 8px,#222425 8px 16px);display:grid;place-items:center;border-bottom:1px solid rgba(231,231,234,.18)"><div style="width:40px;height:40px;border:1px solid #94bce3;display:grid;place-items:center"><div style="width:0;height:0;border-left:10px solid #94bce3;border-top:6px solid transparent;border-bottom:6px solid transparent;margin-left:3px"></div></div></div>
+        <div style="padding:9px 14px;font-size:11.5px;color:rgba(231,231,234,.55);border-bottom:1px solid rgba(231,231,234,.18)">Highlighted segments are the ones this artifact was generated from — carried as citation IDs through every generation call.</div>
+        <div style="flex:1;overflow:auto">
+          <div data-scope="b" data-seg="s01" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">00:41 · HOST</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">Welcome — today it's about what breaks when a Blazor app meets a real team.</div></div>
+          <div data-scope="b" data-seg="s02" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">04:18 · MAYA</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">We cut first paint from 4.2s to 900ms by moving the shell to prerender.</div></div>
+          <div data-scope="b" data-seg="s03" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">09:55 · MAYA</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">Virtualize everything you can measure. The grid was 80% of our frame budget.</div></div>
+          <div data-scope="b" data-seg="s04" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">17:32 · DEV</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">One shared component library, two shells. Nothing lives in the host project.</div></div>
+          <div data-scope="b" data-seg="s05" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">24:09 · MAYA</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">AOT publish bought us 30% on interaction latency, at four minutes of build.</div></div>
+          <div data-scope="b" data-seg="s06" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">33:47 · DEV</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">Offline first was the surprise: the desktop shell made us honest about state.</div></div>
+          <div data-scope="b" data-seg="s07" style="padding:9px 14px;border-bottom:1px solid rgba(231,231,234,.09)"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">41:22 · HOST</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">If you ship one thing this quarter, ship the measurement harness.</div></div>
+          <div data-scope="b" data-seg="s08" style="padding:9px 14px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#94bce3;margin-bottom:3px">51:06 · MAYA</div><div style="font-size:12.5px;color:rgba(231,231,234,.8)">Teams underestimate the review step. Generation is cheap; trust is not.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="1c">
+  <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>The Run Sheet — one vertical column, artifacts pinned to the timecode they came from. Drag any card into a Wire slot to schedule it.</div>
+  <div class="dv-card" style="width:1160px">
+    <div data-scope="c" style="background:#f2f2f3;padding:18px 20px 22px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div>
+          <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">Run sheet · vertical = source timecode</div>
+          <h3 style="margin:4px 0 2px">Shipping Blazor at Scale — webinar</h3>
+          <div style="font-size:12.5px;color:rgba(29,31,32,.6)">Position down the page <em>is</em> position in the source. No panning, no zooming — scroll the master and the campaign scrolls with it.</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-secondary" type="button">Filter: in review</button><button class="btn btn-primary blueprint" type="button">Press Run<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i></button></div>
+      </div>
+
+      <div style="display:flex;gap:26px;align-items:flex-start">
+        <div style="flex:1;min-width:0;max-height:640px;overflow:auto;padding:0 6px 0 14px">
+          <div style="display:flex;gap:14px">
+            <div style="width:56px;flex:none;position:relative;border-right:1px solid rgba(29,31,32,.2)">
+              <div style="position:absolute;right:-2px;top:0;bottom:0;width:3px;background:linear-gradient(#5980a6,#b5d9fd)"></div>
+            </div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">00:41</span>
+                <div class="blueprint" draggable="true" data-drag="Show notes" style="flex:1;padding:10px 12px;border-left:3px solid #b7b7ba;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Show notes</span><span class="tag tag-neutral" style="font-size:9.5px">DRAFT</span></div><div style="font:600 17px/1.15 'Barlow Condensed',sans-serif;margin-top:3px">Eight chapters, with timecodes</div><div style="font-size:12.5px;color:rgba(29,31,32,.62);margin-top:3px;max-width:72ch">Cites <span style="font:11px ui-monospace,Menlo,monospace;color:#416180">s01, s07</span> — the open and the closing ask.</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">04:18</span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+                  <div class="blueprint" style="padding:10px 12px;border-left:3px solid #94bce3;background:#f2f2f3"><i class="corner tl"></i><i class="corner br"></i><div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Blog · 2,140 words</span><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span><span style="margin-left:auto;font-size:11px;color:rgba(29,31,32,.5)">validators 5 / 5</span></div><div style="font:600 19px/1.14 'Barlow Condensed',sans-serif;margin-top:4px">Shipping Blazor at Scale: what actually moved the numbers</div><div style="font-size:12.5px;color:rgba(29,31,32,.68);margin-top:4px;max-width:74ch;text-wrap:pretty">"Prerendering the shell took first paint from 4.2 seconds to 900 milliseconds — and it cost us one afternoon." Three image stubs, cross-model audit clean.</div><div style="display:flex;gap:6px;margin-top:7px"><span class="tag tag-outline" style="font-size:9.5px">s02</span><span class="tag tag-outline" style="font-size:9.5px">s03</span><span class="tag tag-outline" style="font-size:9.5px">s05</span><span style="font-size:11px;color:rgba(29,31,32,.45);align-self:center">↳ spans three moments in the source</span></div></div>
+                  <div style="display:flex;gap:8px">
+                    <div class="blueprint" draggable="true" data-drag="LinkedIn" style="flex:1;padding:9px 11px;border-left:3px solid #1d2d3d;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">LinkedIn · published</div><div style="font-size:12.5px;margin-top:4px">"We didn't rewrite. We moved one boundary." 1,180 / 3,000</div></div>
+                    <div class="blueprint" draggable="true" data-drag="Clip 04:18" style="width:250px;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Clip · queued</div><div style="font-size:12.5px;margin-top:4px">4.2s → 900ms · 9:16 · 44s</div></div>
+                    <div class="blueprint duotone" style="width:96px;height:62px;border-left:3px solid #1d2d3d;background:repeating-linear-gradient(45deg,#d4d4d7 0 6px,#e9e9ea 6px 12px)"><i class="corner tl"></i><i class="corner br"></i></div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">09:55</span>
+                <div class="blueprint" draggable="true" data-drag="SEO report" style="flex:1;padding:10px 12px;border-left:3px solid #1d2d3d;background:#f2f2f3;cursor:grab;position:relative"><i class="corner tl"></i><i class="corner br"></i><div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">SEO / AEO report</span><span class="tag tag-neutral" style="font-size:9.5px">PUBLISHED</span></div><div style="display:flex;align-items:flex-end;gap:5px;height:34px;margin-top:8px"><div style="width:16px;height:45%;background:#94bce3"></div><div style="width:16px;height:72%;background:#749dc4"></div><div style="width:16px;height:58%;background:#597ea3"></div><div style="width:16px;height:96%;background:#416180"></div><div style="width:16px;height:34%;background:#94bce3"></div><span style="font-size:11.5px;color:rgba(29,31,32,.55);align-self:center;margin-left:8px">"blazor performance" — position 14, AI-overview citation on 2 of 5 engines</span></div><span class="igb tag tag-outline" style="border-style:dashed;font-size:9px;position:absolute;right:8px;top:8px">IgbCategoryChart</span></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">24:09</span>
+                <div style="flex:1;display:flex;gap:8px">
+                  <div class="blueprint" draggable="true" data-drag="X post" style="flex:1;padding:9px 11px;border-left:3px solid #416180;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">X · queued Thu 09:00</div><div style="font-size:12.5px;margin-top:4px">"AOT cost us 4 minutes of build and gave back 30% of interaction latency."</div><div style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;margin-top:5px">241 / 280</div></div>
+                  <div class="blueprint" draggable="true" data-drag="Nurture seq." style="flex:1;padding:9px 11px;border-left:3px solid #b7b7ba;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Email sequence · draft</div><div style="font-size:12.5px;margin-top:4px">Day 0 · Day 3 · Day 8 — the build-cost objection, answered</div></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">33:47</span>
+                <div class="blueprint" draggable="true" data-drag="Landing page" style="flex:1;padding:10px 12px;border-left:3px solid #b7b7ba;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Landing page copy · draft</div><div style="font:600 17px/1.15 'Barlow Condensed',sans-serif;margin-top:3px">One library. Two shells. No drift.</div><div style="font-size:12.5px;color:rgba(29,31,32,.62);margin-top:3px">Hero + 3 proof blocks + CTA · cites s02, s04</div></div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:flex-start"><span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none;margin-left:-70px;padding-top:10px">51:06</span>
+                <div class="blueprint" draggable="true" data-drag="Newsletter" style="flex:1;padding:10px 12px;border-left:3px solid #94bce3;background:#f2f2f3;cursor:grab"><i class="corner tl"></i><i class="corner br"></i><div style="display:flex;align-items:baseline;gap:8px"><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Newsletter · 640 words</span><span class="tag tag-accent" style="font-size:9.5px">IN REVIEW</span></div><div style="font:600 17px/1.15 'Barlow Condensed',sans-serif;margin-top:3px">Generation is cheap. Trust is not.</div><div style="font-size:12.5px;color:rgba(29,31,32,.62);margin-top:3px">Closing argument, drawn from the last five minutes of the session.</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card blueprint" style="width:290px;flex:none;padding:0;gap:0;background:#f2f2f3">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="padding:11px 12px;border-bottom:1px solid rgba(29,31,32,.16);display:flex;align-items:center;justify-content:space-between"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:#5980a6">The Wire · drop to schedule</span><span class="igb tag tag-outline" style="border-style:dashed;font-size:9px">IgbDialog</span></div>
+          <div style="padding:9px 12px;font-size:11.5px;color:rgba(29,31,32,.6);border-bottom:1px solid rgba(29,31,32,.16)">Drag any card on the left into a day. One gesture from review to scheduled.</div>
+          <div data-slots="c" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+            <div data-slot="Tue 28" style="border:1px dashed rgba(29,31,32,.28);min-height:56px;padding:6px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">TUE 28</div><div style="margin-top:5px;font-size:11.5px;padding:3px 6px;border-left:2px solid #1d2d3d;background:#e9e9ea">LinkedIn · 09:00</div></div>
+            <div data-slot="Wed 29" style="border:1px dashed rgba(29,31,32,.28);min-height:56px;padding:6px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">WED 29</div></div>
+            <div data-slot="Thu 30" style="border:1px dashed rgba(29,31,32,.28);min-height:56px;padding:6px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">THU 30</div><div style="margin-top:5px;font-size:11.5px;padding:3px 6px;border-left:2px solid #416180;background:#e9e9ea">X · 09:00</div></div>
+            <div data-slot="Fri 31" style="border:1px dashed rgba(29,31,32,.28);min-height:56px;padding:6px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">FRI 31</div></div>
+            <div data-slot="Mon 03" style="border:1px dashed rgba(29,31,32,.28);min-height:56px;padding:6px"><div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.5)">MON 03</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+<p class="dv-next">Try next: "take <a class="dv-oid" href="#1a">1a</a> and re-skin it in Castmill's warm palette" · "show <a class="dv-oid" href="#1c">1c</a> with the Focus Mode editor open" · "combine <a class="dv-oid" href="#1b">1b</a>'s Wire dock with <a class="dv-oid" href="#1a">1a</a>'s canvas" · "new directions"</p>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;igniteMap&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Annotations&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#5980a6&quot;,&quot;options&quot;:[&quot;#5980a6&quot;,&quot;#C15F3C&quot;,&quot;#5F7355&quot;,&quot;#8A7248&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  componentDidMount() { this.applyProps(); this.syncRadios(); }
+  syncRadios() {
+    const r = this.root; if (!r) return;
+    r.querySelectorAll('input[data-zoom]').forEach(i => { i.checked = i.dataset.zoom === '1'; });
+    r.querySelectorAll('input[data-zoom2]').forEach(i => { i.checked = i.dataset.zoom2 === '1'; });
+  }
+  componentDidUpdate() { this.applyProps(); }
+  applyProps() {
+    const r = this.root; if (!r) return;
+    const accent = this.props.accent || '#5980a6';
+    r.style.setProperty('--color-accent', accent);
+    r.classList.toggle('igb-on', !!this.props.igniteMap);
+    const cb = r.querySelector('[data-igbtoggle]');
+    if (cb && !this._synced) { cb.checked = !!this.props.igniteMap; this._synced = true; }
+  }
+  renderVals() {
+    return {
+      rootRef: (el) => { this.root = el; if (el) this.applyProps(); },
+      onOver: (e) => this.trace(e, true),
+      onOut: (e) => this.trace(e, false),
+      onChange: (e) => {
+        const t = e.target;
+        if (t.dataset.igbtoggle) { this.root.classList.toggle('igb-on', t.checked); return; }
+        if (t.dataset.zoom2) {
+          const l2 = this.root.querySelector('[data-lanes2="a2"]');
+          if (l2) l2.style.transform = 'scale(' + t.dataset.zoom2 + ')';
+          return;
+        }
+        if (t.dataset.zoom) {
+          const lanes = this.root.querySelector('[data-lanes="a"]');
+          if (lanes) lanes.style.transform = 'scale(' + t.dataset.zoom + ')';
+        }
+      },
+      onClick: (e) => {
+        const card2 = e.target.closest('[data-art]');
+        if (card2 && card2.tagName !== 'TR') {
+          const c = card2.closest('[data-pin]');
+          if (c) {
+            c.querySelectorAll('[data-art]').forEach(n => { n.style.outline = ''; });
+            card2.style.outline = '2px solid ' + (this.props.accent || '#5980a6');
+            c._pinned = card2;
+            if (c.querySelector('[data-quotes]')) this.quote(c, card2); else this.draw(c, card2);
+            return;
+          }
+        }
+        const row = e.target.closest('tr[data-art]');
+        if (!row) return;
+        this.root.querySelectorAll('tr[data-art]').forEach(r => { r.style.background = ''; });
+        row.style.background = 'rgba(89,128,166,.22)';
+        const name = row.querySelector('td');
+        const label = this.root.querySelector('[data-selname="b"]');
+        if (label && name) label.textContent = name.textContent.split('  ')[0].slice(0, 34);
+        this.highlight('b', (row.dataset.cites || '').split(' '), true);
+      },
+      onDragStart: (e) => {
+        const card = e.target.closest('[data-drag]');
+        if (!card) return;
+        e.dataTransfer.setData('text/plain', card.dataset.drag);
+        e.dataTransfer.effectAllowed = 'copy';
+      },
+      onDragOver: (e) => {
+        const slot = e.target.closest('[data-slot]');
+        if (!slot) return;
+        e.preventDefault();
+        slot.style.borderColor = this.props.accent || '#5980a6';
+        slot.style.background = 'rgba(89,128,166,.10)';
+      },
+      onDrop: (e) => {
+        const slot = e.target.closest('[data-slot]');
+        if (!slot) return;
+        e.preventDefault();
+        slot.style.borderColor = 'rgba(29,31,32,.28)';
+        slot.style.background = '';
+        const name = e.dataTransfer.getData('text/plain');
+        if (!name) return;
+        const chip = document.createElement('div');
+        chip.style.cssText = 'margin-top:5px;font-size:11.5px;padding:3px 6px;border-left:2px solid ' + (this.props.accent || '#5980a6') + ';background:#e9e9ea';
+        chip.textContent = name + ' · 09:00';
+        slot.appendChild(chip);
+      }
+    };
+  }
+  segsIn(container) {
+    return Array.from(container.querySelectorAll('[data-seg]'));
+  }
+  clearScope(container) {
+    const svg = container.querySelector('[data-threads]');
+    if (svg) svg.innerHTML = '';
+    this.segsIn(container).forEach(n => n.classList.remove('seg-hi'));
+  }
+  draw(container, card) {
+    const svg = container.querySelector('[data-threads]');
+    if (!svg) return;
+    const ids = (card.dataset.cites || '').split(' ').filter(Boolean);
+    this.clearScope(container);
+    const base = svg.getBoundingClientRect();
+    const cr = card.getBoundingClientRect();
+    const x2 = cr.left - base.left, y2 = cr.top - base.top + cr.height / 2;
+    const accent = this.props.accent || '#5980a6';
+    svg.innerHTML = ids.map(id => {
+      const n = container.querySelector('[data-seg="' + id + '"]');
+      if (!n) return '';
+      n.classList.add('seg-hi');
+      const sr = n.getBoundingClientRect();
+      const x1 = sr.right - base.left, y1 = sr.top - base.top + sr.height / 2;
+      const mid = x1 + (x2 - x1) * 0.55;
+      return '<path d="M' + x1 + ' ' + y1 + ' C' + mid + ' ' + y1 + ' ' + mid + ' ' + y2 + ' ' + x2 + ' ' + y2 +
+        '" fill="none" stroke="' + accent + '" stroke-width="1.25"/><circle cx="' + x1 + '" cy="' + y1 + '" r="2.5" fill="' + accent + '"/>' +
+        '<text x="' + (x1 + 8) + '" y="' + (y1 - 5) + '" fill="' + accent + '" style="font:10px ui-monospace,Menlo,monospace">' + id + '</text>';
+    }).join('');
+  }
+  quote(container, card) {
+    const panel = container.querySelector('[data-quotes]');
+    if (!panel) return;
+    const ids = (card.dataset.cites || '').split(' ').filter(Boolean);
+    panel.innerHTML = '';
+    const title = card.dataset.name || 'artifact';
+    const head = container.querySelector('[data-quotehead]');
+    if (head) head.textContent = ids.length + ' quoted segment' + (ids.length === 1 ? '' : 's') + ' behind “' + title + '”';
+    ids.forEach(id => {
+      const src = container.querySelector('[data-seg="' + id + '"]');
+      if (src) panel.appendChild(src.cloneNode(true));
+    });
+  }
+  highlight(scope, ids, on) {
+    const sel = scope === 'b' ? '[data-scope="b"][data-seg]' : '[data-seg]';
+    this.root.querySelectorAll(sel).forEach(n => {
+      if (scope !== 'b' && n.closest('[data-scope="b"]')) return;
+      n.classList.remove('seg-hi');
+    });
+    if (!on) return;
+    ids.filter(Boolean).forEach(id => {
+      const n = scope === 'b'
+        ? this.root.querySelector('[data-scope="b"][data-seg="' + id + '"]')
+        : Array.from(this.root.querySelectorAll('[data-seg="' + id + '"]')).find(x => !x.closest('[data-scope="b"]'));
+      if (n) n.classList.add('seg-hi');
+    });
+  }
+  trace(e, on) {
+    const c0 = e.target && e.target.closest ? e.target.closest('[data-pin]') : null;
+    if (c0) {
+      const card0 = e.target.closest('[data-art]');
+      if (card0 && on) { if (c0.querySelector('[data-quotes]')) this.quote(c0, card0); else this.draw(c0, card0); }
+      else if (!on && !card0) { if (c0._pinned) { if (c0.querySelector('[data-quotes]')) this.quote(c0, c0._pinned); else this.draw(c0, c0._pinned); } else this.clearScope(c0); }
+      return;
+    }
+    const card = e.target && e.target.closest ? e.target.closest('[data-art]') : null;
+    const svg = this.root && this.root.querySelector('[data-threads="a"]');
+    if (!svg) return;
+    if (!card || card.tagName === 'TR' || !card.closest('[data-scope="a"]')) {
+      if (!on || !card) { svg.innerHTML = ''; this.highlight('a', [], false); }
+      return;
+    }
+    if (!on) { svg.innerHTML = ''; this.highlight('a', [], false); return; }
+    const ids = (card.dataset.cites || '').split(' ').filter(Boolean);
+    this.highlight('a', ids, true);
+    const base = svg.getBoundingClientRect();
+    const cr = card.getBoundingClientRect();
+    const x2 = cr.left - base.left, y2 = cr.top - base.top + cr.height / 2;
+    svg.innerHTML = ids.map(id => {
+      const n = Array.from(this.root.querySelectorAll('[data-seg="' + id + '"]')).find(x => !x.closest('[data-scope="b"]'));
+      if (!n) return '';
+      const sr = n.getBoundingClientRect();
+      const x1 = sr.right - base.left, y1 = sr.top - base.top + sr.height / 2;
+      const mid = x1 + (x2 - x1) * 0.55;
+      const accent = this.props.accent || '#5980a6';
+      return '<path d="M' + x1 + ' ' + y1 + ' C' + mid + ' ' + y1 + ' ' + mid + ' ' + y2 + ' ' + x2 + ' ' + y2 +
+        '" fill="none" stroke="' + accent + '" stroke-width="1.25"/><circle cx="' + x1 + '" cy="' + y1 + '" r="2.5" fill="' + accent + '"/>';
+    }).join('');
+  }
+}
+</script>
+</body>
+</html>
