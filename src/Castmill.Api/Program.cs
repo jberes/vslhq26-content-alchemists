@@ -5,6 +5,7 @@ using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
+using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
@@ -55,6 +56,12 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddSingleton<ISecretCipher>(secretCipher);
 builder.Services.AddScoped<IUserSecretsService, UserSecretsService>();
 builder.Services.AddSingleton<IBlobSasService, BlobSasService>();
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
+builder.Services.AddSingleton<IPromptLog, PromptLog>();
+builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
+builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
+builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
+builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.FromMinutes(5));
 
 builder.Services.AddDbContext<CastmillDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill")));
@@ -108,6 +115,7 @@ builder.Services.AddAuthorization(options =>
 // Fixed-window limits (ADR-009); values are config-tunable, never disabled.
 var authPerMinute = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10);
 var writesPerMinute = builder.Configuration.GetValue("RateLimits:WritesPerMinute", 60);
+var aiPerMinute = builder.Configuration.GetValue("RateLimits:AiPerMinute", 30);
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -130,6 +138,16 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = writesPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    // AI generation: the expensive partition — honest 429s beat surprise bills.
+    options.AddPolicy("ai", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = aiPerMinute,
                 Window = TimeSpan.FromMinutes(1),
             }));
 });
@@ -174,6 +192,7 @@ app.MapBrandEndpoints();
 app.MapSettingsEndpoints();
 app.MapSecretsEndpoints();
 app.MapBlobEndpoints();
+app.MapAiEndpoints();
 
 app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
     {

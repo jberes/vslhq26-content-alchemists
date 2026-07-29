@@ -164,14 +164,14 @@ flowchart LR
 - Endpoint-filter validation.
 - **Check-in gate:** full CRUD demonstrable via OpenAPI UI against dev; `Preview` payload for a 50-artifact campaign under 100 KB.
 
-### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)* — ⬜
+### Phase B5 — AI orchestration on Foundry *(size XL — the critical path)* — 🔶 mostly complete 2026-07-28 *(done: M.E.AI client layer + per-user credential resolution + model-alias table, /ai/status probe, transcript ingest w/ segment IDs, blog outline→draft→cross-model-audit, full fan-out ×13 kinds, deterministic validators incl. hard char caps, prompt-transparency ring buffer — all proven via fake-model integration tests. Remaining: B5.4 actual image rendering (gpt-image-2/mai-image-2.5pro → WebP → stub replacement) and the live-model gate, which needs Ai:Foundry credentials filled into appsettings.Development.json)*
 - `Microsoft.Extensions.AI` client layer; per-user Foundry credential resolution; model-alias remap table; `/ai/status` deployment probe.
 - Timed-transcript ingest (segment IDs); blog generator (outline → draft → cross-model audit) **with citations**; then the fan-out set (social ×6 with per-platform rules and hard char caps, email sequence, newsletter, landing page, show notes, clip suggestions, image prompts).
 - Deterministic validators (word bands, char caps, banned phrases) as a review gate; prompt-transparency ring buffer.
 - **Check-in gate:** seeded transcript → full campaign fan-out in dev, every artifact schema-valid with ≥1 citation (G4, G5); model swap demonstrated by config change only.
 - *Sub-checkpoints (each its own PR):* B5.1 client layer + probe · B5.2 transcript + blog · B5.3 social/email/landing/notes · B5.4 images · B5.5 validators + log.
 
-### Phase B6 — Media pipeline *(size L)* — ⬜
+### Phase B6 — Media pipeline *(size L)* — 🔶 transcription paths complete 2026-07-28 *(done: ≤25 MB Foundry transcription path and Azure AI Speech fast-transcription path w/ diarization, both blob-fed and persisting timed transcripts; resumable upload = block-blob PUT via existing SAS. Remaining: Container Apps ffmpeg clip-export job + enqueue/status endpoints — needs ACA infrastructure)*
 - Server transcription: ≤25 MB extract+transcribe path; Azure AI Speech fast-transcription path for long/diarized media.
 - Resumable block-blob upload contract for web clients.
 - Container Apps ffmpeg job: clip export (stream-copy + re-encode, 9:16 crop, burned captions) Blob-to-Blob; job enqueue/status endpoints.

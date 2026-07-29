@@ -253,15 +253,15 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 ### E6 — AI pipeline (XL)
 | # | Story | Size | Acceptance |
 |---|---|---|---|
-| 6.1 | Foundry client layer on `Microsoft.Extensions.AI`: chat, image, transcription; per-user credential resolution; model-alias remap table | M | one config swap retargets any generator's model |
-| 6.2 | Timed-transcript ingest: segment IDs, timestamps, speaker labels (when diarized) | M | transcript renders synced to media scrubber |
-| 6.3 | Blog generator: outline → draft → cross-model audit; citations; image-stub markers | L | 1,500–2,500-word draft with valid stubs + citations |
-| 6.4 | Social fan-out: 6 platforms, per-platform rules + hard caps, hashtags policy | M | validators reject over-limit posts before review |
-| 6.5 | Email sequence, newsletter, landing page, show notes generators | M | each returns citations + passes validators |
-| 6.6 | Clip suggester: in/out timestamps + platform fit + hook text | M | timestamps land within source duration; ranked list |
-| 6.7 | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container — *Azure image deployments already provisioned (2026-07-28): `gpt-image-2` and `mai-image-2.5pro`; wire them into the model-alias table in B5* |
+| 6.1 🔶 | Foundry client layer on `Microsoft.Extensions.AI`: chat, image, transcription; per-user credential resolution; model-alias remap table | M | one config swap retargets any generator's model — *chat + transcription done 2026-07-28 (alias table, per-user secrets → config fallback, /ai/status probe); image client pending with 6.7* |
+| 6.2 ✅ | Timed-transcript ingest: segment IDs, timestamps, speaker labels (when diarized) | M | transcript renders synced to media scrubber — *server side done 2026-07-28 (paste + both transcription paths); scrubber UI is a client story* |
+| 6.3 ✅ | Blog generator: outline → draft → cross-model audit; citations; image-stub markers | L | 1,500–2,500-word draft with valid stubs + citations — *done 2026-07-28; word-band + citation validators enforced; live-model run pending Foundry creds* |
+| 6.4 ✅ | Social fan-out: 6 platforms, per-platform rules + hard caps, hashtags policy | M | validators reject over-limit posts before review — *done 2026-07-28; caps from shared PlatformLimits table* |
+| 6.5 ✅ | Email sequence, newsletter, landing page, show notes generators | M | each returns citations + passes validators — *done 2026-07-28* |
+| 6.6 ✅ | Clip suggester: in/out timestamps + platform fit + hook text | M | timestamps land within source duration; ranked list — *done 2026-07-28; in/out range validator enforced* |
+| 6.7 🔶 | Image pipeline: prompt builder (brand-aware), gpt-image-2/MAI generation, WebP publish, stub replacement | L | published blog renders images from public container — *image-prompts generator done 2026-07-28 (blog-hero, youtube-thumbnail, inline slots); deployments `gpt-image-2` + `mai-image-2.5pro` already in the alias table; actual generation → WebP → stub replacement remaining* |
 | 6.8 | Brand-voice: exemplar ingestion → distilled style card; injected into every generator | M | A/B: generated copy matches style card on rubric |
-| 6.9 | Deterministic validators + review gate; prompt-transparency log dialog | S | "Mark reviewed" blocked until validators pass |
+| 6.9 🔶 | Deterministic validators + review gate; prompt-transparency log dialog | S | "Mark reviewed" blocked until validators pass — *server validators + /ai/log ring buffer done 2026-07-28; review-gate UI is a client story* |
 
 ### E7 — Media (L)
 | # | Story | Size | Acceptance |
@@ -269,7 +269,7 @@ Sizing: S ≈ ≤2 days · M ≈ ≤1 week · L ≈ 2–3 weeks · XL ≈ 4+ wee
 | 7.1 | Ingest UX: drop/upload media, paste transcript, paste URL (article fetch) | M | 2 GB video uploads resumably on web (block blob) |
 | 7.2 | Desktop media services: ffmpeg sidecar fetch script (pinned SHA-256), audio extraction, WebP | M | works offline; binaries verified at fetch |
 | 7.3 | Desktop local transcription: Whisper.net + model download manager with progress | M | 1-hour audio transcribes locally without cloud |
-| 7.4 | Cloud transcription endpoint: extraction server-side, ≤25 MB path + Speech fast-transcription path | M | web-only user can transcribe end-to-end |
+| 7.4 🔶 | Cloud transcription endpoint: extraction server-side, ≤25 MB path + Speech fast-transcription path | M | web-only user can transcribe end-to-end — *both API paths done 2026-07-28 (audio files; auto-routes >25 MB to Speech w/ diarization); server-side a/v extraction not included — video needs the Speech path or desktop extraction* |
 | 7.5 | Clip export — desktop: stream-copy + re-encode modes, 9:16 crop, burned ASS captions, faststart | L | frame-accurate re-encode; captions clear platform UI margins |
 | 7.6 | Clip export — web: Container Apps ffmpeg job against Blob source, result to Blob + download | M | same output as 7.5 from the browser |
 

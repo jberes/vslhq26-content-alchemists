@@ -26,6 +26,8 @@ public interface IBlobSasService
     /// <summary>Mints a single-blob, single-operation SAS URL (G2: least privilege, minutes-scale expiry).</summary>
     Task<Uri> MintAsync(string blobPath, BlobSasPermissions permission, int? minutes, CancellationToken ct);
     Task<bool> ProbeAsync(CancellationToken ct);
+    /// <summary>Server-side read for processing (e.g. transcription). Returns null if the blob doesn't exist.</summary>
+    Task<(Stream Stream, long Length)?> OpenReadAsync(string blobPath, CancellationToken ct);
 }
 
 public sealed class BlobSasService : IBlobSasService
@@ -85,6 +87,22 @@ public sealed class BlobSasService : IBlobSasService
             startsOn: DateTimeOffset.UtcNow.AddMinutes(-1), expiresOn, ct);
         var delegatedQuery = builder.ToSasQueryParameters(delegationKey.Value, _client.AccountName);
         return new UriBuilder(blobUri) { Query = delegatedQuery.ToString() }.Uri;
+    }
+
+    public async Task<(Stream Stream, long Length)?> OpenReadAsync(string blobPath, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        var blob = _client.GetBlobContainerClient(_options.PrivateContainer).GetBlobClient(blobPath);
+        if (!await blob.ExistsAsync(ct))
+        {
+            return null;
+        }
+        var properties = await blob.GetPropertiesAsync(cancellationToken: ct);
+        var stream = await blob.OpenReadAsync(cancellationToken: ct);
+        return (stream, properties.Value.ContentLength);
     }
 
     public async Task<bool> ProbeAsync(CancellationToken ct)
