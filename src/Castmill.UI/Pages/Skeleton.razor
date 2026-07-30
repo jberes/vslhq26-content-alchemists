@@ -1,0 +1,65 @@
+@* Phase F0's walking skeleton: proves both shells render the same RCL markup, that Blazor
+   event dispatch reaches an Ignite UI web component, and that the platform seam resolves per
+   shell. Phase F3 took over "/" with the Front Page, so this now lives at /dev/skeleton and
+   is kept as a diagnostic — it is the smallest page that exercises the whole client stack. *@
+@page "/dev/skeleton"
+@using System.Reflection
+@using System.Runtime.InteropServices
+@inject IShellInfo Shell
+
+<PageTitle>Castmill</PageTitle>
+
+<h1 class="cm-skeleton__title">The mill is standing.</h1>
+<p class="cm-skeleton__lede">
+    Phase F0 — shells and walking skeleton. One Razor Class Library, two shells, no UI outside it.
+</p>
+
+<IgbCard class="cm-skeleton__card">
+    <IgbCardHeader>
+        <h2 slot="title">Build provenance</h2>
+        <h3 slot="subtitle">Rendered from Castmill.UI</h3>
+    </IgbCardHeader>
+    <IgbCardContent>
+        <dl class="cm-facts">
+            <dt>Shell</dt>
+            <dd><IgbChip>@Shell.Name</IgbChip></dd>
+
+            <dt>Blazor host</dt>
+            <dd>@Shell.HostDescription</dd>
+
+            <dt>Runtime</dt>
+            <dd>@RuntimeInformation.FrameworkDescription</dd>
+
+            <dt>Ignite UI for Blazor</dt>
+            <dd>@IgniteUiVersion <IgbBadge>MIT</IgbBadge></dd>
+        </dl>
+    </IgbCardContent>
+    <IgbCardActions>
+        @* Proves the whole interop path: Blazor click handler on an Ignite UI custom element. *@
+        <IgbButton @onclick="Strike">Strike the plate</IgbButton>
+        <span class="cm-facts__count" aria-live="polite">@_strikes struck</span>
+    </IgbCardActions>
+</IgbCard>
+
+@code {
+    private int _strikes;
+
+    private void Strike() => _strikes++;
+
+    private static string IgniteUiVersion
+    {
+        get
+        {
+            var informational = typeof(IgbCard).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+            // Informational versions carry a "+<commit sha>" suffix — useful in a log,
+            // just noise on screen.
+            var version = informational is null ? null : informational.Split('+')[0];
+
+            return version
+                ?? typeof(IgbCard).Assembly.GetName().Version?.ToString()
+                ?? "unknown";
+        }
+    }
+}

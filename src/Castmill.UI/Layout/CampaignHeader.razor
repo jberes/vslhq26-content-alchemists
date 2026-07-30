@@ -1,0 +1,55 @@
+@* Persistent header on all four campaign views: breadcrumb, name, the n/6 image counter and
+   the view tabs as real <button>s (ADR-F11).
+
+   The counter comes from the same Preview payload as everything else, so it can never
+   disagree with the front page's "slots waiting" block or Focus Mode's slot list (G9). *@
+@using Castmill.UI.State
+@implements IDisposable
+@inject CampaignState Campaign
+@inject NavigationManager Navigation
+
+<header class="cm-campaign-header">
+    <div class="cm-campaign-header__identity">
+        <a class="cm-meta" href="campaigns">Campaigns /</a>
+        <h1 class="cm-campaign-header__name">@(Campaign.Campaign?.Name ?? "…")</h1>
+    </div>
+
+    <div class="cm-campaign-header__meta">
+        <span class="cm-mono cm-meta" title="Image slots filled">
+            @Campaign.ImagesFilled/@Campaign.ImagesTotal images
+        </span>
+
+        @* Real buttons, keyboard-reachable, with a visible focus ring — not links styled as
+           tabs and not divs with click handlers (G5). *@
+        <div class="cm-tabs" role="tablist" aria-label="Campaign views">
+            @foreach (var (view, segment, label) in CampaignViews.All)
+            {
+                <button type="button" role="tab"
+                        class="cm-tabs__tab"
+                        aria-selected="@(view == Current)"
+                        @onclick="() => Go(view)">
+                    @label
+                </button>
+            }
+        </div>
+    </div>
+</header>
+
+@code {
+    /// <summary>The view currently shown, supplied by the campaign layout.</summary>
+    [Parameter, EditorRequired] public CampaignView Current { get; set; }
+
+    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+
+    private void Go(CampaignView view)
+    {
+        if (Campaign.CampaignId is { } id)
+        {
+            Navigation.NavigateTo(CampaignViews.PathFor(id, view));
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Campaign.Changed -= OnChanged;
+}

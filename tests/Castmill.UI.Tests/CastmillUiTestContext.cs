@@ -1,0 +1,185 @@
+using System.Net;
+using System.Net.Http.Json;
+using Bunit;
+using Castmill.Core.Auth;
+using Castmill.UI;
+using Castmill.UI.Design;
+using Castmill.UI.Platform;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Castmill.UI.Tests;
+
+/// <summary>
+/// Shared bUnit setup: the real UI services, plus test doubles for the platform seams
+/// (<see cref="IShellInfo"/>, <see cref="IUiStateStore"/>, <see cref="IAuthTokenProvider"/>)
+/// and a stub HTTP handler, so no test touches JS interop, a real shell, or the network.
+/// </summary>
+public abstract class CastmillUiTestContext : BunitContext
+{
+    protected CastmillUiTestContext()
+    {
+        // Ignite UI components bootstrap themselves through JS. There is no browser here,
+        // so unplanned interop calls are expected rather than a test failure.
+        JSInterop.Mode = JSRuntimeMode.Loose;
+
+        Services.AddCastmillUi(new Uri("https://api.test/"));
+
+        // Replace the browser-backed store: ThemeService would otherwise import a JS module.
+        Services.AddSingleton<IUiStateStore>(UiState);
+        Services.AddSingleton<IShellInfo>(Shell);
+        Services.AddSingleton<IAuthTokenProvider>(Tokens);
+        Services.AddSingleton<IMediaPipeline>(new TestMediaPipeline());
+
+        // Replace the real HttpClient with one that answers from Http's route table, so
+        // AuthState can load /me without a network.
+        Services.AddScoped(_ => new HttpClient(Http) { BaseAddress = new Uri("https://api.test/") });
+    }
+
+    protected TestUiStateStore UiState { get; } = new();
+
+    protected TestShellInfo Shell { get; } = new();
+
+    protected TestAuthTokenProvider Tokens { get; } = new();
+
+    protected StubHttpHandler Http { get; } = new();
+
+    /// <summary>Signs the fake user in and stubs /me, which is what most tests want.</summary>
+    protected void SignInTestUser(string email = "demo@castmill.local")
+    {
+        Tokens.SignIn();
+        Http.OnGet("api/v1/me", new MeResponse(Guid.NewGuid(), Guid.NewGuid(), email, "Demo user"));
+    }
+}
+
+public sealed class TestAuthTokenProvider : IAuthTokenProvider
+{
+    public string? AccessToken { get; private set; }
+
+    public bool IsSignedIn => AccessToken is not null;
+
+    public bool RestoreSucceeds { get; set; }
+
+    public event Action? Changed;
+
+    public void SignIn()
+    {
+        AccessToken = "test-access-token";
+        RestoreSucceeds = true;
+    }
+
+    public Task<bool> TryRestoreAsync() => Task.FromResult(RestoreSucceeds && IsSignedIn);
+
+    public Task StoreAsync(string accessToken, DateTimeOffset accessExpiresAt, string refreshToken)
+    {
+        AccessToken = accessToken;
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> TryRefreshAsync() => Task.FromResult(IsSignedIn);
+
+    public Task ClearAsync()
+    {
+        AccessToken = null;
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Tiny route table so tests state the responses they care about and nothing else.</summary>
+public sealed class StubHttpHandler : HttpMessageHandler
+{
+    private readonly Dictionary<string, Func<HttpResponseMessage>> _routes = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<HttpRequestMessage> Requests { get; } = [];
+
+    public void OnGet<T>(string path, T body) =>
+        _routes[$"GET {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
+
+    public void OnPost<T>(string path, T body) =>
+        _routes[$"POST {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
+
+    public void OnStatus(HttpMethod method, string path, HttpStatusCode status) =>
+        _routes[$"{method} {path}"] = () => new HttpResponseMessage(status);
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        Requests.Add(request);
+
+        var key = $"{request.Method} {request.RequestUri?.AbsolutePath.TrimStart('/')}";
+
+        return Task.FromResult(_routes.TryGetValue(key, out var factory)
+            ? factory()
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
+    private static HttpResponseMessage JsonResponse<T>(HttpStatusCode status, T body) =>
+        new(status) { Content = JsonContent.Create(body) };
+}
+
+/// <summary>In-memory <see cref="IUiStateStore"/>; records the applied theme attributes so
+/// tests can assert what would have been written to the document root.</summary>
+public sealed class TestUiStateStore : IUiStateStore
+{
+    private readonly Dictionary<string, string> _values = [];
+
+    public bool PrefersDark { get; set; }
+
+    public string? AppliedFamily { get; private set; }
+
+    public string? AppliedMode { get; private set; }
+
+    public string? AppliedDensity { get; private set; }
+
+    public Task<string?> GetAsync(string key) =>
+        Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
+
+    public Task SetAsync(string key, string value)
+    {
+        _values[key] = value;
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> PrefersDarkAsync() => Task.FromResult(PrefersDark);
+
+    public Task ApplyThemeAsync(string family, string mode, string density)
+    {
+        AppliedFamily = family;
+        AppliedMode = mode;
+        AppliedDensity = density;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Media pipeline double: capability off, like the web shell.</summary>
+public sealed class TestMediaPipeline : IMediaPipeline
+{
+    public bool CanProcessLocally => false;
+
+    public string? UnavailableReason => "Not available in tests.";
+
+    public PickedMedia? LastPicked => null;
+
+    public Task<PickedMedia?> PickMediaAsync() => Task.FromResult<PickedMedia?>(null);
+
+    public Task<LocalTranscription> TranscribeAsync(
+        PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+
+    public Task<string> ExportClipAsync(
+        PickedMedia source, ClipExportOptions options,
+        IReadOnlyList<Castmill.Core.Ai.TranscriptSegment>? captionSegments,
+        IProgress<PipelineProgress> progress, CancellationToken ct = default) =>
+        throw new NotSupportedException();
+}
+
+public sealed class TestShellInfo : IShellInfo
+{
+    public string Name { get; set; } = "Test shell";
+
+    public string HostDescription { get; set; } = "Headless renderer";
+
+    public bool IsDevelopment { get; set; } = true;
+}

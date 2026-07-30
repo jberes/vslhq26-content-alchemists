@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+    <PropertyGroup>
+        <!-- Castmill Desktop is a desktop product: Windows + macOS only (Roadmap §2.1).
+             The Windows target can only be built on Windows, so it is added conditionally.
+             This project sets TargetFrameworks itself and is therefore excluded by name
+             from the repo-wide TargetFramework in Directory.Build.props. -->
+        <TargetFrameworks>net10.0-maccatalyst</TargetFrameworks>
+        <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Castmill.Desktop</RootNamespace>
+        <UseMaui>true</UseMaui>
+        <SingleProject>true</SingleProject>
+        <EnableDefaultCssItems>false</EnableDefaultCssItems>
+
+        <ApplicationTitle>Castmill</ApplicationTitle>
+        <ApplicationId>ai.castmill.desktop</ApplicationId>
+        <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+        <ApplicationVersion>1</ApplicationVersion>
+
+        <!-- Unpackaged on Windows until Phase F9 does MSIX packaging (E10.4). -->
+        <WindowsPackageType>None</WindowsPackageType>
+
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+        <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Ink background, matching the rect in appicon.svg. -->
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#1C1A17" />
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#1C1A17" BaseSize="128,128" />
+        <MauiImage Include="Resources\Images\*" />
+        <MauiFont Include="Resources\Fonts\*" />
+        <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.10" />
+        <!-- Whisper.net.Runtime ships its Mac Catalyst static libs through build/ targets,
+             which only import into DIRECT referencers — a transitive reference through
+             Castmill.Media never links them and the app fails with undefined _whisper_*
+             symbols. So the MAUI head references the runtime package itself. -->
+        <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Castmill.UI\Castmill.UI.csproj" />
+        <!-- The local media engine (ffmpeg + Whisper). Desktop-only by design: referencing
+             it from Castmill.Web would drag whisper natives into the WASM payload. -->
+        <ProjectReference Include="..\Castmill.Media\Castmill.Media.csproj" />
+    </ItemGroup>
+
+    <!-- On Mac Catalyst, Whisper's natives are STATIC libs linked into the executable by
+         the package's own NativeReference targets (which is why the MAUI head references
+         Whisper.net.Runtime directly). NuGet's generic runtime-asset copy must therefore
+         bundle NO RID-keyed natives at all here:
+           - linux/win .so/.dll break the Catalyst bundler (not Mach-O), and
+           - the runtimes/macos-*.dylib set crashed the app AT LAUNCH — dyld eagerly loads
+             them from MonoBundle and libggml-metal references a versioned install name
+             (libggml-base-whisper.0.dylib) that the package does not ship.
+         The macos dylibs stay where they belong: plain net10.0 hosts (Castmill.Media.Tests). -->
+    <Target Name="PruneForeignNativeAssets" AfterTargets="ResolvePackageAssets"
+            Condition="$(TargetFramework.Contains('-maccatalyst')) Or $(TargetFramework.Contains('-ios'))">
+        <ItemGroup>
+            <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                Condition="$([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.Identity)').Contains('/runtimes/'))" />
+            <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
+                Condition="$([System.String]::Copy('%(NativeCopyLocalItems.Identity)').Contains('/runtimes/'))" />
+        </ItemGroup>
+    </Target>
+
+</Project>

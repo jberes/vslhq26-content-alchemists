@@ -47,6 +47,13 @@ TestResults/
 coverage/
 *.trx
 
-# --- Node (editor-interop, added later) ---
+# --- Node (editor-interop) ---
 node_modules/
 dist/
+
+# --- Generated client assets ---
+# The editor bundle is esbuild output from src/editor-interop, rebuilt by `npm run build`
+# and by the RCL's BuildEditorInterop target. Never hand-edited, never committed.
+src/Castmill.UI/wwwroot/js/castmill-editor.js
+src/Castmill.UI/wwwroot/js/castmill-editor.js.map
+src/Castmill.UI/wwwroot/js/*.LEGAL.txt

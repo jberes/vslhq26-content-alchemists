@@ -1,0 +1,249 @@
+@* Front page (workspace scope): what needs a human today.
+   Four blocks from the handoff §1 — ready for review, on the wire, drafts aging, and image
+   slots waiting. The last one exists because empty image slots were otherwise invisible
+   until publish time (G9). *@
+@page "/"
+@using Castmill.Core
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject CampaignsClient Campaigns
+@inject NavigationManager Navigation
+
+<PageTitle>Front page — Castmill</PageTitle>
+
+<div class="cm-measure--dashboard">
+    <header class="cm-front__head">
+        <span class="cm-kicker">Front page</span>
+        <h1>What needs you today.</h1>
+    </header>
+
+    @if (!Workspace.IsLoaded)
+    {
+        <p class="cm-meta">Loading your workspace…</p>
+    }
+    else if (Workspace.LoadError is { } error)
+    {
+        <EmptyState Kicker="Workspace" Headline="Couldn't load your campaigns." Detail="@error" />
+    }
+    else if (Workspace.Campaigns.Count == 0)
+    {
+        <EmptyState Kicker="Workspace"
+                    Headline="Nothing has come off the press yet."
+                    Detail="A campaign starts from one source asset — a video, a podcast, a webinar or a transcript — and fans out into everything else.">
+            <Action>
+                <a class="cm-button" href="campaigns/new">Start a run</a>
+            </Action>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="cm-front">
+            <section class="cm-front__primary">
+                <h2 class="cm-front__block-title">Ready for review</h2>
+                @if (_review.Count == 0)
+                {
+                    <p class="cm-meta">Nothing is waiting on you. @(_loaded ? "" : "Still checking…")</p>
+                }
+                else
+                {
+                    <ul class="cm-cards">
+                        @foreach (var item in _review)
+                        {
+                            <li>
+                                <button type="button" class="cm-card cm-card--artifact"
+                                        @onclick="() => OpenFocus(item)">
+                                    <span class="cm-card__bar cm-card__bar--review" aria-hidden="true"></span>
+                                    <span class="cm-card__body">
+                                        <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Artifact.Kind)</span>
+                                        <span class="cm-card__title">@item.Artifact.Title</span>
+                                        <span class="cm-meta">
+                                            Updated @ArtifactDisplay.Ago(item.Artifact.UpdatedAt, Now)
+                                        </span>
+                                    </span>
+                                    <span class="@ArtifactDisplay.StatusModifier(item.Artifact.Status)">
+                                        @ArtifactDisplay.StatusLabel(item.Artifact.Status)
+                                    </span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <aside class="cm-front__secondary">
+                <section>
+                    <h2 class="cm-front__block-title">On the wire this week</h2>
+                    @* The Wire's own data source arrives with F8; until then this block says
+                       so rather than inventing rows. *@
+                    <p class="cm-meta">Scheduling arrives with the Wire (Phase F8).</p>
+                </section>
+
+                <section>
+                    <h2 class="cm-front__block-title">Drafts aging</h2>
+                    @if (_aging.Count == 0)
+                    {
+                        <p class="cm-meta">No draft has been sitting long enough to worry about.</p>
+                    }
+                    else
+                    {
+                        <ul class="cm-rows">
+                            @foreach (var item in _aging)
+                            {
+                                <li class="cm-row">
+                                    <span class="cm-row__label">@item.Artifact.Title</span>
+                                    <span class="cm-meta">@ArtifactDisplay.Ago(item.Artifact.UpdatedAt, Now)</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
+
+                <section>
+                    <h2 class="cm-front__block-title">Image slots waiting</h2>
+                    @if (_emptySlots == 0)
+                    {
+                        <p class="cm-meta">Every reserved slot is filled.</p>
+                    }
+                    else
+                    {
+                        <p class="cm-front__slots">
+                            <span class="cm-mono cm-front__slot-count">@_emptySlots</span>
+                            <span class="cm-meta">
+                                empty across @_campaignsWithSlots
+                                @(_campaignsWithSlots == 1 ? "campaign" : "campaigns")
+                            </span>
+                        </p>
+                        <ul class="cm-chips">
+                            @foreach (var model in _slotModels)
+                            {
+                                <li><span class="cm-chip cm-mono">@model</span></li>
+                            }
+                        </ul>
+                        @if (_firstSlotCampaign is { } target)
+                        {
+                            <a class="cm-meta" href="@CampaignViews.PathFor(target, CampaignView.ImageStudio)">
+                                Open image studio &rarr;
+                            </a>
+                        }
+                    }
+                </section>
+            </aside>
+        </div>
+    }
+</div>
+
+@code {
+    private sealed record ReviewItem(string CampaignName, Guid CampaignId, ArtifactPreviewResponse Artifact);
+
+    private readonly List<ReviewItem> _review = [];
+    private readonly List<ReviewItem> _aging = [];
+    private readonly HashSet<string> _slotModels = new(StringComparer.OrdinalIgnoreCase);
+
+    private int _emptySlots;
+    private int _campaignsWithSlots;
+    private Guid? _firstSlotCampaign;
+    private bool _loaded;
+
+    private static DateTimeOffset Now => DateTimeOffset.Now;
+
+    protected override void OnInitialized() => Workspace.Changed += OnChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Workspace.LoadAsync();
+        await LoadDashboardAsync();
+    }
+
+    /// <summary>
+    /// The front page is cross-campaign, so it reads one Preview per campaign rather than a
+    /// dedicated endpoint. Requests go out together instead of in series — with a dozen
+    /// campaigns the difference is the whole G4 budget (&lt; 1 s).
+    ///
+    /// If this ever needs to scale past a handful of campaigns it wants a real server-side
+    /// dashboard projection; that is a backend story, and this is where it would land.
+    /// </summary>
+    private async Task LoadDashboardAsync()
+    {
+        var previews = await Task.WhenAll(Workspace.Campaigns.Select(async campaign =>
+        {
+            try
+            {
+                return (Campaign: campaign, Preview: (CampaignPreview?)await Campaigns.GetPreviewAsync(campaign.Id));
+            }
+            catch (ApiException)
+            {
+                return (Campaign: campaign, Preview: null);
+            }
+            catch (HttpRequestException)
+            {
+                return (Campaign: campaign, Preview: null);
+            }
+        }));
+
+        _review.Clear();
+        _aging.Clear();
+        _slotModels.Clear();
+        _emptySlots = 0;
+        _campaignsWithSlots = 0;
+        _firstSlotCampaign = null;
+
+        var aging = DateTimeOffset.Now - TimeSpan.FromDays(7);
+
+        foreach (var (campaign, preview) in previews)
+        {
+            if (preview is null)
+            {
+                continue;
+            }
+
+            foreach (var artifact in preview.Artifacts)
+            {
+                if (artifact.Status == ArtifactStatus.InReview)
+                {
+                    _review.Add(new ReviewItem(campaign.Name, campaign.Id, artifact));
+                }
+                else if (artifact.Status == ArtifactStatus.Draft && artifact.UpdatedAt < aging)
+                {
+                    _aging.Add(new ReviewItem(campaign.Name, campaign.Id, artifact));
+                }
+            }
+
+            var empty = preview.ImageSlots
+                .Where(s => !string.Equals(s.State, "Filled", StringComparison.Ordinal))
+                .ToList();
+
+            if (empty.Count > 0)
+            {
+                _emptySlots += empty.Count;
+                _campaignsWithSlots++;
+                _firstSlotCampaign ??= campaign.Id;
+
+                foreach (var model in empty.Select(s => s.ModelAlias).Where(m => !string.IsNullOrWhiteSpace(m)))
+                {
+                    _slotModels.Add(model!);
+                }
+            }
+        }
+
+        _review.Sort((a, b) => b.Artifact.UpdatedAt.CompareTo(a.Artifact.UpdatedAt));
+        _aging.Sort((a, b) => a.Artifact.UpdatedAt.CompareTo(b.Artifact.UpdatedAt));
+        _loaded = true;
+
+        StateHasChanged();
+    }
+
+    private void OpenFocus(ReviewItem item)
+    {
+        Workspace.SetActive(item.CampaignId);
+        Navigation.NavigateTo(
+            $"{CampaignViews.PathFor(item.CampaignId, CampaignView.Focus)}?artifact={item.Artifact.Id}");
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Workspace.Changed -= OnChanged;
+}

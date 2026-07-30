@@ -1,0 +1,26 @@
+/* Boot and error chrome only — the desktop counterpart of the web shell's host.css.
+ * Anything visible after startup belongs in Castmill.UI. */
+
+.cm-boot {
+    padding: 2rem clamp(1rem, 4vw, 3rem);
+    font: 0.9375rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--cm-f0-muted, #6b645a);
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 1000;
+    padding: 0.75rem 1.25rem;
+    background: #ffe6b5;
+    color: #1c1a17;
+    box-shadow: 0 -1px 3px rgb(0 0 0 / 0.2);
+    font: 0.875rem/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    inset: 0.5rem 0.75rem auto auto;
+}

@@ -1,0 +1,227 @@
+@* Living style guide (roadmap E3.3) — the surface the F1 check-in gate is reviewed on.
+   Shows every semantic token, the type scale, motion, status encoding and the shared
+   components, with family x mode x density switchers so all four combinations are one
+   click apart.
+
+   Dev-only: the route is registered but the page refuses to render unless the host says
+   it is a development build, so it cannot become a production surface by accident. *@
+@page "/dev/style-guide"
+@using Castmill.UI.Design
+@using Castmill.UI.Platform
+@inject IShellInfo Shell
+@inject INotifier Notifier
+@inject IConfirmService Confirm
+
+<PageTitle>Style guide — Castmill</PageTitle>
+
+@if (!Shell.IsDevelopment)
+{
+    <EmptyState Kicker="Style guide"
+                Headline="The style guide is a development-only surface."
+                Detail="It is not published, so there is nothing to see in this build." />
+}
+else
+{
+    <div class="cm-guide cm-measure--dashboard">
+
+        <header class="cm-guide__head">
+            <span class="cm-kicker">Design system</span>
+            <h1>Two families, four modes, one token layer.</h1>
+            <p class="cm-guide__lede">
+                Every value below comes from the semantic layer. Switch family or mode and
+                nothing on this page changes except the values behind the tokens —
+                that is the whole claim of ADR-F09.
+            </p>
+            <ThemeSwitcher />
+        </header>
+
+        <section class="cm-guide__section">
+            <h2>Surfaces &amp; content</h2>
+            <div class="cm-swatches">
+                @foreach (var (token, label) in SurfaceTokens)
+                {
+                    <figure class="cm-swatch">
+                        <div class="cm-swatch__chip" style="background: var(@token)"></div>
+                        <figcaption>
+                            <span class="cm-mono cm-meta">@token</span>
+                            <span class="cm-meta">@label</span>
+                        </figcaption>
+                    </figure>
+                }
+            </div>
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Type scale</h2>
+            <p class="cm-meta">
+                Shared rhythm, family faces. Display is
+                <span class="cm-mono">--cm-font-display</span>, body is
+                <span class="cm-mono">--cm-font-body</span>, and every counter, timecode and
+                segment ID is <span class="cm-mono">--cm-font-mono</span>.
+            </p>
+            <div class="cm-type-specimens">
+                <p style="font: var(--cm-font-display-weight) var(--cm-text-h1)/var(--cm-leading-tight) var(--cm-font-display)">Turn one asset into a campaign</p>
+                <p style="font: var(--cm-font-display-weight) var(--cm-text-h2)/var(--cm-leading-tight) var(--cm-font-display)">The Mill Floor</p>
+                <p style="font: var(--cm-font-display-weight) var(--cm-text-h3)/var(--cm-leading-tight) var(--cm-font-display)">Ready for review</p>
+                <p style="font: var(--cm-font-display-weight) var(--cm-text-h4)/var(--cm-leading-tight) var(--cm-font-display)">Image slots waiting</p>
+                <p>Body copy sets the manuscript column at roughly 72 characters, because whitespace is a feature and a measure that wide reads like a page rather than a dashboard.</p>
+                <p class="cm-mono cm-meta">00:41 · HOST — s02 · 04:18 — 280/280</p>
+                <p><span class="cm-kicker">Kicker · uppercase monospace</span></p>
+            </div>
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Artifact status</h2>
+            <p class="cm-meta">
+                Four states, encoded twice — bar and colour, never colour alone (ADR-F12).
+            </p>
+            <div class="cm-guide__row">
+                <span class="cm-status">Draft</span>
+                <span class="cm-status cm-status--review">In review</span>
+                <span class="cm-status cm-status--queued">Queued</span>
+                <span class="cm-status cm-status--published">Published</span>
+            </div>
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Controls</h2>
+            <div class="cm-guide__row">
+                <button type="button" class="cm-button">Start a run</button>
+                <button type="button" class="cm-button cm-button--quiet">Cancel</button>
+                <button type="button" class="cm-button cm-button--danger">Delete campaign</button>
+                <button type="button" class="cm-button" disabled>Unavailable</button>
+            </div>
+            <div class="cm-guide__row">
+                <IgbCard>
+                    <IgbCardHeader>
+                        <h3 slot="title">An Ignite UI card</h3>
+                        <h4 slot="subtitle">themed from the same tokens</h4>
+                    </IgbCardHeader>
+                    <IgbCardContent>
+                        <p class="cm-meta">
+                            E3.2's gate: this should be indistinguishable from the custom chrome
+                            beside it, in both families.
+                        </p>
+                    </IgbCardContent>
+                    <IgbCardActions>
+                        <IgbButton>Ignite button</IgbButton>
+                        <IgbChip>Chip</IgbChip>
+                        <IgbBadge>7</IgbBadge>
+                    </IgbCardActions>
+                </IgbCard>
+            </div>
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Feedback</h2>
+            <div class="cm-guide__row">
+                @foreach (var sample in ToastSamples)
+                {
+                    <button type="button" class="cm-button cm-button--quiet"
+                            @onclick="() => Raise(sample.Severity, sample.Message)">
+                        @sample.Label
+                    </button>
+                }
+                <button type="button" class="cm-button cm-button--quiet" @onclick="AskAsync">Confirm dialog</button>
+            </div>
+            @if (_confirmResult is not null)
+            {
+                <p class="cm-meta">Last confirm returned <span class="cm-mono">@_confirmResult</span>.</p>
+            }
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Empty state</h2>
+            <EmptyState Kicker="Image slots"
+                        Headline="Six slots are waiting on a prompt."
+                        Detail="Slots are reserved when the run starts, so an empty one is a decision you have not made yet — not a failure.">
+                <Action>
+                    <button type="button" class="cm-button">Open image studio</button>
+                </Action>
+            </EmptyState>
+        </section>
+
+        <section class="cm-guide__section">
+            <h2>Spacing &amp; motion</h2>
+            <div class="cm-guide__scale">
+                @foreach (var step in new[] { 1, 2, 3, 4, 6, 8, 12 })
+                {
+                    <div class="cm-guide__scale-item">
+                        <div class="cm-guide__scale-bar" style="inline-size: var(--cm-space-@step)"></div>
+                        <span class="cm-mono cm-meta">--cm-space-@step</span>
+                    </div>
+                }
+            </div>
+            <p class="cm-meta">
+                Density rides the unit: one number moves every gap in the app. Motion is
+                <span class="cm-mono">200ms</span> ease-out everywhere, and collapses to
+                <span class="cm-mono">1ms</span> under <span class="cm-mono">prefers-reduced-motion</span>.
+            </p>
+        </section>
+
+        <footer class="cm-guide__section">
+            <p class="cm-meta">Rendered in @Shell.Name · @Shell.HostDescription</p>
+        </footer>
+    </div>
+}
+
+@code {
+    private string? _confirmResult;
+
+    private static readonly (string Token, string Label)[] SurfaceTokens =
+    [
+        ("--cm-surface", "page"),
+        ("--cm-surface-raised", "cards, docks"),
+        ("--cm-surface-sunken", "wells, board"),
+        ("--cm-surface-inverse", "toasts"),
+        ("--cm-on-surface", "primary text"),
+        ("--cm-on-surface-muted", "metadata"),
+        ("--cm-on-surface-subtle", "least emphasis"),
+        ("--cm-accent", "identity, decoration"),
+        ("--cm-accent-strong", "behind text"),
+        ("--cm-accent-wash", "active, hover"),
+        ("--cm-rule", "hairlines"),
+        ("--cm-rule-strong", "borders"),
+        ("--cm-success", "success"),
+        ("--cm-warning", "warning"),
+        ("--cm-danger", "danger"),
+    ];
+
+    private static readonly (string Label, NotificationSeverity Severity, string Message)[] ToastSamples =
+    [
+        ("Info toast", NotificationSeverity.Info, "Transcript attached · 214 segments"),
+        ("Success toast", NotificationSeverity.Success, "Scheduled Thu 30 09:00 via broker"),
+        ("Warning toast", NotificationSeverity.Warning, "LinkedIn variant is 40 characters over"),
+        ("Error toast (stays)", NotificationSeverity.Error, "The broker rejected the schedule"),
+    ];
+
+    private void Raise(NotificationSeverity severity, string message)
+    {
+        switch (severity)
+        {
+            case NotificationSeverity.Success:
+                Notifier.ShowSuccess(message);
+                break;
+            case NotificationSeverity.Warning:
+                Notifier.ShowWarning(message);
+                break;
+            case NotificationSeverity.Error:
+                Notifier.ShowError(message);
+                break;
+            default:
+                Notifier.ShowInfo(message);
+                break;
+        }
+    }
+
+    private async Task AskAsync()
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            "Delete this campaign?",
+            "Its artifacts, image slots and schedule entries go with it. This cannot be undone.",
+            AcceptLabel: "Delete",
+            Destructive: true));
+
+        _confirmResult = accepted ? "accepted" : "cancelled";
+    }
+}

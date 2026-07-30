@@ -79,6 +79,8 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
             }
             return Task.FromResult(new Uri($"https://public.example/{path}"));
         }
+
+        public Task<byte[]?> ReadAsync(string path, CancellationToken ct) => Task.FromResult<byte[]?>(null);
     }
 
     private static async Task<HttpClient> AuthedClientAsync(WebApplicationFactory<Program> app)

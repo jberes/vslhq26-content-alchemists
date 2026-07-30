@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "Castmill.sln",
+    "projects": [
+      "src\\Castmill.Api\\Castmill.Api.csproj",
+      "src\\Castmill.Core\\Castmill.Core.csproj",
+      "src\\Castmill.UI\\Castmill.UI.csproj",
+      "src\\Castmill.Media\\Castmill.Media.csproj",
+      "src\\Castmill.Web\\Castmill.Web.csproj",
+      "tests\\Castmill.Api.Tests\\Castmill.Api.Tests.csproj",
+      "tests\\Castmill.UI.Tests\\Castmill.UI.Tests.csproj",
+      "tests\\Castmill.Media.Tests\\Castmill.Media.Tests.csproj"
+    ]
+  }
+}

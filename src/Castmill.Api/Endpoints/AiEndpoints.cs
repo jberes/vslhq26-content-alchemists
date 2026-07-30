@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
@@ -34,7 +35,66 @@ public static class AiEndpoints
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
         group.MapPost("/campaigns/{campaignId:guid}/generate/{kind}", GenerateOneAsync)
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
+        // B9.8: Press Run progress. A plain read, so it is not on the "ai" partition —
+        // polling progress must never consume the generation budget.
+        group.MapGet("/runs/{runId:guid}", RunAsync);
+        group.MapGet("/campaigns/{campaignId:guid}/runs/latest", LatestRunAsync);
         return routes;
+    }
+
+    /// <summary>Per-artifact completions for the Press Run reveal (B9.8).</summary>
+    /// <summary>
+    /// The campaign's most recent run. Exists because the generate POST is a buffered
+    /// response: its run id only reaches the client when generation has already finished,
+    /// which is exactly too late for the Press Run to poll. The client starts the POST,
+    /// navigates, and discovers the in-flight run here.
+    /// </summary>
+    private static async Task<IResult> LatestRunAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
+    {
+        var run = await db.GenerationRuns
+            .Where(r => r.CampaignId == campaignId)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync(ct);
+        return run is null ? Results.NotFound() : ProjectRun(run);
+    }
+
+    /// <summary>Client segments are trusted for times/speakers but never for ids: ids are
+    /// reassigned to the canonical s01… form every other surface expects.</summary>
+    private static TranscriptContent NormalizeSegments(IReadOnlyList<TranscriptSegment> segments, string? source)
+    {
+        var normalized = segments
+            .Where(s => !string.IsNullOrWhiteSpace(s.Text))
+            .OrderBy(s => s.StartSeconds)
+            .Select((s, i) => new TranscriptSegment(
+                $"s{i + 1:00}",
+                Math.Max(0, s.StartSeconds),
+                Math.Max(s.StartSeconds, s.EndSeconds),
+                string.IsNullOrWhiteSpace(s.Speaker) ? null : s.Speaker,
+                s.Text.Trim()))
+            .ToList();
+        return new TranscriptContent(source ?? "local-transcription", normalized);
+    }
+
+    private static async Task<IResult> RunAsync(Guid runId, CastmillDbContext db, CancellationToken ct)
+    {
+        var run = await db.GenerationRuns.SingleOrDefaultAsync(r => r.Id == runId, ct);
+        return run is null ? Results.NotFound() : ProjectRun(run);
+    }
+
+    private static IResult ProjectRun(GenerationRun run)
+    {
+        using var items = JsonDocument.Parse(run.ItemsJson);
+        return Results.Ok(new
+        {
+            run.Id,
+            run.CampaignId,
+            run.Status,
+            run.TotalKinds,
+            completed = items.RootElement.GetArrayLength(),
+            items = items.RootElement.Clone(),
+            run.StartedAt,
+            run.UpdatedAt,
+        });
     }
 
     // ---- Status & transparency ----------------------------------------------
@@ -43,6 +103,7 @@ public static class AiEndpoints
         bool? probe,
         ClaimsPrincipal principal,
         IFoundryClientFactory clients,
+        IImageProviderRegistry imageProviders,
         IOptions<AiOptions> options,
         CancellationToken ct)
     {
@@ -68,12 +129,17 @@ public static class AiEndpoints
             }
         }
 
+        // Per-provider readiness (B9.5): the client disables a model with a reason
+        // instead of letting the user watch a generate fail.
+        var providers = await imageProviders.StatusAsync(userId, ct);
+
         return Results.Ok(new AiStatusResponse(
             credentials?.Source ?? "none",
             credentials is not null,
             models,
             options.Value.Speech.IsConfigured,
-            probeResult));
+            probeResult,
+            [.. providers.Select(p => new ImageProviderReadiness(p.Name, p.Ready, p.Reason))]));
     }
 
     private static IResult Log(ClaimsPrincipal principal, IPromptLog promptLog) =>
@@ -93,7 +159,11 @@ public static class AiEndpoints
         {
             return Results.NotFound();
         }
-        var transcript = TranscriptService.FromPlainText(request.Text, request.Source);
+        // Client-supplied timed segments (desktop local transcription) win over
+        // sentence-splitting: they carry the real timestamps.
+        var transcript = request.Segments is { Count: > 0 }
+            ? NormalizeSegments(request.Segments, request.Source)
+            : TranscriptService.FromPlainText(request.Text, request.Source);
         if (transcript.Segments.Count == 0)
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -177,14 +247,20 @@ public static class AiEndpoints
             return Results.NotFound();
         }
 
+        // Open the run row first: the client can start polling /ai/runs/{id} the
+        // moment it has the id, while this request is still generating (B9.8).
+        var runId = await orchestrator.StartRunAsync(campaignId, request.Kinds, ct);
+        response.Headers.Append("Castmill-Run-Id", runId.ToString());
+
         var results = await orchestrator.RunFanOutAsync(
-            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds, ct);
+            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds, ct, runId);
 
         // Per-phase costs for the Press Run UI (G7).
         response.Headers.Append("Server-Timing",
             string.Join(", ", results.Select(r => $"{r.Kind};dur={r.DurationMs}")));
         return Results.Ok(new
         {
+            runId,
             succeeded = results.Count(r => r.Success),
             failed = results.Count(r => !r.Success),
             results,

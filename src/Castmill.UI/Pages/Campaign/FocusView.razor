@@ -1,0 +1,561 @@
+@* Focus mode. Phase F5 builds the full Producer rail — steering, two-pass narrated log,
+   image slots, the version filmstrip and the validator line. Phase F4's job is the editor
+   itself: the manuscript column, the outline rail and blur-commit saving against the
+   artifact's ETag. *@
+@page "/campaigns/{CampaignId:guid}/focus"
+@using Castmill.Core
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Editor
+@using Castmill.UI.Platform
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@implements IDisposable
+@inject CampaignState Campaign
+@inject CampaignsClient Campaigns
+@inject GenerationClient Generation
+@inject INotifier Notifier
+@inject NavigationManager Navigation
+
+<PageTitle>@(_artifact?.Title ?? Campaign.Campaign?.Name ?? "Campaign") — Focus</PageTitle>
+
+<CampaignShell CampaignId="CampaignId" View="CampaignView.Focus">
+    <div class="cm-focus cm-region">
+        <aside class="cm-focus__outline cm-region">
+            <h2 class="cm-kicker">Artifacts</h2>
+            @if (Campaign.Artifacts.Count == 0)
+            {
+                <p class="cm-meta cm-focus__pad">Nothing to edit yet.</p>
+            }
+            else
+            {
+                <ul class="cm-focus__list">
+                    @foreach (var item in Editable)
+                    {
+                        <li>
+                            <button type="button"
+                                    class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
+                                    @onclick="() => SelectAsync(item.Id)">
+                                <span class="cm-focus__list-title">@item.Title</span>
+                                <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (_headings.Count > 0)
+            {
+                <h2 class="cm-kicker">Outline</h2>
+                <ul class="cm-focus__outline-list">
+                    @foreach (var heading in _headings)
+                    {
+                        <li style="padding-inline-start: @((heading.Level - 1) * 10)px">
+                            <button type="button" class="cm-focus__outline-item"
+                                    @onclick="() => GoToAsync(heading)">
+                                @heading.Text
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+        </aside>
+
+        <div class="cm-focus__manuscript cm-region">
+            @if (_loadError is { } error)
+            {
+                <EmptyState Kicker="Focus" Headline="That artifact couldn't be opened." Detail="@error" />
+            }
+            else if (_artifact is null)
+            {
+                <EmptyState Kicker="Focus"
+                            Headline="Pick something to work on."
+                            Detail="Focus mode edits one artifact at a time. Its markdown is the only thing persisted — no HTML, no editor-native format." />
+            }
+            else
+            {
+                <header class="cm-focus__head">
+                    <span class="cm-kicker">@ArtifactDisplay.KindLabel(_artifact.Kind)</span>
+                    <h1>@_artifact.Title</h1>
+                    <div class="cm-focus__status">
+                        <span class="@ArtifactDisplay.StatusModifier(_artifact.Status)">
+                            @ArtifactDisplay.StatusLabel(_artifact.Status)
+                        </span>
+                        <span class="cm-meta">@_saveState</span>
+                    </div>
+                </header>
+
+                @if (_artifact.Kind == "clips")
+                {
+                    <ClipReview ContentJson="@_artifact.ContentJson" />
+                }
+                else
+                {
+                <RichEditor @key="EditorKey"
+                            Markdown="@DisplayedMarkdown"
+                            Editable="@(_previewRevision is null)"
+                            Placeholder="Write, or press / for a block."
+                            OnCommit="CommitAsync"
+                            OnChanged="MarkDirty"
+                            OnHeadings="OnHeadings"
+                            @ref="_editor" />
+                }
+
+                <footer class="cm-focus__foot">
+                    @* The review gate: advancing status is a distinct action from saving
+                       (E6.9). The full validator line arrives with F5. *@
+                    @if (_artifact.Status == ArtifactStatus.Draft)
+                    {
+                        <button type="button" class="cm-button" @onclick="() => SetStatusAsync(ArtifactStatus.InReview)">
+                            Send to review
+                        </button>
+                    }
+                    else if (_artifact.Status == ArtifactStatus.InReview)
+                    {
+                        <button type="button" class="cm-button" @onclick="() => SetStatusAsync(ArtifactStatus.Queued)">
+                            Mark reviewed
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="() => SetStatusAsync(ArtifactStatus.Draft)">
+                            Back to draft
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="cm-meta">
+                            @ArtifactDisplay.StatusLabel(_artifact.Status). Scheduling lives on the Wire (F8).
+                        </span>
+                    }
+                </footer>
+            }
+        </div>
+
+        <aside class="cm-focus__producer cm-region">
+            <h2 class="cm-kicker">Producer</h2>
+
+            @if (_artifact is not null)
+            {
+                <div class="cm-producer__group">
+                    <label class="cm-field">
+                        <span class="cm-field__label">Steering</span>
+                        <textarea class="cm-input cm-textarea" rows="3" @bind="_steering"
+                                  placeholder="Tighter intro. Lead with the rollback story."></textarea>
+                    </label>
+                    <div class="cm-form__actions">
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@_regenerating"
+                                @onclick="RegenerateAsync">
+                            @(_regenerating ? "Regenerating…" : "Regenerate whole")
+                        </button>
+                    </div>
+                    @if (_producerLog.Count > 0)
+                    {
+                        <ul class="cm-log">
+                            @foreach (var line in _producerLog)
+                            {
+                                <li class="cm-mono cm-meta">@line</li>
+                            }
+                        </ul>
+                    }
+                    <p class="cm-meta">
+                        Regenerate currently prints a <em>new take</em> as its own artifact
+                        (backend 🔶 5.7) — the filmstrip below only rings manual saves and restores.
+                    </p>
+                </div>
+
+                <div class="cm-producer__group">
+                    <span class="cm-kicker">Image slots in this campaign</span>
+                    <ul class="cm-plan__slots">
+                        @foreach (var slot in Campaign.ImageSlots)
+                        {
+                            <li class="cm-plan__slot">
+                                <span class="cm-plan__slot-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+                                <span class="cm-badge @(slot.State == "Filled" ? "cm-badge--done" : "cm-badge--empty")">
+                                    @(slot.State == "Filled" ? "DONE" : "EMPTY")
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+
+                <div class="cm-producer__group">
+                    <span class="cm-kicker">Versions</span>
+                    @if (_revisions.Count == 0)
+                    {
+                        <p class="cm-meta">No earlier takes yet. The ring keeps the last 10.</p>
+                    }
+                    else
+                    {
+                        <ul class="cm-filmstrip">
+                            @foreach (var revision in _revisions)
+                            {
+                                <li>
+                                    <button type="button"
+                                            class="cm-filmstrip__frame @(_previewRevision?.Id == revision.Id ? "cm-filmstrip__frame--active" : "")"
+                                            @onclick="() => PreviewRevisionAsync(revision.Id)">
+                                        <span class="cm-mono">v@(revision.Version)</span>
+                                        <span class="cm-meta">@revision.Reason</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+
+                    @if (_previewRevision is { } preview)
+                    {
+                        <div class="cm-filmstrip__actions">
+                            <span class="cm-meta">Viewing v@(preview.Version) (@preview.Reason) — read-only.</span>
+                            <button type="button" class="cm-button" @onclick="RestoreRevisionAsync">Restore this take</button>
+                            <button type="button" class="cm-button cm-button--quiet" @onclick="ClosePreview">Back to current</button>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="cm-meta">Open an artifact to steer it.</p>
+            }
+        </aside>
+    </div>
+</CampaignShell>
+
+@code {
+    /// <summary>Kinds Focus mode can edit — the markdown ones. A transcript is source, not copy.</summary>
+    private static readonly string[] EditableKinds =
+        ["blog", "landing-page", "newsletter", "email-sequence", "show-notes", "seo-brief", "clips"];
+
+    private readonly List<EditorHeading> _headings = [];
+
+    private readonly List<string> _producerLog = [];
+    private readonly List<ArtifactRevisionResponse> _revisions = [];
+
+    private RichEditor? _editor;
+    private ArtifactRevisionDetailResponse? _previewRevision;
+    private string _steering = string.Empty;
+    private bool _regenerating;
+    private ArtifactResponse? _artifact;
+    private Guid? _artifactId;
+    private string? _etag;
+    private string _markdown = string.Empty;
+    private string _saveState = "Saved on blur";
+    private string? _loadError;
+    private bool _selecting;
+
+    [Parameter] public Guid CampaignId { get; set; }
+
+    /// <summary>Deep link from the front page's review queue.</summary>
+    [SupplyParameterFromQuery(Name = "artifact")]
+    private Guid? RequestedArtifact { get; set; }
+
+    private IEnumerable<ArtifactPreviewResponse> Editable =>
+        Campaign.Artifacts.Where(a => EditableKinds.Contains(a.Kind, StringComparer.Ordinal));
+
+    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+
+    protected override Task OnParametersSetAsync() => SyncSelectionAsync();
+
+    /// <summary>
+    /// Chooses which artifact to edit. Called from OnParametersSetAsync AND from the store's
+    /// Changed handler, because the campaign is still loading when the route parameters are
+    /// first set — OnParametersSetAsync does not run again when that load finishes, so
+    /// selecting only there left the editor permanently unmounted.
+    /// </summary>
+    private async Task SyncSelectionAsync()
+    {
+        if (Campaign.CampaignId != CampaignId || Campaign.IsLoading || _selecting)
+        {
+            return;
+        }
+
+        var target = RequestedArtifact ?? _artifactId ?? Editable.FirstOrDefault()?.Id;
+
+        if (target is { } id && id != _artifactId)
+        {
+            _selecting = true;
+            try
+            {
+                await LoadArtifactAsync(id);
+            }
+            finally
+            {
+                _selecting = false;
+            }
+        }
+        else if (target is null && _artifact is not null)
+        {
+            _artifact = null;
+            _artifactId = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectAsync(Guid id)
+    {
+        // Keep the URL honest so a reload or a Back lands on the same artifact (ADR-F07).
+        Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={id}");
+        await LoadArtifactAsync(id);
+    }
+
+    private async Task LoadArtifactAsync(Guid id)
+    {
+        _loadError = null;
+
+        try
+        {
+            var (artifact, etag) = await Campaigns.GetArtifactAsync(CampaignId, id);
+            _artifact = artifact;
+            _artifactId = id;
+            _etag = etag;
+            _markdown = ArtifactContent.ToMarkdown(artifact.ContentJson);
+            _headings.Clear();
+            _saveState = "Saved on blur";
+            _previewRevision = null;
+            await LoadRevisionsAsync(id);
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Couldn't reach the Castmill API.";
+        }
+
+        StateHasChanged();
+    }
+
+    private void MarkDirty()
+    {
+        _saveState = "Unsaved — commits on blur";
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Blur-commit. A 412 means someone else changed the artifact; the user is told rather
+    /// than having their edit silently dropped or silently overwriting the other version.
+    /// </summary>
+    private async Task CommitAsync(string markdown)
+    {
+        if (_artifact is null || _artifactId is not { } id)
+        {
+            return;
+        }
+
+        if (string.Equals(markdown, _markdown, StringComparison.Ordinal))
+        {
+            _saveState = "Saved on blur";
+            return;
+        }
+
+        _saveState = "Saving…";
+        StateHasChanged();
+
+        try
+        {
+            var saved = await Campaigns.SaveArtifactAsync(
+                CampaignId, id, _artifact.Title, ArtifactContent.FromMarkdown(_artifact.ContentJson, markdown), _etag);
+
+            _artifact = saved;
+            _markdown = markdown;
+            _etag = $"\"{saved.Version}\"";
+            _saveState = $"Saved · v{saved.Version}";
+
+            // A manual save snapshots the prior take server-side (ADR-017), so the
+            // filmstrip must refresh or the new frame is invisible until re-select.
+            await LoadRevisionsAsync(id);
+        }
+        catch (ConflictApiException)
+        {
+            _saveState = "Conflict — reload to see the newer version";
+            Notifier.ShowError(
+                "Someone else changed this artifact while you were editing. Reload to see their version — your text is still on screen.");
+        }
+        catch (ApiException ex)
+        {
+            _saveState = "Not saved";
+            Notifier.ShowError(ex.Message);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task SetStatusAsync(string status)
+    {
+        if (_artifactId is not { } id)
+        {
+            return;
+        }
+
+        try
+        {
+            _artifact = await Campaigns.SetArtifactStatusAsync(CampaignId, id, status, _etag);
+            _etag = $"\"{_artifact.Version}\"";
+            Notifier.ShowSuccess($"Moved to {ArtifactDisplay.StatusLabel(status).ToLowerInvariant()}.");
+
+            // The front page and the header counter read the campaign preview, so refresh it.
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ConflictApiException)
+        {
+            Notifier.ShowError("This artifact changed since you loaded it. Reload before changing its status.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private void OnHeadings(IReadOnlyList<EditorHeading> headings)
+    {
+        _headings.Clear();
+        _headings.AddRange(headings);
+        StateHasChanged();
+    }
+
+    private async Task GoToAsync(EditorHeading heading)
+    {
+        if (_editor is not null)
+        {
+            await _editor.GoToAsync(heading.Pos);
+        }
+    }
+
+    /// <summary>What the editor shows: the live document, or a revision being previewed.</summary>
+    private string DisplayedMarkdown =>
+        _previewRevision is { } preview ? ArtifactContent.ToMarkdown(preview.ContentJson) : _markdown;
+
+    /// <summary>Remounts the editor when switching artifact OR entering/leaving preview.</summary>
+    private string EditorKey => $"{_artifactId}:{_previewRevision?.Id.ToString() ?? "live"}";
+
+    private async Task LoadRevisionsAsync(Guid artifactId)
+    {
+        try
+        {
+            var list = await Campaigns.ListRevisionsAsync(CampaignId, artifactId);
+            _revisions.Clear();
+            _revisions.AddRange(list);
+        }
+        catch (ApiException)
+        {
+            // The filmstrip is an enhancement; the editor must not fail over it.
+            _revisions.Clear();
+        }
+    }
+
+    private async Task PreviewRevisionAsync(Guid revisionId)
+    {
+        if (_artifactId is not { } id)
+        {
+            return;
+        }
+
+        try
+        {
+            _previewRevision = await Campaigns.GetRevisionAsync(CampaignId, id, revisionId);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private void ClosePreview() => _previewRevision = null;
+
+    /// <summary>
+    /// Restore is an ordinary ETag-guarded write (ADR-017): the current take is snapshotted
+    /// first server-side, so restoring is never destructive.
+    /// </summary>
+    private async Task RestoreRevisionAsync()
+    {
+        if (_artifactId is not { } id || _previewRevision is not { } preview)
+        {
+            return;
+        }
+
+        try
+        {
+            var restored = await Campaigns.RestoreRevisionAsync(CampaignId, id, preview.Id, _etag);
+            _artifact = restored;
+            _markdown = ArtifactContent.ToMarkdown(restored.ContentJson);
+            _etag = $"\"{restored.Version}\"";
+            _previewRevision = null;
+            _saveState = $"Restored v{preview.Version} · now v{restored.Version}";
+            Notifier.ShowSuccess($"Restored take v{preview.Version}.");
+            await LoadRevisionsAsync(id);
+        }
+        catch (ConflictApiException)
+        {
+            Notifier.ShowError("The artifact changed since you loaded it. Reload before restoring.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Regenerate whole, with the steering text as the brief. The narrated two-pass log is
+    /// honest about what request/response generation can know: one line when the press
+    /// starts, one when the result lands, with the real duration and audit warnings.
+    /// </summary>
+    private async Task RegenerateAsync()
+    {
+        if (_artifact is null || Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            Notifier.ShowError("This campaign has no transcript to regenerate from.");
+            return;
+        }
+
+        _regenerating = true;
+        _producerLog.Clear();
+        _producerLog.Add($"queued {_artifact.Kind} · drafting, then cross-model audit…");
+        StateHasChanged();
+
+        try
+        {
+            var result = await Generation.GenerateOneAsync(
+                CampaignId, _artifact.Kind, transcriptId,
+                string.IsNullOrWhiteSpace(_steering) ? null : _steering);
+
+            if (result.Success)
+            {
+                _producerLog.Add($"printed {result.Kind} · {result.DurationMs} ms"
+                    + (result.ValidationWarnings is { Count: > 0 } w
+                        ? $" · audit: {string.Join("; ", w)}"
+                        : " · audit clean"));
+
+                // 🔶 5.7: the new take is a NEW artifact row. Reload and jump to it.
+                await Campaign.LoadAsync(CampaignId, force: true);
+                var newest = Campaign.Artifacts
+                    .Where(a => a.Kind == _artifact.Kind)
+                    .OrderByDescending(a => a.CreatedAt)
+                    .FirstOrDefault();
+                if (newest is not null && newest.Id != _artifactId)
+                {
+                    await SelectAsync(newest.Id);
+                }
+            }
+            else
+            {
+                _producerLog.Add($"failed {result.Kind} · {result.Error}");
+                Notifier.ShowError(result.Error ?? "Generation failed.");
+            }
+        }
+        catch (ApiException ex)
+        {
+            _producerLog.Add($"failed · {ex.Message}");
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _regenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(async () =>
+    {
+        StateHasChanged();
+        await SyncSelectionAsync();
+    });
+
+    public void Dispose() => Campaign.Changed -= OnChanged;
+}

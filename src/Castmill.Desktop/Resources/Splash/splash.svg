@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Launch splash: the same millstone mark as the app icon.
+     Background colour comes from MauiSplashScreen Color in Castmill.Desktop.csproj. -->
+<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="228" cy="228" r="120" fill="#C0552E" />
+    <circle cx="228" cy="228" r="120" fill="none" stroke="#F7F3EC" stroke-width="8" />
+
+    <g fill="#F7F3EC">
+        <g transform="rotate(0 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(45 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(90 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(135 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(180 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(225 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(270 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+        <g transform="rotate(315 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
+    </g>
+
+    <rect x="200" y="200" width="56" height="56" fill="#F7F3EC" />
+    <rect x="216" y="216" width="24" height="24" fill="#1C1A17" />
+</svg>

@@ -1,0 +1,55 @@
+@* The app's single confirm dialog. Mounted once by ShellLayout. *@
+@using Castmill.UI.Design
+@implements IDisposable
+@inject ConfirmService Confirm
+
+@if (Confirm.Active is { } request)
+{
+    <div class="cm-modal" role="presentation" @onclick="Cancel">
+        <div class="cm-modal__panel" role="alertdialog" aria-modal="true"
+             aria-labelledby="cm-confirm-title" @onclick:stopPropagation="true">
+            <h2 id="cm-confirm-title" class="cm-modal__title">@request.Title</h2>
+            <p class="cm-modal__message">@request.Message</p>
+            <div class="cm-modal__actions">
+                <button type="button" class="cm-button cm-button--quiet" @onclick="Cancel">
+                    @request.CancelLabel
+                </button>
+                <button type="button" @ref="_acceptButton"
+                        class="@(request.Destructive ? "cm-button cm-button--danger" : "cm-button")"
+                        @onclick="Accept">
+                    @request.AcceptLabel
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference? _acceptButton;
+    private bool _needsFocus;
+
+    protected override void OnInitialized() => Confirm.Requested += OnRequested;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Focus the primary action when the dialog appears, so it is operable from the
+        // keyboard the moment it opens (G5).
+        if (_needsFocus && _acceptButton is { } button)
+        {
+            _needsFocus = false;
+            await button.FocusAsync();
+        }
+    }
+
+    private void Accept() => Confirm.Complete(true);
+
+    private void Cancel() => Confirm.Complete(false);
+
+    private void OnRequested()
+    {
+        _needsFocus = Confirm.Active is not null;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Confirm.Requested -= OnRequested;
+}

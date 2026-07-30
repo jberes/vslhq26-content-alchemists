@@ -1,0 +1,437 @@
+@* New campaign — three steps, and the only path that creates one (handoff §3).
+     1. pick a source            drop zone + paste URL / paste transcript / pick from assets
+     2. transcription progress   determinate bar + narrated log (ADR-F13: never a spinner)
+     3. the brief                2x2 fields + fan-out checklist, then Press Run
+
+   Desktop (F7): pick an MP3/MP4 → ffmpeg extracts → Whisper transcribes on-device → the
+   TIMED segments go to the server. Web: capability flagged off with a stated reason (G3);
+   pasted transcripts work everywhere.
+*@
+@page "/campaigns/new"
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.Platform
+@using Castmill.UI.State
+@inject CampaignsClient Campaigns
+@inject GenerationClient Generation
+@inject WorkspaceState Workspace
+@inject PressRunService PressRun
+@inject IMediaPipeline Media
+@inject INotifier Notifier
+@inject NavigationManager Navigation
+
+<PageTitle>Start a run — Castmill</PageTitle>
+
+<div class="cm-measure--dashboard cm-run">
+    <header class="cm-front__head">
+        <span class="cm-kicker">Step @((int)_step + 1) of 3</span>
+        <h1>@StepTitle</h1>
+    </header>
+
+    <ol class="cm-steps" aria-label="Progress">
+        @foreach (var step in Enum.GetValues<Step>())
+        {
+            <li class="cm-steps__step @(step <= _step ? "cm-steps__step--done" : "")"
+                aria-current="@(step == _step ? "step" : "false")">
+                <span class="cm-mono">@((int)step + 1)</span>
+                <span>@Title(step)</span>
+            </li>
+        }
+    </ol>
+
+    @if (_step == Step.Source)
+    {
+        <section class="cm-run__panel">
+            @if (Media.CanProcessLocally)
+            {
+                <div class="cm-dropzone">
+                    <p class="cm-dropzone__headline">Bring a video or audio file</p>
+                    <p class="cm-meta">
+                        MP3, MP4, MOV, M4A, WAV — extracted and transcribed on this machine.
+                        Nothing leaves it except the finished transcript.
+                    </p>
+                    <button type="button" class="cm-button" @onclick="PickMediaAsync">
+                        Pick a file…
+                    </button>
+                    @if (_picked is { } picked)
+                    {
+                        <p class="cm-mono cm-meta">@picked.FileName · @(picked.SizeBytes / 1_048_576) MB</p>
+                    }
+                </div>
+            }
+            else
+            {
+                @* Capability off with a stated reason — never a dead control (G3). *@
+                <div class="cm-dropzone cm-dropzone--disabled" aria-disabled="true">
+                    <p class="cm-dropzone__headline">Bring a video or audio file</p>
+                    <p class="cm-meta">@Media.UnavailableReason</p>
+                </div>
+            }
+
+            <div class="cm-run__sources">
+                <label class="cm-field">
+                    <span class="cm-field__label">Campaign name</span>
+                    <input class="cm-input" @bind="_name" @bind:event="oninput"
+                           placeholder="Q3 product webinar" />
+                </label>
+
+                <label class="cm-field">
+                    <span class="cm-field__label">Paste a transcript</span>
+                    <textarea class="cm-input cm-textarea" rows="8" @bind="_transcript" @bind:event="oninput"
+                              placeholder="Paste the transcript text. Segments and timings are derived server-side."></textarea>
+                    <span class="cm-field__hint cm-meta">@_transcript.Length characters</span>
+                </label>
+            </div>
+
+            @if (_error is not null)
+            {
+                <p class="cm-form__error" role="alert">@_error</p>
+            }
+
+            <div class="cm-form__actions">
+                @if (_picked is not null)
+                {
+                    <button type="button" class="cm-button" disabled="@(_name.Trim().Length == 0)"
+                            @onclick="StartLocalIngestAsync">
+                        Transcribe on this machine
+                    </button>
+                }
+                <button type="button" class="cm-button @(_picked is null ? "" : "cm-button--quiet")"
+                        disabled="@(!CanStart)" @onclick="StartIngestAsync">
+                    Transcribe pasted text
+                </button>
+                <a class="cm-meta" href="campaigns">Cancel</a>
+            </div>
+        </section>
+    }
+    else if (_step == Step.Transcribing)
+    {
+        <section class="cm-run__panel">
+            @* Determinate progress + a narrated log line. The steps are real: each one is a
+               call that has either completed or not. *@
+            <div class="cm-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                 aria-valuenow="@_percent">
+                <div class="cm-progress__fill" style="inline-size: @_percent%"></div>
+            </div>
+
+            <ul class="cm-log">
+                @foreach (var line in _log)
+                {
+                    <li class="cm-mono cm-meta">@line</li>
+                }
+            </ul>
+
+            @if (_error is not null)
+            {
+                <p class="cm-form__error" role="alert">@_error</p>
+                <div class="cm-form__actions">
+                    <button type="button" class="cm-button cm-button--quiet" @onclick="() => _step = Step.Source">
+                        Back
+                    </button>
+                </div>
+            }
+        </section>
+    }
+    else
+    {
+        <section class="cm-run__panel">
+            <div class="cm-brief">
+                <label class="cm-field">
+                    <span class="cm-field__label">Title</span>
+                    <input class="cm-input" @bind="_name" />
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Audience</span>
+                    <input class="cm-input" @bind="_audience" placeholder="Platform engineers evaluating tooling" />
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Brand voice</span>
+                    <input class="cm-input" @bind="_voice" placeholder="Direct, specific, no hype" />
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Angle</span>
+                    <input class="cm-input" @bind="_angle" placeholder="What changed and why it matters" />
+                </label>
+            </div>
+
+            <h2 class="cm-front__block-title">Fan-out</h2>
+            <ul class="cm-fanout">
+                @foreach (var item in _fanOut)
+                {
+                    <li>
+                        <label class="cm-fanout__item">
+                            <input type="checkbox" checked="@item.Selected"
+                                   @onchange="e => item.Selected = (bool)(e.Value ?? false)" />
+                            <span>@item.Label</span>
+                        </label>
+                    </li>
+                }
+            </ul>
+
+            @if (_error is not null)
+            {
+                <p class="cm-form__error" role="alert">@_error</p>
+            }
+
+            <div class="cm-form__actions">
+                <button type="button" class="cm-button" disabled="@_busy" @onclick="PressRunAsync">
+                    @(_busy ? "Starting the run…" : "Press Run")
+                </button>
+                <span class="cm-meta">@_fanOut.Count(f => f.Selected) of @_fanOut.Count selected</span>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private enum Step
+    {
+        Source,
+        Transcribing,
+        Brief,
+    }
+
+    private sealed class FanOutItem(string kind, string label, bool selected = true)
+    {
+        public string Kind { get; } = kind;
+
+        public string Label { get; } = label;
+
+        public bool Selected { get; set; } = selected;
+    }
+
+    private readonly List<string> _log = [];
+
+    private readonly List<FanOutItem> _fanOut =
+    [
+        new("blog", "Blog post"),
+        new("social", "Social set (6 platforms)"),
+        new("email-sequence", "Email sequence"),
+        new("newsletter", "Newsletter"),
+        new("landing-page", "Landing page"),
+        new("show-notes", "Show notes"),
+        new("clips", "Clip suggestions"),
+        new("seo-brief", "SEO brief"),
+        new("image-plan", "Image plan (6 slots)"),
+    ];
+
+    private Step _step = Step.Source;
+    private string _name = string.Empty;
+    private string _transcript = string.Empty;
+    private string _audience = string.Empty;
+    private string _voice = string.Empty;
+    private string _angle = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private int _percent;
+    private Guid? _campaignId;
+    private Guid? _transcriptArtifactId;
+    private PickedMedia? _picked;
+
+    private bool CanStart => _name.Trim().Length > 0 && _transcript.Trim().Length > 40;
+
+    private string StepTitle => StepTitleFor(_step);
+
+    private static string StepTitleFor(Step step) => step switch
+    {
+        Step.Source => "Pick a source.",
+        Step.Transcribing => "Reading the source.",
+        _ => "The brief.",
+    };
+
+    private static string Title(Step step) => step switch
+    {
+        Step.Source => "Source",
+        Step.Transcribing => "Transcript",
+        _ => "Brief",
+    };
+
+    private async Task StartIngestAsync()
+    {
+        _error = null;
+        _step = Step.Transcribing;
+        _log.Clear();
+        _percent = 0;
+
+        try
+        {
+            await NarrateAsync("creating campaign…", 10);
+            var campaign = await Campaigns.CreateAsync(_name.Trim(), brief: null);
+            _campaignId = campaign.Id;
+            Workspace.Add(campaign);
+
+            await NarrateAsync($"ingesting transcript · {_transcript.Length:N0} characters…", 45);
+            var ingest = await Generation.IngestTranscriptAsync(campaign.Id, _transcript);
+            _transcriptArtifactId = ingest.TranscriptArtifactId;
+
+            await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
+
+            _step = Step.Brief;
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API.";
+        }
+    }
+
+    private async Task PickMediaAsync()
+    {
+        _error = null;
+        var picked = await Media.PickMediaAsync();
+        if (picked is not null)
+        {
+            _picked = picked;
+            if (_name.Trim().Length == 0)
+            {
+                _name = System.IO.Path.GetFileNameWithoutExtension(picked.FileName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The desktop ingest path (E7.3): extract audio with ffmpeg, transcribe with Whisper
+    /// on-device — narrated with the engine's real stage + percent — then send the TIMED
+    /// segments to the server, so provenance keeps genuine timestamps.
+    /// </summary>
+    private async Task StartLocalIngestAsync()
+    {
+        if (_picked is not { } picked)
+        {
+            return;
+        }
+
+        _error = null;
+        _step = Step.Transcribing;
+        _log.Clear();
+        _percent = 0;
+        StateHasChanged();
+
+        var progress = new Progress<PipelineProgress>(p =>
+        {
+            _percent = (int)Math.Clamp(p.Percent ?? 0, 0, 100);
+            var line = $"{p.Stage}…{(p.Detail is null ? "" : $" {p.Detail}")}";
+            if (_log.Count == 0 || !_log[^1].StartsWith(p.Stage, StringComparison.Ordinal))
+            {
+                _log.Add(line);
+            }
+            else
+            {
+                _log[^1] = line;
+            }
+
+            StateHasChanged();
+        });
+
+        try
+        {
+            var transcription = await Media.TranscribeAsync(picked, progress);
+
+            if (transcription.Segments.Count == 0)
+            {
+                _error = "Whisper heard nothing usable in that file.";
+                return;
+            }
+
+            await NarrateAsync("creating campaign…", 96);
+            var campaign = await Campaigns.CreateAsync(_name.Trim(), brief: null);
+            _campaignId = campaign.Id;
+            Workspace.Add(campaign);
+
+            await NarrateAsync($"ingesting {transcription.Segments.Count} timed segments…", 98);
+            var ingest = await Generation.IngestTranscriptAsync(
+                campaign.Id, transcription.JoinedText, picked.FileName, transcription.Segments);
+            _transcriptArtifactId = ingest.TranscriptArtifactId;
+
+            await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
+            _step = Step.Brief;
+        }
+        catch (NotSupportedException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The engine's own errors (ffmpeg missing, unreadable file) are user-facing.
+            _error = ex.Message;
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Appends a log line and advances the bar. The percentages mark real completed calls,
+    /// not a timer — ADR-F13's rule is that progress must mean something.
+    /// </summary>
+    private async Task NarrateAsync(string line, int percent)
+    {
+        _log.Add(line);
+        _percent = percent;
+        StateHasChanged();
+
+        // Yield so the line actually paints before the next call blocks.
+        await Task.Yield();
+    }
+
+    private async Task PressRunAsync()
+    {
+        if (_campaignId is not { } campaignId)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            // The brief is stored on the campaign; the fan-out selection drives generation.
+            var brief = string.Join('\n',
+                $"Audience: {_audience}",
+                $"Brand voice: {_voice}",
+                $"Angle: {_angle}");
+
+            await Campaigns.UpdateAsync(campaignId, _name.Trim(), brief);
+
+            if (_transcriptArtifactId is not { } transcriptId)
+            {
+                _error = "This campaign has no transcript to generate from.";
+                return;
+            }
+
+            // Hand the run to the press-run service and go straight to the Mill Floor:
+            // the reveal happens there, card by card, as completions land (ADR-F13).
+            PressRun.Start(
+                campaignId, transcriptId, brief,
+                _fanOut.Where(f => f.Selected).Select(f => f.Kind).ToArray());
+
+            Navigation.NavigateTo(CampaignViews.PathFor(campaignId, CampaignView.MillFloor));
+        }
+        catch (ApiException ex)
+        {
+            // A failed run must not lose the campaign the user just created.
+            _error = $"{ex.Message} The campaign was created — you can start the run from its Mill Floor.";
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

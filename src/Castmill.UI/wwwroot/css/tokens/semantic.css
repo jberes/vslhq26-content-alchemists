@@ -1,0 +1,120 @@
+/* THE SEMANTIC TOKEN LAYER — the contract (ADR-F09, roadmap E3.1).
+ *
+ * Feature CSS may use ONLY the --cm-* tokens below. It may never reference a --cmf-*
+ * family variable and never a literal colour, font, radius, duration or shadow. That rule
+ * is what makes adding a third family a new file in tokens/ with zero feature-CSS edits,
+ * and it is checked by DesignTokenTests in tests/Castmill.UI.Tests.
+ *
+ * Everything here resolves to a family variable or a shared scale. If you need a value
+ * that does not exist yet, add a semantic token — do not reach through to the family.
+ */
+
+:root {
+    /* ---- Surfaces ------------------------------------------------------------- */
+    --cm-surface: var(--cmf-surface);
+    --cm-surface-raised: var(--cmf-surface-raised);
+    --cm-surface-sunken: var(--cmf-surface-sunken);
+    --cm-surface-inverse: var(--cmf-surface-inverse);
+
+    /* ---- Content ------------------------------------------------------------- */
+    --cm-on-surface: var(--cmf-on-surface);
+    --cm-on-surface-muted: var(--cmf-on-surface-muted);
+    --cm-on-surface-subtle: var(--cmf-on-surface-subtle);
+    --cm-on-inverse: var(--cmf-on-inverse);
+
+    /* ---- Accent -------------------------------------------------------------- */
+    /* --cm-accent is for identity and decoration (rules, glyphs, thin bars).
+       --cm-accent-strong is the only accent allowed BEHIND text: it is the one the
+       contrast test pairs with --cm-on-accent. Filled buttons and active tabs use it. */
+    --cm-accent: var(--cmf-accent);
+    --cm-accent-strong: var(--cmf-accent-strong);
+    --cm-accent-hover: var(--cmf-accent-hover);
+    --cm-accent-wash: var(--cmf-accent-wash);
+    --cm-on-accent: var(--cmf-on-accent);
+
+    /* ---- Rules --------------------------------------------------------------- */
+    --cm-rule: var(--cmf-rule);
+    --cm-rule-strong: var(--cmf-rule-strong);
+
+    /* ---- Feedback ------------------------------------------------------------ */
+    --cm-success: var(--cmf-success);
+    --cm-warning: var(--cmf-warning);
+    --cm-danger: var(--cmf-danger);
+
+    /* ---- Artifact status (ADR-F12) ------------------------------------------- */
+    /* Four states, both families, always encoded twice: this colour AND the 3 px bar.
+       Never colour alone. */
+    --cm-status-draft: var(--cmf-status-draft);
+    --cm-status-review: var(--cmf-status-review);
+    --cm-status-queued: var(--cmf-status-queued);
+    --cm-status-published: var(--cmf-status-published);
+    --cm-status-bar-width: 3px;
+
+    /* ---- Shape --------------------------------------------------------------- */
+    --cm-radius-sm: var(--cmf-radius-sm);
+    --cm-radius-md: var(--cmf-radius-md);
+    --cm-radius-lg: var(--cmf-radius-lg);
+
+    --cm-shadow-sm: var(--cmf-shadow-sm);
+    --cm-shadow-md: var(--cmf-shadow-md);
+    --cm-shadow-lg: var(--cmf-shadow-lg);
+
+    /* ---- Texture (family treatment) ------------------------------------------ */
+    --cm-texture: var(--cmf-texture);
+    --cm-texture-opacity: var(--cmf-texture-opacity);
+
+    /* ---- Type ---------------------------------------------------------------- */
+    --cm-font-display: var(--cmf-font-display);
+    --cm-font-body: var(--cmf-font-body);
+    --cm-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --cm-font-display-weight: var(--cmf-font-display-weight);
+
+    /* Scale is shared across families — the faces differ, the rhythm does not.
+       From the handoff: h1 42 · h2 32 · h3 25 · h4 20 · body 15/1.55 · meta 11.5 · kicker 10.
+       Expressed in rem so 200 % browser zoom behaves like a narrow breakpoint (G8). */
+    --cm-text-h1: clamp(2rem, 1.6rem + 1.4vw, 2.625rem);
+    --cm-text-h2: 2rem;
+    --cm-text-h3: 1.5625rem;
+    --cm-text-h4: 1.25rem;
+    --cm-text-body: 0.9375rem;
+    --cm-text-meta: 0.71875rem;
+    --cm-text-kicker: 0.625rem;
+
+    --cm-leading-tight: 1.15;
+    --cm-leading-body: 1.55;
+    --cm-leading-loose: 1.62;
+    --cm-tracking-kicker: 0.13em;
+    --cm-tracking-wordmark: 0.18em;
+
+    /* ---- Space --------------------------------------------------------------- */
+    /* The handoff's 3.4px unit. Density rides the unit, so every gap in the app
+       scales from one number (roadmap E3.6). */
+    --cm-space-unit: 3.4px;
+    --cm-space-1: calc(var(--cm-space-unit) * 1);
+    --cm-space-2: calc(var(--cm-space-unit) * 2);
+    --cm-space-3: calc(var(--cm-space-unit) * 3);
+    --cm-space-4: calc(var(--cm-space-unit) * 4);
+    --cm-space-6: calc(var(--cm-space-unit) * 6);
+    --cm-space-8: calc(var(--cm-space-unit) * 8);
+    --cm-space-12: calc(var(--cm-space-unit) * 12);
+
+    /* ---- Motion -------------------------------------------------------------- */
+    /* 200 ms ease-out everywhere; no bounce, no parallax (§1.2). */
+    --cm-motion-duration: 200ms;
+    --cm-motion-ease: cubic-bezier(0.2, 0, 0.2, 1);
+    --cm-motion: var(--cm-motion-duration) var(--cm-motion-ease);
+}
+
+/* Compact density: one number, whole app (E3.6). */
+:root[data-cm-density="compact"] {
+    --cm-space-unit: 2.8px;
+    --cm-leading-body: 1.45;
+}
+
+/* The motion spec honours prefers-reduced-motion by collapsing the duration, so no
+   feature has to branch on the media query itself (ADR-F13's fallback path). */
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --cm-motion-duration: 1ms;
+    }
+}

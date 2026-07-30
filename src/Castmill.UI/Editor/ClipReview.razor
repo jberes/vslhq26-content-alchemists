@@ -1,0 +1,176 @@
+@* Clip review + export (F7 / roadmap 7.5). Renders a clips artifact's suggestions with
+   in/out points, hook and platform fit; on desktop each clip exports through the local
+   ffmpeg engine (stream-copy or frame-accurate re-encode, optional 9:16 crop and burned
+   captions from the transcript). On web the action is flagged off with the reason (G3) —
+   the cloud path needs the uploaded source plus the ACA ffmpeg worker. *@
+@using System.Text.Json
+@using Castmill.Core.Ai
+@using Castmill.UI.Design
+@using Castmill.UI.Platform
+@using Castmill.UI.State
+@inject IMediaPipeline Media
+@inject CampaignState Campaign
+@inject INotifier Notifier
+
+<div class="cm-clips">
+    @if (_clips.Count == 0)
+    {
+        <EmptyState Kicker="Clips" Headline="No clip suggestions in this artifact." />
+    }
+    else
+    {
+        <div class="cm-clips__source">
+            @if (Media.CanProcessLocally)
+            {
+                @if (Media.LastPicked is { } source)
+                {
+                    <span class="cm-meta">Source: <span class="cm-mono">@source.FileName</span></span>
+                }
+                else
+                {
+                    <span class="cm-meta">Pick the source media these timestamps refer to:</span>
+                }
+                <button type="button" class="cm-button cm-button--quiet" @onclick="PickSourceAsync">
+                    @(Media.LastPicked is null ? "Pick source media…" : "Change source…")
+                </button>
+            }
+            else
+            {
+                <span class="cm-meta">@Media.UnavailableReason</span>
+            }
+        </div>
+
+        <div class="cm-clips__options">
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_reencode" /> <span>Frame-accurate (re-encode)</span>
+            </label>
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_vertical" /> <span>9:16 crop</span>
+            </label>
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_captions" /> <span>Burn captions</span>
+            </label>
+        </div>
+
+        <ul class="cm-clips__list">
+            @foreach (var (clip, i) in _clips.Select((c, i) => (c, i)))
+            {
+                <li class="cm-clips__clip">
+                    <span class="cm-mono">@Clock(clip.InSeconds)–@Clock(clip.OutSeconds)</span>
+                    <span class="cm-clips__hook">@clip.Hook</span>
+                    <span class="cm-chips">
+                        @foreach (var platform in clip.PlatformFit)
+                        {
+                            <span class="cm-chip cm-mono">@platform</span>
+                        }
+                    </span>
+                    <button type="button" class="cm-button cm-button--quiet"
+                            disabled="@(!Media.CanProcessLocally || Media.LastPicked is null || _exporting == i)"
+                            @onclick="() => ExportAsync(clip, i)">
+                        @(_exporting == i ? _exportStage : "Export")
+                    </button>
+                </li>
+            }
+        </ul>
+
+        @if (_lastOutput is { } output)
+        {
+            <p class="cm-meta">Saved to <span class="cm-mono">@output</span></p>
+        }
+    }
+</div>
+
+@code {
+    private sealed record Clip(double InSeconds, double OutSeconds, string Hook, IReadOnlyList<string> PlatformFit);
+
+    private readonly List<Clip> _clips = [];
+
+    private bool _reencode = true;
+    private bool _vertical = true;
+    private bool _captions = true;
+    private int _exporting = -1;
+    private string _exportStage = "Exporting…";
+    private string? _lastOutput;
+
+    /// <summary>The clips artifact's ContentJson.</summary>
+    [Parameter, EditorRequired] public string ContentJson { get; set; } = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        _clips.Clear();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(ContentJson);
+            if (doc.RootElement.TryGetProperty("clips", out var clips))
+            {
+                foreach (var clip in clips.EnumerateArray())
+                {
+                    _clips.Add(new Clip(
+                        clip.GetProperty("inSeconds").GetDouble(),
+                        clip.GetProperty("outSeconds").GetDouble(),
+                        clip.TryGetProperty("hook", out var hook) ? hook.GetString() ?? "" : "",
+                        clip.TryGetProperty("platformFit", out var fit)
+                            ? fit.EnumerateArray().Select(p => p.GetString() ?? "").ToList()
+                            : []));
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // An unparseable clips payload renders as empty rather than crashing Focus.
+        }
+    }
+
+    private async Task PickSourceAsync() => await Media.PickMediaAsync();
+
+    private async Task ExportAsync(Clip clip, int index)
+    {
+        if (Media.LastPicked is not { } source)
+        {
+            return;
+        }
+
+        _exporting = index;
+        _lastOutput = null;
+
+        var progress = new Progress<PipelineProgress>(p =>
+        {
+            _exportStage = $"{p.Stage} {(p.Percent is { } pct ? $"{pct:0}%" : "")}";
+            StateHasChanged();
+        });
+
+        try
+        {
+            var captionSegments = _captions
+                ? Campaign.Transcript?.Segments
+                    .Where(s => s.EndSeconds > clip.InSeconds && s.StartSeconds < clip.OutSeconds)
+                    .ToList()
+                : null;
+
+            _lastOutput = await Media.ExportClipAsync(
+                source,
+                new ClipExportOptions(clip.InSeconds, clip.OutSeconds, _reencode, _vertical, _captions),
+                captionSegments,
+                progress);
+
+            Notifier.ShowSuccess($"Clip exported · {System.IO.Path.GetFileName(_lastOutput)}");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _exporting = -1;
+            _exportStage = "Exporting…";
+            StateHasChanged();
+        }
+    }
+
+    private static string Clock(double seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
+    }
+}

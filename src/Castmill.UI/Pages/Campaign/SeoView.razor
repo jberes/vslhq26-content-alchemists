@@ -1,0 +1,20 @@
+@* SEO / AEO desk. Phase F9 builds the scorecard, the keyword table and the share-of-voice
+   chart on IgbCategoryChart (which needs the commercial Ignite UI package — ADR-F15). *@
+@page "/campaigns/{CampaignId:guid}/seo"
+@using Castmill.UI.Design
+@using Castmill.UI.State
+@inject CampaignState Campaign
+
+<PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — SEO analysis</PageTitle>
+
+<CampaignShell CampaignId="CampaignId" View="CampaignView.Seo">
+    <div class="cm-region cm-pad">
+        <EmptyState Kicker="SEO / AEO"
+                    Headline="The SEO desk arrives with Phase F9."
+                    Detail="The keyword plan and SEO brief already generate server-side; this view renders them as a scorecard, a keyword table and share-of-voice bars. An unpublished campaign will label its positions projected on the surface itself." />
+    </div>
+</CampaignShell>
+
+@code {
+    [Parameter] public Guid CampaignId { get; set; }
+}

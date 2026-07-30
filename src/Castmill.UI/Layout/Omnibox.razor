@@ -1,0 +1,261 @@
+@* The ⌘K omnibox (F6 / roadmap 4.2): navigation, actions and transcript search from one
+   keyboard-first surface. Results are computed in .NET from state already loaded — the
+   only interop is the global chord listener and a focus() call. *@
+@using Castmill.Core.Ai
+@using Castmill.UI.Auth
+@using Castmill.UI.Design
+@using Castmill.UI.State
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject WorkspaceState Workspace
+@inject CampaignState Campaign
+@inject AuthState Auth
+@inject NavigationManager Navigation
+
+@if (_open)
+{
+    <div class="cm-omni" role="presentation" @onclick="Close">
+        <div class="cm-omni__panel" role="dialog" aria-modal="true" aria-label="Command palette"
+             @onclick:stopPropagation="true">
+            <input @ref="_input" class="cm-omni__input" placeholder="Go anywhere, do anything, search the transcript…"
+                   value="@_query" @oninput="OnQueryChanged" @onkeydown="OnKeyDown"
+                   aria-activedescendant="@($"cm-omni-{_index}")" aria-expanded="true" role="combobox" />
+
+            <ol class="cm-omni__results" role="listbox">
+                @foreach (var (result, i) in Results.Select((r, i) => (r, i)))
+                {
+                    <li id="@($"cm-omni-{i}")" role="option" aria-selected="@(i == _index)">
+                        <button type="button"
+                                class="cm-omni__result @(i == _index ? "cm-omni__result--active" : "")"
+                                @onclick="() => RunAsync(result)">
+                            <span class="cm-kicker cm-omni__group">@result.Group</span>
+                            <span class="cm-omni__label">@result.Label</span>
+                            @if (result.Detail is not null)
+                            {
+                                <span class="cm-meta cm-omni__detail">@result.Detail</span>
+                            }
+                        </button>
+                    </li>
+                }
+                @if (Results.Count == 0)
+                {
+                    <li class="cm-omni__empty cm-meta">Nothing matches "@_query".</li>
+                }
+            </ol>
+
+            <footer class="cm-omni__foot cm-meta">
+                <kbd>&#8593;&#8595;</kbd> move · <kbd>&#8629;</kbd> go · <kbd>esc</kbd> close
+            </footer>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record Result(string Group, string Label, string? Detail, Func<Task> Run);
+
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _listener;
+    private DotNetObjectReference<Omnibox>? _self;
+    private ElementReference _input;
+    private bool _open;
+    private bool _needsFocus;
+    private string _query = string.Empty;
+    private int _index;
+
+    private List<Result> Results { get; set; } = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await Js.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/Castmill.UI/js/castmill-shortcuts.js");
+                _self = DotNetObjectReference.Create(this);
+                _listener = await _module.InvokeAsync<IJSObjectReference>("listen", _self);
+            }
+            catch (JSException)
+            {
+                // No interop (tests): the omnibox simply has no global chord.
+            }
+        }
+
+        if (_needsFocus && _module is not null)
+        {
+            _needsFocus = false;
+            await _module.InvokeVoidAsync("focus", _input);
+        }
+    }
+
+    [JSInvokable]
+    public async Task NotifyChordAsync(string chord)
+    {
+        switch (chord)
+        {
+            case "omnibox":
+                _open = !_open;
+                _needsFocus = _open;
+                _query = string.Empty;
+                _index = 0;
+                Compute();
+                break;
+
+            case "generate":
+                Navigation.NavigateTo("campaigns/new");
+                break;
+
+            case "image-studio" when Workspace.Active is { } active:
+                Navigation.NavigateTo(CampaignViews.PathFor(active.Id, CampaignView.ImageStudio));
+                break;
+
+            case "escape" when _open:
+                _open = false;
+                break;
+
+            default:
+                return;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OnQueryChanged(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? string.Empty;
+        _index = 0;
+        Compute();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                _index = Results.Count == 0 ? 0 : (_index + 1) % Results.Count;
+                break;
+            case "ArrowUp":
+                _index = Results.Count == 0 ? 0 : (_index - 1 + Results.Count) % Results.Count;
+                break;
+            case "Enter" when Results.Count > 0:
+                await RunAsync(Results[Math.Min(_index, Results.Count - 1)]);
+                break;
+            case "Escape":
+                Close();
+                break;
+        }
+    }
+
+    private async Task RunAsync(Result result)
+    {
+        _open = false;
+        await result.Run();
+    }
+
+    private void Close() => _open = false;
+
+    /// <summary>
+    /// Builds the result list from loaded state. Order encodes priority: actions, then
+    /// navigation, then campaigns, then transcript hits — the design's "everything" search.
+    /// </summary>
+    private void Compute()
+    {
+        var query = _query.Trim();
+        var results = new List<Result>();
+
+        void Add(string group, string label, string? detail, Func<Task> run)
+        {
+            if (query.Length == 0
+                || label.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || detail?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                results.Add(new Result(group, label, detail, run));
+            }
+        }
+
+        Task Go(string url)
+        {
+            Navigation.NavigateTo(url);
+            return Task.CompletedTask;
+        }
+
+        Add("Action", "Start a run", "new campaign from a source", () => Go("campaigns/new"));
+        Add("Go", "Front page", null, () => Go(""));
+        Add("Go", "Campaigns", null, () => Go("campaigns"));
+        Add("Go", "The Wire", null, () => Go("wire"));
+
+        if (Workspace.Active is { } active)
+        {
+            foreach (var (view, _, label) in CampaignViews.All)
+            {
+                Add("Go", label, active.Name, () => Go(CampaignViews.PathFor(active.Id, view)));
+            }
+        }
+
+        Add("Action", "Change password", null, () => Go("settings/password"));
+        Add("Action", "Sign out", null, async () =>
+        {
+            await Auth.SignOutAsync();
+            Navigation.NavigateTo("sign-in", replace: true);
+        });
+
+        foreach (var campaign in Workspace.Campaigns.OrderByDescending(c => c.UpdatedAt))
+        {
+            Add("Campaign", campaign.Name, "open, keeping the current view", () =>
+            {
+                var view = CampaignViews.ViewFromPath(Navigation.ToBaseRelativePath(Navigation.Uri));
+                Workspace.SetActive(campaign.Id);
+                return Go(CampaignViews.PathFor(campaign.Id, view));
+            });
+        }
+
+        // Transcript search: the active campaign's timed segments, already in the store.
+        if (query.Length >= 3 && Campaign.Transcript is { } transcript && Campaign.CampaignId is { } campaignId)
+        {
+            foreach (var segment in transcript.Segments
+                .Where(s => s.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Take(5))
+            {
+                var target = $"{CampaignViews.PathFor(campaignId, CampaignView.MillFloor)}?seg={segment.Id}";
+                results.Add(new Result(
+                    "Transcript",
+                    Snippet(segment.Text, query),
+                    $"{segment.Id} · {TimeSpan.FromSeconds(segment.StartSeconds):m\\:ss}",
+                    () => Go(target)));
+            }
+        }
+
+        Results = results.Take(12).ToList();
+    }
+
+    private static string Snippet(string text, string query)
+    {
+        var at = text.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+        var start = Math.Max(0, at - 24);
+        var length = Math.Min(text.Length - start, 72);
+        return (start > 0 ? "…" : "") + text.Substring(start, length) + (start + length < text.Length ? "…" : "");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_listener is not null)
+            {
+                await _listener.InvokeVoidAsync("dispose");
+                await _listener.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _self?.Dispose();
+    }
+}

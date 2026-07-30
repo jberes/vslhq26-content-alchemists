@@ -1,0 +1,207 @@
+@* The provenance threads (F5.2) — the trust feature.
+
+   One SVG per canvas region. For the active card (hovered, or pinned by click) a cubic
+   path is drawn per cited transcript segment, from the segment row's right edge to the
+   card's left edge, with a source dot and a monospace segment label. Hover is transient;
+   click pins; mouse-out restores the pinned set.
+
+   All measurement happens through the castmill-overlay.js island — the one component
+   allowed to touch getBoundingClientRect (ADR-F10) — and is redone on scroll, zoom,
+   resize and theme change. The maths and the drawing decisions stay here in .NET. *@
+@using Castmill.UI.Design
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject ThemeService Theme
+
+<svg class="cm-threads" width="@((int)_width)" height="@((int)_height)"
+     viewBox="0 0 @((int)_width) @((int)_height)" aria-hidden="true">
+    @foreach (var thread in _threads)
+    {
+        <path class="cm-threads__path" d="@thread.Path" />
+        <circle class="cm-threads__dot" cx="@Fmt(thread.SourceX)" cy="@Fmt(thread.SourceY)" r="2.5" />
+        @* <text> is a Razor keyword, so the SVG label is emitted as markup. Only the
+           segment id (server-normalised s01…) goes in — HTML-encoded regardless. *@
+        @((MarkupString)$"<text class=\"cm-threads__label\" x=\"{Fmt(thread.SourceX + 6)}\" y=\"{Fmt(thread.SourceY - 5)}\">{System.Net.WebUtility.HtmlEncode(thread.SegmentId)}</text>")
+    }
+</svg>
+
+@code {
+    private readonly List<(string SegmentId, string Path, double SourceX, double SourceY)> _threads = [];
+
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _observer;
+    private DotNetObjectReference<ProvenanceOverlay>? _self;
+    private double _width;
+    private double _height;
+    private bool _observing;
+    private string _lastHighlightKey = "";
+
+    /// <summary>The canvas root element; also the SVG's coordinate system.</summary>
+    [Parameter, EditorRequired] public ElementReference Container { get; set; }
+
+    /// <summary>The artifact whose citations are being traced, or null for none.</summary>
+    [Parameter] public Guid? ActiveArtifactId { get; set; }
+
+    /// <summary>Segment ids the active artifact cites.</summary>
+    [Parameter] public IReadOnlyList<string> Citations { get; set; } = [];
+
+    /// <summary>Called with the segment ids to highlight, so the transcript rows can react.</summary>
+    [Parameter] public EventCallback<IReadOnlyList<string>> OnHighlight { get; set; }
+
+    /// <summary>
+    /// Bumped by the parent when geometry moved in a way no observer can see — a CSS
+    /// transform (zoom) changes no layout box, so ResizeObserver stays silent.
+    /// </summary>
+    [Parameter] public int Epoch { get; set; }
+
+    protected override void OnInitialized() => Theme.Changed += OnThemeChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/Castmill.UI/js/castmill-overlay.js");
+        }
+
+        // The observer needs the container reference, which parents set after their own
+        // first render — so attach lazily, once it is a real element.
+        if (!_observing && _module is not null && !Container.Equals(default(ElementReference)))
+        {
+            _observing = true;
+            _self = DotNetObjectReference.Create(this);
+            _observer = await _module.InvokeAsync<IJSObjectReference>("observe", Container, _self);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync() => await RedrawAsync();
+
+    /// <summary>Geometry moved — scroll, resize, zoom re-layout. Called from JS, ≤ once per frame.</summary>
+    [JSInvokable]
+    public async Task NotifyGeometryChangedAsync()
+    {
+        await RedrawAsync();
+        StateHasChanged();
+    }
+
+    private async Task RedrawAsync()
+    {
+        _threads.Clear();
+
+        if (_module is null || ActiveArtifactId is null || Citations.Count == 0
+            || Container.Equals(default(ElementReference)))
+        {
+            await EmitHighlightAsync([]);
+            return;
+        }
+
+        var cardSelector = $"[data-card=\"{ActiveArtifactId}\"]";
+        var selectors = new List<string> { cardSelector };
+        selectors.AddRange(Citations.Select(id => $"[data-seg=\"{id}\"]"));
+
+        Measured measured;
+        try
+        {
+            measured = await _module.InvokeAsync<Measured>("measure", Container, selectors);
+        }
+        catch (JSException)
+        {
+            return;
+        }
+
+        _width = measured.Width;
+        _height = measured.Height;
+
+        if (!measured.Rects.TryGetValue(cardSelector, out var card))
+        {
+            await EmitHighlightAsync([]);
+            return;
+        }
+
+        var visible = new List<string>();
+
+        foreach (var segmentId in Citations)
+        {
+            if (!measured.Rects.TryGetValue($"[data-seg=\"{segmentId}\"]", out var row) || !row.Visible)
+            {
+                continue;
+            }
+
+            visible.Add(segmentId);
+
+            // Segment row right edge → card left edge; control points at 55% of the
+            // horizontal span (the handoff's geometry).
+            var x1 = row.X + row.W;
+            var y1 = row.Y + (row.H / 2);
+            var x2 = card.X;
+            var y2 = card.Y + Math.Min(card.H / 2, 40);
+            var bend = (x2 - x1) * 0.55;
+
+            _threads.Add((
+                segmentId,
+                $"M {Fmt(x1)} {Fmt(y1)} C {Fmt(x1 + bend)} {Fmt(y1)}, {Fmt(x2 - bend)} {Fmt(y2)}, {Fmt(x2)} {Fmt(y2)}",
+                x1,
+                y1));
+        }
+
+        await EmitHighlightAsync(Citations);
+    }
+
+    /// <summary>
+    /// Notifies the parent ONLY when the highlighted set actually changed. This is
+    /// load-bearing: OnParametersSetAsync runs on every parent render, and the parent's
+    /// highlight handler re-renders — an unconditional emit here is an infinite render
+    /// loop (found by the bUnit cycle limit; it would spin a real tab identically).
+    /// </summary>
+    private async Task EmitHighlightAsync(IReadOnlyList<string> segmentIds)
+    {
+        var key = string.Join('|', segmentIds);
+        if (key == _lastHighlightKey)
+        {
+            return;
+        }
+
+        _lastHighlightKey = key;
+        await OnHighlight.InvokeAsync(segmentIds);
+    }
+
+    private void OnThemeChanged() => InvokeAsync(async () =>
+    {
+        // Colours come from tokens, but a family switch changes fonts and therefore
+        // layout — geometry must be re-measured, not assumed (ADR-F09's acceptance).
+        await RedrawAsync();
+        StateHasChanged();
+    });
+
+    private static string Fmt(double value) =>
+        value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        Theme.Changed -= OnThemeChanged;
+
+        try
+        {
+            if (_observer is not null)
+            {
+                await _observer.InvokeVoidAsync("dispose");
+                await _observer.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+
+        _self?.Dispose();
+    }
+
+    private sealed record Measured(double Width, double Height, Dictionary<string, MeasuredRect> Rects);
+
+    private sealed record MeasuredRect(double X, double Y, double W, double H, bool Visible);
+}

@@ -1,0 +1,53 @@
+@* Toast host: bottom-right of the content pane, dark panel, auto-dismiss (the handoff's
+   §0 spec). Mounted once by ShellLayout; features only ever call INotifier. *@
+@using Castmill.UI.Design
+@implements IDisposable
+@inject Notifier Notifier
+
+<div class="cm-toasts" role="status" aria-live="polite">
+    @foreach (var note in Notifier.Current)
+    {
+        <div class="cm-toast cm-toast--@note.Severity.ToString().ToLowerInvariant()" @key="note.Id">
+            <span class="cm-toast__message">@note.Message</span>
+            @if (note.Duration == Timeout.InfiniteTimeSpan)
+            {
+                <button type="button" class="cm-toast__dismiss" aria-label="Dismiss"
+                        @onclick="() => Notifier.Dismiss(note.Id)">&#x2715;</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private readonly HashSet<Guid> _scheduled = [];
+
+    protected override void OnInitialized() => Notifier.Changed += OnChanged;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Schedule auto-dismiss once per toast, after it has actually rendered.
+        foreach (var note in Notifier.Current.ToArray())
+        {
+            if (note.Duration == Timeout.InfiniteTimeSpan || !_scheduled.Add(note.Id))
+            {
+                continue;
+            }
+
+            _ = DismissLaterAsync(note);
+        }
+    }
+
+    private async Task DismissLaterAsync(Notification note)
+    {
+        await Task.Delay(note.Duration);
+        await InvokeAsync(() =>
+        {
+            Notifier.Dismiss(note.Id);
+            _scheduled.Remove(note.Id);
+        });
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Notifier.Changed -= OnChanged;
+}

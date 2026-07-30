@@ -1,0 +1,122 @@
+@* The one JS-interop component that matters (Roadmap §2.5 / ADR-F03).
+   Markdown string in, markdown string out. Persistence commits on blur, so at most one
+   keystroke-burst of work is ever at risk. The outline rail is a plain Blazor sibling fed by
+   heading events — it is not part of the editor bundle. *@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+<div class="cm-editor">
+    <div class="cm-editor__host" @ref="_host"></div>
+</div>
+
+@code {
+    private const string ModulePath = "./_content/Castmill.UI/js/castmill-editor.js";
+
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _handle;
+    private DotNetObjectReference<RichEditor>? _self;
+    private ElementReference _host;
+    private string? _mounted;
+
+    /// <summary>The document, as markdown. Setting it replaces the editor's content.</summary>
+    [Parameter] public string Markdown { get; set; } = string.Empty;
+
+    /// <summary>Raised on blur with the current markdown — the save signal.</summary>
+    [Parameter] public EventCallback<string> OnCommit { get; set; }
+
+    /// <summary>Raised on every edit, for a dirty indicator. Not a save signal.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>Raised whenever the heading structure changes; feeds the outline rail.</summary>
+    [Parameter] public EventCallback<IReadOnlyList<EditorHeading>> OnHeadings { get; set; }
+
+    [Parameter] public string? Placeholder { get; set; }
+
+    [Parameter] public bool Editable { get; set; } = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            _self = DotNetObjectReference.Create(this);
+            _handle = await _module.InvokeAsync<IJSObjectReference>(
+                "initFor", _host, Markdown, _self,
+                new { placeholder = Placeholder, editable = Editable });
+            _mounted = Markdown;
+            return;
+        }
+
+        // A programmatic content change — a regenerate, or restoring a revision. Pushing it
+        // in only when it differs from what we last mounted avoids clobbering the caret on
+        // every unrelated re-render.
+        if (_handle is not null && !string.Equals(_mounted, Markdown, StringComparison.Ordinal))
+        {
+            _mounted = Markdown;
+            await _handle.InvokeVoidAsync("setMarkdown", Markdown);
+        }
+    }
+
+    /// <summary>Called from JS on blur. Public only because JSInvokable requires it.</summary>
+    [JSInvokable]
+    public async Task NotifyBlurAsync(string markdown)
+    {
+        _mounted = markdown;
+        await OnCommit.InvokeAsync(markdown);
+    }
+
+    [JSInvokable]
+    public Task NotifyChangedAsync() => OnChanged.InvokeAsync();
+
+    [JSInvokable]
+    public Task NotifyHeadingsAsync(EditorHeading[] headings) => OnHeadings.InvokeAsync(headings);
+
+    /// <summary>Moves the caret to a heading — the outline rail's click target.</summary>
+    public async Task GoToAsync(int position)
+    {
+        if (_handle is not null)
+        {
+            await _handle.InvokeVoidAsync("goTo", position);
+        }
+    }
+
+    public async Task InsertImageAsync(string src, string? alt)
+    {
+        if (_handle is not null)
+        {
+            await _handle.InvokeVoidAsync("insertImage", src, alt);
+        }
+    }
+
+    public async Task InsertYouTubeAsync(string videoId, string? title)
+    {
+        if (_handle is not null)
+        {
+            await _handle.InvokeVoidAsync("insertYouTube", videoId, title);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_handle is not null)
+            {
+                await _handle.InvokeVoidAsync("destroy");
+                await _handle.DisposeAsync();
+            }
+
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is already gone (shell closing) — nothing to release.
+        }
+
+        _self?.Dispose();
+    }
+}

@@ -7,6 +7,7 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Media;
 using Castmill.Api.Services.Publish;
 using Castmill.Api.Services.Secrets;
@@ -64,6 +65,11 @@ builder.Services.AddSingleton<IPromptLog, PromptLog>();
 builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
+// Image path (B9): provider seam (ADR-015) → slot-accurate crop + headline
+// compositing (ADR-013) → typed image plan (ADR-012).
+builder.Services.AddImageProviders(builder.Configuration);
+builder.Services.AddSingleton<IImageComposer, ImageComposer>();
+builder.Services.AddScoped<IImagePlanService, ImagePlanService>();
 builder.Services.AddScoped<IImageRenderer, ImageRenderer>();
 builder.Services.AddSingleton<IPublicContentStore, PublicContentStore>();
 builder.Services.AddSingleton<IClipJobDispatcher, ClipJobDispatcher>();
@@ -78,6 +84,8 @@ builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.Fro
     .AddStandardResilienceHandler();
 builder.Services.AddHttpClient("broker").AddStandardResilienceHandler();
 builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
+builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
+    .AddStandardResilienceHandler();
 
 builder.Services.AddDbContext<CastmillDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill"),
@@ -187,6 +195,21 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
+// CORS. The client shells are separate origins: the WASM dev server runs on its own port,
+// and Static Web Apps serves the published client from a different host than App Service.
+// Origins are configuration only — never a wildcard — and the Production guard above
+// refuses a localhost origin. ETag and the correlation ID must be *exposed* explicitly or
+// the browser hides them from the client, which would silently break conditional writes
+// (If-Match) and client-to-server log correlation.
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(CorsPolicyName, policy => policy
+        .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+        .WithHeaders("Authorization", "Content-Type", "If-Match", "X-Correlation-ID")
+        .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE")
+        .WithExposedHeaders("ETag", "X-Correlation-ID"));
+});
+
 if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddOpenApi();
@@ -201,6 +224,8 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
+// Before authentication: a rejected pre-flight must not depend on a token.
+app.UseCors(CorsPolicyName);
 // Authentication MUST precede the rate limiter: the "writes" policy partitions
 // by user id, which is empty (one shared anonymous bucket) before auth runs.
 app.UseAuthentication();
@@ -210,6 +235,10 @@ app.UseAuthorization();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // Development-only demo account, off unless Dev:SeedDemoUser is set. The seeder
+    // refuses to run outside Development — see the security fence on DemoUserSeeder.
+    await DemoUserSeeder.SeedAsync(app);
 
     // Dev-only browser testbed (no Blazor needed): https://localhost:<port>/dev/testbed
     // Served from source, mapped only in Development, excluded from publish output.
@@ -229,8 +258,10 @@ app.MapSecretsEndpoints();
 app.MapBlobEndpoints();
 app.MapAiEndpoints();
 app.MapImageEndpoints();
+app.MapImageSlotEndpoints();
 app.MapMediaEndpoints();
 app.MapPublishEndpoints();
+app.MapScheduleEndpoints();
 app.MapSeoEndpoints();
 
 app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
@@ -248,4 +279,8 @@ app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
 app.Run();
 
 // Exposed for WebApplicationFactory-based integration tests.
-public partial class Program;
+public partial class Program
+{
+    /// <summary>Name of the single CORS policy; origins come from Cors:AllowedOrigins.</summary>
+    internal const string CorsPolicyName = "castmill";
+}

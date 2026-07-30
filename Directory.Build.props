@@ -1,6 +1,11 @@
 <Project>
-  <PropertyGroup>
+  <!-- Directory.Build.props is imported before the project body, so $(TargetFrameworks)
+       is not yet set here: the multi-targeting MAUI shell has to opt out by name. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'Castmill.Desktop'">
     <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

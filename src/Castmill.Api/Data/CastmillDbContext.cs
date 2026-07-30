@@ -17,6 +17,10 @@ public sealed class CastmillDbContext(
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<Artifact> Artifacts => Set<Artifact>();
+    public DbSet<ArtifactRevision> ArtifactRevisions => Set<ArtifactRevision>();
+    public DbSet<ImageSlot> ImageSlots => Set<ImageSlot>();
+    public DbSet<ScheduleEntry> ScheduleEntries => Set<ScheduleEntry>();
+    public DbSet<GenerationRun> GenerationRuns => Set<GenerationRun>();
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
@@ -46,9 +50,59 @@ public sealed class CastmillDbContext(
         {
             e.Property(a => a.Kind).HasMaxLength(50);
             e.Property(a => a.Title).HasMaxLength(300);
+            e.Property(a => a.Status).HasMaxLength(20);
+            // SQL extracts citations so list projections never load ContentJson (ADR-003).
+            // ISJSON guards against a legacy non-JSON payload making the column throw.
+            e.Property(a => a.CitationsJson).HasComputedColumnSql(
+                "CASE WHEN ISJSON([ContentJson]) = 1 THEN JSON_QUERY([ContentJson], '$.citations') END");
             e.Property(a => a.Version).IsConcurrencyToken();
             e.HasIndex(a => new { a.TenantId, a.CampaignId });
+            // The Front Page's review queue filters by status across the whole tenant.
+            e.HasIndex(a => new { a.TenantId, a.Status });
             e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ArtifactRevision>(e =>
+        {
+            e.Property(r => r.Title).HasMaxLength(300);
+            e.Property(r => r.Reason).HasMaxLength(50);
+            e.HasIndex(r => new { r.TenantId, r.ArtifactId, r.Version });
+            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ImageSlot>(e =>
+        {
+            e.Property(s => s.Kind).HasMaxLength(50);
+            e.Property(s => s.Prompt).HasMaxLength(4000);
+            e.Property(s => s.ModelAlias).HasMaxLength(100);
+            e.Property(s => s.SourceSegmentId).HasMaxLength(50);
+            e.Property(s => s.HeadlineText).HasMaxLength(32);
+            e.Property(s => s.State).HasMaxLength(20);
+            e.Property(s => s.PublishedUrl).HasMaxLength(2000);
+            e.Property(s => s.BaseImagePath).HasMaxLength(1000);
+            e.Property(s => s.BaseImageUrl).HasMaxLength(2000);
+            // One slot per kind per campaign: reservation is idempotent by construction.
+            e.HasIndex(s => new { s.TenantId, s.CampaignId, s.Kind }).IsUnique();
+            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ScheduleEntry>(e =>
+        {
+            e.Property(s => s.ChannelId).HasMaxLength(200);
+            e.Property(s => s.BrokerPostId).HasMaxLength(200);
+            e.Property(s => s.Text).HasMaxLength(65_000);
+            e.Property(s => s.MediaUrl).HasMaxLength(2000);
+            e.Property(s => s.Status).HasMaxLength(20);
+            e.Property(s => s.Error).HasMaxLength(2000);
+            e.HasIndex(s => new { s.TenantId, s.ScheduledAt });
+            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<GenerationRun>(e =>
+        {
+            e.Property(r => r.Status).HasMaxLength(20);
+            e.HasIndex(r => new { r.TenantId, r.CampaignId, r.StartedAt });
+            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<Asset>(e =>
@@ -82,6 +136,7 @@ public sealed class CastmillDbContext(
 
         builder.Entity<ClipJob>(e =>
         {
+            e.Property(j => j.Mode).HasMaxLength(10);
             e.Property(j => j.Status).HasMaxLength(20);
             e.Property(j => j.OutputBlobPath).HasMaxLength(1000);
             e.Property(j => j.Error).HasMaxLength(2000);

@@ -11,6 +11,8 @@ public enum SecretKind
     FoundryEndpoint,
     FoundryKey,
     BrokerToken,
+    /// <summary>Credential for an optional non-Foundry image provider (ADR-015).</summary>
+    ImageProviderKey,
 }
 
 public interface IUserSecretsService

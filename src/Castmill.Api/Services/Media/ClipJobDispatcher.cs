@@ -9,6 +9,8 @@ namespace Castmill.Api.Services.Media;
 /// <summary>Queue message consumed by the Container Apps ffmpeg worker (/infra/clipjob).</summary>
 public sealed record ClipJobMessage(
     Guid JobId,
+    /// <summary>"clip" cuts a range; "frame" extracts a single still at InSeconds (ADR-014).</summary>
+    string Mode,
     string SourceBlobPath,
     string OutputBlobPath,
     double InSeconds,

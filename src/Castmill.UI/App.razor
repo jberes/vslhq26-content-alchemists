@@ -1,0 +1,10 @@
+@* The single root component for BOTH shells (ADR-F01). Castmill.Web mounts it on
+   "#app" from Program.cs; Castmill.Desktop mounts it from MainPage.xaml. Neither shell
+   owns a router, a layout, or a page — that is the whole point. *@
+
+<Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(ShellLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+</Router>

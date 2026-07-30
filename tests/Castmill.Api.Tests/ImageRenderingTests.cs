@@ -53,6 +53,9 @@ public sealed class ImageRenderingTests(CastmillApiFactory factory)
     {
         public Task<byte[]> RenderWebpAsync(Guid userId, string prompt, string aspectRatio, string modelAlias, CancellationToken ct) =>
             Task.FromResult(new byte[] { 1, 2, 3 });
+
+        public Task<byte[]> RenderExactAsync(Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct) =>
+            Task.FromResult(new byte[] { 1, 2, 3 });
     }
 
     private sealed class FakePublicStore : IPublicContentStore
@@ -60,6 +63,8 @@ public sealed class ImageRenderingTests(CastmillApiFactory factory)
         public bool IsConfigured => true;
         public Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct) =>
             Task.FromResult(new Uri($"https://public.example/{path}"));
+
+        public Task<byte[]?> ReadAsync(string path, CancellationToken ct) => Task.FromResult<byte[]?>(null);
     }
 
     [Fact]

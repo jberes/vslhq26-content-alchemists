@@ -1,0 +1,124 @@
+@* The left rail — WORKSPACE scope only (ADR-F11).
+   The four campaign views are NEVER rail items; they are tabs on the campaign header. That
+   separation is what keeps "where am I" answerable and makes switching campaign orthogonal
+   to switching view. *@
+@using Castmill.Core.Resources
+@using Castmill.UI.State
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject NavigationManager Navigation
+
+<nav class="cm-rail" aria-label="Workspace">
+    <div class="cm-rail__head">
+        <span class="cm-wordmark">Castmill</span>
+    </div>
+
+    <div class="cm-rail__group">
+        <span class="cm-kicker" id="cm-rail-workspace">Workspace</span>
+        <ul class="cm-rail__items" aria-labelledby="cm-rail-workspace">
+            <li>
+                <a class="cm-rail__item @Active("")" href="">
+                    <span class="cm-rail__label">Front page</span>
+                </a>
+            </li>
+            <li>
+                <a class="cm-rail__item @Active("campaigns")" href="campaigns">
+                    <span class="cm-rail__label">Campaigns</span>
+                    <span class="cm-rail__count cm-mono">@Workspace.Campaigns.Count</span>
+                </a>
+            </li>
+            <li>
+                <a class="cm-rail__item @Active("wire")" href="wire">
+                    <span class="cm-rail__label">The Wire</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="cm-rail__group">
+        <span class="cm-kicker" id="cm-rail-campaign">In this campaign</span>
+
+        @if (Workspace.Active is { } active)
+        {
+            @* The active-campaign card. Clicking it opens the switcher below rather than
+               navigating, because switching campaign must keep the current view. *@
+            <div class="cm-rail__card">
+                <span class="cm-rail__card-name">@active.Name</span>
+                <span class="cm-meta">@ArtifactDisplay.Ago(active.UpdatedAt, DateTimeOffset.Now)</span>
+            </div>
+        }
+        else
+        {
+            <p class="cm-rail__empty cm-meta">No campaign open.</p>
+        }
+
+        <ul class="cm-rail__items" aria-labelledby="cm-rail-campaign">
+            @foreach (var campaign in Workspace.RailCampaigns)
+            {
+                <li>
+                    <button type="button"
+                            class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
+                            aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
+                            @onclick="() => SwitchTo(campaign)">
+                        <span class="cm-rail__label">@campaign.Name</span>
+                    </button>
+                </li>
+            }
+
+            @if (Workspace.IsIndexed)
+            {
+                @* The handoff's scaling rule: past about a dozen campaigns the rail stops
+                   trying to list them all. *@
+                <li>
+                    <a class="cm-rail__item cm-rail__index" href="campaigns">
+                        <span class="cm-rail__label">Index — all @Workspace.Campaigns.Count</span>
+                        <span aria-hidden="true">&rarr;</span>
+                    </a>
+                </li>
+            }
+        </ul>
+    </div>
+
+    <div class="cm-rail__foot">
+        <dl class="cm-rail__hints">
+            <dt><kbd>&#8984;K</kbd></dt><dd class="cm-meta">Everything</dd>
+            <dt><kbd>&#8984;G</kbd></dt><dd class="cm-meta">Generate</dd>
+            <dt><kbd>&#8984;&#8679;I</kbd></dt><dd class="cm-meta">Image studio</dd>
+        </dl>
+
+        <a class="cm-button cm-rail__run" href="campaigns/new">Start a run</a>
+    </div>
+</nav>
+
+@code {
+    protected override void OnInitialized() => Workspace.Changed += OnChanged;
+
+    /// <summary>
+    /// Marks the current workspace destination. Compared on the whole relative path so
+    /// "campaigns" does not light up while a campaign view is open.
+    /// </summary>
+    private string Active(string path)
+    {
+        var current = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?')[0].TrimEnd('/');
+        return string.Equals(current, path, StringComparison.OrdinalIgnoreCase)
+            ? "cm-rail__item--active"
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// Switching campaign keeps the current view (ADR-F11). If the user is on a campaign
+    /// view, navigate to the same view under the new campaign; otherwise open its Mill Floor.
+    /// </summary>
+    private void SwitchTo(CampaignResponse campaign)
+    {
+        var current = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?')[0];
+        var view = CampaignViews.ViewFromPath(current);
+
+        Workspace.SetActive(campaign.Id);
+        Navigation.NavigateTo(CampaignViews.PathFor(campaign.Id, view));
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Workspace.Changed -= OnChanged;
+}

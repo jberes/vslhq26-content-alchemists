@@ -1,0 +1,25 @@
+/* Castmill design system — the single stylesheet both shells load.
+ *
+ * Import order is load-bearing:
+ *   1. Ignite UI's light theme      structural base (type metrics, elevations, sizing)
+ *   2. families                     raw --cmf-* values per family x mode
+ *   3. semantic                     the --cm-* contract feature CSS binds to
+ *   4. ignite                       maps --cm-* onto --ig-*; must beat step 1
+ *   5. base                         @font-face, reset, shared type roles
+ *   6. layout                       fluid grid, breakpoints, rail, density
+ *   7. components / views           shared chrome, then the phase F3/F4 surfaces
+ *
+ * Feature CSS added in later phases uses --cm-* only — never a --cmf-*, never a literal.
+ * DesignTokenTests enforces that.
+ */
+
+@import url("../../IgniteUI.Blazor/themes/light/material.css");
+
+@import url("tokens/family-warm-editorial.css");
+@import url("tokens/family-industry-blueprint.css");
+@import url("tokens/semantic.css");
+@import url("tokens/ignite.css");
+@import url("base.css");
+@import url("layout.css");
+@import url("components.css");
+@import url("views.css");

@@ -18,18 +18,18 @@
     <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
     <PackageReference Include="Azure.Storage.Queues" Version="12.27.1" />
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="3.1.2" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0-rc.1.25451.107" />
-    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.0-rc.1.25451.107" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.1.25451.107" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0-rc.1.25451.107">
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0-rc.1.25451.107" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
     <!-- Transitive pins: NuGet audit runs as a build error (never suppressed), so
          vulnerable transitive dependencies are lifted to patched versions here.
          EF Design pulls Microsoft.Build 17.14.8 (GHSA-w3q9-fxm7-j8fq);
-         AspNetCore.OpenApi rc.1 pulls Microsoft.OpenApi 2.0.0 (GHSA-v5pm-xwqc-g5wc). -->
+         AspNetCore.OpenApi pulls Microsoft.OpenApi 2.0.0 (GHSA-v5pm-xwqc-g5wc). -->
     <PackageReference Include="Microsoft.Build.Tasks.Core" Version="17.14.28">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -42,6 +42,13 @@
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.6" />
     <PackageReference Include="SkiaSharp" Version="4.150.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.150.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The overlay compositor's typeface travels with the app: Linux App Service images
+         ship few or no fonts, so a system face is not a dependency we can take (ADR-013).
+         OFL 1.1 — licence is alongside the font. -->
+    <Content Include="Assets\Fonts\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

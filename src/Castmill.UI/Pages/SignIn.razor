@@ -1,0 +1,96 @@
+@* Sign in. Lives in the RCL, so this is the same screen on desktop and web (G1) — only
+   where the refresh token lands differs. *@
+@page "/sign-in"
+@using Castmill.Core.Auth
+@using Castmill.UI.Auth
+@using Castmill.UI.Http
+@layout AuthLayout
+@inject AuthClient Auth
+@inject AuthState State
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in — Castmill</PageTitle>
+
+<div class="cm-auth">
+    <span class="cm-kicker">Castmill</span>
+    <h1>Sign in.</h1>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="cm-form">
+        <DataAnnotationsValidator />
+
+        <label class="cm-field">
+            <span class="cm-field__label">Email</span>
+            <InputText @bind-Value="_model.Email" class="cm-input" autocomplete="username"
+                       type="email" disabled="@_busy" />
+            <ValidationMessage For="() => _model.Email" class="cm-field__error" />
+        </label>
+
+        <label class="cm-field">
+            <span class="cm-field__label">Password</span>
+            <InputText @bind-Value="_model.Password" class="cm-input" type="password"
+                       autocomplete="current-password" disabled="@_busy" />
+            <ValidationMessage For="() => _model.Password" class="cm-field__error" />
+        </label>
+
+        @if (_error is not null)
+        {
+            <p class="cm-form__error" role="alert">@_error</p>
+        }
+
+        <div class="cm-form__actions">
+            <button type="submit" class="cm-button" disabled="@_busy">
+                @(_busy ? "Signing in…" : "Sign in")
+            </button>
+            <a href="register" class="cm-meta">Create an account</a>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    private readonly Model _model = new();
+    private bool _busy;
+    private string? _error;
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var response = await Auth.LoginAsync(new LoginRequest(_model.Email, _model.Password));
+            await State.SignedInAsync(response);
+            Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "" : ReturnUrl);
+        }
+        catch (UnauthorizedApiException)
+        {
+            // The server deliberately does not distinguish unknown email from wrong
+            // password (no account enumeration), so neither does this message.
+            _error = "That email and password don't match an account.";
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API. Is it running?";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class Model
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+}

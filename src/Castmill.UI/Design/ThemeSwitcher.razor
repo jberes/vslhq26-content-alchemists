@@ -1,0 +1,68 @@
+@* Family x mode x density switcher (E3.5). Real buttons with visible focus rings, and
+   aria-pressed rather than colour alone, so the current choice is never carried by hue. *@
+@using Castmill.UI.Design
+@implements IDisposable
+@inject ThemeService Theme
+
+<div class="cm-switcher">
+    <div class="cm-switcher__group" role="group" aria-label="Theme family">
+        <span class="cm-kicker">Family</span>
+        <div class="cm-segmented">
+            @foreach (var family in Families)
+            {
+                <button type="button" class="cm-segmented__option"
+                        aria-pressed="@(Theme.Family == family)"
+                        @onclick="() => Theme.SetFamilyAsync(family)">
+                    @Label(family)
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="cm-switcher__group" role="group" aria-label="Colour mode">
+        <span class="cm-kicker">Mode</span>
+        <div class="cm-segmented">
+            @foreach (var mode in Modes)
+            {
+                <button type="button" class="cm-segmented__option"
+                        aria-pressed="@(Theme.Mode == mode)"
+                        @onclick="() => Theme.SetModeAsync(mode)">
+                    @mode
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="cm-switcher__group" role="group" aria-label="Density">
+        <span class="cm-kicker">Density</span>
+        <div class="cm-segmented">
+            @foreach (var density in Densities)
+            {
+                <button type="button" class="cm-segmented__option"
+                        aria-pressed="@(Theme.Density == density)"
+                        @onclick="() => Theme.SetDensityAsync(density)">
+                    @density
+                </button>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly ThemeFamily[] Families = Enum.GetValues<ThemeFamily>();
+    private static readonly ThemeMode[] Modes = Enum.GetValues<ThemeMode>();
+    private static readonly ThemeDensity[] Densities = Enum.GetValues<ThemeDensity>();
+
+    protected override void OnInitialized() => Theme.Changed += OnChanged;
+
+    private static string Label(ThemeFamily family) => family switch
+    {
+        ThemeFamily.WarmEditorial => "Warm Editorial",
+        ThemeFamily.IndustryBlueprint => "Industry Blueprint",
+        _ => family.ToString(),
+    };
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Theme.Changed -= OnChanged;
+}

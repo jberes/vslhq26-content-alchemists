@@ -43,6 +43,12 @@ csharp_style_namespace_declarations = file_scoped:error
 generated_code = true
 dotnet_analyzer_diagnostic.severity = none
 
+# MAUI platform entry points are named by the OS, not by us: Mac Catalyst/iOS resolve
+# AppDelegate by the UIApplicationDelegate convention, so CA1711's "type must not end in
+# 'Delegate'" would require breaking the app to satisfy it.
+[src/Castmill.Desktop/Platforms/**/*.cs]
+dotnet_diagnostic.CA1711.severity = none
+
 # Test projects: underscore test names are idiomatic xUnit; inline literal
 # arrays in test payloads are clearer than hoisted fields
 [tests/**.cs]

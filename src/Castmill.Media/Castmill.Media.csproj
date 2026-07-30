@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The local media engine (roadmap E7.2/E7.3/E7.5): ffmpeg extraction, Whisper
+       transcription, clip export. Plain net10.0 with NO MAUI dependency, so the engine is
+       testable on a dev machine and in CI; Castmill.Desktop adapts it to IMediaPipeline.
+       Castmill.Web must NEVER reference this — it would drag whisper natives into WASM. -->
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Castmill.Media.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Castmill.Core\Castmill.Core.csproj" />
+  </ItemGroup>
+
+</Project>

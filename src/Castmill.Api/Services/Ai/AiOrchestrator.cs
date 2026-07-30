@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Castmill.Api.Data;
+using Castmill.Api.Services.Images;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
@@ -12,11 +13,19 @@ public interface IAiOrchestrator
 {
     Task<GenerationResult> RunBlogAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, CancellationToken ct);
     Task<GenerationResult> RunGeneratorAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, CancellationToken ct);
-    Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds, CancellationToken ct);
+    /// <summary>
+    /// Fan-out. When <paramref name="runId"/> is supplied, per-artifact completions
+    /// are written to that run row as they land so the Press Run can poll progress
+    /// from any instance while this call is still in flight (B9.8).
+    /// </summary>
+    Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds, CancellationToken ct, Guid? runId = null);
+    /// <summary>Opens a run row for progress polling (B9.8) before the fan-out starts.</summary>
+    Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct);
 }
 
 public sealed class AiOrchestrator(
     IFoundryClientFactory clients,
+    IImagePlanService imagePlan,
     CastmillDbContext db,
     ITenantProvider tenant,
     IPromptLog promptLog,
@@ -26,16 +35,23 @@ public sealed class AiOrchestrator(
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds, CancellationToken ct)
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds,
+        CancellationToken ct, Guid? runId = null)
     {
         var wanted = kinds is { Length: > 0 }
             ? Generators.FanOut.Where(g => kinds.Contains(g.Kind, StringComparer.OrdinalIgnoreCase)).ToList()
             : [.. Generators.FanOut];
 
+        // The image plan is reserved by the run (ADR-012): empty slots must be
+        // visible from the moment the campaign has content, not at publish time.
+        await imagePlan.EnsureSlotsAsync(campaign.Id, ct);
+
         var results = new List<GenerationResult>();
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
-            results.Add(await RunBlogAsync(userId, campaign, transcript, brief, ct));
+            var blog = await RunBlogAsync(userId, campaign, transcript, brief, ct);
+            results.Add(blog);
+            await RecordProgressAsync(runId, results, ct);
         }
 
         // Per-artifact granularity, partial failures allowed (ADR-006): one bad
@@ -43,9 +59,82 @@ public sealed class AiOrchestrator(
         // model-side latency dominates and the Press Run consumes per-artifact results.
         foreach (var spec in wanted)
         {
-            results.Add(await RunGeneratorAsync(userId, campaign, transcript, brief, spec, ct));
+            var result = await RunGeneratorAsync(userId, campaign, transcript, brief, spec, ct);
+            results.Add(result);
+
+            // Image prompts seed the reserved slots, keeping each prompt tied to the
+            // transcript moment it illustrates.
+            if (result is { Success: true, Kind: "image-prompts", ArtifactId: { } artifactId })
+            {
+                var artifact = await db.Artifacts.FindAsync([artifactId], ct);
+                if (artifact is not null)
+                {
+                    await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct);
+                }
+            }
+
+            await RecordProgressAsync(runId, results, ct);
         }
+
+        await CompleteRunAsync(runId, results, ct);
         return results;
+    }
+
+    /// <summary>Creates the run row the Press Run polls; returns its id.</summary>
+    public async Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct)
+    {
+        var total = kinds is { Length: > 0 }
+            ? kinds.Length
+            : Generators.FanOut.Count + 1; // +1 for the blog pipeline
+        var now = clock.GetUtcNow();
+        var run = new GenerationRun
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.TenantId ?? throw new InvalidOperationException("Generation requires a tenant."),
+            CampaignId = campaignId,
+            Status = "Running",
+            TotalKinds = total,
+            ItemsJson = "[]",
+            StartedAt = now,
+            UpdatedAt = now,
+        };
+        db.GenerationRuns.Add(run);
+        await db.SaveChangesAsync(ct);
+        return run.Id;
+    }
+
+    private async Task RecordProgressAsync(Guid? runId, List<GenerationResult> results, CancellationToken ct)
+    {
+        if (runId is null)
+        {
+            return;
+        }
+        var run = await db.GenerationRuns.FindAsync([runId.Value], ct);
+        if (run is null)
+        {
+            return;
+        }
+        run.ItemsJson = JsonSerializer.Serialize(results, Json);
+        run.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task CompleteRunAsync(Guid? runId, List<GenerationResult> results, CancellationToken ct)
+    {
+        if (runId is null)
+        {
+            return;
+        }
+        var run = await db.GenerationRuns.FindAsync([runId.Value], ct);
+        if (run is null)
+        {
+            return;
+        }
+        run.ItemsJson = JsonSerializer.Serialize(results, Json);
+        run.Status = "Completed";
+        run.TotalKinds = results.Count;
+        run.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<GenerationResult> RunGeneratorAsync(

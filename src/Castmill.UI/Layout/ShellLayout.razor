@@ -1,0 +1,104 @@
+@* The app frame for every signed-in surface. Also the auth guard: an unauthenticated
+   visitor is sent to sign-in with a returnUrl, so a deep link survives the detour
+   (ADR-F07). Phase F3 replaces the placeholder rail with the real WORKSPACE /
+   IN THIS CAMPAIGN navigation model (ADR-F11). *@
+@using Castmill.UI.Auth
+@using Castmill.UI.Design
+@implements IDisposable
+@inherits LayoutComponentBase
+@inject ThemeService Theme
+@inject AuthState Auth
+@inject NavigationManager Navigation
+
+@if (!Auth.IsReady)
+{
+    @* No indeterminate spinner (ADR-F13) — a narrated line saying what is happening. *@
+    <div class="cm-authframe">
+        <p class="cm-meta">Restoring your session…</p>
+    </div>
+}
+else if (!Auth.IsSignedIn)
+{
+    <div class="cm-authframe">
+        <p class="cm-meta">Redirecting to sign in…</p>
+    </div>
+}
+else
+{
+    <div class="cm-app" data-cm-rail-open="@(_railOpen ? "true" : "false")">
+        <div class="cm-app__rail">
+            <WorkspaceRail />
+        </div>
+
+        <div class="cm-app__content">
+            <header class="cm-topbar">
+                <button type="button" class="cm-topbar__rail-toggle cm-button cm-button--quiet"
+                        aria-label="Toggle navigation" @onclick="() => _railOpen = !_railOpen">
+                    &#9776;
+                </button>
+                <span class="cm-kicker">@PhaseLabel</span>
+                <div class="cm-topbar__spacer"></div>
+                <a class="cm-meta" href="dev/style-guide">Style guide</a>
+                <span class="cm-meta">@Auth.User?.Email</span>
+                <button type="button" class="cm-button cm-button--quiet" @onclick="SignOutAsync">
+                    Sign out
+                </button>
+            </header>
+
+            <main class="cm-app__main cm-region cm-pad">
+                @Body
+            </main>
+        </div>
+    </div>
+}
+
+<Omnibox />
+<NotificationHost />
+<ConfirmHost />
+
+@code {
+    private const string PhaseLabel = "the mill · F5–F7";
+
+    private bool _railOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Auth.Changed += OnAuthChanged;
+
+        // Restores the stored family/mode/density, or falls back to prefers-color-scheme on
+        // first run. The host page already applied the same values pre-paint, so this is a
+        // no-op visually — it exists so the service's state matches the DOM.
+        await Theme.InitializeAsync();
+
+        // Cold-start silent restore: exchanges a stored refresh token for a live session so
+        // a returning user is never shown the sign-in form unnecessarily.
+        await Auth.InitializeAsync();
+
+        RedirectIfSignedOut();
+    }
+
+    private void RedirectIfSignedOut()
+    {
+        if (!Auth.IsReady || Auth.IsSignedIn)
+        {
+            return;
+        }
+
+        var returnUrl = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var target = string.IsNullOrWhiteSpace(returnUrl) || returnUrl.StartsWith("sign-in", StringComparison.Ordinal)
+            ? "sign-in"
+            : $"sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}";
+
+        Navigation.NavigateTo(target, replace: true);
+    }
+
+    private async Task SignOutAsync()
+    {
+        await Auth.SignOutAsync();
+        Navigation.NavigateTo("sign-in", replace: true);
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.Changed -= OnAuthChanged;
+}

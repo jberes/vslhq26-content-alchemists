@@ -52,6 +52,11 @@ def report(job, status, error=None):
 
 
 def build_ffmpeg_cmd(job, source, captions, output):
+    if job.get("mode") == "frame":
+        # Reference-frame extraction (ADR-014): one still, no re-encode of anything
+        # else. -ss before -i keeps the seek fast on long sources.
+        return ["ffmpeg", "-y", "-ss", str(job["inSeconds"]), "-i", source, "-frames:v", "1", output]
+
     duration = job["outSeconds"] - job["inSeconds"]
     cmd = ["ffmpeg", "-y", "-ss", str(job["inSeconds"]), "-t", str(duration), "-i", source]
     filters = []
@@ -82,9 +87,10 @@ def main():
     job = json.loads(message.content)
     report(job, "Processing")
     try:
+        is_frame = job.get("mode") == "frame"
         with tempfile.TemporaryDirectory() as tmp:
             source = os.path.join(tmp, "source")
-            output = os.path.join(tmp, "clip.mp4")
+            output = os.path.join(tmp, "frame.png" if is_frame else "clip.mp4")
             captions = None
 
             blob = blob_service.get_blob_client(container, job["sourceBlobPath"])
@@ -100,7 +106,9 @@ def main():
 
             out_blob = blob_service.get_blob_client(container, job["outputBlobPath"])
             with open(output, "rb") as f:
-                out_blob.upload_blob(f, overwrite=True, content_type="video/mp4")
+                out_blob.upload_blob(
+                    f, overwrite=True, content_type="image/png" if is_frame else "video/mp4"
+                )
 
         report(job, "Succeeded")
         queue.delete_message(message)

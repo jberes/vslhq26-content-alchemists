@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Castmill</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <!-- All page styling comes from the RCL. This shell contributes only the boot chrome. -->
+    <link rel="stylesheet" href="_content/Castmill.UI/css/castmill.css" />
+    <link rel="stylesheet" href="css/host.css" />
+    <!-- SVG first so the tab icon stays crisp at any density; the PNGs are the fallback
+         and are generated from the same RCL source (src/Castmill.UI/wwwroot/favicon.svg). -->
+    <link rel="icon" type="image/svg+xml" href="_content/Castmill.UI/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <!-- Scoped-CSS bundle. Blazor only emits it once some .razor.css exists anywhere in
+         the graph, and none does yet, so linking it now would 404 on every load. Restore
+         this line with the first component-scoped stylesheet in Phase F1.
+    <link href="Castmill.Web.styles.css" rel="stylesheet" /> -->
+    <script type="importmap"></script>
+    <script>
+        // Applies the stored theme BEFORE first paint so a dark-mode user never sees a
+        // light flash on load (E3.5: "switch is instant with no flash"). ThemeService
+        // takes over once Blazor is running and is the only writer thereafter; the keys
+        // must match Castmill.UI/Design/ThemeService.cs.
+        (function () {
+            try {
+                var g = function (k, d) { return localStorage.getItem('castmill:cm.theme.' + k) || d; };
+                var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var r = document.documentElement;
+                r.setAttribute('data-cm-family', g('family') === 'IndustryBlueprint' ? 'industry-blueprint' : 'warm-editorial');
+                r.setAttribute('data-cm-mode', (g('mode') || (dark ? 'Dark' : 'Light')) === 'Dark' ? 'dark' : 'light');
+                r.setAttribute('data-cm-density', g('density') === 'Compact' ? 'compact' : 'comfortable');
+            } catch (e) { /* storage unavailable — the CSS default stands */ }
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="cm-boot">Loading Castmill…</div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+
+</html>

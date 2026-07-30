@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Castmill</title>
+    <base href="/" />
+    <!-- Same RCL stylesheet the web shell loads — this is what makes the page identical. -->
+    <link rel="stylesheet" href="_content/Castmill.UI/css/castmill.css" />
+    <link rel="stylesheet" href="css/host.css" />
+    <!-- Scoped-CSS bundle: see the note in Castmill.Web/wwwroot/index.html. Restore with
+         the first component-scoped stylesheet in Phase F1.
+    <link rel="stylesheet" href="Castmill.Desktop.styles.css" /> -->
+    <link rel="icon" type="image/svg+xml" href="_content/Castmill.UI/favicon.svg" />
+    <script>
+        // Pre-paint theme application — see the twin block in Castmill.Web/wwwroot/index.html.
+        (function () {
+            try {
+                var g = function (k, d) { return localStorage.getItem('castmill:cm.theme.' + k) || d; };
+                var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                var r = document.documentElement;
+                r.setAttribute('data-cm-family', g('family') === 'IndustryBlueprint' ? 'industry-blueprint' : 'warm-editorial');
+                r.setAttribute('data-cm-mode', (g('mode') || (dark ? 'Dark' : 'Light')) === 'Dark' ? 'dark' : 'light');
+                r.setAttribute('data-cm-density', g('density') === 'Compact' ? 'compact' : 'comfortable');
+            } catch (e) { /* storage unavailable — the CSS default stands */ }
+        })();
+    </script>
+</head>
+
+<body>
+
+    <div id="app">
+        <div class="cm-boot">Loading Castmill…</div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+
+    <script>
+        // Ignite UI's Blazor JS initializer cache-busts its bundle with a query string.
+        // BlazorWebView serves static assets over a virtual scheme where that query is
+        // not honoured, so the bundle must be requested by its plain path instead.
+        window.__igSkipCacheBust = true;
+    </script>
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+
+</body>
+
+</html>

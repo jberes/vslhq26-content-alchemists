@@ -19,6 +19,11 @@ public sealed record ClipJobCreateRequest(
     bool BurnCaptions,
     [property: MaxLength(200_000)] string? CaptionsSrt);
 
+public sealed record FrameJobCreateRequest(
+    [property: Required] Guid AssetId,
+    /// <summary>Timestamp to extract, in seconds from the start of the source.</summary>
+    [property: Range(0, 86_400)] double AtSeconds);
+
 public sealed record ClipJobCallbackRequest(
     [property: Required] string Token,
     [property: Required] string Status,
@@ -36,6 +41,9 @@ public static class MediaEndpoints
         var group = routes.MapGroup("/api/v1/media").RequireAuthorization("TenantAllowed");
         group.MapPost("/clip-jobs", EnqueueAsync).Validate<ClipJobCreateRequest>().RequireRateLimiting("writes");
         group.MapGet("/clip-jobs/{id:guid}", StatusAsync);
+        // B9.4: reference frames ride the same queue + worker + status endpoint —
+        // one ffmpeg path, not two (ADR-014).
+        group.MapPost("/frames", ExtractFrameAsync).Validate<FrameJobCreateRequest>().RequireRateLimiting("writes");
 
         // Worker callback: anonymous route, authenticated by the per-job token
         // (hash-stored, single job scope) — the worker has no user identity.
@@ -81,6 +89,7 @@ public static class MediaEndpoints
             Id = jobId,
             TenantId = tenant.TenantId!.Value,
             AssetId = asset.Id,
+            Mode = "clip",
             InSeconds = request.InSeconds,
             OutSeconds = request.OutSeconds,
             CropVertical = request.CropVertical,
@@ -96,13 +105,74 @@ public static class MediaEndpoints
         await db.SaveChangesAsync(ct);
 
         await queue.EnqueueAsync(new ClipJobMessage(
-            jobId, asset.BlobPath, outputPath,
+            jobId, "clip", asset.BlobPath, outputPath,
             request.InSeconds, request.OutSeconds, request.CropVertical, request.BurnCaptions, request.CaptionsSrt,
             callbackToken,
-            $"{http.Request.Scheme}://{http.Request.Host}/api/v1/media/clip-jobs/{jobId}/callback"), ct);
+            CallbackUrl(http, jobId)), ct);
 
         return Results.Accepted($"/api/v1/media/clip-jobs/{jobId}", new { jobId, status = job.Status });
     }
+
+    /// <summary>
+    /// B9.4 — extracts one still for image-to-image reference edits. Async by
+    /// design: it is the same ffmpeg job path, so API instances stay off the
+    /// transcode (ADR-008/014). Poll GET /clip-jobs/{id} for the SAS download URL.
+    /// </summary>
+    private static async Task<IResult> ExtractFrameAsync(
+        FrameJobCreateRequest request,
+        HttpContext http,
+        IClipJobDispatcher queue,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (!queue.IsConfigured)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "Storage is not configured for the clip-job queue.");
+        }
+        var asset = await db.Assets.SingleOrDefaultAsync(a => a.Id == request.AssetId, ct);
+        if (asset is null)
+        {
+            return Results.NotFound();
+        }
+
+        var now = clock.GetUtcNow();
+        var jobId = Guid.NewGuid();
+        var callbackToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var outputPath = $"tenants/{asset.TenantId}/frames/{jobId}.png";
+
+        var job = new ClipJob
+        {
+            Id = jobId,
+            TenantId = tenant.TenantId!.Value,
+            AssetId = asset.Id,
+            Mode = "frame",
+            InSeconds = request.AtSeconds,
+            OutSeconds = request.AtSeconds,
+            CropVertical = false,
+            BurnCaptions = false,
+            Status = "Queued",
+            OutputBlobPath = outputPath,
+            CallbackTokenHash = Hash(callbackToken),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.ClipJobs.Add(job);
+        await db.SaveChangesAsync(ct);
+
+        await queue.EnqueueAsync(new ClipJobMessage(
+            jobId, "frame", asset.BlobPath, outputPath,
+            request.AtSeconds, request.AtSeconds, false, false, null,
+            callbackToken,
+            CallbackUrl(http, jobId)), ct);
+
+        return Results.Accepted($"/api/v1/media/clip-jobs/{jobId}", new { jobId, mode = job.Mode, status = job.Status });
+    }
+
+    private static string CallbackUrl(HttpContext http, Guid jobId) =>
+        $"{http.Request.Scheme}://{http.Request.Host}/api/v1/media/clip-jobs/{jobId}/callback";
 
     private static async Task<IResult> StatusAsync(
         Guid id, IBlobSasService sas, CastmillDbContext db, CancellationToken ct)

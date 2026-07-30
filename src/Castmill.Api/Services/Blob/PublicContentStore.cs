@@ -14,6 +14,13 @@ public interface IPublicContentStore
     /// snapshots — content that is public by design once the user publishes.
     /// </summary>
     Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct);
+
+    /// <summary>
+    /// Reads published bytes back. Used by the headline compositor, which must
+    /// re-composite from the stored base image — going out over the public URL
+    /// would make an internal operation depend on internet egress.
+    /// </summary>
+    Task<byte[]?> ReadAsync(string path, CancellationToken ct);
 }
 
 public sealed class PublicContentStore : IPublicContentStore
@@ -63,5 +70,20 @@ public sealed class PublicContentStore : IPublicContentStore
             },
         }, ct);
         return blob.Uri;
+    }
+
+    public async Task<byte[]?> ReadAsync(string path, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        var blob = _client.GetBlobContainerClient(_options.PublicContainer).GetBlobClient(path);
+        if (!await blob.ExistsAsync(ct))
+        {
+            return null;
+        }
+        var download = await blob.DownloadContentAsync(ct);
+        return download.Value.Content.ToArray();
     }
 }

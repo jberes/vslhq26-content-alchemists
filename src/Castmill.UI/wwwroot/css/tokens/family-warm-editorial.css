@@ -1,0 +1,110 @@
+/* Family A — Warm Editorial (default family, ADR-F09).
+ *
+ * Warm, editorial, book-like. Values are the brand sheet in Roadmap-Blazor.md §1.2.
+ *
+ * This file defines ONLY raw family variables (--cmf-*). Feature CSS may never reference
+ * them; it binds to the semantic layer in semantic.css, which is what makes a third family
+ * a new file rather than a refactor. Selectors carry both attributes so neither family
+ * leaks into the other when only one attribute has been set yet.
+ */
+
+/* The bare `:root` here is the pre-JS default: it means the semantic layer always
+   resolves, even in the instant before ThemeService sets the attributes. Warm Editorial
+   light is the documented default family (ADR-F09), so the default costs no duplication. */
+:root,
+:root[data-cm-family="warm-editorial"],
+:root[data-cm-family="warm-editorial"][data-cm-mode="light"] {
+    color-scheme: light;
+
+    --cmf-surface: #f5f0e8;          /* warm ivory paper */
+    --cmf-surface-raised: #fbf8f2;   /* cards, docks */
+    --cmf-surface-sunken: #ebe4d8;   /* wells, the board behind cards */
+    --cmf-surface-inverse: #26221e;
+
+    --cmf-on-surface: #1a1815;       /* ink — never pure black */
+    --cmf-on-surface-muted: #6b5a3c; /* brass, darkened to clear AA on paper */
+    --cmf-on-surface-subtle: #6f6656;
+    --cmf-on-inverse: #ede7dd;
+
+    --cmf-accent: #c15f3c;           /* terracotta ember */
+    --cmf-accent-strong: #9e4526;    /* carries on-accent text */
+    --cmf-accent-hover: #a94f30;
+    --cmf-accent-wash: rgb(193 95 60 / 0.12);
+    --cmf-on-accent: #fbf8f2;
+
+    --cmf-rule: #ddd3c2;             /* hairline, like a print column rule */
+    --cmf-rule-strong: #c3b59c;
+
+    --cmf-success: #4c5f43;
+    --cmf-warning: #7e5f1e;
+    --cmf-danger: #9c3b2c;
+
+    --cmf-status-draft: #b0a48c;
+    --cmf-status-review: #c15f3c;
+    --cmf-status-queued: #8a7248;
+    --cmf-status-published: #5f7355;
+
+    --cmf-radius-sm: 4px;
+    --cmf-radius-md: 5px;
+    --cmf-radius-lg: 7px;
+
+    --cmf-shadow-sm: 0 1px 2px rgb(26 24 21 / 0.10);
+    --cmf-shadow-md: 0 3px 10px rgb(26 24 21 / 0.12);
+    --cmf-shadow-lg: 0 12px 32px rgb(26 24 21 / 0.18);
+
+    --cmf-font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --cmf-font-body: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --cmf-font-display-weight: 600;
+
+    /* Paper grain, 2–3% (§1.2). A tiny SVG turbulence tile rather than a raster asset:
+       it costs nothing to ship and scales with density. The Blueprint family sets none. */
+    --cmf-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23g)' opacity='0.55'/%3E%3C/svg%3E");
+    --cmf-texture-opacity: 0.025;
+}
+
+:root[data-cm-family="warm-editorial"][data-cm-mode="dark"] {
+    color-scheme: dark;
+
+    --cmf-surface: #1e1b18;          /* warm charcoal */
+    --cmf-surface-raised: #26221e;
+    --cmf-surface-sunken: #171512;
+    --cmf-surface-inverse: #ede7dd;
+
+    --cmf-on-surface: #ede7dd;
+    --cmf-on-surface-muted: #b39c74;
+    --cmf-on-surface-subtle: #a1927a;
+    --cmf-on-inverse: #1a1815;
+
+    --cmf-accent: #d97757;           /* lifted terracotta */
+    --cmf-accent-strong: #e58e70;
+    --cmf-accent-hover: #e58e70;
+    --cmf-accent-wash: rgb(217 119 87 / 0.16);
+    --cmf-on-accent: #1a1815;
+
+    --cmf-rule: #3a342e;
+    --cmf-rule-strong: #544c42;
+
+    --cmf-success: #8fa682;
+    --cmf-warning: #d2a24a;
+    --cmf-danger: #e0806f;
+
+    --cmf-status-draft: #6b6252;
+    --cmf-status-review: #d97757;
+    --cmf-status-queued: #a98e63;
+    --cmf-status-published: #7e9471;
+
+    --cmf-radius-sm: 4px;
+    --cmf-radius-md: 5px;
+    --cmf-radius-lg: 7px;
+
+    --cmf-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.30);
+    --cmf-shadow-md: 0 3px 10px rgb(0 0 0 / 0.38);
+    --cmf-shadow-lg: 0 12px 32px rgb(0 0 0 / 0.48);
+
+    --cmf-font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --cmf-font-body: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --cmf-font-display-weight: 600;
+
+    --cmf-texture: none;
+    --cmf-texture-opacity: 0;
+}

@@ -8,6 +8,11 @@ Target stack (from the product roadmap, unchanged by this design):
 - Shells: .NET MAUI Blazor Hybrid (desktop) + Blazor WebAssembly (web)
 - ASP.NET Core Minimal APIs, Azure SQL, Blob Storage; AI server-side on Azure AI Foundry
 
+> **Implementation deltas (recorded 2026-07-28).** Two questions this handoff leaves open have been decided in the architecture docs, and one convention is deliberately not being implemented:
+> - **Both token sheets ship**, not one — *Warm Editorial* (the roadmap brand sheet) and *Industry Blueprint* (the sheet used here), each light + dark, with a runtime switcher over a shared semantic token layer. See [Frontend-Architecture.md](../../Frontend-Architecture.md) ADR-F09 and [Roadmap-Blazor.md](../../Roadmap-Blazor.md) §1.2.
+> - **Layout is fluid, not 1440 × 880.** The fixed canvas is treated as a drawing convention; pixel values below are read as ratios. Breakpoints, rail collapse and per-region scrolling are specified in ADR-F10 / roadmap E3.6.
+> - Everything else here — navigation scopes, the ten screens, provenance behaviour, the no-spinner rule, the Image Studio, and all five scope additions at the bottom of this file — has been folded into the backlogs (frontend F1/F3/F5/F8/F9/F10, backend phase B9, roadmap E3.5–E3.6, E4.8–4.10, E6.10–6.14, E8.4, E11).
+
 ## About the design files
 The files in this bundle are **design references written in HTML/CSS/JS** — prototypes of intended look and behavior. They are **not** production code and should not be ported line by line. The task is to **recreate these designs in `Castmill.UI` as Razor components**, using Ignite UI for Blazor where the usage map below says so, and custom Razor + CSS for the differentiated chrome (canvas, campaign header, Focus Mode, Wire, Press Run).
 

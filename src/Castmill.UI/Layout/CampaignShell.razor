@@ -1,0 +1,66 @@
+@* Wraps the four campaign views: loads the campaign into CampaignState, renders the header,
+   then the view's own content.
+
+   This component is the answer to the prototype's most common bug ("header changed, content
+   didn't"). Both the header AND the body read from CampaignState, and the load is keyed on
+   the route parameter, so a campaign switch cannot update one without the other.
+   CampaignSwitchTests holds that. *@
+@using Castmill.UI.Design
+@using Castmill.UI.State
+@implements IDisposable
+@inject CampaignState Campaign
+@inject WorkspaceState Workspace
+
+<CampaignHeader Current="View" />
+
+@if (Campaign.LoadError is { } error)
+{
+    <div class="cm-pad">
+        <EmptyState Kicker="Campaign"
+                    Headline="This campaign couldn't be loaded."
+                    Detail="@error" />
+    </div>
+}
+else if (Campaign.IsLoading)
+{
+    @* Narrated, not a spinner (ADR-F13). *@
+    <div class="cm-pad">
+        <p class="cm-meta">Loading campaign…</p>
+    </div>
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid CampaignId { get; set; }
+
+    [Parameter, EditorRequired] public CampaignView View { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+
+    /// <summary>
+    /// Runs on every parameter change, which is what makes a campaign switch reload rather
+    /// than only re-render. OnInitializedAsync would fire once and leave the body stale.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        await Workspace.LoadAsync();
+
+        // Keep the rail's active-campaign card in step with the route, so a deep link or a
+        // browser Back lands with the rail showing the right campaign.
+        if (Workspace.Active?.Id != CampaignId)
+        {
+            Workspace.SetActive(CampaignId);
+        }
+
+        await Campaign.LoadAsync(CampaignId);
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Campaign.Changed -= OnChanged;
+}

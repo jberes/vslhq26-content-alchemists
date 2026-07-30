@@ -1,0 +1,107 @@
+/* Family B — Industry Blueprint (from the Mill Floor design handoff).
+ *
+ * Technical, drafting-table: square corners, hairline frames, duotone media plates.
+ * Values are the handoff's Industry token sheet (Roadmap §1.2, handoff README §"Design tokens").
+ *
+ * Note on radius: the prototype's own _ds/styles.css ships radius 2/4/7px, but §1.2 and
+ * ADR-F09 specify **radius 0** for this family and the handoff's frames are square. The
+ * roadmap is authoritative, so 0 it is (recorded in ADR-F18).
+ *
+ * Raw family variables only (--cmf-*). See family-warm-editorial.css for the rules.
+ */
+
+:root[data-cm-family="industry-blueprint"],
+:root[data-cm-family="industry-blueprint"][data-cm-mode="light"] {
+    color-scheme: light;
+
+    --cmf-surface: #f2f2f3;
+    --cmf-surface-raised: #e9e9ea;
+    --cmf-surface-sunken: #e7e7ea;
+    --cmf-surface-inverse: #1d2d3d;   /* the handoff's toast panel */
+
+    --cmf-on-surface: #1d1f20;
+    --cmf-on-surface-muted: #5d5d60;  /* neutral-700; 600 fails AA on this surface */
+    --cmf-on-surface-subtle: #6c6c6f;
+    --cmf-on-inverse: #f2f2f3;
+
+    --cmf-accent: #5980a6;            /* steel blue */
+    --cmf-accent-strong: #416180;     /* accent-700, carries on-accent text */
+    --cmf-accent-hover: #4a6f92;
+    --cmf-accent-wash: rgb(89 128 166 / 0.16);
+    --cmf-on-accent: #f2f2f3;
+
+    --cmf-rule: rgb(29 31 32 / 0.16);
+    --cmf-rule-strong: rgb(29 31 32 / 0.32);
+
+    --cmf-success: #2f6b41;
+    --cmf-warning: #7a5a12;
+    --cmf-danger: #a32a2a;
+
+    --cmf-status-draft: #b7b7ba;
+    --cmf-status-review: #94bce3;
+    --cmf-status-queued: #416180;
+    --cmf-status-published: #1d2d3d;
+
+    --cmf-radius-sm: 0;
+    --cmf-radius-md: 0;
+    --cmf-radius-lg: 0;
+
+    --cmf-shadow-sm: 0 1px 2px rgb(43 43 45 / 0.14);
+    --cmf-shadow-md: 0 3px 10px rgb(43 43 45 / 0.16);
+    --cmf-shadow-lg: 0 12px 32px rgb(43 43 45 / 0.22);
+
+    --cmf-font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+    --cmf-font-body: Barlow, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --cmf-font-display-weight: 600;
+
+    --cmf-texture: none;
+    --cmf-texture-opacity: 0;
+}
+
+:root[data-cm-family="industry-blueprint"][data-cm-mode="dark"] {
+    color-scheme: dark;
+
+    /* "dark mode inverts to the 900/800 neutrals" (§1.2) */
+    --cmf-surface: #1d1f20;
+    --cmf-surface-raised: #2b2b2d;
+    --cmf-surface-sunken: #171819;
+    --cmf-surface-inverse: #e9e9ea;
+
+    --cmf-on-surface: #f2f2f3;
+    --cmf-on-surface-muted: #b7b7ba;
+    --cmf-on-surface-subtle: #98989b;
+    --cmf-on-inverse: #1d1f20;
+
+    --cmf-accent: #94bce3;            /* accent-400 lifts for dark surfaces */
+    --cmf-accent-strong: #b5d9fd;
+    --cmf-accent-hover: #b5d9fd;
+    --cmf-accent-wash: rgb(148 188 227 / 0.18);
+    --cmf-on-accent: #14202b;
+
+    --cmf-rule: rgb(242 242 243 / 0.16);
+    --cmf-rule-strong: rgb(242 242 243 / 0.32);
+
+    --cmf-success: #7fc492;
+    --cmf-warning: #e0b354;
+    --cmf-danger: #f08a8a;
+
+    --cmf-status-draft: #7a7a7d;
+    --cmf-status-review: #597ea3;
+    --cmf-status-published: #d6ebff;
+    --cmf-status-queued: #94bce3;
+
+    --cmf-radius-sm: 0;
+    --cmf-radius-md: 0;
+    --cmf-radius-lg: 0;
+
+    --cmf-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.34);
+    --cmf-shadow-md: 0 3px 10px rgb(0 0 0 / 0.42);
+    --cmf-shadow-lg: 0 12px 32px rgb(0 0 0 / 0.52);
+
+    --cmf-font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+    --cmf-font-body: Barlow, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --cmf-font-display-weight: 600;
+
+    --cmf-texture: none;
+    --cmf-texture-opacity: 0;
+}

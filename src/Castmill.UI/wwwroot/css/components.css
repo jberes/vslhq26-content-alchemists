@@ -1,0 +1,450 @@
+/* Shared chrome built in-house rather than from Ignite UI, because these are the pieces
+ * the design treats as its own voice: buttons, the segmented control, toasts, the modal,
+ * empty states. Semantic tokens only — no family names, no literals. */
+
+/* ---- Buttons ------------------------------------------------------------------- */
+
+.cm-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-4);
+    border: 1px solid transparent;
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-accent-strong);
+    color: var(--cm-on-accent);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-body);
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background var(--cm-motion), border-color var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-button:hover {
+    background: var(--cm-accent-hover);
+}
+
+.cm-button--quiet {
+    background: transparent;
+    border-color: var(--cm-rule-strong);
+    color: var(--cm-on-surface);
+}
+
+.cm-button--quiet:hover {
+    background: var(--cm-accent-wash);
+    border-color: var(--cm-accent);
+    color: var(--cm-on-surface);
+}
+
+.cm-button--danger {
+    background: var(--cm-danger);
+    color: var(--cm-on-accent);
+}
+
+.cm-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---- Segmented control --------------------------------------------------------- */
+
+.cm-segmented {
+    display: inline-flex;
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-md);
+    overflow: hidden;
+}
+
+.cm-segmented__option {
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 0;
+    border-inline-start: 1px solid var(--cm-rule);
+    background: transparent;
+    color: var(--cm-on-surface-muted);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-meta);
+    cursor: pointer;
+    transition: background var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-segmented__option:first-child {
+    border-inline-start: 0;
+}
+
+.cm-segmented__option:hover {
+    background: var(--cm-accent-wash);
+    color: var(--cm-on-surface);
+}
+
+/* Selected state is aria-pressed, not a class — the attribute is the source of truth so
+   the control cannot look selected while reading as unselected to a screen reader. */
+.cm-segmented__option[aria-pressed="true"] {
+    background: var(--cm-accent-strong);
+    color: var(--cm-on-accent);
+}
+
+/* ---- Theme switcher ------------------------------------------------------------ */
+
+.cm-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-6);
+    align-items: flex-end;
+}
+
+.cm-switcher__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+/* ---- Toasts -------------------------------------------------------------------- */
+
+.cm-toasts {
+    position: fixed;
+    inset-block-end: var(--cm-space-6);
+    inset-inline-end: var(--cm-space-6);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    pointer-events: none;
+}
+
+.cm-toast {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    max-inline-size: 44ch;
+    padding: var(--cm-space-2) var(--cm-space-4);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-inverse);
+    color: var(--cm-on-inverse);
+    box-shadow: var(--cm-shadow-md);
+    font-size: var(--cm-text-meta);
+    pointer-events: auto;
+    animation: cm-toast-in var(--cm-motion);
+}
+
+/* Severity is carried by a leading bar as well as by hue (ADR-F12's rule, applied to
+   feedback too): colour alone must never be the signal. */
+.cm-toast::before {
+    content: "";
+    inline-size: var(--cm-status-bar-width);
+    align-self: stretch;
+    border-radius: 1px;
+    background: currentcolor;
+}
+
+.cm-toast--success::before { background: var(--cm-success); }
+.cm-toast--warning::before { background: var(--cm-warning); }
+.cm-toast--error::before { background: var(--cm-danger); }
+
+.cm-toast__message {
+    flex: 1 1 auto;
+}
+
+.cm-toast__dismiss {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: var(--cm-text-meta);
+    line-height: 1;
+}
+
+@keyframes cm-toast-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* ---- Modal / confirm ----------------------------------------------------------- */
+
+.cm-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: grid;
+    place-items: center;
+    padding: var(--cm-space-6);
+    background: rgb(0 0 0 / 0.44);
+}
+
+.cm-modal__panel {
+    inline-size: min(48ch, 100%);
+    padding: var(--cm-space-6);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-lg);
+    background: var(--cm-surface-raised);
+    box-shadow: var(--cm-shadow-lg);
+}
+
+.cm-modal__title {
+    margin-block-end: var(--cm-space-2);
+    font-size: var(--cm-text-h4);
+}
+
+.cm-modal__message {
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-modal__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--cm-space-2);
+}
+
+/* ---- Empty state --------------------------------------------------------------- */
+
+.cm-empty {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-8);
+    border: 1px dashed var(--cm-rule-strong);
+    border-radius: var(--cm-radius-md);
+    text-align: start;
+}
+
+.cm-empty__headline {
+    margin: 0;
+    font-family: var(--cm-font-display);
+    font-weight: var(--cm-font-display-weight);
+    font-size: var(--cm-text-h4);
+}
+
+.cm-empty__detail {
+    margin: 0;
+    color: var(--cm-on-surface-muted);
+    max-inline-size: 56ch;
+}
+
+.cm-empty__action {
+    margin-block-start: var(--cm-space-2);
+}
+
+/* ---- Status ------------------------------------------------------------------- */
+
+/* The double encoding from ADR-F12: a 3 px bar AND the status colour. Any surface showing
+   artifact state uses this, so no surface invents its own. */
+.cm-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-status::before {
+    content: "";
+    inline-size: var(--cm-status-bar-width);
+    block-size: 1em;
+    background: var(--cm-status-draft);
+}
+
+.cm-status--review::before { background: var(--cm-status-review); }
+.cm-status--queued::before { background: var(--cm-status-queued); }
+.cm-status--published::before { background: var(--cm-status-published); }
+
+/* ---- Shell chrome (F1 placeholder; F3 replaces the rail) ----------------------- */
+
+.cm-rail__head {
+    padding: var(--cm-space-4);
+    border-block-end: 1px solid var(--cm-rule);
+    font-size: var(--cm-text-h4);
+}
+
+.cm-rail__note {
+    padding: var(--cm-space-4);
+}
+
+.cm-topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-4);
+    padding: var(--cm-space-3) clamp(var(--cm-space-4), 3vw, var(--cm-space-12));
+    border-block-end: 1px solid var(--cm-rule);
+    background: var(--cm-surface);
+}
+
+.cm-topbar__spacer {
+    flex: 1 1 auto;
+}
+
+/* The rail toggle only exists below the sm breakpoint, where the rail is an overlay. */
+.cm-topbar__rail-toggle {
+    display: none;
+}
+
+@media (max-width: 899.98px) {
+    .cm-topbar__rail-toggle {
+        display: inline-flex;
+    }
+}
+
+.cm-app__main {
+    position: relative;
+    z-index: 1;
+}
+
+/* ---- Style guide (dev-only surface) -------------------------------------------- */
+
+.cm-guide__head,
+.cm-guide__section {
+    padding-block: var(--cm-space-8);
+    border-block-end: 1px solid var(--cm-rule);
+}
+
+.cm-guide__section:last-child {
+    border-block-end: 0;
+}
+
+.cm-guide__section > h2 {
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-guide__lede {
+    max-inline-size: 62ch;
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-guide__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-4);
+    align-items: center;
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: var(--cm-space-4);
+}
+
+.cm-swatch {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+.cm-swatch__chip {
+    block-size: 56px;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-swatch figcaption {
+    display: flex;
+    flex-direction: column;
+}
+
+.cm-type-specimens > p {
+    margin-block: 0 var(--cm-space-4);
+}
+
+.cm-type-specimens .cm-mono {
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-guide__scale {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-guide__scale-item {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+}
+
+.cm-guide__scale-bar {
+    block-size: 10px;
+    background: var(--cm-accent);
+}
+
+/* ---- Auth frame & forms -------------------------------------------------------- */
+
+.cm-authframe {
+    display: grid;
+    place-items: center;
+    min-block-size: 100dvh;
+    padding: var(--cm-space-6);
+}
+
+.cm-authframe__panel {
+    inline-size: min(42ch, 100%);
+}
+
+.cm-auth > h1 {
+    margin-block: var(--cm-space-1) var(--cm-space-6);
+}
+
+.cm-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-4);
+}
+
+.cm-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+.cm-field__label {
+    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-field__hint {
+    margin-block-start: var(--cm-space-1);
+}
+
+.cm-field__error {
+    font-size: var(--cm-text-meta);
+    color: var(--cm-danger);
+}
+
+.cm-input {
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-body);
+    transition: border-color var(--cm-motion);
+}
+
+.cm-input:focus {
+    border-color: var(--cm-accent);
+}
+
+.cm-input:disabled {
+    opacity: 0.6;
+}
+
+/* Blazor's own validation classes, mapped onto our tokens. */
+.cm-input.invalid {
+    border-color: var(--cm-danger);
+}
+
+.cm-form__error {
+    margin: 0;
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-inline-start: var(--cm-status-bar-width) solid var(--cm-danger);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font-size: var(--cm-text-meta);
+}
+
+.cm-form__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-4);
+}

@@ -1,0 +1,124 @@
+@* Campaigns index: the card grid the rail links to past its listing limit (handoff §2).
+
+   The design's card carries a duotone media band and a kicker like "Webinar · 58:12". Source
+   media is not modelled on the campaign server-side yet, so the band is a placeholder
+   treatment and the kicker reports what we actually know — artifact and image counts —
+   rather than inventing a duration. *@
+@page "/campaigns"
+@using Castmill.Core
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@implements IDisposable
+@inject WorkspaceState Workspace
+@inject CampaignsClient Campaigns
+@inject NavigationManager Navigation
+
+<PageTitle>Campaigns — Castmill</PageTitle>
+
+<div class="cm-measure--dashboard">
+    <header class="cm-front__head">
+        <span class="cm-kicker">Workspace</span>
+        <h1>Campaigns</h1>
+    </header>
+
+    @if (!Workspace.IsLoaded)
+    {
+        <p class="cm-meta">Loading campaigns…</p>
+    }
+    else if (Workspace.Campaigns.Count == 0)
+    {
+        <EmptyState Kicker="Campaigns"
+                    Headline="No campaigns yet."
+                    Detail="Every campaign starts from one source asset and fans out from there.">
+            <Action>
+                <a class="cm-button" href="campaigns/new">Start a run</a>
+            </Action>
+        </EmptyState>
+    }
+    else
+    {
+        <ul class="cm-campaign-grid">
+            @foreach (var campaign in Workspace.Campaigns.OrderByDescending(c => c.UpdatedAt))
+            {
+                var summary = _summaries.GetValueOrDefault(campaign.Id);
+                <li>
+                    <button type="button" class="cm-campaign-card" @onclick="() => Open(campaign)">
+                        @* Duotone placeholder band — the design's treatment, with no real
+                           media to show yet. *@
+                        <span class="cm-campaign-card__band cm-duotone" aria-hidden="true"></span>
+                        <span class="cm-campaign-card__body">
+                            <span class="cm-kicker">
+                                @(summary is null ? "Campaign" : $"{summary.Artifacts} artifacts · {summary.Filled}/{summary.Slots} images")
+                            </span>
+                            <span class="cm-campaign-card__title">@campaign.Name</span>
+                            <span class="cm-meta">
+                                Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)
+                            </span>
+                            @if (summary is not null && summary.Review > 0)
+                            {
+                                <span class="cm-status cm-status--review">@summary.Review in review</span>
+                            }
+                        </span>
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private sealed record Summary(int Artifacts, int Review, int Filled, int Slots);
+
+    private readonly Dictionary<Guid, Summary> _summaries = [];
+
+    protected override void OnInitialized() => Workspace.Changed += OnChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Workspace.LoadAsync();
+        await LoadSummariesAsync();
+    }
+
+    private async Task LoadSummariesAsync()
+    {
+        var results = await Task.WhenAll(Workspace.Campaigns.Select(async c =>
+        {
+            try
+            {
+                var preview = await Campaigns.GetPreviewAsync(c.Id);
+                return (c.Id, Summary: new Summary(
+                    preview.Artifacts.Count,
+                    preview.Artifacts.Count(a => a.Status == ArtifactStatus.InReview),
+                    preview.ImagesFilled,
+                    preview.ImagesTotal));
+            }
+            catch (ApiException)
+            {
+                return (c.Id, Summary: (Summary?)null);
+            }
+            catch (HttpRequestException)
+            {
+                return (c.Id, Summary: (Summary?)null);
+            }
+        }));
+
+        foreach (var (id, summary) in results.Where(r => r.Summary is not null))
+        {
+            _summaries[id] = summary!;
+        }
+
+        StateHasChanged();
+    }
+
+    private void Open(CampaignResponse campaign)
+    {
+        Workspace.SetActive(campaign.Id);
+        Navigation.NavigateTo(CampaignViews.PathFor(campaign.Id, CampaignView.MillFloor));
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Workspace.Changed -= OnChanged;
+}

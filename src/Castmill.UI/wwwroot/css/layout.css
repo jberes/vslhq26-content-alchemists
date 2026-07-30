@@ -1,0 +1,145 @@
+/* The responsive layout system (ADR-F10, roadmap E3.6, goal G8).
+ *
+ * There is no fixed page canvas. The handoff's 1440 x 880 is a drawing convention and its
+ * pixel values are read as ratios; only the provenance overlay measures pixels at runtime.
+ *
+ * Breakpoints (also exposed as tokens below so Blazor and tests can agree on them):
+ *   sm  900   rail becomes an overlay
+ *   md 1180   rail becomes icons-only
+ *   lg 1440   the handoff's drawing width
+ *   xl 1920   wide desks
+ *
+ * CSS cannot use custom properties inside media queries, so the numbers are repeated in
+ * the @media rules below. If you change one, change both — ResponsiveLayoutTests checks
+ * that the tokens and the media queries still agree.
+ */
+
+:root {
+    --cm-bp-sm: 900px;
+    --cm-bp-md: 1180px;
+    --cm-bp-lg: 1440px;
+    --cm-bp-xl: 1920px;
+
+    --cm-rail-width: 216px;      /* the handoff's rail */
+    --cm-rail-width-icons: 56px;
+    --cm-content-max: 1600px;    /* dashboards cap and centre */
+    --cm-measure: 72ch;          /* manuscript column */
+}
+
+/* ---- App frame ----------------------------------------------------------------- */
+
+.cm-app {
+    display: grid;
+    grid-template-columns: var(--cm-rail-width) minmax(0, 1fr);
+    grid-template-rows: 100dvh;
+    /* min-inline-size 0 on the content track is what actually prevents page-level
+       horizontal scroll: without it a wide child (the swimlane board, a keyword table)
+       sets the track's intrinsic width and the whole page scrolls sideways. */
+}
+
+.cm-app__rail {
+    position: relative;
+    z-index: 2;
+    min-inline-size: 0;
+    overflow: hidden auto;
+    border-inline-end: 1px solid var(--cm-rule);
+    background: var(--cm-surface);
+    transition: inline-size var(--cm-motion);
+}
+
+.cm-app__content {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-inline-size: 0;   /* see above */
+    overflow: hidden;
+}
+
+/* ---- Scroll containment -------------------------------------------------------- */
+
+/* Every scrolling area is a named region. The page itself never scrolls (G8): regions do.
+   Apply to the element that owns the scrollbar, not its parent. */
+.cm-region {
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+/* Wide content that must stay wide — the board, keyword tables — scrolls inside itself. */
+.cm-scroll-x {
+    min-inline-size: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* ---- Measures ------------------------------------------------------------------ */
+
+.cm-measure {
+    max-inline-size: var(--cm-measure);
+}
+
+.cm-measure--dashboard {
+    max-inline-size: var(--cm-content-max);
+    margin-inline: auto;
+    inline-size: 100%;
+}
+
+.cm-pad {
+    padding: var(--cm-space-6) clamp(var(--cm-space-4), 3vw, var(--cm-space-12));
+}
+
+/* ---- Rail collapse ------------------------------------------------------------- */
+
+/* < md (1180): icons only. Labels are hidden but remain in the accessibility tree via
+   the label element's own visually-hidden treatment, so the rail stays screen-readable. */
+@media (max-width: 1179.98px) {
+    .cm-app {
+        grid-template-columns: var(--cm-rail-width-icons) minmax(0, 1fr);
+    }
+
+    .cm-app[data-cm-rail="labels"] {
+        grid-template-columns: var(--cm-rail-width) minmax(0, 1fr);
+    }
+}
+
+/* < sm (900): the rail leaves the flow entirely and becomes an overlay. */
+@media (max-width: 899.98px) {
+    .cm-app {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .cm-app__rail {
+        position: fixed;
+        inset-block: 0;
+        inset-inline-start: 0;
+        inline-size: var(--cm-rail-width);
+        transform: translateX(-100%);
+        box-shadow: var(--cm-shadow-lg);
+        transition: transform var(--cm-motion);
+    }
+
+    .cm-app[data-cm-rail-open="true"] .cm-app__rail {
+        transform: translateX(0);
+    }
+}
+
+/* Short windows: the desktop shell's minimum is 700 px tall and nothing may clip (G8). */
+@media (max-height: 760px) {
+    .cm-pad {
+        padding-block: var(--cm-space-3);
+    }
+}
+
+/* ---- Visually hidden ----------------------------------------------------------- */
+
+.cm-sr-only {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}

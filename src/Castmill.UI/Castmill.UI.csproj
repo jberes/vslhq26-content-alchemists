@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.10" />
+    <!-- MIT tier of Ignite UI for Blazor: 60+ components, no licence key, no private feed.
+         The commercial package is only needed for IgbCategoryChart on the SEO desk (E9.2 / F9). -->
+    <PackageReference Include="IgniteUI.Blazor.Lite" Version="0.1.1" />
+    <PackageReference Include="IgniteUI.Blazor.GridLite" Version="0.9.1" />
+    <!-- Secondary markdown surfaces (brand guidelines, AI context) render server-side style
+         through Markdig rather than the editor bundle — pure .NET, no interop (Roadmap §2.5). -->
+    <PackageReference Include="Markdig" Version="1.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Castmill.Core\Castmill.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The editor bundle is built by src/editor-interop and emitted into wwwroot/js.
+       It is generated output, so it is gitignored; this target keeps it fresh once a
+       developer has run `npm install` at the repo root. A clone without node_modules
+       simply skips it — nothing before Phase F4 consumes the bundle. -->
+  <Target Name="BuildEditorInterop" BeforeTargets="BeforeBuild"
+          Condition="'$(SkipEditorInterop)' != 'true' And Exists('$(MSBuildThisFileDirectory)..\..\node_modules')">
+    <Exec Command="npm run build --workspace=castmill-editor-interop"
+          WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
+  </Target>
+
+</Project>

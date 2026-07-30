@@ -1,0 +1,317 @@
+@* The Mill Floor (F5.1/5.2/5.4) — the campaign workspace's centrepiece.
+
+   Two regions: the Source Master card (player band, scrubber, timed transcript) and the
+   swimlane board (horizontal scroll inside its own region, transform-only zoom). Status is
+   double-encoded per ADR-F12. Provenance threads draw on hover, pin on click. The Press Run
+   reveals cards in completion order, driven by real run progress — never a timer (ADR-F13). *@
+@page "/campaigns/{CampaignId:guid}/floor"
+@using Castmill.Core
+@using Castmill.Core.Ai
+@using Castmill.Core.Resources
+@using Castmill.UI.Canvas
+@using Castmill.UI.Design
+@using Castmill.UI.State
+@implements IDisposable
+@inject CampaignState Campaign
+@inject PressRunService PressRun
+@inject NavigationManager Navigation
+
+<PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Mill Floor</PageTitle>
+
+<CampaignShell CampaignId="CampaignId" View="CampaignView.MillFloor">
+    <div class="cm-canvas" @ref="_canvas">
+        <section class="cm-canvas__source">
+            <header class="cm-source__head">
+                <span class="cm-kicker">Source master</span>
+                <span class="cm-meta">@(Campaign.Transcript?.Source ?? "no source")</span>
+            </header>
+
+            @if (Campaign.Transcript is { Segments.Count: > 0 } transcript)
+            {
+                <div class="cm-source__player cm-duotone" aria-hidden="true">
+                    <span class="cm-source__play">&#9654;</span>
+                </div>
+                <div class="cm-source__scrub cm-mono cm-meta">
+                    <span>0:00</span>
+                    <span class="cm-source__scrub-bar"></span>
+                    <span>@Clock(transcript.Segments[^1].EndSeconds)</span>
+                </div>
+
+                <ol class="cm-source__segments" data-cm-scroll>
+                    @foreach (var segment in transcript.Segments)
+                    {
+                        <li class="cm-seg @(_highlighted.Contains(segment.Id) ? "cm-seg--cited" : "")"
+                            data-seg="@segment.Id">
+                            <span class="cm-seg__label cm-mono">
+                                @Clock(segment.StartSeconds)@(segment.Speaker is null ? "" : $" · {segment.Speaker}")
+                            </span>
+                            <span class="cm-seg__text">@segment.Text</span>
+                        </li>
+                    }
+                </ol>
+
+                @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
+                {
+                    <aside class="cm-source__quotes">
+                        <span class="cm-kicker">Cited by "@ArtifactTitle(pinned)"</span>
+                        <ul>
+                            @foreach (var id in PinnedCitations)
+                            {
+                                var segment = transcript.Segments.FirstOrDefault(s => s.Id == id);
+                                if (segment is not null)
+                                {
+                                    <li>
+                                        <span class="cm-mono cm-meta">@segment.Id · @Clock(segment.StartSeconds)</span>
+                                        <blockquote>@segment.Text</blockquote>
+                                    </li>
+                                }
+                            }
+                        </ul>
+                    </aside>
+                }
+            }
+            else
+            {
+                <EmptyState Kicker="Source"
+                            Headline="No transcript on this campaign."
+                            Detail="The source master renders the timed transcript — every thread on this board points back into it." />
+            }
+        </section>
+
+        <section class="cm-canvas__board cm-scroll-x" data-cm-scroll>
+            @if (Campaign.Artifacts.Count == 0 && !PressRun.IsActiveFor(CampaignId))
+            {
+                <div class="cm-pad">
+                    <EmptyState Kicker="Mill Floor"
+                                Headline="Nothing has been printed yet."
+                                Detail="A run turns the transcript into the whole set — blog, social, email, clips and the image plan." />
+                </div>
+            }
+            else
+            {
+                <div class="cm-board__scale" style="transform: scale(@ZoomCss); transform-origin: top left;">
+                    @foreach (var lane in Lanes)
+                    {
+                        <div class="cm-lane">
+                            <h2 class="cm-kicker cm-lane__label">@lane.Key</h2>
+                            <ul class="cm-lane__cards">
+                                @foreach (var artifact in lane)
+                                {
+                                    <li>
+                                        <button type="button"
+                                                class="cm-card cm-card--lane @(artifact.Id == ActiveId ? "cm-card--traced" : "") @(_justPrinted.Contains(artifact.Id) ? "cm-card--printed" : "")"
+                                                data-card="@artifact.Id"
+                                                @onmouseover="() => Hover(artifact)"
+                                                @onmouseout="Unhover"
+                                                @onclick="() => TogglePin(artifact)"
+                                                @ondblclick="() => OpenFocus(artifact)">
+                                            <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
+                                            <span class="cm-card__body">
+                                                <span class="cm-card__title">@artifact.Title</span>
+                                                <span class="cm-meta">@ArtifactDisplay.KindLabel(artifact.Kind)</span>
+                                                <span class="@ArtifactDisplay.StatusModifier(artifact.Status)">
+                                                    @ArtifactDisplay.StatusLabel(artifact.Status)
+                                                </span>
+                                            </span>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <ProvenanceOverlay Container="_canvas"
+                           ActiveArtifactId="ActiveId"
+                           Citations="ActiveCitations"
+                           Epoch="_geometryEpoch"
+                           OnHighlight="OnHighlight" />
+
+        <footer class="cm-canvas__status">
+            @if (PressRun.IsActiveFor(CampaignId))
+            {
+                <span class="cm-mono cm-canvas__printing" role="status">@PressLine</span>
+            }
+            else
+            {
+                <span class="cm-canvas__counts">
+                    @foreach (var group in Campaign.Artifacts.Where(a => a.Kind != "transcript").GroupBy(a => a.Status))
+                    {
+                        <span class="@ArtifactDisplay.StatusModifier(group.Key) cm-canvas__count">
+                            @group.Count() @ArtifactDisplay.StatusLabel(group.Key).ToLowerInvariant()
+                        </span>
+                    }
+                </span>
+            }
+
+            <div class="cm-segmented" role="group" aria-label="Zoom">
+                <button type="button" class="cm-segmented__option" aria-pressed="@(!_overview)"
+                        @onclick="() => SetZoom(false)">100%</button>
+                <button type="button" class="cm-segmented__option" aria-pressed="@_overview"
+                        @onclick="() => SetZoom(true)">Overview</button>
+            </div>
+        </footer>
+    </div>
+</CampaignShell>
+
+@code {
+    private static readonly string[] LaneOrder = ["Blog", "Social", "Email", "Clips", "Images", "Page/SEO"];
+
+    private readonly HashSet<string> _highlighted = [];
+    private readonly HashSet<Guid> _justPrinted = [];
+    private readonly HashSet<Guid> _seenArtifacts = [];
+
+    private ElementReference _canvas;
+    private Guid? _hoverId;
+    private Guid? _pinnedId;
+    private bool _overview;
+    private int _geometryEpoch;
+    private int _revealedCount;
+
+    [Parameter] public Guid CampaignId { get; set; }
+
+    /// <summary>Deep link from the omnibox's transcript search: highlights this segment.</summary>
+    [SupplyParameterFromQuery(Name = "seg")]
+    private string? RequestedSegment { get; set; }
+
+    private Guid? ActiveId => _hoverId ?? _pinnedId;
+
+    private IReadOnlyList<string> ActiveCitations =>
+        ActiveId is { } id ? CitationsOf(id) : [];
+
+    private IReadOnlyList<string> PinnedCitations =>
+        _pinnedId is { } id ? CitationsOf(id) : [];
+
+    private string ZoomCss => _overview ? "0.72" : "1";
+
+    private IEnumerable<IGrouping<string, ArtifactPreviewResponse>> Lanes =>
+        Campaign.Artifacts
+            .Where(a => a.Kind != "transcript")
+            .GroupBy(a => ArtifactDisplay.Lane(a.Kind))
+            .OrderBy(g => Array.IndexOf(LaneOrder, g.Key) is var i && i >= 0 ? i : LaneOrder.Length);
+
+    private string PressLine
+    {
+        get
+        {
+            var progress = PressRun.Progress;
+            if (progress is null)
+            {
+                return PressRun.Error ?? "Starting the run…";
+            }
+
+            var last = progress.Items.LastOrDefault();
+            var verb = PressRun.IsRunning ? "Printing" : "Printed";
+            return last is null
+                ? "Warming the press…"
+                : $"{verb}: {ArtifactDisplay.KindLabel(last.Kind)} · {progress.Completed} of {progress.TotalKinds}";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Campaign.Changed += OnCampaignChanged;
+        PressRun.Changed += OnPressRunChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(RequestedSegment))
+        {
+            _highlighted.Add(RequestedSegment);
+        }
+    }
+
+    private IReadOnlyList<string> CitationsOf(Guid artifactId) =>
+        Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Citations ?? [];
+
+    private string ArtifactTitle(Guid artifactId) =>
+        Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Title ?? "…";
+
+    private void Hover(ArtifactPreviewResponse artifact) => _hoverId = artifact.Id;
+
+    private void Unhover() => _hoverId = null; // the pinned set, if any, takes back over
+
+    private void TogglePin(ArtifactPreviewResponse artifact) =>
+        _pinnedId = _pinnedId == artifact.Id ? null : artifact.Id;
+
+    private void OpenFocus(ArtifactPreviewResponse artifact) =>
+        Navigation.NavigateTo(
+            $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifact.Id}");
+
+    private void SetZoom(bool overview)
+    {
+        _overview = overview;
+        // transform: scale() changes no layout box, so ResizeObserver will NOT fire —
+        // the overlay is told explicitly that geometry moved.
+        _geometryEpoch++;
+    }
+
+    private Task OnHighlight(IReadOnlyList<string> segmentIds)
+    {
+        if (_highlighted.SetEquals(segmentIds))
+        {
+            return Task.CompletedTask;
+        }
+
+        _highlighted.Clear();
+        foreach (var id in segmentIds)
+        {
+            _highlighted.Add(id);
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static string Clock(double seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
+    }
+
+    private static string BarClass(string status) => status switch
+    {
+        ArtifactStatus.InReview => "cm-card__bar--review",
+        ArtifactStatus.Queued => "cm-card__bar--queued",
+        ArtifactStatus.Published => "cm-card__bar--published",
+        _ => "cm-card__bar--draft",
+    };
+
+    private void OnCampaignChanged() => InvokeAsync(() =>
+    {
+        // Track which artifacts are new so the Press Run's print-in animation applies to
+        // exactly the cards that just landed, in completion order.
+        foreach (var artifact in Campaign.Artifacts)
+        {
+            if (_seenArtifacts.Add(artifact.Id) && PressRun.IsActiveFor(CampaignId))
+            {
+                _justPrinted.Add(artifact.Id);
+            }
+        }
+
+        StateHasChanged();
+    });
+
+    private void OnPressRunChanged() => InvokeAsync(async () =>
+    {
+        var progress = PressRun.Progress;
+
+        // Reload the board only when something new actually completed — polling happens
+        // every 800 ms, completions every few seconds.
+        if (progress is not null && progress.Completed > _revealedCount)
+        {
+            _revealedCount = progress.Completed;
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        Campaign.Changed -= OnCampaignChanged;
+        PressRun.Changed -= OnPressRunChanged;
+    }
+}

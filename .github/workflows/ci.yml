@@ -20,21 +20,57 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  editor-interop:
+    name: Editor bundle (esbuild + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build bundle
+        run: npm run build
+      - name: Round-trip suite (the G2 gate from Phase F4 on)
+        run: npm test
+
   build-test:
-    name: Build & test
+    name: Build & test (server + shared UI)
     runs-on: ubuntu-latest # Docker is available for Testcontainers SQL
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-          dotnet-quality: preview
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Restore
-        run: dotnet restore
+        # The MAUI shell is excluded here: its targets cannot build on Linux. The
+        # desktop-shell job below covers it.
+        run: dotnet restore Castmill.NoDesktop.slnf
       - name: Build (warnings are errors; NuGet audit is enforced)
-        run: dotnet build --no-restore --configuration Release
+        run: dotnet build Castmill.NoDesktop.slnf --no-restore --configuration Release
       - name: Test
         env:
           # Test-only key generated per run; never a real secret.
           Jwt__SigningKey: ci-only-${{ github.run_id }}-0123456789abcdef0123456789abcdef
-        run: dotnet test --no-build --configuration Release --logger "console;verbosity=normal"
+        run: dotnet test Castmill.NoDesktop.slnf --no-build --configuration Release --logger "console;verbosity=normal"
+
+  desktop-shell:
+    name: Desktop shell (MAUI, Mac Catalyst)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+      - name: Build desktop shell
+        # Proves the shared RCL still compiles into the native shell. Windows packaging
+        # and the notarized macOS build arrive with Phase F9 (story 10.4).
+        run: dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj --configuration Release -p:SkipEditorInterop=true

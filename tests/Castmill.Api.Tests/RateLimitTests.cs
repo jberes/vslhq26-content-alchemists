@@ -17,6 +17,10 @@ public sealed class RateLimitTests
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
+            // Must precede the settings below: appsettings.Development.json declares its
+            // own RateLimits:AuthPerMinute, which would otherwise win over UseSetting and
+            // silently make this test assert nothing.
+            builder.DropDeveloperConfig();
             builder.UseSetting("Jwt:SigningKey", new string('k', 48));
             builder.UseSetting("Castmill:EncryptionKey",
                 Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));

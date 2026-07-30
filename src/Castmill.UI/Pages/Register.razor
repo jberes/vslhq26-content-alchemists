@@ -1,0 +1,102 @@
+@* Register. Creates the user and its permanently bound tenant server-side (ADR-011). *@
+@page "/register"
+@using Castmill.Core.Auth
+@using Castmill.UI.Auth
+@using Castmill.UI.Http
+@layout AuthLayout
+@inject AuthClient Auth
+@inject AuthState State
+@inject NavigationManager Navigation
+
+<PageTitle>Create an account — Castmill</PageTitle>
+
+<div class="cm-auth">
+    <span class="cm-kicker">Castmill</span>
+    <h1>Create an account.</h1>
+
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="cm-form">
+        <DataAnnotationsValidator />
+
+        <label class="cm-field">
+            <span class="cm-field__label">Your name</span>
+            <InputText @bind-Value="_model.DisplayName" class="cm-input" autocomplete="name" disabled="@_busy" />
+            <ValidationMessage For="() => _model.DisplayName" class="cm-field__error" />
+        </label>
+
+        <label class="cm-field">
+            <span class="cm-field__label">Email</span>
+            <InputText @bind-Value="_model.Email" class="cm-input" type="email"
+                       autocomplete="username" disabled="@_busy" />
+            <ValidationMessage For="() => _model.Email" class="cm-field__error" />
+        </label>
+
+        <label class="cm-field">
+            <span class="cm-field__label">Password</span>
+            <InputText @bind-Value="_model.Password" class="cm-input" type="password"
+                       autocomplete="new-password" disabled="@_busy" />
+            <span class="cm-field__hint cm-meta">At least 12 characters. Length is the only rule.</span>
+            <ValidationMessage For="() => _model.Password" class="cm-field__error" />
+        </label>
+
+        @if (_error is not null)
+        {
+            <p class="cm-form__error" role="alert">@_error</p>
+        }
+
+        <div class="cm-form__actions">
+            <button type="submit" class="cm-button" disabled="@_busy">
+                @(_busy ? "Creating…" : "Create account")
+            </button>
+            <a href="sign-in" class="cm-meta">I already have one</a>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    private readonly Model _model = new();
+    private bool _busy;
+    private string? _error;
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var response = await Auth.RegisterAsync(
+                new RegisterRequest(_model.Email, _model.Password, _model.DisplayName));
+            await State.SignedInAsync(response);
+            Navigation.NavigateTo("");
+        }
+        catch (ValidationApiException ex)
+        {
+            // Identity's own descriptions are safe to show — password policy, duplicate email.
+            _error = string.Join(" ", ex.Errors.SelectMany(e => e.Value));
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API. Is it running?";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class Model
+    {
+        [Required, MaxLength(100)]
+        public string DisplayName { get; set; } = string.Empty;
+
+        [Required, EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required, MinLength(12, ErrorMessage = "Use at least 12 characters.")]
+        public string Password { get; set; } = string.Empty;
+    }
+}

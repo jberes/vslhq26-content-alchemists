@@ -8,6 +8,10 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - `tests/Castmill.Api.Tests` — xUnit **v3** + WebApplicationFactory + Testcontainers (SQL Server). Requires Docker.
 - EF Core with **real migrations** (`EnsureCreated` is banned). Migrations folder is analyzer-exempt.
 - Frontend (later phases): all UI in a `Castmill.UI` RCL; Ignite UI for Blazor; shells are bootstrap-only.
+  - **Two theme families** (Warm Editorial + Industry Blueprint) × light/dark behind a shared **semantic** token layer. Feature CSS uses semantic tokens only — never a family's raw colour, never a literal (ADR-F09).
+  - **Fluid layout, no fixed page canvas** (ADR-F10). The design handoff's 1440 × 880 is a drawing convention; its pixel values are ratios. Only the provenance overlay measures pixels at runtime.
+  - Rail = workspace scope; the four campaign views are header tabs (ADR-F11). No indeterminate spinners anywhere (ADR-F13).
+  - Design reference: [docs/design_handoff_castmill_mill_floor/](docs/design_handoff_castmill_mill_floor/README.md) — recreate as Razor components; the prototype's imperative DOM writes are a prototype shortcut, not a pattern.
 
 ## Security rules (non-negotiable)
 - **No secrets in the repo.** Committed `appsettings.json` holds structure only.
@@ -21,11 +25,17 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - NuGet audit runs as a build **error**; fix vulnerable transitives by pinning patched versions in the csproj (see existing pins), never by suppressing.
 
 ## Commands
-- Build: `dotnet build` (warnings are errors)
-- Test: `dotnet test` (needs Docker running for Testcontainers)
+- **SDK: .NET 10 GA**, pinned by `global.json` to 10.0.302 / package band `10.0.10` (ADR-018). The MAUI workload must be installed for the same band (`sudo dotnet workload install maui`).
+- Build: `dotnet build Castmill.NoDesktop.slnf` for the everyday loop (warnings are errors). Plain `dotnet build` also builds the MAUI shell, which is slow and macOS/Windows-only — the solution filter exists so the inner loop doesn't pay for it.
+- Test: `dotnet test Castmill.NoDesktop.slnf` (Api.Tests needs Docker for Testcontainers; UI.Tests does not)
 - Run API: `dotnet run --project src/Castmill.Api` → `/health`, OpenAPI at `/openapi/v1.json`
+- Run web client: `dotnet run --project src/Castmill.Web` → http://localhost:5084
+- Run desktop client: `dotnet build src/Castmill.Desktop -t:Run -f net10.0-maccatalyst`
+- Editor bundle: `npm install` once at the repo root (npm workspaces), then `npm run build` / `npm test`. The RCL rebuilds the bundle automatically on build once `node_modules` exists; `-p:SkipEditorInterop=true` opts out. **`npm test` is the G2 gate** — the markdown round-trip corpus plus the < 250 KB gzip bundle budget. Run `npm run build` before `npm test`: the budget test measures the built asset.
 - **Dev testbed UI:** `/dev/testbed` — plain-HTML page to exercise register/login/refresh/me without any Blazor client (Development only, never published)
-- Migrations: `cd src/Castmill.Api && dotnet ef migrations add <Name>` (run from the project dir — rc.1 tool path bug)
+- **Client style guide:** `/dev/style-guide` in either shell — every semantic token, the type scale, status encoding and the shared components, with family × mode × density switchers. Dev-only: the page refuses to render unless `IShellInfo.IsDevelopment`.
+- **Demo login:** `Dev:SeedDemoUser` in the gitignored `appsettings.Development.json` seeds `demo@castmill.local` on API startup. The password lives only in that file. `DemoUserSeeder` throws if it is ever invoked outside Development.
+- Migrations: `cd src/Castmill.Api && dotnet ef migrations add <Name>` (run from the project dir — was an rc.1 tool path bug; not re-tested since the GA upgrade)
 
 ## Style
 - File-scoped namespaces; primary constructors where natural; `TimeProvider` (never `DateTime.UtcNow` in services).

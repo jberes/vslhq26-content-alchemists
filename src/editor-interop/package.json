@@ -1,0 +1,32 @@
+{
+  "name": "castmill-editor-interop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The markdown editor bundle. Phase F0 ships the module contract only; Phase F4 fills it in with TipTap.",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./markdown": "./src/markdown.js"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "clean": "node -e \"import('node:fs').then(fs=>{for(const f of ['castmill-editor.js','castmill-editor.js.map'])fs.rmSync(new URL('../Castmill.UI/wwwroot/js/'+f,import.meta.url),{force:true})})\""
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.29.2",
+    "@tiptap/extension-bubble-menu": "3.29.2",
+    "@tiptap/extension-image": "3.29.2",
+    "@tiptap/extension-link": "3.29.2",
+    "@tiptap/extension-placeholder": "3.29.2",
+    "@tiptap/extension-task-item": "3.29.2",
+    "@tiptap/extension-task-list": "3.29.2",
+    "@tiptap/starter-kit": "3.29.2",
+    "markdown-it": "14.3.0",
+    "tiptap-markdown": "0.9.0"
+  }
+}

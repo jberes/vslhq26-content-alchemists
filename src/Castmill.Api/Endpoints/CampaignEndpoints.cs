@@ -16,6 +16,9 @@ public static class CampaignEndpoints
 
         group.MapGet("/", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
+        // One call feeds the campaign header counter, the front page's "slots
+        // waiting" block and Focus Mode's slot list (G9) — no per-surface polling.
+        group.MapGet("/{id:guid}/preview", PreviewAsync);
         group.MapPost("/", CreateAsync).Validate<CampaignCreateRequest>().RequireRateLimiting("writes");
         group.MapPut("/{id:guid}", UpdateAsync).Validate<CampaignUpdateRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
@@ -37,6 +40,42 @@ public static class CampaignEndpoints
         // indistinguishable from "does not exist", so nothing leaks.
         var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
         return campaign is null ? Results.NotFound() : Results.Ok(ToResponse(campaign));
+    }
+
+    /// <summary>
+    /// Campaign + artifact previews + image-slot state in one payload (ADR-003 keeps
+    /// the heavy content out). This is what every image counter reads.
+    /// </summary>
+    private static async Task<IResult> PreviewAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+        var artifactRows = await db.Artifacts
+            .Where(a => a.CampaignId == id)
+            .OrderBy(a => a.Kind).ThenBy(a => a.CreatedAt)
+            .Select(a => new { a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson })
+            .ToListAsync(ct);
+        var artifacts = artifactRows
+            .Select(a => new ArtifactPreviewResponse(
+                a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt,
+                ArtifactEndpoints.ParseCitations(a.CitationsJson)))
+            .ToList();
+        var slots = await db.ImageSlots.Where(s => s.CampaignId == id).ToListAsync(ct);
+
+        return Results.Ok(new
+        {
+            campaign = ToResponse(campaign),
+            artifacts,
+            imageSlots = slots
+                .OrderBy(s => Array.FindIndex(Services.Images.ImagePlanService.Templates, t => t.Kind == s.Kind))
+                .Select(ImageSlotEndpoints.ToResponse)
+                .ToList(),
+            imagesFilled = slots.Count(s => s.State == "Filled"),
+            imagesTotal = slots.Count,
+        });
     }
 
     private static async Task<IResult> CreateAsync(
@@ -91,8 +130,14 @@ public static class CampaignEndpoints
             return Results.NotFound();
         }
 
-        // Artifacts have no FK cascade (typed-JSON rows, ADR-003) — delete explicitly.
+        // Children have no FK cascade (typed-JSON rows, ADR-003) — delete explicitly.
+        await db.ArtifactRevisions
+            .Where(r => db.Artifacts.Any(a => a.Id == r.ArtifactId && a.CampaignId == id))
+            .ExecuteDeleteAsync(ct);
         await db.Artifacts.Where(a => a.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.ImageSlots.Where(s => s.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.ScheduleEntries.Where(s => s.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.GenerationRuns.Where(r => r.CampaignId == id).ExecuteDeleteAsync(ct);
         db.Campaigns.Remove(campaign);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();

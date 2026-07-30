@@ -1,0 +1,74 @@
+/* Ignite UI theme mapping (roadmap E3.2).
+ *
+ * Ignite UI keeps component styles inside each component's shadow root and resolves every
+ * colour, size and elevation from --ig-* custom properties. It derives whole ramps from
+ * eight base "-500" keys using relative-colour syntax — hsl(from var(--ig-primary-500) …)
+ * — so overriding those eight plus the type keys re-themes the entire library. That is why
+ * this file is short: we are not restyling components, we are feeding them our tokens.
+ *
+ * Loaded AFTER Ignite's own theme sheet so these win. We import Ignite's LIGHT theme once
+ * as the structural base (typography metrics, elevation curves, component sizing) and
+ * drive light/dark from our own tokens instead of swapping in its dark sheet — one code
+ * path, and dark mode then means exactly what our families say it means.
+ */
+
+:root {
+    /* The eight roots every Ignite ramp derives from. */
+    --ig-primary-500: var(--cm-accent-strong);
+    --ig-secondary-500: var(--cm-accent);
+    --ig-surface-500: var(--cm-surface-raised);
+    --ig-gray-500: var(--cm-on-surface-muted);
+    --ig-info-500: var(--cm-accent);
+    --ig-success-500: var(--cm-success);
+    --ig-warn-500: var(--cm-warning);
+    --ig-error-500: var(--cm-danger);
+
+    /* Type. Ignite's roles inherit from --ig-font-family unless individually set; the
+       display roles get our display face so an IgbCard title matches custom chrome. */
+    --ig-font-family: var(--cm-font-body);
+    --ig-h1-font-family: var(--cm-font-display);
+    --ig-h2-font-family: var(--cm-font-display);
+    --ig-h3-font-family: var(--cm-font-display);
+    --ig-h4-font-family: var(--cm-font-display);
+    --ig-h5-font-family: var(--cm-font-display);
+    --ig-h6-font-family: var(--cm-font-display);
+    --ig-subtitle-1-font-family: var(--cm-font-body);
+    --ig-subtitle-2-font-family: var(--cm-font-body);
+    --ig-body-1-font-family: var(--cm-font-body);
+    --ig-body-2-font-family: var(--cm-font-body);
+    --ig-button-font-family: var(--cm-font-body);
+    --ig-caption-font-family: var(--cm-font-mono);
+    --ig-overline-font-family: var(--cm-font-mono);
+
+    /* The library's default button is UPPERCASE with wide tracking, which fights both
+       families' voice. */
+    --ig-button-text-transform: none;
+    --ig-button-letter-spacing: 0.01em;
+}
+
+/* Corner radius is baked into each component's shadow styles rather than exposed as a
+ * global factor in this version, but the host element's border-radius is settable from
+ * outside — so the Blueprint family's radius 0 is applied per component here.
+ *
+ * This list grows as components are adopted; it is deliberately explicit rather than a
+ * blanket [class*="igc-"] so that adopting a new component is a visible decision. Every
+ * entry maps to the Ignite UI usage map in Roadmap-Blazor.md §2.6.
+ */
+:root[data-cm-family="industry-blueprint"] igc-card,
+:root[data-cm-family="industry-blueprint"] igc-button,
+:root[data-cm-family="industry-blueprint"] igc-icon-button,
+:root[data-cm-family="industry-blueprint"] igc-chip,
+:root[data-cm-family="industry-blueprint"] igc-badge,
+:root[data-cm-family="industry-blueprint"] igc-input,
+:root[data-cm-family="industry-blueprint"] igc-textarea,
+:root[data-cm-family="industry-blueprint"] igc-select,
+:root[data-cm-family="industry-blueprint"] igc-combo,
+:root[data-cm-family="industry-blueprint"] igc-dialog,
+:root[data-cm-family="industry-blueprint"] igc-toast,
+:root[data-cm-family="industry-blueprint"] igc-snackbar,
+:root[data-cm-family="industry-blueprint"] igc-tabs,
+:root[data-cm-family="industry-blueprint"] igc-tree,
+:root[data-cm-family="industry-blueprint"] igc-stepper,
+:root[data-cm-family="industry-blueprint"] igc-date-picker {
+    border-radius: 0;
+}

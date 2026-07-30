@@ -1,0 +1,33 @@
+@* Shared empty state (roadmap E3.4: "used by >=3 features without bespoke styling").
+   Deliberately not a spinner and not a shrug — an empty state names what is missing and
+   offers the action that fills it (ADR-F13's spirit). *@
+
+<div class="cm-empty">
+    @if (!string.IsNullOrWhiteSpace(Kicker))
+    {
+        <span class="cm-kicker">@Kicker</span>
+    }
+    <p class="cm-empty__headline">@Headline</p>
+    @if (!string.IsNullOrWhiteSpace(Detail))
+    {
+        <p class="cm-empty__detail">@Detail</p>
+    }
+    @if (Action is not null)
+    {
+        <div class="cm-empty__action">@Action</div>
+    }
+</div>
+
+@code {
+    /// <summary>Short uppercase label, e.g. the surface's name.</summary>
+    [Parameter] public string? Kicker { get; set; }
+
+    /// <summary>What is missing, as a sentence.</summary>
+    [Parameter, EditorRequired] public string Headline { get; set; } = string.Empty;
+
+    /// <summary>Why it is empty, or what to do about it.</summary>
+    [Parameter] public string? Detail { get; set; }
+
+    /// <summary>The action that resolves the emptiness — usually one button.</summary>
+    [Parameter] public RenderFragment? Action { get; set; }
+}

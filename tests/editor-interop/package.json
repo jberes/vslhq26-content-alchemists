@@ -1,0 +1,18 @@
+{
+  "name": "castmill-editor-interop-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "vitest suite for the editor bundle. Becomes the CI-gated markdown round-trip corpus in Phase F4 (story 5.3).",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "castmill-editor-interop": "*",
+    "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "jsdom": "27.0.0"
+  }
+}
