@@ -1,20 +1,451 @@
-@* SEO / AEO desk. Phase F9 builds the scorecard, the keyword table and the share-of-voice
-   chart on IgbCategoryChart (which needs the commercial Ignite UI package — ADR-F15). *@
+@* The SEO / AEO desk (F9 slice, handoff §9): scorecard · keyword table + share-of-voice
+   bars (Blazor-ApexCharts, ADR-F24) · content angles, plus the A/B YouTube titles, the
+   share link and the blog metadata tabs.
+
+   HONESTY RULE, on the surface: this campaign has not published, so every position here
+   is PROJECTED — said in the banner, not a tooltip. *@
 @page "/campaigns/{CampaignId:guid}/seo"
+@using System.Text.Json
+@using ApexCharts
+@using Castmill.Core.Resources
 @using Castmill.UI.Design
+@using Castmill.UI.Http
 @using Castmill.UI.State
+@implements IDisposable
 @inject CampaignState Campaign
+@inject CampaignsClient Campaigns
+@inject SeoClient Seo
+@inject Castmill.UI.Http.GenerationClient Generation
+@inject INotifier Notifier
+@inject Microsoft.JSInterop.IJSRuntime Js
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — SEO analysis</PageTitle>
 
 <CampaignShell CampaignId="CampaignId" View="CampaignView.Seo">
-    <div class="cm-region cm-pad">
-        <EmptyState Kicker="SEO / AEO"
-                    Headline="The SEO desk arrives with Phase F9."
-                    Detail="The keyword plan and SEO brief already generate server-side; this view renders them as a scorecard, a keyword table and share-of-voice bars. An unpublished campaign will label its positions projected on the surface itself." />
+    <div class="cm-page">
+        <div class="cm-measure--dashboard">
+            <p class="cm-seo__banner">
+                <strong>Projected, not measured.</strong> This campaign hasn't published yet, so
+                positions and share-of-voice are projections from search metrics — not rankings.
+            </p>
+
+            @if (_plan is null)
+            {
+                <EmptyState Kicker="SEO / AEO"
+                            Headline="No keyword plan yet."
+                            Detail="The plan runs in two legs: an AI SEO brief from your transcript, then live DataForSEO metrics and related keywords, merged and ranked by opportunity. Takes about 15 seconds.">
+                    <Action>
+                        <div class="cm-form__actions">
+                            <input class="cm-input cm-seo__focus" placeholder="Optional focus — what should this rank for?"
+                                   @bind="_focus" disabled="@_planning" />
+                            <button type="button" class="cm-button" disabled="@(_planning || Campaign.TranscriptArtifactId is null)"
+                                    @onclick="RunPlanAsync">
+                                @(_planning ? "Planning… (AI brief, then DataForSEO)" : "Run keyword plan")
+                            </button>
+                        </div>
+                        @if (_planError is not null)
+                        {
+                            <p class="cm-form__error" role="alert">@_planError</p>
+                        }
+                    </Action>
+                </EmptyState>
+            }
+            else
+            {
+                <div class="cm-seo">
+                    <section class="cm-seo__scorecard">
+                        <span class="cm-kicker">Scorecard</span>
+                        <div class="cm-seo__score cm-mono">@Score</div>
+                        <p class="cm-meta">@Verdict</p>
+                        <ul class="cm-seo__checks">
+                            <li class="@CheckClass(HasBlog)">Blog drafted</li>
+                            <li class="@CheckClass(_plan.YoutubeTitles.Count >= 3)">A/B titles ready</li>
+                            <li class="@CheckClass(HasBlog && _plan is not null)">Head + JSON-LD built</li>
+                            <li class="@CheckClass(Campaign.ImagesFilled > 0)">Images placed (@Campaign.ImagesFilled/@Campaign.ImagesTotal)</li>
+                        </ul>
+
+                        <div class="cm-producer__group">
+                            <span class="cm-kicker">A/B YouTube titles</span>
+                            <ol class="cm-seo__titles">
+                                @foreach (var title in _plan.YoutubeTitles.Take(3))
+                                {
+                                    <li>@title <span class="cm-mono cm-meta">@title.Length/100</span></li>
+                                }
+                            </ol>
+                        </div>
+
+                        <div class="cm-producer__group">
+                            <span class="cm-kicker">Share report</span>
+                            @if (_shareUrl is null)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet" disabled="@_sharing"
+                                        @onclick="ShareAsync">
+                                    @(_sharing ? "Publishing snapshot…" : "Create public link")
+                                </button>
+                            }
+                            else
+                            {
+                                <a href="@_shareUrl" target="_blank" class="cm-meta cm-seo__share">@_shareUrl</a>
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => CopyAsync(_shareUrl!)">Copy link</button>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="cm-seo__main">
+                        <h2>Share of voice — projected</h2>
+                        <div class="cm-seo__chart">
+                            <ApexChart TItem="KeywordRow" Options="_chartOptions" Height="360">
+                                <ApexPointSeries TItem="KeywordRow"
+                                                 Items="TopKeywords"
+                                                 Name="Monthly searches"
+                                                 SeriesType="SeriesType.Bar"
+                                                 XValue="@(r => r.Term)"
+                                                 YValue="@(r => r.Volume.HasValue ? (decimal)r.Volume.Value : 0m)" />
+                            </ApexChart>
+                        </div>
+
+                        <h2>Keywords, ranked by opportunity</h2>
+                        <div class="cm-scroll-x">
+                            <table class="cm-seo__table">
+                                <thead>
+                                    <tr>
+                                        <th>Keyword</th><th>Volume</th><th>Difficulty</th><th>CPC</th><th>Opportunity</th><th>Source</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in _plan.Keywords.Take(20))
+                                    {
+                                        <tr>
+                                            <td>@row.Term</td>
+                                            <td class="cm-mono">@(row.Volume?.ToString("N0") ?? "—")</td>
+                                            <td class="cm-mono">@(row.Difficulty?.ToString("0") ?? "—")</td>
+                                            <td class="cm-mono">@(row.Cpc is { } cpc ? cpc.ToString("$0.00") : "—")</td>
+                                            <td class="cm-mono">@row.Opportunity.ToString("0.0")</td>
+                                            <td class="cm-meta">@(row.Source == "ai" ? "AI pick" : "suggestion")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="cm-seo__angles">
+                        <span class="cm-kicker">Content angles</span>
+                        <p class="cm-meta">High-opportunity keywords you haven't covered — draft them straight onto the floor.</p>
+                        <ul class="cm-seo__angle-list">
+                            @foreach (var angle in Angles)
+                            {
+                                <li>
+                                    <span class="cm-seo__angle-term">@angle.Term</span>
+                                    <span class="cm-mono cm-meta">@(angle.Volume?.ToString("N0") ?? "—")/mo</span>
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(_drafting == angle.Term)"
+                                            @onclick="() => DraftAngleAsync(angle.Term)">
+                                        @(_drafting == angle.Term ? "Drafting…" : "Draft as artifact")
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    </section>
+                </div>
+
+                <section class="cm-seo__metadata">
+                    <h2>Blog metadata</h2>
+                    @if (!HasBlog)
+                    {
+                        <p class="cm-meta">Draft the blog first — metadata builds from it.</p>
+                    }
+                    else
+                    {
+                        <div class="cm-tabs cm-seo__meta-tabs" role="tablist" aria-label="Metadata format">
+                            @foreach (var tab in MetaTabs)
+                            {
+                                <button type="button" role="tab" class="cm-tabs__tab"
+                                        aria-selected="@(_metaTab == tab)" @onclick="() => _metaTab = tab">
+                                    @tab
+                                </button>
+                            }
+                        </div>
+                        <pre class="cm-seo__meta-pre cm-mono">@MetadataFor(_metaTab)</pre>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="() => CopyAsync(MetadataFor(_metaTab))">
+                            Copy @_metaTab.ToLowerInvariant()
+                        </button>
+                    }
+                </section>
+            }
+        </div>
     </div>
 </CampaignShell>
 
 @code {
+    private static readonly string[] MetaTabs = ["Combined", "Head", "JSON-LD"];
+
+    private KeywordPlan? _plan;
+    private Guid? _planArtifactId;
+    private string _focus = string.Empty;
+    private bool _planning;
+    private string? _planError;
+    private bool _sharing;
+    private string? _shareUrl;
+    private string? _drafting;
+    private string _metaTab = "Combined";
+    private ApexChartOptions<KeywordRow>? _chartOptions;
+
     [Parameter] public Guid CampaignId { get; set; }
+
+    private IEnumerable<KeywordRow> TopKeywords =>
+        _plan?.Keywords.Where(k => k.Volume is > 0).Take(8) ?? [];
+
+    private IEnumerable<KeywordRow> Angles =>
+        _plan?.Keywords.Where(k => k.Source != "ai" && k.Volume is > 0).Take(5) ?? [];
+
+    private bool HasBlog => Campaign.Artifacts.Any(a => a.Kind == "blog");
+
+    private int Score
+    {
+        get
+        {
+            var score = 0;
+            if (HasBlog)
+            {
+                score += 30;
+            }
+
+            if (_plan is { Keywords.Count: > 0 })
+            {
+                score += 30;
+            }
+
+            if (_plan?.YoutubeTitles.Count >= 3)
+            {
+                score += 20;
+            }
+
+            if (Campaign.ImagesTotal > 0)
+            {
+                score += Campaign.ImagesFilled * 20 / Campaign.ImagesTotal;
+            }
+
+            return score;
+        }
+    }
+
+    private string Verdict => Score switch
+    {
+        >= 85 => "Ready to publish and measure.",
+        >= 60 => "Solid coverage — place images and review before publishing.",
+        >= 30 => "The plan exists; the content needs to catch up to it.",
+        _ => "Run the plan, then draft against it.",
+    };
+
+    private static string CheckClass(bool ok) => ok ? "cm-seo__check cm-seo__check--ok" : "cm-seo__check";
+
+    protected override void OnInitialized()
+    {
+        Campaign.Changed += OnChanged;
+
+        _chartOptions = new ApexChartOptions<KeywordRow>
+        {
+            Chart = new Chart { Toolbar = new Toolbar { Show = false }, Background = "transparent" },
+            PlotOptions = new PlotOptions { Bar = new PlotOptionsBar { Horizontal = true, BorderRadius = 2 } },
+            // ApexCharts cannot read CSS custom properties; this is the Warm Editorial
+            // accent-strong. Theming charts per family is follow-up polish.
+            Colors = ["#9E4526"],
+            DataLabels = new DataLabels { Enabled = false },
+            Grid = new Grid { BorderColor = "#00000022" },
+        };
+    }
+
+    protected override void OnParametersSet() => LoadPlanFromState();
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        LoadPlanFromState();
+        StateHasChanged();
+    });
+
+    /// <summary>The plan is an artifact like any other — newest wins.</summary>
+    private void LoadPlanFromState()
+    {
+        var planPreview = Campaign.Artifacts
+            .Where(a => a.Kind == "seo-keyword-plan")
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefault();
+
+        if (planPreview is null)
+        {
+            _plan = null;
+            _planArtifactId = null;
+            return;
+        }
+
+        if (planPreview.Id == _planArtifactId)
+        {
+            return;
+        }
+
+        _planArtifactId = planPreview.Id;
+        _ = LoadPlanContentAsync(planPreview.Id);
+    }
+
+    private async Task LoadPlanContentAsync(Guid artifactId)
+    {
+        try
+        {
+            var (artifact, _) = await Campaigns.GetArtifactAsync(CampaignId, artifactId);
+            _plan = JsonSerializer.Deserialize<KeywordPlan>(
+                artifact.ContentJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ApiException)
+        {
+            _plan = null;
+        }
+        catch (JsonException)
+        {
+            _plan = null;
+        }
+    }
+
+    private async Task RunPlanAsync()
+    {
+        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _planning = true;
+        _planError = null;
+
+        try
+        {
+            await Seo.CreateKeywordPlanAsync(
+                CampaignId, transcriptId, string.IsNullOrWhiteSpace(_focus) ? null : _focus);
+            await Campaign.LoadAsync(CampaignId, force: true);
+            Notifier.ShowSuccess("Keyword plan ready — ranked by opportunity.");
+        }
+        catch (ApiException ex)
+        {
+            // 503 = DataForSEO unconfigured; the server's reason is the honest message.
+            _planError = ex.Message;
+        }
+        finally
+        {
+            _planning = false;
+        }
+    }
+
+    private async Task ShareAsync()
+    {
+        if (_planArtifactId is not { } id)
+        {
+            return;
+        }
+
+        _sharing = true;
+        try
+        {
+            var result = await Seo.ShareReportAsync(id);
+            _shareUrl = result.ShareUrl;
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _sharing = false;
+        }
+    }
+
+    private async Task DraftAngleAsync(string term)
+    {
+        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _drafting = term;
+        StateHasChanged();
+
+        try
+        {
+            var item = await Generation.GenerateOneAsync(
+                CampaignId, "blog", transcriptId,
+                $"Angle this around the search keyword \"{term}\": it should be the natural title focus.");
+
+            if (item.Success)
+            {
+                Notifier.ShowSuccess($"Drafted \"{term}\" as a blog take · {item.DurationMs / 1000.0:0.0}s");
+                await Campaign.LoadAsync(CampaignId, force: true);
+            }
+            else
+            {
+                Notifier.ShowError(item.Error ?? "Draft failed.");
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _drafting = null;
+        }
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notifier.ShowSuccess("Copied.");
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            Notifier.ShowError("Clipboard unavailable.");
+        }
+    }
+
+    /// <summary>Head tags + JSON-LD built client-side from the blog + plan (roadmap 9.4).</summary>
+    private string MetadataFor(string tab)
+    {
+        var blog = Campaign.Artifacts.FirstOrDefault(a => a.Kind == "blog");
+        var title = blog?.Title ?? Campaign.Campaign?.Name ?? "";
+        var description = _plan?.Summary is { Length: > 0 } s
+            ? (s.Length > 155 ? s[..152] + "…" : s)
+            : title;
+        var keywords = string.Join(", ", _plan?.Keywords.Take(6).Select(k => k.Term) ?? []);
+
+        var head = $"""
+            <title>{title}</title>
+            <meta name="description" content="{description}" />
+            <meta name="keywords" content="{keywords}" />
+            <meta property="og:title" content="{title}" />
+            <meta property="og:description" content="{description}" />
+            <meta property="og:type" content="article" />
+            """;
+
+        var jsonLd = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["@context"] = "https://schema.org",
+            ["@type"] = "Article",
+            ["headline"] = title,
+            ["description"] = description,
+            ["keywords"] = keywords,
+            ["datePublished"] = _plan?.GeneratedAt.ToString("yyyy-MM-dd"),
+        }, new JsonSerializerOptions { WriteIndented = true });
+
+        var jsonLdBlock = $"<script type=\"application/ld+json\">\n{jsonLd}\n</script>";
+
+        return tab switch
+        {
+            "Head" => head,
+            "JSON-LD" => jsonLdBlock,
+            _ => head + "\n" + jsonLdBlock,
+        };
+    }
+
+    public void Dispose() => Campaign.Changed -= OnChanged;
 }
