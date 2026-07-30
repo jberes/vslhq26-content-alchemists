@@ -54,7 +54,9 @@ public sealed class CastmillDbContext(
             // SQL extracts citations so list projections never load ContentJson (ADR-003).
             // ISJSON guards against a legacy non-JSON payload making the column throw.
             e.Property(a => a.CitationsJson).HasComputedColumnSql(
-                "CASE WHEN ISJSON([ContentJson]) = 1 THEN JSON_QUERY([ContentJson], '$.citations') END");
+                "CASE WHEN ISJSON([ContentJson]) = 1 THEN COALESCE("
+                + "JSON_QUERY([ContentJson], '$.citations'), "
+                + "JSON_QUERY([ContentJson], '$.content.citations')) END");
             e.Property(a => a.Version).IsConcurrencyToken();
             e.HasIndex(a => new { a.TenantId, a.CampaignId });
             // The Front Page's review queue filters by status across the whole tenant.

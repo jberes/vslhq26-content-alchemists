@@ -168,7 +168,20 @@ function mountSlashMenu(editor, host) {
         open = true;
         index = 0;
         menu.hidden = false;
+        position();
         highlight();
+    }
+
+    /** Places the menu at the caret — a palette pinned to a corner reads as a bug. */
+    function position() {
+        try {
+            const caret = editor.view.coordsAtPos(editor.state.selection.from);
+            const base = host.getBoundingClientRect();
+            menu.style.insetBlockStart = `${caret.bottom - base.top + 6}px`;
+            menu.style.insetInlineStart = `${Math.max(0, caret.left - base.left)}px`;
+        } catch {
+            // Selection not measurable (empty doc edge cases): keep the default spot.
+        }
     }
 
     function hide() {
@@ -214,9 +227,19 @@ function mountSlashMenu(editor, host) {
 
     host.addEventListener('keydown', onKeyDown, true);
 
+    // Click-away and focus loss both close the menu; key handling alone left it stranded
+    // whenever the user clicked back into the text.
+    const onDocPointerDown = event => {
+        if (open && !menu.contains(event.target)) {
+            hide();
+        }
+    };
+    document.addEventListener('mousedown', onDocPointerDown, true);
+
     return {
         destroy() {
             host.removeEventListener('keydown', onKeyDown, true);
+            document.removeEventListener('mousedown', onDocPointerDown, true);
             menu.remove();
         },
     };

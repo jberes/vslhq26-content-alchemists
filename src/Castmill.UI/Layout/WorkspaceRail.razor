@@ -3,9 +3,15 @@
    separation is what keeps "where am I" answerable and makes switching campaign orthogonal
    to switching view. *@
 @using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
 @using Castmill.UI.State
 @implements IDisposable
 @inject WorkspaceState Workspace
+@inject CampaignState CampaignStore
+@inject CampaignsClient Campaigns
+@inject IConfirmService Confirm
+@inject INotifier Notifier
 @inject NavigationManager Navigation
 
 <nav class="cm-rail" aria-label="Workspace">
@@ -55,12 +61,17 @@
         <ul class="cm-rail__items" aria-labelledby="cm-rail-campaign">
             @foreach (var campaign in Workspace.RailCampaigns)
             {
-                <li>
+                <li class="cm-rail__row">
                     <button type="button"
                             class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
                             aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
                             @onclick="() => SwitchTo(campaign)">
                         <span class="cm-rail__label">@campaign.Name</span>
+                    </button>
+                    <button type="button" class="cm-rail__delete"
+                            title="Delete campaign" aria-label="Delete @campaign.Name"
+                            @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
+                        &#x2715;
                     </button>
                 </li>
             }
@@ -116,6 +127,45 @@
 
         Workspace.SetActive(campaign.Id);
         Navigation.NavigateTo(CampaignViews.PathFor(campaign.Id, view));
+    }
+
+    /// <summary>
+    /// Deletes a campaign and everything in it, behind the app's confirm dialog — this is
+    /// the one genuinely destructive action in the workspace.
+    /// </summary>
+    private async Task DeleteAsync(CampaignResponse campaign)
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete \"{campaign.Name}\"?",
+            "Its artifacts, revisions, image slots and schedule entries all go with it. This cannot be undone.",
+            AcceptLabel: "Delete campaign",
+            Destructive: true));
+
+        if (!accepted)
+        {
+            return;
+        }
+
+        try
+        {
+            var wasActive = Workspace.Active?.Id == campaign.Id
+                || CampaignStore.CampaignId == campaign.Id;
+
+            await Campaigns.DeleteAsync(campaign.Id);
+            Workspace.Remove(campaign.Id);
+
+            if (wasActive)
+            {
+                CampaignStore.Clear();
+                Navigation.NavigateTo("campaigns");
+            }
+
+            Notifier.ShowSuccess($"Deleted \"{campaign.Name}\".");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);

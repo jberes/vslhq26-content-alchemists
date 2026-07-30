@@ -20,7 +20,7 @@
     --cm-bp-lg: 1440px;
     --cm-bp-xl: 1920px;
 
-    --cm-rail-width: 216px;      /* the handoff's rail */
+    --cm-rail-width: 432px;      /* 2× the handoff's 216px — names truncated (owner, 2026-07-29) */
     --cm-rail-width-icons: 56px;
     --cm-content-max: 1600px;    /* dashboards cap and centre */
     --cm-measure: 72ch;          /* manuscript column */
@@ -52,6 +52,33 @@
     grid-template-rows: auto minmax(0, 1fr);
     min-inline-size: 0;   /* see above */
     overflow: hidden;
+}
+
+/* The main area NEVER scrolls (owner: "I don't want to scroll the page"). It bounds its
+   child, and each surface owns its scrollbar — .cm-page for document-style pages, the
+   per-column regions for the campaign views. */
+.cm-app__main {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-block-size: 0;
+    overflow: hidden;
+}
+
+/* Document-style pages: their own scrollbar, the old page padding. */
+.cm-page {
+    min-block-size: 0;
+    overflow-y: auto;
+    padding: clamp(1.5rem, 4vh, 2.4rem) clamp(var(--cm-space-4), 3vw, var(--cm-space-12));
+}
+
+/* Campaign frame: fixed header + tabs, the view below owns its own scrolling. */
+.cm-campaign-frame {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-block-size: 0;
+    block-size: 100%;
 }
 
 /* ---- Scroll containment -------------------------------------------------------- */

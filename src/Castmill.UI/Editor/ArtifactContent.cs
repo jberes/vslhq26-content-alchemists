@@ -17,6 +17,26 @@ public static class ArtifactContent
 {
     private const string MarkdownProperty = "markdown";
 
+    /// <summary>
+    /// Where the markdown lives. Hand-authored payloads keep it top-level; the AI
+    /// orchestrator wraps generator output as {"content": {…markdown…}, "validation": …}.
+    /// Rendering raw JSON at the user because of a wrapper object is exactly the failure
+    /// this indirection prevents (found live, 2026-07-29).
+    /// </summary>
+    private static JsonObject? FindMarkdownHost(JsonObject obj)
+    {
+        if (obj.ContainsKey(MarkdownProperty))
+        {
+            return obj;
+        }
+
+        return obj.TryGetPropertyValue("content", out var content)
+            && content is JsonObject nested
+            && nested.ContainsKey(MarkdownProperty)
+            ? nested
+            : null;
+    }
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
     /// <summary>
@@ -37,7 +57,8 @@ public static class ArtifactContent
 
             if (node is JsonObject obj)
             {
-                if (obj.TryGetPropertyValue(MarkdownProperty, out var markdown) && markdown is not null)
+                if (FindMarkdownHost(obj) is { } host
+                    && host.TryGetPropertyValue(MarkdownProperty, out var markdown) && markdown is not null)
                 {
                     return markdown.GetValue<string>();
                 }
@@ -66,9 +87,11 @@ public static class ArtifactContent
         try
         {
             if (JsonNode.Parse(string.IsNullOrWhiteSpace(originalJson) ? "{}" : originalJson) is JsonObject obj
-                && obj.ContainsKey(MarkdownProperty))
+                && FindMarkdownHost(obj) is { } host)
             {
-                obj[MarkdownProperty] = markdown;
+                // Patch in place: citations, validation results and the rest of the payload
+                // must survive an edit untouched, wherever the generator nested them.
+                host[MarkdownProperty] = markdown;
                 return obj.ToJsonString(Options);
             }
         }

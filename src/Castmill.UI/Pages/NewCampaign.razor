@@ -22,7 +22,7 @@
 
 <PageTitle>Start a run — Castmill</PageTitle>
 
-<div class="cm-measure--dashboard cm-run">
+<div class="cm-page"><div class="cm-measure--dashboard cm-run">
     <header class="cm-front__head">
         <span class="cm-kicker">Step @((int)_step + 1) of 3</span>
         <h1>@StepTitle</h1>
@@ -182,6 +182,7 @@
         </section>
     }
 </div>
+</div>
 
 @code {
     private enum Step
@@ -202,17 +203,22 @@
 
     private readonly List<string> _log = [];
 
+    // Only the blog (and the cheap slot reservation) run by default: a full fan-out
+    // against live models takes minutes, and the owner wants fast first feedback with
+    // everything else generated on demand from the Mill Floor (2026-07-29). Images are
+    // NEVER generated here — the plan only reserves slots + prompts; pixels are made in
+    // the Image Studio, deliberately.
     private readonly List<FanOutItem> _fanOut =
     [
         new("blog", "Blog post"),
-        new("social", "Social set (6 platforms)"),
-        new("email-sequence", "Email sequence"),
-        new("newsletter", "Newsletter"),
-        new("landing-page", "Landing page"),
-        new("show-notes", "Show notes"),
-        new("clips", "Clip suggestions"),
-        new("seo-brief", "SEO brief"),
-        new("image-plan", "Image plan (6 slots)"),
+        new("social", "Social set (6 platforms)", selected: false),
+        new("email-sequence", "Email sequence", selected: false),
+        new("newsletter", "Newsletter", selected: false),
+        new("landing-page", "Landing page", selected: false),
+        new("show-notes", "Show notes", selected: false),
+        new("clips", "Clip suggestions", selected: false),
+        new("seo-brief", "SEO brief", selected: false),
+        new("image-plan", "Image plan (slots + prompts only — no images generated)"),
     ];
 
     private Step _step = Step.Source;

@@ -831,6 +831,7 @@
     grid-template-rows: minmax(0, 1fr) auto;
     block-size: 100%;
     min-block-size: 0;
+    overflow: hidden;
 }
 
 .cm-canvas__source {
@@ -1054,6 +1055,9 @@
 
 .cm-focus {
     grid-template-columns: 240px minmax(0, 1fr) 326px;
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
 }
 
 .cm-focus__outline {
@@ -1308,4 +1312,37 @@
 
 .cm-press__audit {
     grid-column: 2 / -1;
+}
+
+/* ---- Rail row delete (hover-revealed) ------------------------------------------- */
+
+.cm-rail__row {
+    display: flex;
+    align-items: stretch;
+}
+
+.cm-rail__row .cm-rail__item {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+}
+
+.cm-rail__delete {
+    flex: 0 0 auto;
+    inline-size: 2rem;
+    border: 0;
+    background: transparent;
+    color: var(--cm-on-surface-subtle);
+    font: inherit;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-rail__row:hover .cm-rail__delete,
+.cm-rail__delete:focus-visible {
+    opacity: 1;
+}
+
+.cm-rail__delete:hover {
+    color: var(--cm-danger);
 }

@@ -120,6 +120,18 @@ public sealed class WorkspaceState(CampaignsClient campaigns)
         Changed?.Invoke();
     }
 
+    /// <summary>Removes a deleted campaign from the list (the server delete already ran).</summary>
+    public void Remove(Guid campaignId)
+    {
+        _campaigns.RemoveAll(c => c.Id == campaignId);
+        if (Active?.Id == campaignId)
+        {
+            Active = null;
+        }
+
+        Changed?.Invoke();
+    }
+
     /// <summary>Adds a newly created campaign without a round-trip and makes it active.</summary>
     public void Add(CampaignResponse campaign)
     {

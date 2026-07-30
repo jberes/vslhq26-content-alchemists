@@ -35,6 +35,11 @@ public sealed class CampaignsClient(ApiClient api)
         api.PutAsync<CampaignUpdateRequest, CampaignResponse>(
             $"api/v1/campaigns/{id}", new CampaignUpdateRequest(name, brief), etag: null, ct);
 
+    /// <summary>Deletes the campaign and everything in it — artifacts, revisions, slots,
+    /// schedule entries, runs. The server cascades explicitly; there is no undo.</summary>
+    public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/campaigns/{id}", ct);
+
     // ---- Artifacts ---------------------------------------------------------
 
     public Task<List<ArtifactPreviewResponse>> ListArtifactsAsync(Guid campaignId, CancellationToken ct = default) =>

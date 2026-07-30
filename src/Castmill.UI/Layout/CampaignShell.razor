@@ -11,27 +11,29 @@
 @inject CampaignState Campaign
 @inject WorkspaceState Workspace
 
-<CampaignHeader Current="View" />
+<div class="cm-campaign-frame">
+    <CampaignHeader Current="View" />
 
-@if (Campaign.LoadError is { } error)
-{
-    <div class="cm-pad">
-        <EmptyState Kicker="Campaign"
-                    Headline="This campaign couldn't be loaded."
-                    Detail="@error" />
-    </div>
-}
-else if (Campaign.IsLoading)
-{
-    @* Narrated, not a spinner (ADR-F13). *@
-    <div class="cm-pad">
-        <p class="cm-meta">Loading campaign…</p>
-    </div>
-}
-else
-{
-    @ChildContent
-}
+    @if (Campaign.LoadError is { } error)
+    {
+        <div class="cm-page">
+            <EmptyState Kicker="Campaign"
+                        Headline="This campaign couldn't be loaded."
+                        Detail="@error" />
+        </div>
+    }
+    else if (Campaign.IsLoading)
+    {
+        @* Narrated, not a spinner (ADR-F13). *@
+        <div class="cm-page">
+            <p class="cm-meta">Loading campaign…</p>
+        </div>
+    }
+    else
+    {
+        @ChildContent
+    }
+</div>
 
 @code {
     [Parameter, EditorRequired] public Guid CampaignId { get; set; }
