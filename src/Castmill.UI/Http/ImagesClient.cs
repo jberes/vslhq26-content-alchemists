@@ -16,6 +16,9 @@ public sealed record PlaceResult(ImageSlotResponse Slot, long? BlogVersion, bool
 /// <summary>Typed client for the image plan + studio (backend B9 / ADR-012/013/015).</summary>
 public sealed class ImagesClient(ApiClient api)
 {
+    public Task<List<ImageSlotResponse>> ListAsync(Guid campaignId, CancellationToken ct = default) =>
+        api.GetAsync<List<ImageSlotResponse>>($"api/v1/campaigns/{campaignId}/image-slots", ct);
+
     /// <summary>Reserves the six typed slots. Idempotent — safe on campaigns without a run.</summary>
     public Task<List<ImageSlotResponse>> ReserveAsync(Guid campaignId, CancellationToken ct = default) =>
         api.PostAsync<object, List<ImageSlotResponse>>(

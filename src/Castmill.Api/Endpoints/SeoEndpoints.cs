@@ -188,10 +188,12 @@ public static class SeoEndpoints
         return Results.Created($"/api/v1/seo/reports/{artifact.Id}", new { reportArtifactId = artifact.Id, analysis.Score });
     }
 
+    // Two shareable SEO shapes exist: analyze reports and keyword plans (roadmap E9.4).
+    // The kind check is inlined in each query because EF can't translate a helper.
     private static async Task<IResult> GetReportAsync(Guid artifactId, CastmillDbContext db, CancellationToken ct)
     {
         var artifact = await db.Artifacts.SingleOrDefaultAsync(
-            a => a.Id == artifactId && a.Kind == "seo-report", ct);
+            a => a.Id == artifactId && (a.Kind == "seo-report" || a.Kind == "seo-keyword-plan"), ct);
         return artifact is null
             ? Results.NotFound()
             : Results.Text(artifact.ContentJson, "application/json");
@@ -210,7 +212,7 @@ public static class SeoEndpoints
                 detail: "Storage is not configured for public publishing.");
         }
         var artifact = await db.Artifacts.SingleOrDefaultAsync(
-            a => a.Id == artifactId && a.Kind == "seo-report", ct);
+            a => a.Id == artifactId && (a.Kind == "seo-report" || a.Kind == "seo-keyword-plan"), ct);
         if (artifact is null)
         {
             return Results.NotFound();
@@ -230,19 +232,39 @@ public static class SeoEndpoints
         using var doc = JsonDocument.Parse(artifact.ContentJson);
         var root = doc.RootElement;
         var keyword = root.TryGetProperty("keyword", out var k) ? k.GetString() ?? "" : "";
-        var score = root.TryGetProperty("score", out var s) ? s.GetInt32() : 0;
+        var heading = keyword.Length > 0 ? $"SEO report — {keyword}" : artifact.Title;
+        // Reports carry a score; keyword plans don't — never invent a 0/100.
+        var scoreHtml = root.TryGetProperty("score", out var s)
+            ? $"""<p class="score">{s.GetInt32()}/100</p>"""
+            : "";
+        var summaryHtml = root.TryGetProperty("summary", out var sum) && sum.GetString() is { Length: > 0 } text
+            ? $"<p>{encoder.Encode(text)}</p>"
+            : "";
+
+        var titles = new StringBuilder();
+        if (root.TryGetProperty("youtubeTitles", out var yts) && yts.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var title in yts.EnumerateArray())
+            {
+                titles.Append("<li>").Append(encoder.Encode(title.GetString() ?? "")).Append("</li>");
+            }
+        }
+        var titlesHtml = titles.Length > 0 ? $"<h2>YouTube title candidates</h2><ol>{titles}</ol>" : "";
 
         var rows = new StringBuilder();
         if (root.TryGetProperty("keywords", out var kws) && kws.ValueKind == JsonValueKind.Array)
         {
             foreach (var kw in kws.EnumerateArray())
             {
+                // Metrics can be JSON null in a keyword plan — render a dash, not a fake 0.
                 rows.Append("<tr><td>")
                     .Append(encoder.Encode(kw.TryGetProperty("term", out var t) ? t.GetString() ?? "" : ""))
                     .Append("</td><td>")
-                    .Append(kw.TryGetProperty("volume", out var v) ? v.GetInt64() : 0)
+                    .Append(kw.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number
+                        ? v.GetInt64().ToString(System.Globalization.CultureInfo.InvariantCulture) : "–")
                     .Append("</td><td>")
-                    .Append(kw.TryGetProperty("difficulty", out var d) ? d.GetDouble() : 0)
+                    .Append(kw.TryGetProperty("difficulty", out var d) && d.ValueKind == JsonValueKind.Number
+                        ? d.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture) : "–")
                     .Append("</td></tr>");
             }
         }
@@ -260,14 +282,16 @@ public static class SeoEndpoints
             <!doctype html><html lang="en"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <meta name="robots" content="noindex">
-            <title>SEO report — {{encoder.Encode(keyword)}}</title>
+            <title>{{encoder.Encode(heading)}}</title>
             <style>body{font-family:Georgia,serif;max-width:720px;margin:3rem auto;padding:0 1rem;color:#2b2b2b}
             table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.5rem;text-align:left}
             .score{font-size:3rem;font-weight:bold}</style></head><body>
-            <h1>SEO report — {{encoder.Encode(keyword)}}</h1>
-            <p class="score">{{score}}/100</p>
+            <h1>{{encoder.Encode(heading)}}</h1>
+            {{scoreHtml}}
+            {{summaryHtml}}
             <h2>Keywords</h2><table><tr><th>Term</th><th>Volume</th><th>Difficulty</th></tr>{{rows}}</table>
-            <h2>Content angles</h2><ul>{{angles}}</ul>
+            {{titlesHtml}}
+            {{angles.Length > 0 ? $"<h2>Content angles</h2><ul>{angles}</ul>" : ""}}
             <p><small>Generated by Castmill on {{artifact.UpdatedAt:yyyy-MM-dd}}.</small></p>
             </body></html>
             """;

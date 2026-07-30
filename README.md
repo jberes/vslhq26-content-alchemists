@@ -67,10 +67,10 @@ Everything is documented inline in [appsettings.Development.template.json](src/C
 
 ## Known limitations
 
-- The Blazor/MAUI client hasn't started yet — the API is exercised through the dev testbed and OpenAPI.
+
 - Publishing goes through a Buffer-class broker abstraction; the concrete broker isn't chosen yet, so `/publish` runs against config stubs.
 - Clip export needs the worker image pushed + Container Apps deployed (code and Bicep are in the repo).
-- Azure AI Speech (long-media path) is wired but not yet configured with a live resource.
+
 
 ## License
 
