@@ -11,7 +11,8 @@
 ## Category
 
 - **Primary:** Azure OpenAI/LLM app
-- **Secondary:** AI agent/workflow automation
+- **Secondary:** category-creative-application (Guys - I changed this at 9:30pm the category was wrong - Creative is the correct category - please don't DQ me!)
+
 
 ## What it does
 
