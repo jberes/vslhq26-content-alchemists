@@ -74,4 +74,23 @@ Everything is documented inline in [appsettings.Development.template.json](src/C
 
 ## License
 
-MIT
+Castmill itself is **MIT**.
+
+### Third-party components
+
+All runtime dependencies are permissively licensed — no copyleft, no license keys, no paid components:
+
+| Component | Use | License |
+| --- | --- | --- |
+| ASP.NET Core / EF Core / .NET MAUI / Blazor WASM (.NET 10) | API, data, desktop + web shells | MIT |
+| [Ignite UI for Blazor](https://github.com/IgniteUI/igniteui-blazor) — `IgniteUI.Blazor.Lite` + `IgniteUI.Blazor.GridLite` | UI components (cards, inputs, dialogs, chips, grid) | MIT (the free tier only — the commercial Ignite UI suite is deliberately not used) |
+| [Blazor-ApexCharts](https://github.com/apexcharts/Blazor-ApexCharts) + bundled ApexCharts.js | SEO desk share-of-voice charts (ADR-F24) | MIT — ApexCharts.js is free for the Blazor wrapper under its Blazor exception |
+| [TipTap](https://tiptap.dev) 2.x + ProseMirror | Focus Mode markdown editor (open-core; only MIT extensions used) | MIT |
+| [Markdig](https://github.com/xoofx/markdig) | Server-side markdown rendering | BSD-2-Clause |
+| [SkiaSharp](https://github.com/mono/SkiaSharp) | Image crop/WebP encode/headline compositing | MIT |
+| [Whisper.net](https://github.com/sandrohanea/whisper.net) + whisper.cpp / ggml | Local transcription in the desktop app | MIT |
+| [FFmpeg](https://ffmpeg.org) | Desktop media probe/clip export (invoked as a separate process, never linked) | LGPL-2.1+ (with GPL components in some builds); the system/sidecar binary is called via CLI, so no linking obligations attach to Castmill |
+| xUnit v3, bUnit, Testcontainers, Vitest, esbuild | Tests and build tooling (not shipped) | Apache-2.0 / MIT / MIT / MIT / MIT |
+| Self-hosted fonts (Source Serif 4, Barlow, Barlow Condensed, IBM Plex Mono, Inter) | The two theme families ([license texts ship beside the files](src/Castmill.UI/wwwroot/fonts/README.md)) | SIL OFL 1.1 |
+
+Paid **services** (not code dependencies): Azure AI Foundry model calls, Azure AI Speech, and DataForSEO are metered APIs configured by the operator; none of their SDKs impose license terms on this codebase (Azure SDKs are MIT; DataForSEO is called over plain REST).

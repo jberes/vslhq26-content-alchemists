@@ -57,6 +57,10 @@ public sealed class ImagesClient(ApiClient api)
             anonymous: false,
             ct);
 
+    /// <summary>Clears a filled slot back to Empty. The prompt survives — it's the user's work.</summary>
+    public Task DeleteAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}", ct);
+
     /// <summary>Re-composites the thumbnail headline over the placed base image — no model call.</summary>
     public Task<PlaceResult> CompositeAsync(
         Guid campaignId, Guid slotId, string headline, bool safeArea, CancellationToken ct = default) =>

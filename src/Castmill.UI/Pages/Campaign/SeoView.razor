@@ -67,7 +67,7 @@
                         <div class="cm-producer__group">
                             <span class="cm-kicker">A/B YouTube titles</span>
                             <ol class="cm-seo__titles">
-                                @foreach (var title in _plan.YoutubeTitles.Take(3))
+                                @foreach (var title in _plan!.YoutubeTitles.Take(3))
                                 {
                                     <li>@title <span class="cm-mono cm-meta">@title.Length/100</span></li>
                                 }

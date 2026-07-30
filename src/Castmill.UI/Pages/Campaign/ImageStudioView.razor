@@ -1,0 +1,484 @@
+@* The Image Studio (F10, handoff §8): the campaign's typed image plan as a workbench.
+   Slots on the left, the selected slot's prompt/model/variants on the right. Nothing
+   generates without an explicit click — variants are live model calls that cost money,
+   which is why generation is a button, never a side effect (the user's rule). *@
+@page "/campaigns/{CampaignId:guid}/images"
+@using Castmill.Core.Ai
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@implements IDisposable
+@inject CampaignState Campaign
+@inject ImagesClient Images
+@inject INotifier Notifier
+
+<PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
+
+<CampaignShell CampaignId="CampaignId" View="CampaignView.ImageStudio">
+    <div class="cm-page">
+        <div class="cm-measure--dashboard">
+            @if (Campaign.ImageSlots.Count == 0)
+            {
+                <EmptyState Kicker="Image studio"
+                            Headline="No image plan yet."
+                            Detail="Every campaign gets six typed slots — YouTube thumbnail, blog header, a social card per shape. Reserving them costs nothing; generating variants is always your click.">
+                    <Action>
+                        <button type="button" class="cm-button" disabled="@_reserving" @onclick="ReserveAsync">
+                            @(_reserving ? "Reserving…" : "Reserve the image plan")
+                        </button>
+                    </Action>
+                </EmptyState>
+            }
+            else
+            {
+                <div class="cm-studio">
+                    <section>
+                        <span class="cm-kicker">Slots · @Campaign.ImagesFilled/@Campaign.ImagesTotal filled</span>
+                        <ul class="cm-studio__slots">
+                            @foreach (var slot in Campaign.ImageSlots)
+                            {
+                                <li>
+                                    <button type="button"
+                                            class="cm-studio__slot @(slot.Id == _selectedId ? "cm-studio__slot--active" : null)"
+                                            @onclick="() => SelectSlot(slot)">
+                                        <span>@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+                                        @if (slot.State == "Filled")
+                                        {
+                                            <span class="cm-studio__badge">Done</span>
+                                        }
+                                        <span class="cm-studio__slot-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    </section>
+
+                    @if (Selected is { } slot2)
+                    {
+                        <section class="cm-studio__pane">
+                            <div>
+                                <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
+                                <p class="cm-meta">
+                                    Generated at exactly @slot2.TargetWidth×@slot2.TargetHeight — the slot's published
+                                    size, no client-side cropping.
+                                    @if (ProvenanceLine(slot2) is { } prov)
+                                    {
+                                        <br />
+                                        <span>Prompt seeded from @prov</span>
+                                    }
+                                </p>
+                            </div>
+
+                            <div>
+                                <span class="cm-kicker">Prompt</span>
+                                <textarea class="cm-studio__prompt" @bind="_prompt" @bind:after="SavePromptAsync"
+                                          placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
+                                <div class="cm-studio__chips">
+                                    @foreach (var chip in ConstraintChips)
+                                    {
+                                        <button type="button" class="cm-studio__chip" @onclick="() => AppendChipAsync(chip)">+ @chip</button>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="cm-studio__models">
+                                <span class="cm-kicker">Model</span>
+                                @if (_status is null)
+                                {
+                                    <p class="cm-meta">Checking provider readiness…</p>
+                                }
+                                else
+                                {
+                                    @foreach (var provider in _status.ImageProviders)
+                                    {
+                                        <label class="cm-studio__model @(provider.Ready ? null : "cm-studio__model--off")">
+                                            <input type="radio" name="cm-studio-model" disabled="@(!provider.Ready)"
+                                                   checked="@(SelectedAlias == provider.Name)"
+                                                   @onchange="() => PickModelAsync(provider.Name)" />
+                                            <span>@provider.Name</span>
+                                            @if (!provider.Ready)
+                                            {
+                                                <span class="cm-meta">— unavailable: @(provider.Reason ?? "not configured")</span>
+                                            }
+                                        </label>
+                                    }
+                                    <label class="cm-studio__model cm-studio__model--off">
+                                        <input type="radio" name="cm-studio-model" disabled />
+                                        <span>video frame reference</span>
+                                        <span class="cm-meta">— unavailable: the clip worker isn't deployed yet</span>
+                                    </label>
+                                }
+                            </div>
+
+                            <div class="cm-studio__row">
+                                <span class="cm-kicker">Variants</span>
+                                @foreach (var n in VariantChoices)
+                                {
+                                    <label class="cm-studio__model">
+                                        <input type="radio" name="cm-studio-variants" checked="@(_variantCount == n)"
+                                               @onchange="() => _variantCount = n" />
+                                        <span>@n</span>
+                                    </label>
+                                }
+                                <button type="button" class="cm-button" disabled="@(_generating || !CanGenerate)"
+                                        @onclick="GenerateAsync">
+                                    @(_generating ? $"Generating {_variantCount} variants…" : $"Generate {_variantCount} variants")
+                                </button>
+                                <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
+                            </div>
+                            @if (_generateError is not null)
+                            {
+                                <p class="cm-form__error" role="alert">@_generateError</p>
+                            }
+
+                            @if (_generating)
+                            {
+                                <div class="cm-studio__grid">
+                                    @for (var i = 0; i < _variantCount; i++)
+                                    {
+                                        <div class="cm-studio__skeleton"></div>
+                                    }
+                                </div>
+                            }
+                            else if (_variants.Count > 0)
+                            {
+                                <div>
+                                    <span class="cm-kicker">Pick one to place</span>
+                                    <p class="cm-meta">Placing publishes it and replaces the blog's image stub in the manuscript.</p>
+                                    <div class="cm-studio__grid">
+                                        @foreach (var variant in _variants)
+                                        {
+                                            <button type="button" class="cm-studio__tile" disabled="@_placing"
+                                                    @onclick="() => PlaceAsync(variant)">
+                                                <img src="@variant.Url" alt="Variant @variant.Index for @ArtifactDisplay.SlotLabel(slot2.Kind)" loading="lazy" />
+                                                <span class="cm-studio__tile-label cm-mono">v@(variant.Index) · @variant.Model</span>
+                                            </button>
+                                        }
+                                    </div>
+                                    @foreach (var failure in _failures)
+                                    {
+                                        <p class="cm-form__error">@failure</p>
+                                    }
+                                </div>
+                            }
+
+                            @if (slot2.State == "Filled" && slot2.PublishedUrl is { } published)
+                            {
+                                <div class="cm-studio__placed">
+                                    <span class="cm-kicker">Placed</span>
+                                    <img src="@(published + "?v=" + slot2.UpdatedAt.ToUnixTimeSeconds())"
+                                         alt="Placed @ArtifactDisplay.SlotLabel(slot2.Kind)" />
+                                    <div class="cm-studio__row">
+                                        <button type="button" class="cm-button cm-button--quiet" @onclick="ClearAsync">
+                                            Clear and redo
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @if (slot2.Kind == "youtube-thumbnail")
+                                {
+                                    <div>
+                                        <span class="cm-kicker">Thumbnail headline</span>
+                                        <p class="cm-meta">Composited server-side over the image — never sent to the model (ADR-013).</p>
+                                        <div class="cm-studio__row">
+                                            <input class="cm-input" maxlength="32" @bind="_headline"
+                                                   placeholder="Up to 32 characters" />
+                                            <span class="cm-mono cm-meta">@(_headline?.Length ?? 0)/32</span>
+                                            <label class="cm-studio__model">
+                                                <input type="checkbox" @bind="_safeArea" />
+                                                <span>keep YouTube's timestamp corner clear</span>
+                                            </label>
+                                            <button type="button" class="cm-button cm-button--quiet"
+                                                    disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
+                                                    @onclick="CompositeAsync">
+                                                @(_compositing ? "Compositing…" : "Composite headline")
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </section>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</CampaignShell>
+
+@code {
+    private static readonly int[] VariantChoices = [2, 4, 6];
+
+    // gpt-image-2 list price at 2026 rates for a single ~1-2 MP render; an estimate on the
+    // surface beats a silent bill (the projected-vs-actual honesty rule, applied to money).
+    private const decimal CostPerVariantUsd = 0.07m;
+
+    private static readonly string[] ConstraintChips =
+    [
+        "no text in the image",
+        "high contrast focal subject",
+        "room for a headline top-left",
+        "editorial photography, not illustration",
+        "brand-warm palette",
+    ];
+
+    private Guid? _selectedId;
+    private string _prompt = string.Empty;
+    private string? _savedPrompt;
+    private AiStatusResponse? _status;
+    private string? _pickedAlias;
+    private int _variantCount = 2;
+    private bool _reserving;
+    private bool _generating;
+    private bool _placing;
+    private bool _compositing;
+    private string? _generateError;
+    private List<ImageVariantResponse> _variants = [];
+    private List<string> _failures = [];
+    private string? _headline;
+    private bool _safeArea = true;
+
+    [Parameter] public Guid CampaignId { get; set; }
+
+    private ImageSlotResponse? Selected =>
+        Campaign.ImageSlots.FirstOrDefault(s => s.Id == _selectedId);
+
+    private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
+
+    private bool CanGenerate => !string.IsNullOrWhiteSpace(_prompt) &&
+        _status?.ImageProviders.Any(p => p.Ready) == true;
+
+    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        SyncSelection();
+        _status ??= await LoadStatusAsync();
+    }
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        SyncSelection();
+        StateHasChanged();
+    });
+
+    private void SyncSelection()
+    {
+        if (Campaign.ImageSlots.Count == 0)
+        {
+            return;
+        }
+        if (_selectedId is null || Campaign.ImageSlots.All(s => s.Id != _selectedId))
+        {
+            SelectSlot(Campaign.ImageSlots[0]);
+        }
+    }
+
+    private async Task<AiStatusResponse?> LoadStatusAsync()
+    {
+        try
+        {
+            return await Images.GetAiStatusAsync();
+        }
+        catch (ApiException)
+        {
+            return null; // the pane says "checking…" — a retry happens on next navigation
+        }
+    }
+
+    private void SelectSlot(ImageSlotResponse slot)
+    {
+        _selectedId = slot.Id;
+        _prompt = slot.Prompt ?? string.Empty;
+        _savedPrompt = slot.Prompt;
+        _pickedAlias = null;
+        _variants = [];
+        _failures = [];
+        _generateError = null;
+        _headline = slot.HeadlineText;
+        _safeArea = slot.SafeArea;
+    }
+
+    private async Task ReserveAsync()
+    {
+        _reserving = true;
+        try
+        {
+            await Images.ReserveAsync(CampaignId);
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _reserving = false;
+        }
+    }
+
+    private async Task SavePromptAsync()
+    {
+        if (Selected is not { } slot || string.Equals(_prompt, _savedPrompt, StringComparison.Ordinal))
+        {
+            return;
+        }
+        try
+        {
+            await Images.PatchAsync(CampaignId, slot.Id, prompt: _prompt);
+            _savedPrompt = _prompt;
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private Task AppendChipAsync(string chip)
+    {
+        _prompt = string.IsNullOrWhiteSpace(_prompt) ? chip : $"{_prompt.TrimEnd().TrimEnd(',', '.')}, {chip}";
+        return SavePromptAsync();
+    }
+
+    private async Task PickModelAsync(string alias)
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        _pickedAlias = alias;
+        try
+        {
+            await Images.PatchAsync(CampaignId, slot.Id, modelAlias: alias);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        await SavePromptAsync();
+
+        _generating = true;
+        _generateError = null;
+        _variants = [];
+        _failures = [];
+        StateHasChanged();
+
+        try
+        {
+            var result = await Images.GenerateAsync(CampaignId, slot.Id, _variantCount);
+            _variants = [.. result.Variants];
+            _failures = [.. (result.Failures ?? []).Select(f => $"Variant {f} failed — the rest are fine.")];
+            if (_variants.Count == 0)
+            {
+                _generateError = "No variants came back. Try again, or a simpler prompt.";
+            }
+        }
+        catch (ApiException ex)
+        {
+            _generateError = ex.Message;
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
+
+    private async Task PlaceAsync(ImageVariantResponse variant)
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        _placing = true;
+        try
+        {
+            // The blog carries the ![stub:kind]() markers; if one exists, placing rewrites it.
+            var blogId = Campaign.Artifacts.FirstOrDefault(a => a.Kind == "blog")?.Id;
+            var result = await Images.PlaceAsync(CampaignId, slot.Id, variant.Url, blogId);
+            _variants = [];
+            Notifier.ShowSuccess(result.BlogVersion is null
+                ? "Placed and published."
+                : "Placed, published, and the blog's stub is now the real image.");
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _placing = false;
+        }
+    }
+
+    private async Task CompositeAsync()
+    {
+        if (Selected is not { } slot || string.IsNullOrWhiteSpace(_headline))
+        {
+            return;
+        }
+        _compositing = true;
+        try
+        {
+            var result = await Images.CompositeAsync(CampaignId, slot.Id, _headline!, _safeArea);
+            Notifier.ShowSuccess(result.FontFallback == true
+                ? "Headline composited (system typeface — the display font wasn't available server-side)."
+                : "Headline composited.");
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _compositing = false;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        try
+        {
+            await Images.DeleteAsync(CampaignId, slot.Id);
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>"the transcript at 12:34" — the same provenance idea as the Mill Floor threads.</summary>
+    private string? ProvenanceLine(ImageSlotResponse slot)
+    {
+        if (slot.SourceSegmentId is null || Campaign.Transcript is null)
+        {
+            return null;
+        }
+        var segment = Campaign.Transcript.Segments.FirstOrDefault(s => s.Id == slot.SourceSegmentId);
+        if (segment is null)
+        {
+            return "the transcript";
+        }
+        var at = TimeSpan.FromSeconds(segment.StartSeconds);
+        return $"the transcript at {(int)at.TotalMinutes}:{at.Seconds:00} — “{Truncate(segment.Text, 80)}”";
+    }
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max].TrimEnd() + "…";
+
+    public void Dispose() => Campaign.Changed -= OnChanged;
+}
