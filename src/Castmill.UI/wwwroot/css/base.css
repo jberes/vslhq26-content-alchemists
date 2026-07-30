@@ -82,6 +82,12 @@
 html {
     /* Never a fixed page canvas (ADR-F10). */
     block-size: 100%;
+
+    /* 18px rem base. The handoff's 15px body / 11.5px meta read unreadably small on a
+       retina display at default zoom (owner feedback, 2026-07-29). The type tokens are
+       rem-based ratios, so lifting the base scales the whole hierarchy — and Ignite UI's
+       theme is rem-based too, so components keep pace. */
+    font-size: 112.5%;
 }
 
 body {

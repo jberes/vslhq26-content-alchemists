@@ -19,6 +19,9 @@ public sealed class PressRunService(GenerationClient generation) : IDisposable
 
     public Guid? CampaignId { get; private set; }
 
+    /// <summary>The kinds this run was asked for, in request order — the press panel's rows.</summary>
+    public IReadOnlyList<string> Kinds { get; private set; } = [];
+
     public RunProgress? Progress { get; private set; }
 
     public bool IsRunning { get; private set; }
@@ -41,6 +44,7 @@ public sealed class PressRunService(GenerationClient generation) : IDisposable
         _cts = new CancellationTokenSource();
 
         CampaignId = campaignId;
+        Kinds = kinds;
         Progress = null;
         Error = null;
         IsRunning = true;

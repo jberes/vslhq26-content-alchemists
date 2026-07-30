@@ -79,6 +79,46 @@
         </section>
 
         <section class="cm-canvas__board cm-scroll-x" data-cm-scroll>
+            @if (PressRun.IsActiveFor(CampaignId))
+            {
+                @* The press panel: the run narrated in full, not a footer whisper. Every
+                   row is a requested kind; state comes from real completions (ADR-F13). *@
+                <div class="cm-press">
+                    <span class="cm-kicker">Press run</span>
+                    <h2 class="cm-press__line">@PressLine</h2>
+                    @if (PressRun.Error is { } runError)
+                    {
+                        <p class="cm-form__error" role="alert">@runError</p>
+                    }
+                    <ul class="cm-press__items">
+                        @foreach (var kind in PressRun.Kinds)
+                        {
+                            var item = PressRun.Progress?.Items.FirstOrDefault(i => i.Kind == kind);
+                            <li class="cm-press__item @(item is null ? "" : item.Success ? "cm-press__item--done" : "cm-press__item--failed")">
+                                <span class="cm-press__mark cm-mono">
+                                    @(item is null ? "…" : item.Success ? "✓" : "✕")
+                                </span>
+                                <span class="cm-press__kind">@ArtifactDisplay.KindLabel(kind)</span>
+                                <span class="cm-meta">
+                                    @(item is null
+                                        ? "queued"
+                                        : item.Success
+                                            ? $"printed · {item.DurationMs / 1000.0:0.0}s"
+                                            : item.Error)
+                                </span>
+                                @if (item?.ValidationWarnings is { Count: > 0 } warnings)
+                                {
+                                    <span class="cm-meta cm-press__audit">audit: @string.Join(" · ", warnings.Take(2))</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    <p class="cm-meta">
+                        Each artifact prints onto the board below the moment its generator
+                        finishes. Long-form pieces take a minute or two against live models.
+                    </p>
+                </div>
+            }
             @if (Campaign.Artifacts.Count == 0 && !PressRun.IsActiveFor(CampaignId))
             {
                 <div class="cm-pad">

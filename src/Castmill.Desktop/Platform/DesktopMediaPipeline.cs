@@ -27,7 +27,10 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
 
     public async Task<PickedMedia?> PickMediaAsync()
     {
-        var result = await FilePicker.Default.PickAsync(new PickOptions
+        // MAUI Essentials pickers MUST run on the main thread. Blazor Hybrid dispatches
+        // component events off it, and calling the picker there doesn't fail — it
+        // deadlocks the app with the dialog never shown.
+        var result = await MainThread.InvokeOnMainThreadAsync(() => FilePicker.Default.PickAsync(new PickOptions
         {
             PickerTitle = "Pick a video or audio file",
             FileTypes = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
@@ -35,7 +38,7 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
                 [DevicePlatform.MacCatalyst] = ["public.movie", "public.audio"],
                 [DevicePlatform.WinUI] = [".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav", ".aac"],
             }),
-        });
+        }));
 
         if (result is null)
         {

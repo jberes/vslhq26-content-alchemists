@@ -7,6 +7,8 @@
 @layout AuthLayout
 @inject AuthClient Auth
 @inject AuthState State
+@inject ApiClient Api
+@inject Castmill.UI.Platform.IShellInfo Shell
 @inject NavigationManager Navigation
 
 <PageTitle>Sign in — Castmill</PageTitle>
@@ -53,6 +55,35 @@
 
     [SupplyParameterFromQuery(Name = "returnUrl")]
     private string? ReturnUrl { get; set; }
+
+    /// <summary>
+    /// Dev convenience: prefill the seeded demo account. The credentials come from a
+    /// Development-only API endpoint — they exist in no tracked file — and production
+    /// builds never ask (the endpoint does not exist there either).
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Shell.IsDevelopment)
+        {
+            return;
+        }
+
+        try
+        {
+            var demo = await Api.GetAsync<DemoCredentials>("api/v1/dev/demo-credentials");
+            _model.Email = demo.Email;
+            _model.Password = demo.Password;
+        }
+        catch (ApiException)
+        {
+            // Seeding off, or a prod-shaped API: the form simply starts empty.
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private sealed record DemoCredentials(string Email, string Password);
 
     private async Task SubmitAsync()
     {

@@ -51,7 +51,7 @@
                         Nothing leaves it except the finished transcript.
                     </p>
                     <button type="button" class="cm-button" @onclick="PickMediaAsync">
-                        Pick a file…
+                        Pick a file &amp; transcribe…
                     </button>
                     @if (_picked is { } picked)
                     {
@@ -282,14 +282,23 @@
     {
         _error = null;
         var picked = await Media.PickMediaAsync();
-        if (picked is not null)
+        if (picked is null)
         {
-            _picked = picked;
-            if (_name.Trim().Length == 0)
-            {
-                _name = System.IO.Path.GetFileNameWithoutExtension(picked.FileName);
-            }
+            return;
         }
+
+        _picked = picked;
+        if (_name.Trim().Length == 0)
+        {
+            _name = System.IO.Path.GetFileNameWithoutExtension(picked.FileName);
+        }
+
+        // The pick resumes on the MAUI main thread, outside Blazor's render loop — without
+        // an explicit re-render the UI sits unchanged and the flow looks dead. And since
+        // the campaign name is auto-filled from the file, there is nothing left to ask:
+        // go straight into the narrated pipeline rather than waiting for a second click.
+        await InvokeAsync(StateHasChanged);
+        await StartLocalIngestAsync();
     }
 
     /// <summary>
@@ -310,7 +319,7 @@
         _percent = 0;
         StateHasChanged();
 
-        var progress = new Progress<PipelineProgress>(p =>
+        var progress = new Progress<PipelineProgress>(p => InvokeAsync(() =>
         {
             _percent = (int)Math.Clamp(p.Percent ?? 0, 0, 100);
             var line = $"{p.Stage}…{(p.Detail is null ? "" : $" {p.Detail}")}";
@@ -324,7 +333,7 @@
             }
 
             StateHasChanged();
-        });
+        }));
 
         try
         {

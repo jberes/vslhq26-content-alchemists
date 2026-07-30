@@ -55,21 +55,25 @@
     </ItemGroup>
 
     <!-- On Mac Catalyst, Whisper's natives are STATIC libs linked into the executable by
-         the package's own NativeReference targets (which is why the MAUI head references
-         Whisper.net.Runtime directly). NuGet's generic runtime-asset copy must therefore
-         bundle NO RID-keyed natives at all here:
-           - linux/win .so/.dll break the Catalyst bundler (not Mach-O), and
+         the package's own NativeReference targets (which is why this project references
+         Whisper.net.Runtime directly). The RID-keyed runtimes/** assets must therefore not
+         be bundled AT ALL here:
+           - linux/win binaries are not Mach-O and break install_name_tool during bundling;
            - the runtimes/macos-*.dylib set crashed the app AT LAUNCH — dyld eagerly loads
-             them from MonoBundle and libggml-metal references a versioned install name
-             (libggml-base-whisper.0.dylib) that the package does not ship.
-         The macos dylibs stay where they belong: plain net10.0 hosts (Castmill.Media.Tests). -->
-    <Target Name="PruneForeignNativeAssets" AfterTargets="ResolvePackageAssets"
+             them from MonoBundle, and libggml-metal references a versioned install name
+             (libggml-base-whisper.0.dylib) the package does not ship.
+         The Catalyst bundler consumes ResolvedFileToPublish (the publish pipeline), so the
+         prune happens there — pruning the NuGet copy-local items upstream is not enough.
+         The macos dylibs stay where they belong: plain net10.0 hosts (Castmill.Media[.Tests]). -->
+    <Target Name="PruneForeignNativeAssets" AfterTargets="ComputeResolvedFilesToPublishList"
             Condition="$(TargetFramework.Contains('-maccatalyst')) Or $(TargetFramework.Contains('-ios'))">
         <ItemGroup>
-            <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
-                Condition="$([System.String]::Copy('%(RuntimeTargetsCopyLocalItems.Identity)').Contains('/runtimes/'))" />
-            <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)"
-                Condition="$([System.String]::Copy('%(NativeCopyLocalItems.Identity)').Contains('/runtimes/'))" />
+            <!-- No package-id condition: the natives arrive TRANSITIVELY through the
+                 Castmill.Media project reference, where NuGetPackageId is empty. Nothing
+                 legitimate ships under a runtimes/ RelativePath in a Catalyst bundle —
+                 RID-specific natives there are exactly the thing this target removes. -->
+            <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                Condition="$([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').StartsWith('runtimes'))" />
         </ItemGroup>
     </Target>
 

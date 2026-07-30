@@ -240,6 +240,18 @@ if (app.Environment.IsDevelopment())
     // refuses to run outside Development — see the security fence on DemoUserSeeder.
     await DemoUserSeeder.SeedAsync(app);
 
+    // Dev-only: hands the seeded demo credentials to dev client builds so the sign-in
+    // form can prefill. Same fence as the testbed: mapped ONLY in Development, and the
+    // password itself lives only in the gitignored dev config.
+    app.MapGet("/api/v1/dev/demo-credentials", (IConfiguration config) =>
+            config.GetValue("Dev:SeedDemoUser", false)
+                && config["Dev:DemoUserEmail"] is { Length: > 0 } email
+                && config["Dev:DemoUserPassword"] is { Length: > 0 } password
+                ? Results.Ok(new { email, password })
+                : Results.NotFound())
+        .AllowAnonymous()
+        .RequireRateLimiting("auth");
+
     // Dev-only browser testbed (no Blazor needed): https://localhost:<port>/dev/testbed
     // Served from source, mapped only in Development, excluded from publish output.
     var testbed = Path.Combine(app.Environment.ContentRootPath, "DevTestbed", "index.html");
