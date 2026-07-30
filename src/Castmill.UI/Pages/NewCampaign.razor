@@ -208,6 +208,9 @@
     // everything else generated on demand from the Mill Floor (2026-07-29). Images are
     // NEVER generated here — the plan only reserves slots + prompts; pixels are made in
     // the Image Studio, deliberately.
+    // "social" expands to the six real per-platform generator kinds at submit — the
+    // orchestrator matches kinds exactly. Image slots are reserved automatically by any
+    // run, so there is no image checkbox: pixels only ever come from the Image Studio.
     private readonly List<FanOutItem> _fanOut =
     [
         new("blog", "Blog post"),
@@ -218,8 +221,10 @@
         new("show-notes", "Show notes", selected: false),
         new("clips", "Clip suggestions", selected: false),
         new("seo-brief", "SEO brief", selected: false),
-        new("image-plan", "Image plan (slots + prompts only — no images generated)"),
     ];
+
+    private static string[] ExpandKinds(IEnumerable<string> kinds) =>
+        kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]).ToArray();
 
     private Step _step = Step.Source;
     private string _name = string.Empty;
@@ -431,7 +436,7 @@
             // the reveal happens there, card by card, as completions land (ADR-F13).
             PressRun.Start(
                 campaignId, transcriptId, brief,
-                _fanOut.Where(f => f.Selected).Select(f => f.Kind).ToArray());
+                ExpandKinds(_fanOut.Where(f => f.Selected).Select(f => f.Kind)));
 
             Navigation.NavigateTo(CampaignViews.PathFor(campaignId, CampaignView.MillFloor));
         }

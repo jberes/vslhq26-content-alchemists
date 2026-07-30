@@ -26,9 +26,10 @@
 }
 
 .cm-button--quiet {
-    background: transparent;
+    background: var(--cm-surface-raised);
     border-color: var(--cm-rule-strong);
     color: var(--cm-on-surface);
+    font-weight: 400;
 }
 
 .cm-button--quiet:hover {

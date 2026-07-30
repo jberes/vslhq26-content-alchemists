@@ -178,35 +178,34 @@
 
 .cm-tabs {
     display: inline-flex;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-1);
     border: 1px solid var(--cm-rule-strong);
-    border-radius: var(--cm-radius-md);
-    overflow: hidden;
+    border-radius: var(--cm-radius-lg);
+    background: var(--cm-surface-sunken);
 }
 
 .cm-tabs__tab {
-    padding: var(--cm-space-2) var(--cm-space-3);
+    padding: var(--cm-space-2) var(--cm-space-6);
     border: 0;
-    border-inline-start: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
     background: transparent;
-    color: var(--cm-on-surface-muted);
-    font: inherit;
-    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-body);
+    font-weight: 500;
     cursor: pointer;
-    transition: background var(--cm-motion), color var(--cm-motion);
-}
-
-.cm-tabs__tab:first-child {
-    border-inline-start: 0;
+    transition: background var(--cm-motion), color var(--cm-motion), box-shadow var(--cm-motion);
 }
 
 .cm-tabs__tab:hover {
     background: var(--cm-accent-wash);
-    color: var(--cm-on-surface);
 }
 
 .cm-tabs__tab[aria-selected="true"] {
     background: var(--cm-accent-strong);
     color: var(--cm-on-accent);
+    box-shadow: var(--cm-shadow-sm);
 }
 
 /* ---- Front page ---------------------------------------------------------------- */
@@ -791,6 +790,13 @@
     pointer-events: none;
 }
 
+/* The [hidden] rule is load-bearing: this class sets display:flex, which beats the UA's
+   [hidden]{display:none} — without the override the menu is visible from mount and only
+   LOOKS like it "opens" (owner hit exactly this, twice). */
+.cm-editor__slash[hidden] {
+    display: none;
+}
+
 .cm-editor__slash {
     position: absolute;
     z-index: 20;
@@ -1345,4 +1351,14 @@
 
 .cm-rail__delete:hover {
     color: var(--cm-danger);
+}
+
+/* ---- On-demand generation strip -------------------------------------------------- */
+
+.cm-board__more {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin: var(--cm-space-4) var(--cm-space-4) 0;
 }

@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Blazor-ApexCharts" Version="7.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.10" />
     <!-- MIT tier of Ignite UI for Blazor: 60+ components, no licence key, no private feed.
          The commercial package is only needed for IgbCategoryChart on the SEO desk (E9.2 / F9). -->
@@ -23,10 +24,8 @@
        It is generated output, so it is gitignored; this target keeps it fresh once a
        developer has run `npm install` at the repo root. A clone without node_modules
        simply skips it — nothing before Phase F4 consumes the bundle. -->
-  <Target Name="BuildEditorInterop" BeforeTargets="BeforeBuild"
-          Condition="'$(SkipEditorInterop)' != 'true' And Exists('$(MSBuildThisFileDirectory)..\..\node_modules')">
-    <Exec Command="npm run build --workspace=castmill-editor-interop"
-          WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
+  <Target Name="BuildEditorInterop" BeforeTargets="BeforeBuild" Condition="'$(SkipEditorInterop)' != 'true' And Exists('$(MSBuildThisFileDirectory)..\..\node_modules')">
+    <Exec Command="npm run build --workspace=castmill-editor-interop" WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
   </Target>
 
 </Project>

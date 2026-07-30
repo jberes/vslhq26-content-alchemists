@@ -30,10 +30,21 @@ public static class ArtifactDisplay
         _ => "cm-status",
     };
 
+    /// <summary>The six per-platform social generator kinds — "social" alone matches nothing.</summary>
+    public static readonly string[] SocialKinds =
+        ["social-x", "social-linkedin", "social-facebook", "social-instagram", "social-threads", "social-bluesky"];
+
     /// <summary>Human label for an artifact kind, keyed to the generator names the API uses.</summary>
     public static string KindLabel(string kind) => kind switch
     {
         "blog" => "Blog post",
+        "social-x" => "X post",
+        "social-linkedin" => "LinkedIn post",
+        "social-facebook" => "Facebook post",
+        "social-instagram" => "Instagram post",
+        "social-threads" => "Threads post",
+        "social-bluesky" => "Bluesky post",
+        "seo-keyword-plan" => "Keyword plan",
         "landing-page" => "Landing page",
         "email-sequence" => "Email sequence",
         "newsletter" => "Newsletter",
@@ -54,7 +65,7 @@ public static class ArtifactDisplay
         "blog" or "landing-page" => "Blog",
         "newsletter" or "email-sequence" => "Email",
         "clips" => "Clips",
-        "seo-brief" or "keyword-plan" => "Page/SEO",
+        "seo-brief" or "keyword-plan" or "seo-keyword-plan" => "Page/SEO",
         "image-prompts" => "Images",
         "transcript" => "Source",
         _ => "Social",

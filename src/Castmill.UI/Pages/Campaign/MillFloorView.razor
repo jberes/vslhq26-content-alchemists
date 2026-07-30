@@ -14,6 +14,8 @@
 @implements IDisposable
 @inject CampaignState Campaign
 @inject PressRunService PressRun
+@inject Castmill.UI.Http.GenerationClient Generation
+@inject INotifier Notifier
 @inject NavigationManager Navigation
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Mill Floor</PageTitle>
@@ -119,6 +121,22 @@
                     </p>
                 </div>
             }
+            @if (Campaign.Transcript is not null && !PressRun.IsActiveFor(CampaignId) && MissingKinds.Any())
+            {
+                <div class="cm-board__more">
+                    <span class="cm-kicker">Print more from this source</span>
+                    @foreach (var kind in MissingKinds)
+                    {
+                        var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@(_generating.Contains(kind))"
+                                @onclick="() => GenerateKindAsync(kind)">
+                            @(_generating.Contains(kind) ? $"Printing {label}…" : $"+ {label}")
+                        </button>
+                    }
+                </div>
+            }
+
             @if (Campaign.Artifacts.Count == 0 && !PressRun.IsActiveFor(CampaignId))
             {
                 <div class="cm-pad">
@@ -276,6 +294,79 @@
 
     private void TogglePin(ArtifactPreviewResponse artifact) =>
         _pinnedId = _pinnedId == artifact.Id ? null : artifact.Id;
+
+    /// <summary>On-demand menu entries; "social" fans out to the six real platform kinds.</summary>
+    private static readonly string[] AllKinds =
+        ["blog", "social", "email-sequence", "newsletter", "landing-page", "show-notes", "clips", "seo-brief"];
+
+    private readonly HashSet<string> _generating = [];
+
+    private IEnumerable<string> MissingKinds
+    {
+        get
+        {
+            var have = Campaign.Artifacts.Select(a => a.Kind).ToHashSet(StringComparer.Ordinal);
+            foreach (var kind in AllKinds)
+            {
+                var satisfied = kind == "social"
+                    ? ArtifactDisplay.SocialKinds.All(have.Contains)
+                    : have.Contains(kind);
+                if (!satisfied)
+                {
+                    yield return kind;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Prints one kind on demand against the live model, with per-button state — the
+    /// owner's "generate the rest when I ask, not up front".
+    /// </summary>
+    private async Task GenerateKindAsync(string kind)
+    {
+        if (Campaign.TranscriptArtifactId is not { } transcriptId || !_generating.Add(kind))
+        {
+            return;
+        }
+
+        StateHasChanged();
+
+        try
+        {
+            if (kind == "social")
+            {
+                // Six per-platform generators, one press: rides the run path so the
+                // press panel narrates each platform as it lands.
+                var finished = await Generation.GenerateAsync(
+                    CampaignId, transcriptId, null, ArtifactDisplay.SocialKinds);
+                Notifier.ShowSuccess($"Social set printed · {finished.Succeeded} of {ArtifactDisplay.SocialKinds.Length}.");
+            }
+            else
+            {
+                var item = await Generation.GenerateOneAsync(CampaignId, kind, transcriptId, null);
+                if (item.Success)
+                {
+                    Notifier.ShowSuccess($"{ArtifactDisplay.KindLabel(kind)} printed · {item.DurationMs / 1000.0:0.0}s");
+                }
+                else
+                {
+                    Notifier.ShowError(item.Error ?? $"{ArtifactDisplay.KindLabel(kind)} failed.");
+                }
+            }
+
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (Castmill.UI.Http.ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _generating.Remove(kind);
+            StateHasChanged();
+        }
+    }
 
     private void OpenFocus(ArtifactPreviewResponse artifact) =>
         Navigation.NavigateTo(

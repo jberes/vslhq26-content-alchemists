@@ -91,9 +91,16 @@
                 }
                 else
                 {
+                @if (IsStructured)
+                {
+                    <p class="cm-meta">
+                        Structured artifact — rendered read-only. Its fields are validated
+                        server-side; a composer for structured kinds is a later phase.
+                    </p>
+                }
                 <RichEditor @key="EditorKey"
                             Markdown="@DisplayedMarkdown"
-                            Editable="@(_previewRevision is null)"
+                            Editable="@(_previewRevision is null && !IsStructured)"
                             Placeholder="Write, or press / for a block."
                             OnCommit="CommitAsync"
                             OnChanged="MarkDirty"
@@ -220,7 +227,12 @@
 @code {
     /// <summary>Kinds Focus mode can edit — the markdown ones. A transcript is source, not copy.</summary>
     private static readonly string[] EditableKinds =
-        ["blog", "landing-page", "newsletter", "email-sequence", "show-notes", "seo-brief", "clips"];
+        ["blog", "landing-page", "newsletter", "email-sequence", "show-notes", "seo-brief", "clips",
+         "social-x", "social-linkedin", "social-facebook", "social-instagram", "social-threads", "social-bluesky",
+         "seo-keyword-plan"];
+
+    /// <summary>Structured kinds render formatted but read-only (see StructuredContent).</summary>
+    private bool IsStructured => _artifact is not null && StructuredContent.IsStructured(_artifact.Kind);
 
     private readonly List<EditorHeading> _headings = [];
 
@@ -304,7 +316,9 @@
             _artifact = artifact;
             _artifactId = id;
             _etag = etag;
-            _markdown = ArtifactContent.ToMarkdown(artifact.ContentJson);
+            _markdown = StructuredContent.IsStructured(artifact.Kind)
+                ? StructuredContent.ToDisplayMarkdown(artifact.Kind, artifact.ContentJson)
+                : ArtifactContent.ToMarkdown(artifact.ContentJson);
             _headings.Clear();
             _saveState = "Saved on blur";
             _previewRevision = null;
@@ -334,7 +348,7 @@
     /// </summary>
     private async Task CommitAsync(string markdown)
     {
-        if (_artifact is null || _artifactId is not { } id)
+        if (_artifact is null || _artifactId is not { } id || IsStructured)
         {
             return;
         }
