@@ -62,7 +62,7 @@ Everything is documented inline in [appsettings.Development.template.json](src/C
 
 ## Demo (required)
 
-- Video link: _coming with the client phase_
+- Video link: [demo/demo-castmill.mp4](demo/demo-castmill.mp4)
 - Deployed URL: _run locally per above; one-command Azure deploy: `./infra/deploy.sh rg-castmill`_
 
 ## Known limitations
