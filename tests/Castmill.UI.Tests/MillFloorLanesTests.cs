@@ -100,6 +100,29 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Print_more_renders_one_even_chip_per_kind_inside_a_labelled_tray()
+    {
+        StubPreview(Artifact("transcript", "Source transcript"), Artifact("blog", "Blog draft"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Print more from this source");
+
+        // The label owns its own row; the actions sit on a grid, so nothing half-wraps.
+        Assert.NotNull(view.Find(".cm-board__more > .cm-kicker"));
+        var grid = view.Find(".cm-board__more-grid");
+        var chips = grid.QuerySelectorAll(".cm-print-chip");
+
+        // Blog exists already, so it is not offered; the rest of the on-demand set is.
+        Assert.Equal(7, chips.Length);
+        Assert.All(chips, chip =>
+        {
+            Assert.NotNull(chip.QuerySelector(".cm-print-chip__plus"));
+            Assert.NotNull(chip.QuerySelector(".cm-print-chip__label"));
+        });
+        Assert.Contains(chips, c => c.TextContent.Contains("Social set (6)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Deleting_a_card_confirms_then_calls_the_delete_endpoint_and_reloads()
     {
         StubPreview(Artifact("blog", "Doomed draft"));

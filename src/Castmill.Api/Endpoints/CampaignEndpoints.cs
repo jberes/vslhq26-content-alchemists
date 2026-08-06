@@ -180,6 +180,14 @@ public static class CampaignEndpoints
             .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
             .ToListAsync(ct);
 
+        // The Wire's queue: reviewed and waiting for a slot (ADR-F22's Queued state).
+        var readyToSchedule = await db.Artifacts
+            .Where(a => a.Status == ArtifactStatus.Queued)
+            .OrderBy(a => a.UpdatedAt)
+            .Take(50)
+            .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
+            .ToListAsync(ct);
+
         var emptySlotModels = await db.ImageSlots
             .Where(s => s.State != "Filled" && s.ModelAlias != null)
             .Select(s => s.ModelAlias!)
@@ -206,7 +214,10 @@ public static class CampaignEndpoints
             slotCounts.Sum(s => s.Total - s.Filled),
             withEmpty.Count,
             emptySlotModels,
-            campaigns.FirstOrDefault(c => withEmpty.Contains(c.Id))?.Id));
+            campaigns.FirstOrDefault(c => withEmpty.Contains(c.Id))?.Id,
+            readyToSchedule.Select(a => new DashboardArtifact(
+                a.CampaignId, names.GetValueOrDefault(a.CampaignId, ""), a.Id,
+                a.Kind, a.Title, a.Status, a.UpdatedAt)).ToList()));
     }
 
     private static async Task<IResult> CreateAsync(

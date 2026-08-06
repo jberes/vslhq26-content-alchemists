@@ -1,0 +1,221 @@
+@* The Wire (workspace scope): what is scheduled this week, and what is reviewed and
+   still waiting for a slot. It renders from OUR schedule rows (ADR-016), so the week
+   draws on load without a broker round-trip.
+
+   Drag-to-schedule and broker publishing are F8. Until they land this page states that
+   plainly rather than rendering a control that would do nothing (G3). The rail item used
+   to point at no route at all, which dead-ended the user with no way back — a routed
+   page inside the shell is the fix, empty week or not. *@
+@page "/wire"
+@using Castmill.Core
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@inject CampaignsClient Campaigns
+@inject ScheduleClient Schedule
+@inject WorkspaceState Workspace
+@inject NavigationManager Navigation
+
+<PageTitle>The Wire — Castmill</PageTitle>
+
+<div class="cm-page cm-page--fill"><div class="cm-measure--dashboard cm-front__frame">
+    <header class="cm-front__head">
+        <span class="cm-kicker">The Wire</span>
+        <h1>@WeekLabel</h1>
+    </header>
+
+    @if (!_loaded)
+    {
+        <p class="cm-meta">Loading the week…</p>
+    }
+    else
+    {
+        <div class="cm-wire">
+            <aside class="cm-wire__queue cm-region">
+                <h2 class="cm-front__block-title">Ready to schedule</h2>
+                @if (_queue.Count == 0)
+                {
+                    <p class="cm-meta">
+                        Nothing is waiting for a slot. Artifacts land here once they are
+                        marked reviewed in Focus mode.
+                    </p>
+                }
+                else
+                {
+                    <ul class="cm-rows">
+                        @foreach (var item in _queue)
+                        {
+                            <li class="cm-row">
+                                <button type="button" class="cm-wire__queue-item"
+                                        @onclick="() => OpenFocus(item)">
+                                    <span class="cm-row__label">@item.Title</span>
+                                    <span class="cm-meta">
+                                        @item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)
+                                    </span>
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </aside>
+
+            <section class="cm-wire__week cm-region">
+                <div class="cm-wire__week-head">
+                    <h2 class="cm-front__block-title">This week</h2>
+                    <div class="cm-segmented" role="group" aria-label="Week">
+                        <button type="button" class="cm-segmented__option" @onclick="() => ShiftWeekAsync(-1)">← Previous</button>
+                        <button type="button" class="cm-segmented__option" aria-pressed="@(_weekOffset == 0)"
+                                @onclick="() => ShiftWeekAsync(0)">This week</button>
+                        <button type="button" class="cm-segmented__option" @onclick="() => ShiftWeekAsync(1)">Next →</button>
+                    </div>
+                </div>
+
+                @if (_loadError is { } error)
+                {
+                    <p class="cm-form__error" role="alert">@error</p>
+                }
+
+                <div class="cm-wire__days cm-scroll-x" data-cm-scroll>
+                    @foreach (var day in Days)
+                    {
+                        var entries = _entries
+                            .Where(e => e.ScheduledAt.ToLocalTime().Date == day.Date)
+                            .OrderBy(e => e.ScheduledAt)
+                            .ToList();
+
+                        <div class="cm-wire__day @(day.Date == DateTimeOffset.Now.Date ? "cm-wire__day--today" : "")">
+                            <span class="cm-kicker">@day.ToString("ddd d MMM")</span>
+                            @if (entries.Count == 0)
+                            {
+                                <span class="cm-meta cm-wire__day-empty">—</span>
+                            }
+                            else
+                            {
+                                <ul class="cm-wire__entries">
+                                    @foreach (var entry in entries)
+                                    {
+                                        <li class="cm-wire__entry">
+                                            <span class="cm-mono cm-meta">
+                                                @entry.ScheduledAt.ToLocalTime().ToString("HH:mm") · @entry.ChannelId
+                                            </span>
+                                            <span class="cm-wire__entry-text">@Excerpt(entry.Text)</span>
+                                            <span class="@StatusClass(entry.Status)">@entry.Status</span>
+                                            @if (entry.Error is { Length: > 0 } entryError)
+                                            {
+                                                <span class="cm-meta">@entryError</span>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                </div>
+
+                @* The honesty rule, applied to scheduling: say what this surface cannot
+                   do yet rather than offering a control that does nothing. *@
+                <p class="cm-meta cm-wire__note">
+                    Drag-to-schedule and publishing to channels arrive with Phase F8. The
+                    week above is live: it reads the schedule mirror, so anything created
+                    through the API shows here and survives a reload.
+                </p>
+            </section>
+        </div>
+    }
+</div></div>
+
+@code {
+    private readonly List<ScheduleEntryResponse> _entries = [];
+    private readonly List<DashboardArtifact> _queue = [];
+
+    private bool _loaded;
+    private string? _loadError;
+    private int _weekOffset;
+
+    /// <summary>Monday of the displayed week, local time.</summary>
+    private DateTimeOffset WeekStart
+    {
+        get
+        {
+            var today = DateTimeOffset.Now.Date;
+            var sinceMonday = ((int)today.DayOfWeek + 6) % 7;
+            return new DateTimeOffset(today.AddDays(-sinceMonday + (_weekOffset * 7)), DateTimeOffset.Now.Offset);
+        }
+    }
+
+    private IEnumerable<DateTimeOffset> Days => Enumerable.Range(0, 7).Select(i => WeekStart.AddDays(i));
+
+    private string WeekLabel => _weekOffset switch
+    {
+        0 => "On the wire this week.",
+        < 0 => $"The week of {WeekStart:d MMM}.",
+        _ => $"The week of {WeekStart:d MMM}.",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Workspace.LoadAsync();
+        await LoadAsync();
+    }
+
+    private async Task ShiftWeekAsync(int offset)
+    {
+        _weekOffset = offset == 0 ? 0 : _weekOffset + offset;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+
+        try
+        {
+            var entries = await Schedule.ListAsync(WeekStart, WeekStart.AddDays(7));
+            _entries.Clear();
+            _entries.AddRange(entries);
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Couldn't reach the Castmill API.";
+        }
+
+        try
+        {
+            var dashboard = await Campaigns.GetDashboardAsync();
+            _queue.Clear();
+            _queue.AddRange(dashboard.ReadyToSchedule ?? []);
+        }
+        catch (ApiException)
+        {
+            // The week still renders; the queue column shows its empty state.
+        }
+        catch (HttpRequestException)
+        {
+        }
+
+        _loaded = true;
+    }
+
+    private void OpenFocus(DashboardArtifact item)
+    {
+        Workspace.SetActive(item.CampaignId);
+        Navigation.NavigateTo(
+            $"{CampaignViews.PathFor(item.CampaignId, CampaignView.Focus)}?artifact={item.ArtifactId}");
+    }
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Sent" => "cm-status cm-status--published",
+        "Queued" => "cm-status cm-status--queued",
+        "Error" => "cm-status cm-status--review",
+        _ => "cm-status",
+    };
+
+    private static string Excerpt(string text) =>
+        text.Length <= 90 ? text : text[..90].TrimEnd() + "…";
+}

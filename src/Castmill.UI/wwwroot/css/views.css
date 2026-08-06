@@ -235,24 +235,56 @@
     margin-block-end: var(--cm-space-6);
 }
 
+/* The front page fills the frame and scrolls INSIDE its columns rather than growing the
+   page (G8: the page never scrolls, regions do). A campaign with fifty aging drafts must
+   not push the review queue off the bottom of the window. */
+.cm-front__frame {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-block-size: 0;
+    block-size: 100%;
+}
+
 .cm-front {
     display: grid;
     grid-template-columns: 1.35fr 1fr;
     gap: var(--cm-space-8);
-    align-items: start;
+    align-items: stretch;
+    min-block-size: 0;
 }
 
-@media (max-width: 1179.98px) {
-    .cm-front {
-        grid-template-columns: minmax(0, 1fr);
-    }
+.cm-front__primary,
+.cm-front__secondary {
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* Room for the last row's descender + focus ring against the scroll edge. */
+    padding-block-end: var(--cm-space-3);
 }
 
 .cm-front__secondary {
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-8);
-    min-inline-size: 0;
+}
+
+/* Below md the columns stack, so the page itself becomes the one scroll region again —
+   two stacked scroll boxes on a narrow window is worse than a single honest scroll. */
+@media (max-width: 1179.98px) {
+    .cm-front {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .cm-front__frame {
+        grid-template-rows: auto auto;
+        block-size: auto;
+    }
+
+    .cm-front__primary,
+    .cm-front__secondary {
+        overflow-y: visible;
+    }
 }
 
 .cm-front__block-title {
@@ -1520,12 +1552,60 @@
 
 /* ---- On-demand generation strip -------------------------------------------------- */
 
+/* "Print more from this source": a labelled tray, not a ragged wrap of buttons. The
+   label owns its own line and the actions sit on an even grid, so a lane of six or of
+   two reads the same and nothing half-wraps mid-row. */
 .cm-board__more {
+    margin: var(--cm-space-4) var(--cm-space-4) 0;
+    padding: var(--cm-space-3);
+    max-inline-size: 62rem;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+}
+
+.cm-board__more-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-2);
+}
+
+.cm-print-chip {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: var(--cm-space-2);
-    margin: var(--cm-space-4) var(--cm-space-4) 0;
+    inline-size: 100%;
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    text-align: start;
+    cursor: pointer;
+    transition: border-color var(--cm-motion), background var(--cm-motion);
+}
+
+.cm-print-chip:hover {
+    border-color: var(--cm-accent);
+    background: var(--cm-accent-wash);
+}
+
+/* The plus is a fixed-width gutter so every label starts on the same x. */
+.cm-print-chip__plus {
+    inline-size: 1em;
+    flex: 0 0 auto;
+    color: var(--cm-accent-alt);
+    font-family: var(--cm-font-mono);
+}
+
+.cm-print-chip__label {
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ---- SEO / AEO desk (F9) ---------------------------------------------------------- */
@@ -2077,4 +2157,108 @@
     block-size: auto;
     border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-sm);
+}
+
+/* ---- The Wire (workspace scope) -------------------------------------------------- */
+
+.cm-wire {
+    display: grid;
+    grid-template-columns: 22rem minmax(0, 1fr);
+    gap: var(--cm-space-8);
+    align-items: stretch;
+    min-block-size: 0;
+}
+
+@media (max-width: 1179.98px) {
+    .cm-wire {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.cm-wire__queue,
+.cm-wire__week {
+    min-inline-size: 0;
+    min-block-size: 0;
+}
+
+.cm-wire__queue-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    inline-size: 100%;
+    padding: var(--cm-space-2);
+    border: 0;
+    border-inline-start: 2px solid var(--cm-status-queued);
+    background: transparent;
+    color: var(--cm-on-surface);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    transition: background var(--cm-motion);
+}
+
+.cm-wire__queue-item:hover {
+    background: var(--cm-accent-wash);
+}
+
+.cm-wire__week-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+/* Seven day columns; the strip scrolls inside itself so the page never does (G8). */
+.cm-wire__days {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(11rem, 1fr);
+    gap: var(--cm-space-2);
+    margin-block: var(--cm-space-3);
+}
+
+.cm-wire__day {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    min-block-size: 9rem;
+    padding: var(--cm-space-2);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+}
+
+.cm-wire__day--today {
+    border-color: var(--cm-accent);
+    box-shadow: inset 0 2px 0 0 var(--cm-accent);
+}
+
+.cm-wire__day-empty {
+    color: var(--cm-on-surface-subtle);
+}
+
+.cm-wire__entries {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+}
+
+.cm-wire__entry {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--cm-space-2);
+    border-block-start: 1px solid var(--cm-rule);
+}
+
+.cm-wire__entry-text {
+    font-size: var(--cm-text-meta);
+}
+
+.cm-wire__note {
+    max-inline-size: 60ch;
 }

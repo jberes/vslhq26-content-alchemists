@@ -125,14 +125,18 @@
             {
                 <div class="cm-board__more">
                     <span class="cm-kicker">Print more from this source</span>
-                    @foreach (var kind in MissingKinds)
-                    {
-                        var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
-                        <button type="button" class="cm-button cm-button--quiet"
-                                @onclick="() => GenerateKind(kind)">
-                            + @label
-                        </button>
-                    }
+                    <div class="cm-board__more-grid">
+                        @foreach (var kind in MissingKinds)
+                        {
+                            var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
+                            <button type="button" class="cm-print-chip"
+                                    title="Generate @label from this transcript"
+                                    @onclick="() => GenerateKind(kind)">
+                                <span class="cm-print-chip__plus" aria-hidden="true">+</span>
+                                <span class="cm-print-chip__label">@label</span>
+                            </button>
+                        }
+                    </div>
                 </div>
             }
 

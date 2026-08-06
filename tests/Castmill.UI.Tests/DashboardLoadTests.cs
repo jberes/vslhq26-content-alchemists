@@ -60,6 +60,22 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task The_front_page_columns_are_their_own_scroll_regions()
+    {
+        // A campaign with fifty aging drafts must scroll inside the column, not grow the
+        // page past the window — the structural half of that is these classes.
+        var page = Render<FrontPage>();
+        await page.WaitForStateAsync(
+            () => page.Markup.Contains("Cutting deployment time", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+
+        Assert.NotNull(page.Find(".cm-page.cm-page--fill"));
+        Assert.NotNull(page.Find(".cm-front__frame"));
+        Assert.NotNull(page.Find(".cm-front__primary"));
+        Assert.NotNull(page.Find(".cm-front__secondary"));
+    }
+
+    [Fact]
     public async Task The_campaigns_index_renders_its_counters_from_the_same_projection()
     {
         var page = Render<CampaignsIndex>();

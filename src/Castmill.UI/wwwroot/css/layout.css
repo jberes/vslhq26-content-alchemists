@@ -74,6 +74,22 @@
     padding: clamp(1.5rem, 4vh, 2.4rem) clamp(var(--cm-space-4), 3vw, var(--cm-space-12));
 }
 
+/* A document page whose own content owns the scrolling: the page fills the frame and
+   hands its height to the child regions instead of growing (the front page's columns).
+   Below the md tier the child opts back into normal page scroll — see views.css. */
+.cm-page--fill {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+}
+
+@media (max-width: 1179.98px) {
+    .cm-page--fill {
+        display: block;
+        overflow-y: auto;
+    }
+}
+
 /* Campaign frame: fixed header + tabs, the view below owns its own scrolling. */
 .cm-campaign-frame {
     display: grid;

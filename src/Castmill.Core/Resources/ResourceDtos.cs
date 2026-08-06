@@ -43,7 +43,9 @@ public sealed record DashboardResponse(
     int EmptySlots,
     int CampaignsWithEmptySlots,
     IReadOnlyList<string> EmptySlotModels,
-    Guid? FirstEmptySlotCampaign);
+    Guid? FirstEmptySlotCampaign,
+    /// <summary>Reviewed artifacts waiting for a slot on the Wire (status Queued).</summary>
+    IReadOnlyList<DashboardArtifact>? ReadyToSchedule = null);
 
 // ---- Artifacts -------------------------------------------------------------
 
