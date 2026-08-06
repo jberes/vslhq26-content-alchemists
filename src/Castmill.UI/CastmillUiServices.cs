@@ -62,6 +62,7 @@ public static class CastmillUiServices
         services.AddScoped<GenerationClient>();
         services.AddScoped<SeoClient>();
         services.AddScoped<ImagesClient>();
+        services.AddScoped<BrandsClient>();
 
         // The dependency graph is genuinely circular: the token provider refreshes through
         // AuthClient, which resolves an HttpClient whose handler needs the token provider.
@@ -80,6 +81,7 @@ public static class CastmillUiServices
         // Scoped, NOT per-page: the run must survive the navigation from the new-campaign
         // flow to the Mill Floor, and a component awaiting the POST would cancel it.
         services.AddScoped<PressRunService>();
+        services.AddScoped<StudioRunService>();
 
         return services;
     }

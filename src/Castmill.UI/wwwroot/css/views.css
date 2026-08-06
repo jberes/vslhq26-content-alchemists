@@ -11,6 +11,16 @@
     gap: var(--cm-space-6);
     min-block-size: 100%;
     padding-block-end: var(--cm-space-6);
+    color: var(--cm-on-rail);
+}
+
+/* The rail is its own surface (item 10): its text bindings swap to the on-rail pair so
+   the tinted panel keeps AA — enforced as a contrast pair in DesignTokenTests. */
+.cm-rail .cm-kicker,
+.cm-rail .cm-rail__count,
+.cm-rail .cm-rail__hints kbd,
+.cm-rail .cm-rail__hints dd {
+    color: var(--cm-on-rail-muted);
 }
 
 .cm-rail__group {
@@ -39,7 +49,7 @@
     /* 2 px transparent left border so the active state adds no layout shift. */
     border-inline-start: 2px solid transparent;
     background: transparent;
-    color: var(--cm-on-surface);
+    color: var(--cm-on-rail);
     font: inherit;
     font-size: var(--cm-text-body);
     text-align: start;
@@ -125,10 +135,21 @@
 /* Below md the rail is icons-only: labels are hidden but the hint block and switcher
    collapse entirely rather than being squeezed (E3.6). */
 @media (max-width: 1179.98px) {
-    .cm-app:not([data-cm-rail="labels"]) .cm-rail__label,
-    .cm-app:not([data-cm-rail="labels"]) .cm-rail__hints,
-    .cm-app:not([data-cm-rail="labels"]) .cm-rail__card,
-    .cm-app:not([data-cm-rail="labels"]) .cm-rail__count {
+    :root:not([data-cm-rail="labels"]) .cm-rail__label,
+    :root:not([data-cm-rail="labels"]) .cm-rail__hints,
+    :root:not([data-cm-rail="labels"]) .cm-rail__card,
+    :root:not([data-cm-rail="labels"]) .cm-rail__count {
+        display: none;
+    }
+}
+
+/* User-pinned collapse: the same icons-only treatment at any in-flow width. */
+@media (min-width: 900px) {
+    :root[data-cm-rail="icons"] .cm-rail__label,
+    :root[data-cm-rail="icons"] .cm-rail__hints,
+    :root[data-cm-rail="icons"] .cm-rail__card,
+    :root[data-cm-rail="icons"] .cm-rail__count,
+    :root[data-cm-rail="icons"] .cm-rail__run {
         display: none;
     }
 }
@@ -552,6 +573,30 @@
     padding-block-start: var(--cm-space-2);
 }
 
+/* Kind sub-groups inside a lane: every artifact kind gets its own labelled row, so
+   categories never visually mix (the pre-registry board dumped unmapped kinds into
+   Social). Groups stack vertically inside the lane's content column. */
+.cm-lane__groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    min-inline-size: 0;
+}
+
+.cm-lane__kind {
+    margin: 0 0 var(--cm-space-1);
+    padding-inline-start: var(--cm-space-1);
+    border-inline-start: 2px solid var(--cm-accent-alt);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-meta);
+    font-weight: 600;
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-lane__kind-count {
+    font-weight: 400;
+}
+
 .cm-lane__cards {
     list-style: none;
     margin: 0;
@@ -561,10 +606,57 @@
     min-inline-size: 0;
 }
 
+.cm-lane__cards > li {
+    position: relative;
+}
+
 .cm-card--lane {
     inline-size: 220px;
     flex: 0 0 auto;
     cursor: default;
+}
+
+/* Ghost card: a stub for content the press is still printing. Dashed frame + shimmer
+   title + pulsing dot; replaced by the real card's print-in when the generator lands. */
+.cm-card--ghost {
+    border-style: dashed;
+    background: var(--cm-surface);
+}
+
+.cm-card__printing {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-1);
+    color: var(--cm-on-surface-subtle);
+}
+
+/* Delete affordance: hidden until the card is hovered or the button itself is focused,
+   so the board stays calm; always reachable by keyboard (focus reveals it). */
+.cm-card__delete {
+    position: absolute;
+    inset-block-start: var(--cm-space-1);
+    inset-inline-end: var(--cm-space-1);
+    inline-size: 22px;
+    block-size: 22px;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-meta);
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-lane__cards > li:hover .cm-card__delete,
+.cm-card__delete:focus-visible {
+    opacity: 1;
+}
+
+.cm-card__delete:hover {
+    color: var(--cm-danger);
+    border-color: var(--cm-danger);
 }
 
 /* ---- Image plan (F10 builds the studio pane) ----------------------------------- */
@@ -703,6 +795,74 @@
 
 .cm-focus__list-title {
     font-size: var(--cm-text-body);
+}
+
+/* ---- Artifact tree (Focus rail): lane groups → items, with per-item delete ------- */
+
+.cm-tree {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-tree__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--cm-space-2);
+    inline-size: 100%;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border: 0;
+    background: transparent;
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.cm-tree__head:hover {
+    background: var(--cm-accent-wash);
+}
+
+.cm-tree__chevron {
+    font-size: var(--cm-text-meta);
+    color: var(--cm-accent-alt);
+}
+
+.cm-tree__row {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+
+.cm-tree__row .cm-focus__list-item {
+    padding-inline-start: var(--cm-space-6);
+}
+
+.cm-tree__delete {
+    position: absolute;
+    inset-block-start: var(--cm-space-1);
+    inset-inline-end: var(--cm-space-1);
+    inline-size: 22px;
+    block-size: 22px;
+    border: 0;
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface-subtle);
+    font-size: var(--cm-text-meta);
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-tree__row:hover .cm-tree__delete,
+.cm-tree__row:focus-within .cm-tree__delete {
+    opacity: 1;
+}
+
+.cm-tree__delete:hover {
+    color: var(--cm-danger);
 }
 
 .cm-focus__pad {
@@ -899,6 +1059,11 @@
     padding: var(--cm-space-2) var(--cm-space-3);
     border-block-end: 1px solid var(--cm-rule);
     transition: background var(--cm-motion);
+    /* Browser-native lazy render: off-screen rows skip layout/paint but STAY in the DOM,
+       which the provenance overlay requires (it measures [data-seg] by selector). Same
+       approach as the board's cards (F5) — no windowing component. */
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 3.6rem;
 }
 
 .cm-seg__label {
@@ -1698,30 +1863,218 @@
 }
 
 /* Skeleton while variants render — motion, not a spinner (ADR-F13). */
-.cm-studio__skeleton {
-    aspect-ratio: 16 / 9;
-    border-radius: var(--cm-radius-sm);
-    background: linear-gradient(100deg,
-        var(--cm-surface-sunken) 40%, var(--cm-surface-raised) 50%, var(--cm-surface-sunken) 60%);
-    background-size: 200% 100%;
-    animation: cm-studio-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes cm-studio-shimmer {
-    from { background-position: 100% 0; }
-    to { background-position: -100% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .cm-studio__skeleton {
-        animation: none;
-    }
-}
+/* Studio tiles use the shared .cm-skeleton.cm-skeleton--tile (components.css). */
 
 .cm-studio__placed img {
     max-width: 28rem;
     width: 100%;
     height: auto;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+}
+
+/* ---- Brands (workspace scope): the steering kits ------------------------------- */
+
+.cm-brand {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-8);
+    max-inline-size: 72ch;
+}
+
+.cm-brand__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+}
+
+.cm-brand__color-row {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-brand__color-row .cm-tree__delete {
+    position: static;
+    opacity: 1;
+}
+
+.cm-brand__color-role {
+    inline-size: 16rem;
+}
+
+.cm-brand__color-pick {
+    inline-size: 2.4rem;
+    block-size: 2rem;
+    padding: 0;
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    cursor: pointer;
+}
+
+.cm-brand__assets,
+.cm-brand__templates {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+}
+
+.cm-brand__asset {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-2);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+}
+
+.cm-brand__asset img {
+    inline-size: 56px;
+    block-size: 56px;
+    object-fit: cover;
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-brand__asset-label {
+    flex: 1 1 auto;
+}
+
+.cm-brand__asset .cm-tree__delete,
+.cm-brand__template .cm-tree__delete {
+    position: static;
+    opacity: 1;
+}
+
+.cm-brand__upload,
+.cm-brand__new-template {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-3);
+    border: 1px dashed var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-brand__kind {
+    inline-size: 16rem;
+}
+
+.cm-brand__template {
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+}
+
+.cm-brand__template-head {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    flex-wrap: wrap;
+}
+
+.cm-brand-card {
+    position: relative;
+    display: flex;
+}
+
+.cm-brand-card__open {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    inline-size: 100%;
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    transition: border-color var(--cm-motion);
+}
+
+.cm-brand-card__open:hover {
+    border-color: var(--cm-accent);
+}
+
+.cm-brand-card .cm-tree__delete {
+    inset-block-start: var(--cm-space-2);
+    inset-inline-end: var(--cm-space-2);
+}
+
+.cm-brand-card__voice {
+    max-inline-size: 40ch;
+}
+
+.cm-brand-card__swatches {
+    display: inline-flex;
+    gap: var(--cm-space-1);
+}
+
+.cm-brand-card__swatch {
+    inline-size: 18px;
+    block-size: 18px;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+}
+
+/* ---- Studio take gallery + dialog (items 4/11) ---------------------------------- */
+
+.cm-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--cm-space-3);
+    margin-block: var(--cm-space-3);
+}
+
+.cm-gallery__tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    cursor: pointer;
+    transition: border-color var(--cm-motion);
+}
+
+.cm-gallery__tile:hover {
+    border-color: var(--cm-accent);
+}
+
+.cm-gallery__tile img {
+    inline-size: 100%;
+    block-size: auto;
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-gallery__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-modal__panel--studio {
+    max-inline-size: min(60rem, 92vw);
+    max-block-size: 92vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+}
+
+.cm-variant__preview {
+    inline-size: 100%;
+    block-size: auto;
     border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-sm);
 }

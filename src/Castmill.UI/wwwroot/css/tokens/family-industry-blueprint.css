@@ -30,6 +30,16 @@
     --cmf-accent-wash: rgb(89 128 166 / 0.16);
     --cmf-on-accent: #f2f2f3;
 
+    /* Second accent — drafting-marker amber. Decoration only (never behind text). */
+    --cmf-accent-alt: #b06e10;
+    --cmf-accent-alt-wash: rgb(176 110 16 / 0.14);
+
+    /* The rail is its own surface: blue-tinted drafting paper, so the workspace chrome
+       reads apart from the content sheet. */
+    --cmf-surface-rail: #e3eaf1;
+    --cmf-on-rail: #1d1f20;
+    --cmf-on-rail-muted: #4d5a66;
+
     --cmf-rule: rgb(29 31 32 / 0.16);
     --cmf-rule-strong: rgb(29 31 32 / 0.32);
 
@@ -37,10 +47,12 @@
     --cmf-warning: #7a5a12;
     --cmf-danger: #a32a2a;
 
+    /* De-monochromed (was an all-blue ramp): each state gets its own hue, and the bar
+       position still carries the meaning when hue can't (ADR-F12). */
     --cmf-status-draft: #b7b7ba;
-    --cmf-status-review: #94bce3;
-    --cmf-status-queued: #416180;
-    --cmf-status-published: #1d2d3d;
+    --cmf-status-review: #3f7fc0;
+    --cmf-status-queued: #a8760a;
+    --cmf-status-published: #2f6b41;
 
     --cmf-radius-sm: 0;
     --cmf-radius-md: 0;
@@ -54,8 +66,10 @@
     --cmf-font-body: Barlow, system-ui, -apple-system, "Segoe UI", sans-serif;
     --cmf-font-display-weight: 600;
 
-    --cmf-texture: none;
-    --cmf-texture-opacity: 0;
+    /* Blueprint grid: 24 px hairlines with a heavier line on the 96 px module — the
+       family's answer to Warm Editorial's paper grain (handoff: registration-mark feel). */
+    --cmf-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M24 0v96M48 0v96M72 0v96M0 24h96M0 48h96M0 72h96' stroke='%231d2d3d' stroke-width='1' fill='none'/%3E%3Cpath d='M0.75 0v96M0 0.75h96' stroke='%231d2d3d' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    --cmf-texture-opacity: 0.05;
 }
 
 :root[data-cm-family="industry-blueprint"][data-cm-mode="dark"] {
@@ -78,6 +92,14 @@
     --cmf-accent-wash: rgb(148 188 227 / 0.18);
     --cmf-on-accent: #14202b;
 
+    --cmf-accent-alt: #e0b354;
+    --cmf-accent-alt-wash: rgb(224 179 84 / 0.18);
+
+    /* Deep drafting blue — the handoff's toast-panel hue, promoted to the rail. */
+    --cmf-surface-rail: #16222d;
+    --cmf-on-rail: #f2f2f3;
+    --cmf-on-rail-muted: #9db4c9;
+
     --cmf-rule: rgb(242 242 243 / 0.16);
     --cmf-rule-strong: rgb(242 242 243 / 0.32);
 
@@ -86,9 +108,9 @@
     --cmf-danger: #f08a8a;
 
     --cmf-status-draft: #7a7a7d;
-    --cmf-status-review: #597ea3;
-    --cmf-status-published: #d6ebff;
-    --cmf-status-queued: #94bce3;
+    --cmf-status-review: #6ea8dd;
+    --cmf-status-queued: #e0b354;
+    --cmf-status-published: #7fc492;
 
     --cmf-radius-sm: 0;
     --cmf-radius-md: 0;
@@ -102,6 +124,6 @@
     --cmf-font-body: Barlow, system-ui, -apple-system, "Segoe UI", sans-serif;
     --cmf-font-display-weight: 600;
 
-    --cmf-texture: none;
-    --cmf-texture-opacity: 0;
+    --cmf-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M24 0v96M48 0v96M72 0v96M0 24h96M0 48h96M0 72h96' stroke='%23b5d9fd' stroke-width='1' fill='none'/%3E%3Cpath d='M0.75 0v96M0 0.75h96' stroke='%23b5d9fd' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    --cmf-texture-opacity: 0.05;
 }

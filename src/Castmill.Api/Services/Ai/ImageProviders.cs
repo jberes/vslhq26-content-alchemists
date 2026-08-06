@@ -81,7 +81,12 @@ public sealed class FoundryImageProvider(IFoundryClientFactory clients) : IImage
     public async Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct)
     {
-        var alias = string.IsNullOrWhiteSpace(modelAlias) ? "image" : modelAlias;
+        // A slot may carry a model alias OR a provider name (the studio's model radio
+        // writes the latter — Resolve() routes on it). To this provider its own name
+        // means "your default deployment", never an alias-table lookup.
+        var alias = string.IsNullOrWhiteSpace(modelAlias) || modelAlias.Equals(Name, StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : modelAlias;
         var target = await clients.ResolveTargetAsync(userId, alias, ct)
             ?? throw new AiNotConfiguredException($"No Foundry credentials/deployment for image alias '{alias}'.");
 

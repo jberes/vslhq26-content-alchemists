@@ -24,6 +24,9 @@ public sealed class BrowserUiStateStore(IJSRuntime js) : IUiStateStore, IAsyncDi
     public async Task ApplyThemeAsync(string family, string mode, string density) =>
         await (await ModuleAsync()).InvokeVoidAsync("applyTheme", family, mode, density);
 
+    public async Task ApplyRailAsync(string? state) =>
+        await (await ModuleAsync()).InvokeVoidAsync("applyRail", state);
+
     public async ValueTask DisposeAsync()
     {
         if (_module is not null)

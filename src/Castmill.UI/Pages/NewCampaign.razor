@@ -8,10 +8,12 @@
    pasted transcripts work everywhere.
 *@
 @page "/campaigns/new"
+@using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
 @using Castmill.UI.Platform
 @using Castmill.UI.State
+@inject BrandsClient Brands
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
 @inject WorkspaceState Workspace
@@ -154,6 +156,37 @@
                 </label>
             </div>
 
+            <h2 class="cm-front__block-title">Brand</h2>
+            <p class="cm-meta">
+                A brand steers every generator with its voice, colours and templates —
+                or pick None and steer by hand.
+            </p>
+            <select class="cm-input cm-brand__kind" @bind="_brandId">
+                <option value="">None</option>
+                @foreach (var brand in _brands)
+                {
+                    <option value="@brand.Id">@brand.Name</option>
+                }
+            </select>
+
+            <h2 class="cm-front__block-title">Context links</h2>
+            <p class="cm-meta">
+                Real destinations — the home page, GitHub pages, docs — that generated
+                content should reference and link to.
+            </p>
+            @foreach (var link in _links)
+            {
+                <div class="cm-brand__color-row">
+                    <input class="cm-input cm-brand__color-role" placeholder="Label (Home page…)"
+                           maxlength="100" @bind="link.Label" />
+                    <input class="cm-input" placeholder="https://…" maxlength="2000" @bind="link.Url" />
+                    <button type="button" class="cm-tree__delete" aria-label="Remove link"
+                            @onclick="() => _links.Remove(link)">✕</button>
+                </div>
+            }
+            <button type="button" class="cm-button cm-button--quiet" @onclick="() => _links.Add(new LinkRow())"
+                    disabled="@(_links.Count >= 10)">+ Add link</button>
+
             <h2 class="cm-front__block-title">Fan-out</h2>
             <ul class="cm-fanout">
                 @foreach (var item in _fanOut)
@@ -219,12 +252,22 @@
         new("newsletter", "Newsletter", selected: false),
         new("landing-page", "Landing page", selected: false),
         new("show-notes", "Show notes", selected: false),
-        new("clips", "Clip suggestions", selected: false),
+        new("clip-suggestions", "Clip suggestions", selected: false),
         new("seo-brief", "SEO brief", selected: false),
     ];
 
     private static string[] ExpandKinds(IEnumerable<string> kinds) =>
         kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]).ToArray();
+
+    private sealed class LinkRow
+    {
+        public string Label { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+    }
+
+    private readonly List<BrandProfileDetailResponse> _brands = [];
+    private readonly List<LinkRow> _links = [];
+    private string _brandId = string.Empty;
 
     private Step _step = Step.Source;
     private string _name = string.Empty;
@@ -240,6 +283,21 @@
     private PickedMedia? _picked;
 
     private bool CanStart => _name.Trim().Length > 0 && _transcript.Trim().Length > 40;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _brands.AddRange(await Brands.ListAsync());
+        }
+        catch (ApiException)
+        {
+            // Brand-less runs work fine; the picker just offers None.
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
 
     private string StepTitle => StepTitleFor(_step);
 
@@ -424,7 +482,16 @@
                 $"Brand voice: {_voice}",
                 $"Angle: {_angle}");
 
-            await Campaigns.UpdateAsync(campaignId, _name.Trim(), brief);
+            var links = _links
+                .Where(l => !string.IsNullOrWhiteSpace(l.Url))
+                .Select(l => new CampaignLink(
+                    string.IsNullOrWhiteSpace(l.Label) ? "Link" : l.Label.Trim(), l.Url.Trim()))
+                .ToList();
+
+            await Campaigns.UpdateAsync(
+                campaignId, _name.Trim(), brief,
+                Guid.TryParse(_brandId, out var brandId) ? brandId : null,
+                links.Count > 0 ? links : null);
 
             if (_transcriptArtifactId is not { } transcriptId)
             {

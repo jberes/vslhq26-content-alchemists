@@ -1,0 +1,147 @@
+@* Brands index (workspace scope). Each brand is a steering kit for generation: voice,
+   palette, image style, reference assets and per-kind templates. Campaigns pick one (or
+   None) and every generator run reads it through the server's BrandContextService. *@
+@page "/brands"
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@inject BrandsClient BrandsApi
+@inject IConfirmService Confirm
+@inject INotifier Notifier
+@inject NavigationManager Navigation
+
+<PageTitle>Brands — Castmill</PageTitle>
+
+<div class="cm-page"><div class="cm-measure--dashboard">
+    <header class="cm-front__head">
+        <span class="cm-kicker">Brands</span>
+        <h1>Steering kits for everything you print.</h1>
+    </header>
+
+    @if (!_loaded)
+    {
+        <p class="cm-meta">Loading brands…</p>
+    }
+    else if (_error is { } error)
+    {
+        <EmptyState Kicker="Brands" Headline="Couldn't load brands." Detail="@error" />
+    }
+    else if (_brands.Count == 0)
+    {
+        <EmptyState Kicker="Brands"
+                    Headline="No brands yet."
+                    Detail="A brand carries the voice, colours, image style, faces and templates that steer generation. Campaigns pick a brand — or none.">
+            <Action>
+                <button type="button" class="cm-button" @onclick="CreateAsync">Create a brand</button>
+            </Action>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="cm-form__actions">
+            <button type="button" class="cm-button" @onclick="CreateAsync">New brand</button>
+        </div>
+
+        <ul class="cm-campaign-grid">
+            @foreach (var brand in _brands)
+            {
+                <li>
+                    <div class="cm-brand-card">
+                        <button type="button" class="cm-brand-card__open" @onclick="() => Open(brand.Id)">
+                            <span class="cm-kicker">Brand</span>
+                            <span class="cm-campaign-card__title">@brand.Name</span>
+                            @if (!string.IsNullOrWhiteSpace(brand.StyleCard?.Voice))
+                            {
+                                <span class="cm-meta cm-brand-card__voice">@Excerpt(brand.StyleCard.Voice)</span>
+                            }
+                            @if (brand.StyleCard?.Colors is { Count: > 0 } colors)
+                            {
+                                <span class="cm-brand-card__swatches" aria-label="Brand colours">
+                                    @foreach (var color in colors.Take(6))
+                                    {
+                                        <span class="cm-brand-card__swatch" title="@color.Role"
+                                              style="background:@color.Hex"></span>
+                                    }
+                                </span>
+                            }
+                            <span class="cm-meta">Updated @Castmill.UI.State.ArtifactDisplay.Ago(brand.UpdatedAt, DateTimeOffset.Now)</span>
+                        </button>
+                        <button type="button" class="cm-tree__delete" aria-label="Delete @brand.Name"
+                                @onclick="() => DeleteAsync(brand)">✕</button>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</div></div>
+
+@code {
+    private readonly List<BrandProfileDetailResponse> _brands = [];
+    private bool _loaded;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var brands = await BrandsApi.ListAsync();
+            _brands.Clear();
+            _brands.AddRange(brands);
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _error = "Couldn't reach the Castmill API.";
+        }
+
+        _loaded = true;
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var brand = await BrandsApi.CreateAsync("New brand", null);
+            Navigation.NavigateTo($"brands/{brand.Id}");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private void Open(Guid id) => Navigation.NavigateTo($"brands/{id}");
+
+    private async Task DeleteAsync(BrandProfileDetailResponse brand)
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete \"{brand.Name}\"?",
+            "Its templates and asset links go with it; campaigns using it fall back to no brand. This cannot be undone.",
+            AcceptLabel: "Delete brand",
+            Destructive: true));
+
+        if (!accepted)
+        {
+            return;
+        }
+
+        try
+        {
+            await BrandsApi.DeleteAsync(brand.Id);
+            _brands.RemoveAll(b => b.Id == brand.Id);
+            Notifier.ShowSuccess($"Deleted \"{brand.Name}\".");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private static string Excerpt(string value) =>
+        value.Length <= 140 ? value : value[..140] + "…";
+}

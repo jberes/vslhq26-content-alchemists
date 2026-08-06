@@ -25,6 +25,15 @@ public sealed class Campaign : ITenantScoped
     public Guid OwnerId { get; set; }
     public required string Name { get; set; }
     public string? Brief { get; set; }
+
+    /// <summary>The brand steering this campaign's generation — null means "None".
+    /// No FK constraint; brand delete detaches campaigns explicitly (house style).</summary>
+    public Guid? BrandId { get; set; }
+
+    /// <summary>JSON array of <c>CampaignLink</c> — home page, GitHub pages, docs — that
+    /// inform generation. Validated at the boundary (ADR-003 typed-JSON precedent).</summary>
+    public string? ContextJson { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -173,11 +182,58 @@ public sealed class GenerationRun : ITenantScoped
     public Guid CampaignId { get; set; }
     /// <summary>Running | Completed.</summary>
     public required string Status { get; set; }
+
+    /// <summary>content | image. The Press Run polls content runs; the Image Studio
+    /// polls image runs — the discriminator keeps the two reveals from crossing.</summary>
+    public string Kind { get; set; } = "content";
+
+    /// <summary>The slot an image run is generating into; null for content runs.</summary>
+    public Guid? SlotId { get; set; }
+
     public int TotalKinds { get; set; }
     /// <summary>Per-kind outcomes as they complete: [{ kind, success, artifactId, error, durationMs }].</summary>
     public required string ItemsJson { get; set; }
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// One generated take for an image slot. Variants persist (they used to evaporate with
+/// the component that requested them) so the studio can show every take, keep/discard
+/// them, and steer new takes from old ones.
+/// </summary>
+public sealed class ImageVariant : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid SlotId { get; set; }
+
+    /// <summary>Full-size public WebP.</summary>
+    public required string Url { get; set; }
+    public required string BlobPath { get; set; }
+
+    /// <summary>Gallery thumbnail (480 px longest edge), public WebP.</summary>
+    public required string ThumbUrl { get; set; }
+    public required string ThumbBlobPath { get; set; }
+
+    public required string Model { get; set; }
+
+    /// <summary>The EXACT prompt sent — post brand-injection, post steering.</summary>
+    public required string Prompt { get; set; }
+
+    /// <summary>The user's adjustment note when this take was steered from another.</summary>
+    public string? SteeringNote { get; set; }
+
+    /// <summary>The variant this one was steered from — the take's lineage.</summary>
+    public Guid? SourceVariantId { get; set; }
+
+    /// <summary>Candidate | Kept | Discarded. Blobs are never deleted (immutable cache).</summary>
+    public required string State { get; set; }
+
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class Asset : ITenantScoped
@@ -189,6 +245,53 @@ public sealed class Asset : ITenantScoped
     public long SizeBytes { get; set; }
     public required string BlobPath { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// An image in a brand's kit: a logo, a reusable background, a face that may appear in
+/// generated imagery. The bytes live on an ordinary <see cref="Asset"/> (private blob,
+/// SAS-read); this row adds brand scoping, a kind and a prompt-usable label.
+/// </summary>
+public sealed class BrandAsset : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public Guid AssetId { get; set; }
+
+    /// <summary>logo | background | face | other.</summary>
+    public required string Kind { get; set; }
+
+    /// <summary>Display name, doubling as prompt text ("the host, short dark hair").</summary>
+    public string? Label { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Per-brand steering for one generator kind — "our newsletter template", "our blog
+/// voice". The default template for a kind is appended to that generator's instructions
+/// on every run for campaigns carrying the brand.
+/// </summary>
+public sealed class BrandTemplate : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+
+    /// <summary>A generator kind (blog, newsletter, social-x, …) — validated at the boundary.</summary>
+    public required string Kind { get; set; }
+
+    public required string Name { get; set; }
+
+    /// <summary>The steering prompt appended to the generator's instructions.</summary>
+    public required string SteeringPrompt { get; set; }
+
+    /// <summary>The template auto-applied for this kind; at most one per (brand, kind).</summary>
+    public bool IsDefault { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class BrandProfile : ITenantScoped

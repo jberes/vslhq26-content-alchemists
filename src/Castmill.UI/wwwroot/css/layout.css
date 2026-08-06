@@ -20,7 +20,7 @@
     --cm-bp-lg: 1440px;
     --cm-bp-xl: 1920px;
 
-    --cm-rail-width: 432px;      /* 2× the handoff's 216px — names truncated (owner, 2026-07-29) */
+    --cm-rail-width: 346px;      /* was 432 (2× the handoff's 216); ~20% narrower per owner, 2026-08-05 */
     --cm-rail-width-icons: 56px;
     --cm-content-max: 1600px;    /* dashboards cap and centre */
     --cm-measure: 72ch;          /* manuscript column */
@@ -42,8 +42,9 @@
     z-index: 2;
     min-inline-size: 0;
     overflow: hidden auto;
-    border-inline-end: 1px solid var(--cm-rule);
-    background: var(--cm-surface);
+    border-inline-end: 1px solid var(--cm-rule-strong);
+    background: var(--cm-surface-rail);
+    color: var(--cm-on-rail);
     transition: inline-size var(--cm-motion);
 }
 
@@ -117,6 +118,16 @@
 
 /* ---- Rail collapse ------------------------------------------------------------- */
 
+/* User-pinned collapse (focus mode for a campaign): `data-cm-rail="icons"` on the ROOT —
+   set pre-paint from localStorage by both shells' index.html and by ThemeService
+   thereafter, exactly like the theme attributes. It pins the rail to icons at any width
+   where the rail is in the flow; below sm the overlay behaviour wins regardless. */
+@media (min-width: 900px) {
+    :root[data-cm-rail="icons"] .cm-app {
+        grid-template-columns: var(--cm-rail-width-icons) minmax(0, 1fr);
+    }
+}
+
 /* < md (1180): icons only. Labels are hidden but remain in the accessibility tree via
    the label element's own visually-hidden treatment, so the rail stays screen-readable. */
 @media (max-width: 1179.98px) {
@@ -124,7 +135,7 @@
         grid-template-columns: var(--cm-rail-width-icons) minmax(0, 1fr);
     }
 
-    .cm-app[data-cm-rail="labels"] {
+    :root[data-cm-rail="labels"] .cm-app {
         grid-template-columns: var(--cm-rail-width) minmax(0, 1fr);
     }
 }
@@ -170,3 +181,21 @@
     white-space: nowrap;
     border: 0;
 }
+
+/* ---- Header press-run indicator --------------------------------------------------- */
+
+.cm-header-run {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-1) var(--cm-space-3);
+    border: 1px solid var(--cm-accent);
+    border-radius: 999px;
+    background: var(--cm-accent-wash);
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    cursor: pointer;
+}
+
+/* The pill's dot is the shared .cm-ai-dot (components.css) — one pulse rhythm app-wide. */

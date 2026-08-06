@@ -27,6 +27,8 @@ public sealed class DesignTokenTests
         ("--cmf-on-surface-subtle", "--cmf-surface"),
         ("--cmf-on-accent", "--cmf-accent-strong"),
         ("--cmf-on-inverse", "--cmf-surface-inverse"),
+        ("--cmf-on-rail", "--cmf-surface-rail"),
+        ("--cmf-on-rail-muted", "--cmf-surface-rail"),
         ("--cmf-success", "--cmf-surface"),
         ("--cmf-warning", "--cmf-surface"),
         ("--cmf-danger", "--cmf-surface"),

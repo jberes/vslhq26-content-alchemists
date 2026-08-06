@@ -30,46 +30,89 @@ public static class ArtifactDisplay
         _ => "cm-status",
     };
 
+    /// <summary>
+    /// Everything the client knows about one artifact kind. This registry is the single
+    /// source of truth — the lane map, the labels, Focus's editable list and the board
+    /// filter all read it, because three hand-maintained lists drifted (show-notes fell
+    /// through a lane switch's default arm and rendered inside the Social lane).
+    /// </summary>
+    public sealed record KindInfo(string Kind, string Label, string Lane, bool Editable, bool OnBoard);
+
+    /// <summary>Board lanes in display order. "Other" catches kinds this build doesn't know.</summary>
+    public static readonly string[] LaneOrder = ["Blog", "Social", "Email", "Clips", "Page/SEO", "Other"];
+
+    /// <summary>
+    /// The registry, in display order (in-lane sub-groups follow this order). Images are
+    /// deliberately absent from the board: image work lives in the Image Studio and inside
+    /// the content itself, so <c>image-prompts</c> and <c>transcript</c> carry
+    /// <c>OnBoard: false</c>.
+    /// </summary>
+    public static readonly KindInfo[] Known =
+    [
+        new("blog", "Blog post", "Blog", Editable: true, OnBoard: true),
+        new("show-notes", "Show notes", "Blog", Editable: true, OnBoard: true),
+        new("social-x", "X post", "Social", Editable: true, OnBoard: true),
+        new("social-linkedin", "LinkedIn post", "Social", Editable: true, OnBoard: true),
+        new("social-facebook", "Facebook post", "Social", Editable: true, OnBoard: true),
+        new("social-instagram", "Instagram post", "Social", Editable: true, OnBoard: true),
+        new("social-threads", "Threads post", "Social", Editable: true, OnBoard: true),
+        new("social-bluesky", "Bluesky post", "Social", Editable: true, OnBoard: true),
+        new("email-sequence", "Email sequence", "Email", Editable: true, OnBoard: true),
+        new("newsletter", "Newsletter", "Email", Editable: true, OnBoard: true),
+        new("clip-suggestions", "Clip suggestions", "Clips", Editable: true, OnBoard: true),
+        new("landing-page", "Landing page", "Page/SEO", Editable: true, OnBoard: true),
+        new("seo-brief", "SEO brief", "Page/SEO", Editable: true, OnBoard: true),
+        new("seo-keyword-plan", "Keyword plan", "Page/SEO", Editable: true, OnBoard: true),
+        new("image-prompts", "Image prompts", "Images", Editable: false, OnBoard: false),
+        new("transcript", "Transcript", "Source", Editable: false, OnBoard: false),
+    ];
+
+    /// <summary>
+    /// Resolves a kind to its registry entry, tolerating the legacy spellings the database
+    /// may still hold. Unknown kinds resolve to an editable "Other"-lane entry rather than
+    /// disappearing — new server kinds must show up somewhere before the registry learns them.
+    /// </summary>
+    public static KindInfo Resolve(string kind)
+    {
+        var canonical = kind switch
+        {
+            "clips" => "clip-suggestions",
+            "keyword-plan" => "seo-keyword-plan",
+            _ => kind,
+        };
+
+        return Known.FirstOrDefault(k => k.Kind == canonical)
+            ?? new KindInfo(kind, Prettify(kind), "Other", Editable: true, OnBoard: true);
+    }
+
     /// <summary>The six per-platform social generator kinds — "social" alone matches nothing.</summary>
     public static readonly string[] SocialKinds =
-        ["social-x", "social-linkedin", "social-facebook", "social-instagram", "social-threads", "social-bluesky"];
+        [.. Known.Where(k => k.Lane == "Social").Select(k => k.Kind)];
 
     /// <summary>Human label for an artifact kind, keyed to the generator names the API uses.</summary>
-    public static string KindLabel(string kind) => kind switch
-    {
-        "blog" => "Blog post",
-        "social-x" => "X post",
-        "social-linkedin" => "LinkedIn post",
-        "social-facebook" => "Facebook post",
-        "social-instagram" => "Instagram post",
-        "social-threads" => "Threads post",
-        "social-bluesky" => "Bluesky post",
-        "seo-keyword-plan" => "Keyword plan",
-        "landing-page" => "Landing page",
-        "email-sequence" => "Email sequence",
-        "newsletter" => "Newsletter",
-        "show-notes" => "Show notes",
-        "clips" => "Clip suggestions",
-        "seo-brief" => "SEO brief",
-        "keyword-plan" => "Keyword plan",
-        "transcript" => "Transcript",
-        "image-prompts" => "Image prompts",
-        _ => kind.Replace('-', ' ') is { Length: > 0 } pretty
-            ? char.ToUpperInvariant(pretty[0]) + pretty[1..]
-            : kind,
-    };
+    public static string KindLabel(string kind) => Resolve(kind).Label;
 
     /// <summary>Which swimlane a kind belongs to on the Mill Floor (F5) and the front page.</summary>
-    public static string Lane(string kind) => kind switch
+    public static string Lane(string kind) => Resolve(kind).Lane;
+
+    /// <summary>Whether Focus mode can open this kind for editing.</summary>
+    public static bool Editable(string kind) => Resolve(kind).Editable;
+
+    /// <summary>Whether the Mill Floor board shows this kind as a card.</summary>
+    public static bool OnBoard(string kind) => Resolve(kind).OnBoard;
+
+    /// <summary>Registry position, so in-lane sub-groups render in a stable, intended order.</summary>
+    public static int KindOrder(string kind)
     {
-        "blog" or "landing-page" => "Blog",
-        "newsletter" or "email-sequence" => "Email",
-        "clips" => "Clips",
-        "seo-brief" or "keyword-plan" or "seo-keyword-plan" => "Page/SEO",
-        "image-prompts" => "Images",
-        "transcript" => "Source",
-        _ => "Social",
-    };
+        var resolved = Resolve(kind);
+        var index = Array.FindIndex(Known, k => k.Kind == resolved.Kind);
+        return index >= 0 ? index : Known.Length;
+    }
+
+    private static string Prettify(string kind) =>
+        kind.Replace('-', ' ') is { Length: > 0 } pretty
+            ? char.ToUpperInvariant(pretty[0]) + pretty[1..]
+            : kind;
 
     /// <summary>"3 days ago" — deliberately coarse; exact timestamps live in tooltips.</summary>
     public static string Ago(DateTimeOffset when, DateTimeOffset now)

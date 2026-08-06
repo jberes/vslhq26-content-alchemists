@@ -17,6 +17,10 @@ public interface IImageComposer
     /// composited after generation — editing it never costs another render.
     /// </summary>
     CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea);
+
+    /// <summary>Scales the longest edge down to <paramref name="maxEdge"/> for gallery
+    /// thumbnails; the full-size WebP stays the source of truth.</summary>
+    byte[] ToThumbWebp(byte[] webpImage, int maxEdge = 480);
 }
 
 /// <summary>
@@ -58,6 +62,24 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         using var cropped = CentreCrop(source, width, height);
         using var image = SKImage.FromBitmap(cropped);
         using var encoded = image.Encode(SKEncodedImageFormat.Webp, WebpQuality)
+            ?? throw new InvalidOperationException("WebP encoding failed.");
+        return encoded.ToArray();
+    }
+
+    public byte[] ToThumbWebp(byte[] webpImage, int maxEdge = 480)
+    {
+        using var source = SKBitmap.Decode(webpImage)
+            ?? throw new InvalidOperationException("The image to thumbnail is not decodable.");
+
+        var scale = Math.Min(1f, (float)maxEdge / Math.Max(source.Width, source.Height));
+        var width = Math.Max(1, (int)MathF.Round(source.Width * scale));
+        var height = Math.Max(1, (int)MathF.Round(source.Height * scale));
+
+        using var resized = source.Resize(
+            new SKImageInfo(width, height), new SKSamplingOptions(SKCubicResampler.Mitchell))
+            ?? throw new InvalidOperationException("Thumbnail resize failed.");
+        using var image = SKImage.FromBitmap(resized);
+        using var encoded = image.Encode(SKEncodedImageFormat.Webp, 75)
             ?? throw new InvalidOperationException("WebP encoding failed.");
         return encoded.ToArray();
     }

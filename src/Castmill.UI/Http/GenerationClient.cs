@@ -79,7 +79,8 @@ public sealed class GenerationClient(ApiClient api)
         api.GetAsync<RunProgress>($"api/v1/ai/runs/{runId}", ct);
 
     /// <summary>The campaign's most recent run — how the Press Run finds an in-flight run,
-    /// since the generate POST cannot reveal its run id until it has already finished.</summary>
-    public Task<RunProgress> GetLatestRunAsync(Guid campaignId, CancellationToken ct = default) =>
-        api.GetAsync<RunProgress>($"api/v1/ai/campaigns/{campaignId}/runs/latest", ct);
+    /// since the generate POST cannot reveal its run id until it has already finished.
+    /// <paramref name="kind"/>: "content" (default) or "image" — the two reveals never cross.</summary>
+    public Task<RunProgress> GetLatestRunAsync(Guid campaignId, string kind = "content", CancellationToken ct = default) =>
+        api.GetAsync<RunProgress>($"api/v1/ai/campaigns/{campaignId}/runs/latest?kind={kind}", ct);
 }

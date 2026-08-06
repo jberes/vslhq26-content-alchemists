@@ -50,9 +50,17 @@ public static class TranscriptService
     }
 
     /// <summary>Transcript rendered for prompts: each segment prefixed with its citation id.</summary>
-    public static string ToPromptText(TranscriptContent transcript) =>
-        string.Join("\n", transcript.Segments.Select(s =>
-            $"[{s.Id}]{(s.Speaker is null ? "" : $" {s.Speaker}:")} {s.Text}"));
+    public static string ToPromptText(TranscriptContent transcript)
+    {
+        // Timings ride along when the transcript has real ones — the clip generator's
+        // in/out points and show-notes chapters are computed from them, and a model
+        // asked for timings it was never shown correctly returns nothing. Pasted text
+        // is segmented with zeroed times, which would only mislead.
+        var timed = transcript.Segments.Any(s => s.EndSeconds > 0);
+        return string.Join("\n", transcript.Segments.Select(s =>
+            $"[{s.Id}{(timed ? FormattableString.Invariant($" {s.StartSeconds:0.0}s-{s.EndSeconds:0.0}s") : "")}]" +
+            $"{(s.Speaker is null ? "" : $" {s.Speaker}:")} {s.Text}"));
+    }
 
     private static IEnumerable<string> SplitSentences(string text)
     {

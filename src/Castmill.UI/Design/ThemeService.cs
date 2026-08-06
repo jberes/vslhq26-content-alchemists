@@ -36,6 +36,7 @@ public sealed class ThemeService(IUiStateStore store)
     private const string FamilyKey = "cm.theme.family";
     private const string ModeKey = "cm.theme.mode";
     private const string DensityKey = "cm.theme.density";
+    private const string RailKey = "cm.rail";
 
     private bool _initialized;
 
@@ -44,6 +45,11 @@ public sealed class ThemeService(IUiStateStore store)
     public ThemeMode Mode { get; private set; } = ThemeMode.Light;
 
     public ThemeDensity Density { get; private set; } = ThemeDensity.Comfortable;
+
+    /// <summary>User-pinned rail collapse (item 9): true pins the rail to icons at any
+    /// width, so working inside a campaign gets the whole window. Per-device (ADR-F06);
+    /// the pre-paint scripts in both shells read the same key to avoid a layout flash.</summary>
+    public bool RailCollapsed { get; private set; }
 
     /// <summary>Raised after any change so components can re-render — including the
     /// provenance overlay, which must re-measure when the theme changes (ADR-F09).</summary>
@@ -74,7 +80,18 @@ public sealed class ThemeService(IUiStateStore store)
             ? mode
             : await store.PrefersDarkAsync() ? ThemeMode.Dark : ThemeMode.Light;
 
+        RailCollapsed = await store.GetAsync(RailKey) == "icons";
+
         await ApplyAsync();
+    }
+
+    /// <summary>Pins the rail closed or restores the responsive default.</summary>
+    public async Task ToggleRailAsync()
+    {
+        RailCollapsed = !RailCollapsed;
+        await store.SetAsync(RailKey, RailCollapsed ? "icons" : "auto");
+        await store.ApplyRailAsync(RailCollapsed ? "icons" : null);
+        Changed?.Invoke();
     }
 
     public Task SetFamilyAsync(ThemeFamily family)
@@ -124,6 +141,7 @@ public sealed class ThemeService(IUiStateStore store)
     private async Task ApplyAsync()
     {
         await store.ApplyThemeAsync(ToAttribute(Family), ToAttribute(Mode), ToAttribute(Density));
+        await store.ApplyRailAsync(RailCollapsed ? "icons" : null);
         Changed?.Invoke();
     }
 }

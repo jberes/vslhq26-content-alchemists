@@ -130,7 +130,7 @@ public static class StructuredContent
     public static bool IsStructured(string kind) =>
         kind.StartsWith("social-", StringComparison.Ordinal)
         || kind is "email-sequence" or "newsletter" or "landing-page" or "show-notes"
-                or "seo-brief" or "seo-keyword-plan" or "keyword-plan" or "clips";
+                or "seo-brief" or "seo-keyword-plan" or "keyword-plan" or "clips" or "clip-suggestions";
 
     /// <summary>Formats a structured payload as display markdown. Falls back to pretty JSON.</summary>
     public static string ToDisplayMarkdown(string kind, string? contentJson)

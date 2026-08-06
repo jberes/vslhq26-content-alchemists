@@ -176,9 +176,33 @@ public sealed class ApiClient(HttpClient http)
                 "That was a lot at once — give it a moment and try again.", 429, correlationId),
 
             _ => new ApiException(
-                $"The server returned {(int)response.StatusCode}.", (int)response.StatusCode, correlationId),
+                await ProblemDetailAsync(response, ct)
+                    ?? $"The server returned {(int)response.StatusCode}.",
+                (int)response.StatusCode, correlationId),
         };
     }
+
+    /// <summary>
+    /// The server explains its 5xx/409s through ProblemDetails ("DataForSEO is not
+    /// configured…", "No Foundry deployment for alias…"). Surfacing that sentence is the
+    /// difference between a fixable error and a dead "the server returned 503".
+    /// </summary>
+    private static async Task<string?> ProblemDetailAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var problem = await response.Content.ReadFromJsonAsync<ProblemBody>(Json, ct);
+            return string.IsNullOrWhiteSpace(problem?.Detail)
+                ? (string.IsNullOrWhiteSpace(problem?.Title) ? null : problem!.Title)
+                : problem!.Detail;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record ProblemBody(string? Title, string? Detail);
 
     private static async Task<ApiException> ValidationOrGenericAsync(
         HttpResponseMessage response,

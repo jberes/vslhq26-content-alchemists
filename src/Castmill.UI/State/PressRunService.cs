@@ -11,7 +11,7 @@ namespace Castmill.UI.State;
 /// poll of <c>runs/latest</c> that surfaces per-artifact completions while the POST is still
 /// buffering. The reveal is driven by real completion events, never a timer (ADR-F13).
 /// </summary>
-public sealed class PressRunService(GenerationClient generation) : IDisposable
+public sealed class PressRunService(GenerationClient generation, CampaignState campaign) : IDisposable
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(800);
 
@@ -83,14 +83,24 @@ public sealed class PressRunService(GenerationClient generation) : IDisposable
 
                 try
                 {
-                    var latest = await generation.GetLatestRunAsync(campaignId, ct);
+                    var latest = await generation.GetLatestRunAsync(campaignId, "content", ct);
 
                     // Only adopt a run that started for THIS press: a stale run from an
                     // earlier session would replay its reveal.
                     if (latest.StartedAt >= startedAfter)
                     {
+                        var previouslyCompleted = Progress?.Completed ?? 0;
                         Progress = latest;
                         Changed?.Invoke();
+
+                        // The service owns the board refresh, so completions land even when
+                        // no view is mounted (the user may be on another tab). Guarded on
+                        // the store still holding THIS campaign — a forced load of the
+                        // run's campaign would otherwise hijack a user who switched away.
+                        if (latest.Completed > previouslyCompleted && campaign.CampaignId == campaignId)
+                        {
+                            await campaign.LoadAsync(campaignId, force: true);
+                        }
                     }
                 }
                 catch (ApiException)
@@ -124,6 +134,20 @@ public sealed class PressRunService(GenerationClient generation) : IDisposable
             {
                 IsRunning = false;
                 Changed?.Invoke();
+
+                // Reconciliation: whatever the poll saw or missed, the run is over — one
+                // final reload guarantees the board matches the server. Same hijack guard.
+                if (campaign.CampaignId == campaignId)
+                {
+                    try
+                    {
+                        await campaign.LoadAsync(campaignId, force: true);
+                    }
+                    catch (HttpRequestException)
+                    {
+                        // The board will catch up on its next natural load.
+                    }
+                }
             }
         }
     }

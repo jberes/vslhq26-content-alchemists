@@ -33,6 +33,8 @@
                 r.setAttribute('data-cm-family', g('family') === 'IndustryBlueprint' ? 'industry-blueprint' : 'warm-editorial');
                 r.setAttribute('data-cm-mode', (g('mode') || (dark ? 'Dark' : 'Light')) === 'Dark' ? 'dark' : 'light');
                 r.setAttribute('data-cm-density', g('density') === 'Compact' ? 'compact' : 'comfortable');
+                // Rail collapse rides the same pre-paint path — key must match ThemeService.RailKey.
+                if (localStorage.getItem('castmill:cm.rail') === 'icons') { r.setAttribute('data-cm-rail', 'icons'); }
             } catch (e) { /* storage unavailable — the CSS default stands */ }
         })();
     </script>

@@ -26,6 +26,9 @@ public sealed class CampaignState(CampaignsClient campaigns)
 
     public CampaignResponse? Campaign { get; private set; }
 
+    /// <summary>The brand steering this campaign, from the preview payload; null = None.</summary>
+    public BrandSummaryResponse? Brand { get; private set; }
+
     public IReadOnlyList<ArtifactPreviewResponse> Artifacts { get; private set; } = [];
 
     public IReadOnlyList<ImageSlotResponse> ImageSlots { get; private set; } = [];
@@ -107,6 +110,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
         // artifacts under the new one's name.
         CampaignId = campaignId;
         Campaign = null;
+        Brand = null;
         Artifacts = [];
         ImageSlots = [];
         ImagesFilled = 0;
@@ -135,6 +139,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
             }
 
             Campaign = preview.Campaign;
+            Brand = preview.Brand;
             Artifacts = preview.Artifacts;
             ImageSlots = preview.ImageSlots;
             ImagesFilled = preview.ImagesFilled;
@@ -187,6 +192,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
         _inFlightId = null;
         CampaignId = null;
         Campaign = null;
+        Brand = null;
         Artifacts = [];
         ImageSlots = [];
         ImagesFilled = 0;

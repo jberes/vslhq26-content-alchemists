@@ -49,10 +49,14 @@ public static class AiEndpoints
     /// which is exactly too late for the Press Run to poll. The client starts the POST,
     /// navigates, and discovers the in-flight run here.
     /// </summary>
-    private static async Task<IResult> LatestRunAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> LatestRunAsync(
+        Guid campaignId, string? kind, CastmillDbContext db, CancellationToken ct)
     {
+        // Defaults to content runs so the Press Run never adopts an image run; the
+        // Image Studio polls with ?kind=image (or by the run id it was handed).
+        var wanted = string.IsNullOrWhiteSpace(kind) ? "content" : kind;
         var run = await db.GenerationRuns
-            .Where(r => r.CampaignId == campaignId)
+            .Where(r => r.CampaignId == campaignId && r.Kind == wanted)
             .OrderByDescending(r => r.StartedAt)
             .FirstOrDefaultAsync(ct);
         return run is null ? Results.NotFound() : ProjectRun(run);

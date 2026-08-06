@@ -251,9 +251,36 @@
 /* ---- Shell chrome (F1 placeholder; F3 replaces the rail) ----------------------- */
 
 .cm-rail__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
     padding: var(--cm-space-4);
     border-block-end: 1px solid var(--cm-rule);
     font-size: var(--cm-text-h4);
+}
+
+.cm-rail__collapse {
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    font-size: var(--cm-text-body);
+    line-height: 1;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    cursor: pointer;
+    transition: color var(--cm-motion), border-color var(--cm-motion);
+}
+
+.cm-rail__collapse:hover {
+    color: var(--cm-on-surface);
+    border-color: var(--cm-rule-strong);
+}
+
+/* Collapsed: the wordmark yields; the expand chevron is the head's only control. */
+:root[data-cm-rail="icons"] .cm-wordmark {
+    display: none;
 }
 
 .cm-rail__note {
@@ -448,4 +475,52 @@
     display: flex;
     align-items: center;
     gap: var(--cm-space-4);
+}
+
+/* ---- AI-progress vocabulary (ADR-F13): shimmer skeletons + the pulsing dot -------- */
+/* One shared language for "the model is working": the header pill, the Mill Floor's
+   ghost cards and the Image Studio's tiles all shimmer and pulse in the same rhythm. */
+
+.cm-skeleton {
+    display: block;
+    border-radius: var(--cm-radius-sm);
+    background: linear-gradient(100deg,
+        var(--cm-surface-sunken) 40%, var(--cm-surface-raised) 50%, var(--cm-surface-sunken) 60%);
+    background-size: 200% 100%;
+    animation: cm-shimmer 1.4s ease-in-out infinite;
+}
+
+.cm-skeleton--tile {
+    aspect-ratio: 16 / 9;
+}
+
+.cm-skeleton--title {
+    block-size: 1em;
+    inline-size: 70%;
+}
+
+@keyframes cm-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+
+.cm-ai-dot {
+    display: inline-block;
+    inline-size: 0.6em;
+    block-size: 0.6em;
+    border-radius: 50%;
+    background: var(--cm-accent-strong);
+    animation: cm-ai-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes cm-ai-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cm-skeleton,
+    .cm-ai-dot {
+        animation: none;
+    }
 }

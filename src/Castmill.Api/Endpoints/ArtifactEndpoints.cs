@@ -262,6 +262,15 @@ public static class ArtifactEndpoints
         // Revisions are meaningless without their artifact — clear them in the same write.
         var revisions = await db.ArtifactRevisions.Where(r => r.ArtifactId == id).ToListAsync(ct);
         db.ArtifactRevisions.RemoveRange(revisions);
+
+        // Schedule entries mirror text already composed for the broker (ADR-016) — they
+        // survive the delete, but must not point at a row that no longer exists.
+        var scheduled = await db.ScheduleEntries.Where(s => s.ArtifactId == id).ToListAsync(ct);
+        foreach (var entry in scheduled)
+        {
+            entry.ArtifactId = null;
+        }
+
         db.Artifacts.Remove(artifact);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();

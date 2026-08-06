@@ -90,8 +90,13 @@ public sealed class TestAuthTokenProvider : IAuthTokenProvider
 public sealed class StubHttpHandler : HttpMessageHandler
 {
     private readonly Dictionary<string, Func<HttpResponseMessage>> _routes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TaskCompletionSource<HttpResponseMessage>> _gates = new(StringComparer.OrdinalIgnoreCase);
 
     public List<HttpRequestMessage> Requests { get; } = [];
+
+    /// <summary>Request bodies snapshotted at send time — the message's own content is
+    /// disposed with the request, so asserting on it afterwards needs this copy.</summary>
+    public List<(HttpMethod Method, string Path, string Body)> Bodies { get; } = [];
 
     public void OnGet<T>(string path, T body) =>
         _routes[$"GET {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
@@ -99,20 +104,47 @@ public sealed class StubHttpHandler : HttpMessageHandler
     public void OnPost<T>(string path, T body) =>
         _routes[$"POST {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
 
+    public void OnPatch<T>(string path, T body) =>
+        _routes[$"PATCH {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
+
     public void OnStatus(HttpMethod method, string path, HttpStatusCode status) =>
         _routes[$"{method} {path}"] = () => new HttpResponseMessage(status);
 
-    protected override Task<HttpResponseMessage> SendAsync(
+    /// <summary>
+    /// Gates a route: requests to it hang until the returned completion source is resolved.
+    /// The only way to express "the model is still generating" against a stub transport.
+    /// </summary>
+    public TaskCompletionSource<HttpResponseMessage> Gate(HttpMethod method, string path)
+    {
+        var tcs = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _gates[$"{method} {path}"] = tcs;
+        return tcs;
+    }
+
+    public static HttpResponseMessage Json<T>(T body) => JsonResponse(HttpStatusCode.OK, body);
+
+    protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         Requests.Add(request);
+        if (request.Content is not null)
+        {
+            Bodies.Add((request.Method,
+                request.RequestUri?.AbsolutePath.TrimStart('/') ?? string.Empty,
+                await request.Content.ReadAsStringAsync(cancellationToken)));
+        }
 
         var key = $"{request.Method} {request.RequestUri?.AbsolutePath.TrimStart('/')}";
 
-        return Task.FromResult(_routes.TryGetValue(key, out var factory)
+        if (_gates.TryGetValue(key, out var gate))
+        {
+            return await gate.Task.WaitAsync(cancellationToken);
+        }
+
+        return _routes.TryGetValue(key, out var factory)
             ? factory()
-            : new HttpResponseMessage(HttpStatusCode.NotFound));
+            : new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 
     private static HttpResponseMessage JsonResponse<T>(HttpStatusCode status, T body) =>
@@ -133,6 +165,8 @@ public sealed class TestUiStateStore : IUiStateStore
 
     public string? AppliedDensity { get; private set; }
 
+    public string? AppliedRail { get; private set; }
+
     public Task<string?> GetAsync(string key) =>
         Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);
 
@@ -149,6 +183,12 @@ public sealed class TestUiStateStore : IUiStateStore
         AppliedFamily = family;
         AppliedMode = mode;
         AppliedDensity = density;
+        return Task.CompletedTask;
+    }
+
+    public Task ApplyRailAsync(string? state)
+    {
+        AppliedRail = state;
         return Task.CompletedTask;
     }
 }

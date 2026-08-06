@@ -6,6 +6,7 @@
 @using Castmill.UI.State
 @implements IDisposable
 @inject CampaignState Campaign
+@inject PressRunService PressRun
 @inject NavigationManager Navigation
 
 <header class="cm-campaign-header">
@@ -15,6 +16,21 @@
     </div>
 
     <div class="cm-campaign-header__meta">
+        @* The press never runs invisibly: whichever view is open, the header names what is
+           printing right now, and clicking it lands on the narrated panel (ADR-F13). *@
+        @if (Campaign.CampaignId is { } cid && PressRun.IsActiveFor(cid) && PressRun.IsRunning)
+        {
+            <button type="button" class="cm-header-run" @onclick="() => Go(CampaignView.MillFloor)">
+                <span class="cm-ai-dot" aria-hidden="true"></span>
+                @RunLine
+            </button>
+        }
+
+        @if (Campaign.Brand is { } brand)
+        {
+            <span class="cm-chip cm-mono" title="Brand steering this campaign">@brand.Name</span>
+        }
+
         <span class="cm-mono cm-meta" title="Image slots filled">
             @Campaign.ImagesFilled/@Campaign.ImagesTotal images
         </span>
@@ -39,7 +55,27 @@
     /// <summary>The view currently shown, supplied by the campaign layout.</summary>
     [Parameter, EditorRequired] public CampaignView Current { get; set; }
 
-    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+    private string RunLine
+    {
+        get
+        {
+            var progress = PressRun.Progress;
+            if (progress is null)
+            {
+                return "Printing…";
+            }
+            var last = progress.Items.LastOrDefault();
+            return last is null
+                ? $"Printing · 0 of {progress.TotalKinds}"
+                : $"Printing {ArtifactDisplay.KindLabel(last.Kind)} · {progress.Completed} of {progress.TotalKinds}";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Campaign.Changed += OnChanged;
+        PressRun.Changed += OnChanged;
+    }
 
     private void Go(CampaignView view)
     {
@@ -51,5 +87,9 @@
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Campaign.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Campaign.Changed -= OnChanged;
+        PressRun.Changed -= OnChanged;
+    }
 }

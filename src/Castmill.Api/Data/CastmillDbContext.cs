@@ -21,8 +21,11 @@ public sealed class CastmillDbContext(
     public DbSet<ImageSlot> ImageSlots => Set<ImageSlot>();
     public DbSet<ScheduleEntry> ScheduleEntries => Set<ScheduleEntry>();
     public DbSet<GenerationRun> GenerationRuns => Set<GenerationRun>();
+    public DbSet<ImageVariant> ImageVariants => Set<ImageVariant>();
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
+    public DbSet<BrandAsset> BrandAssets => Set<BrandAsset>();
+    public DbSet<BrandTemplate> BrandTemplates => Set<BrandTemplate>();
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
@@ -41,6 +44,7 @@ public sealed class CastmillDbContext(
         {
             e.Property(c => c.Name).HasMaxLength(200);
             e.HasIndex(c => new { c.TenantId, c.UpdatedAt });
+            e.HasIndex(c => new { c.TenantId, c.BrandId });
             // Structural tenant isolation (G1): every query is filtered to the
             // caller's tenant; there is no code path that opts out per-request.
             e.HasQueryFilter(c => c.TenantId == _tenantProvider.TenantId);
@@ -103,8 +107,23 @@ public sealed class CastmillDbContext(
         builder.Entity<GenerationRun>(e =>
         {
             e.Property(r => r.Status).HasMaxLength(20);
+            e.Property(r => r.Kind).HasMaxLength(20).HasDefaultValue("content");
             e.HasIndex(r => new { r.TenantId, r.CampaignId, r.StartedAt });
             e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ImageVariant>(e =>
+        {
+            e.Property(v => v.Url).HasMaxLength(2000);
+            e.Property(v => v.BlobPath).HasMaxLength(1000);
+            e.Property(v => v.ThumbUrl).HasMaxLength(2000);
+            e.Property(v => v.ThumbBlobPath).HasMaxLength(1000);
+            e.Property(v => v.Model).HasMaxLength(100);
+            e.Property(v => v.Prompt).HasMaxLength(8000);
+            e.Property(v => v.SteeringNote).HasMaxLength(1000);
+            e.Property(v => v.State).HasMaxLength(20);
+            e.HasIndex(v => new { v.TenantId, v.SlotId, v.CreatedAt });
+            e.HasQueryFilter(v => v.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<Asset>(e =>
@@ -119,6 +138,24 @@ public sealed class CastmillDbContext(
         {
             e.Property(b => b.Name).HasMaxLength(200);
             e.HasQueryFilter(b => b.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<BrandAsset>(e =>
+        {
+            e.Property(a => a.Kind).HasMaxLength(20);
+            e.Property(a => a.Label).HasMaxLength(200);
+            e.HasIndex(a => new { a.TenantId, a.BrandId });
+            e.HasIndex(a => new { a.TenantId, a.BrandId, a.AssetId }).IsUnique();
+            e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<BrandTemplate>(e =>
+        {
+            e.Property(t => t.Kind).HasMaxLength(50);
+            e.Property(t => t.Name).HasMaxLength(200);
+            e.Property(t => t.SteeringPrompt).HasMaxLength(4000);
+            e.HasIndex(t => new { t.TenantId, t.BrandId, t.Kind, t.Name }).IsUnique();
+            e.HasQueryFilter(t => t.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<UserSetting>(e =>

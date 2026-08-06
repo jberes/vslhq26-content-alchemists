@@ -167,8 +167,10 @@ public sealed class ResourceApiTests(CastmillApiFactory factory)
         var client = await AuthedClientAsync();
 
         var brand = await client.PostAsJsonAsync("/api/v1/brands",
-            new BrandProfileRequest("Acme", """{"tone":"warm"}"""));
+            new BrandProfileUpsertRequest("Acme", new BrandStyleCard(Voice: "warm, direct")));
         Assert.Equal(HttpStatusCode.Created, brand.StatusCode);
+        var brandBody = (await brand.Content.ReadFromJsonAsync<BrandProfileDetailResponse>())!;
+        Assert.Equal("warm, direct", brandBody.StyleCard?.Voice);
 
         var asset = await client.PostAsJsonAsync("/api/v1/assets",
             new AssetCreateRequest("../../evil path.mp4", "video/mp4", 1024));

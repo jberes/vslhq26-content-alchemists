@@ -29,8 +29,12 @@ public static class Generators
 
     public static IReadOnlyList<GeneratorSpec> FanOut { get; } = BuildFanOut();
 
+    /// <summary>Clients have said "clips" since F5; the generator's kind is "clip-suggestions".</summary>
+    public static string Normalize(string kind) =>
+        kind.Equals("clips", StringComparison.OrdinalIgnoreCase) ? "clip-suggestions" : kind;
+
     public static GeneratorSpec? Find(string kind) =>
-        FanOut.FirstOrDefault(g => g.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase));
+        FanOut.FirstOrDefault(g => g.Kind.Equals(Normalize(kind), StringComparison.OrdinalIgnoreCase));
 
     private static List<GeneratorSpec> BuildFanOut()
     {

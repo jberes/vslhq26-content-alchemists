@@ -1,0 +1,206 @@
+using Bunit;
+using Castmill.Core;
+using Castmill.Core.Resources;
+using Castmill.UI.Design;
+using Castmill.UI.Http;
+using Castmill.UI.Pages.Campaign;
+using Castmill.UI.State;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Castmill.UI.Tests;
+
+/// <summary>
+/// The Mill Floor's category separation. The pre-registry board sent every unmapped kind
+/// into the Social lane (the lane switch's default arm), which is how a keyword plan ended
+/// up rendered between LinkedIn posts. These tests pin the registry-driven grouping, the
+/// kind sub-headers, and item 8's rule: nothing image-shaped renders on the board.
+/// </summary>
+public sealed class MillFloorLanesTests : CastmillUiTestContext
+{
+    private static readonly Guid CampaignId = Guid.Parse("31111111-1111-1111-1111-111111111111");
+
+    public MillFloorLanesTests()
+    {
+        SignInTestUser();
+        Http.OnGet("api/v1/campaigns", new List<CampaignResponse> { Campaign("Webinar campaign") });
+    }
+
+    [Fact]
+    public async Task Seo_kinds_render_in_the_page_seo_lane_never_social()
+    {
+        StubPreview(
+            Artifact("seo-keyword-plan", "Keyword plan for launch"),
+            Artifact("show-notes", "Episode show notes"),
+            Artifact("social-x", "Launch thread"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Keyword plan for launch");
+
+        Assert.Equal("Page/SEO", LaneOf(view, "Keyword plan for launch"));
+        Assert.Equal("Blog", LaneOf(view, "Episode show notes"));
+        Assert.Equal("Social", LaneOf(view, "Launch thread"));
+    }
+
+    [Fact]
+    public async Task An_unknown_kind_renders_in_the_other_lane_not_social()
+    {
+        StubPreview(Artifact("press-release", "Q3 press release"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Q3 press release");
+
+        Assert.Equal("Other", LaneOf(view, "Q3 press release"));
+    }
+
+    [Fact]
+    public async Task Image_prompts_and_transcript_never_render_on_the_board()
+    {
+        StubPreview(
+            Artifact("image-prompts", "Image prompt bag"),
+            Artifact("transcript", "Source transcript"),
+            Artifact("blog", "The one real card"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "The one real card");
+
+        Assert.DoesNotContain("Image prompt bag", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(">Images<", view.Markup, StringComparison.Ordinal);
+        var laneLabels = view.FindAll(".cm-lane__label").Select(l => l.TextContent.Trim());
+        Assert.DoesNotContain("Images", laneLabels);
+    }
+
+    [Fact]
+    public async Task Lanes_show_kind_subheaders_separating_each_category()
+    {
+        StubPreview(
+            Artifact("social-x", "X launch post"),
+            Artifact("social-linkedin", "LinkedIn launch post"),
+            Artifact("newsletter", "October newsletter"),
+            Artifact("email-sequence", "Onboarding drips"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "X launch post");
+
+        var kindHeaders = view.FindAll(".cm-lane__kind").Select(h => h.TextContent.Trim()).ToList();
+        Assert.Contains(kindHeaders, h => h.StartsWith("X post", StringComparison.Ordinal));
+        Assert.Contains(kindHeaders, h => h.StartsWith("LinkedIn post", StringComparison.Ordinal));
+        Assert.Contains(kindHeaders, h => h.StartsWith("Newsletter", StringComparison.Ordinal));
+        Assert.Contains(kindHeaders, h => h.StartsWith("Email sequence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_print_more_menu_never_offers_image_prompts()
+    {
+        StubPreview(Artifact("transcript", "Source transcript"), Artifact("blog", "Blog draft"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Blog draft");
+
+        Assert.DoesNotContain("Image prompts", view.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Deleting_a_card_confirms_then_calls_the_delete_endpoint_and_reloads()
+    {
+        StubPreview(Artifact("blog", "Doomed draft"));
+
+        var confirm = new AutoConfirm(accept: true);
+        Services.AddScoped<IConfirmService>(_ => confirm);
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Doomed draft");
+
+        var artifactId = StubbedArtifacts.Single().Id;
+        Http.OnStatus(HttpMethod.Delete,
+            $"api/v1/campaigns/{CampaignId}/artifacts/{artifactId}", System.Net.HttpStatusCode.NoContent);
+
+        await view.Find(".cm-card__delete").ClickAsync();
+
+        Assert.Single(confirm.Requests);
+        Assert.Contains(Http.Requests, r =>
+            r.Method == HttpMethod.Delete
+            && r.RequestUri!.AbsolutePath.EndsWith($"artifacts/{artifactId}", StringComparison.Ordinal));
+        // The reload after delete refetches the preview.
+        Assert.True(Http.Requests.Count(r =>
+            r.Method == HttpMethod.Get
+            && r.RequestUri!.AbsolutePath.EndsWith("/preview", StringComparison.Ordinal)) >= 2);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_confirm_leaves_the_artifact_alone()
+    {
+        StubPreview(Artifact("blog", "Spared draft"));
+
+        Services.AddScoped<IConfirmService>(_ => new AutoConfirm(accept: false));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Spared draft");
+
+        await view.Find(".cm-card__delete").ClickAsync();
+
+        Assert.DoesNotContain(Http.Requests, r => r.Method == HttpMethod.Delete);
+        Assert.Contains("Spared draft", view.Markup, StringComparison.Ordinal);
+    }
+
+    // ---- helpers ---------------------------------------------------------------
+
+    /// <summary>Scripted confirm double: answers immediately, records every request.</summary>
+    private sealed class AutoConfirm(bool accept) : IConfirmService
+    {
+        public List<ConfirmRequest> Requests { get; } = [];
+
+        public Task<bool> ConfirmAsync(ConfirmRequest request)
+        {
+            Requests.Add(request);
+            return Task.FromResult(accept);
+        }
+    }
+
+    private List<ArtifactPreviewResponse> StubbedArtifacts { get; } = [];
+
+    private void StubPreview(params ArtifactPreviewResponse[] artifacts)
+    {
+        StubbedArtifacts.Clear();
+        StubbedArtifacts.AddRange(artifacts);
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign("Webinar campaign"), artifacts, [], 0, 0));
+
+        // The store fetches the transcript artifact's full content after every preview.
+        foreach (var transcript in artifacts.Where(a => a.Kind == "transcript"))
+        {
+            Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{transcript.Id}", new ArtifactResponse(
+                transcript.Id, CampaignId, "transcript", transcript.Title,
+                """{"source":"test","segments":[]}""",
+                ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow));
+        }
+    }
+
+    /// <summary>The lane label of the lane whose markup contains the given card title.</summary>
+    private static string LaneOf(IRenderedComponent<MillFloorView> view, string title)
+    {
+        var lane = view.FindAll(".cm-lane")
+            .FirstOrDefault(l => l.TextContent.Contains(title, StringComparison.Ordinal));
+        Assert.NotNull(lane);
+        return lane.QuerySelector(".cm-lane__label")!.TextContent.Trim();
+    }
+
+    private static async Task WaitForTextAsync(IRenderedComponent<MillFloorView> view, string text)
+    {
+        try
+        {
+            await view.WaitForStateAsync(
+                () => view.Markup.Contains(text, StringComparison.Ordinal), TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
+        {
+            Assert.Fail($"'{text}' never rendered ({ex.GetType().Name}). Markup was:{Environment.NewLine}{view.Markup}");
+        }
+    }
+
+    private static CampaignResponse Campaign(string name) =>
+        new(CampaignId, Guid.NewGuid(), name, null, DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+
+    private static ArtifactPreviewResponse Artifact(string kind, string title) =>
+        new(Guid.NewGuid(), CampaignId, kind, title, ArtifactStatus.Draft, 1,
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+}

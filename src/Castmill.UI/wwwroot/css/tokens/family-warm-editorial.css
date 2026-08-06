@@ -32,6 +32,15 @@
     --cmf-accent-wash: rgb(193 95 60 / 0.12);
     --cmf-on-accent: #fbf8f2;
 
+    /* Second accent — brass. Decoration only (never behind text). */
+    --cmf-accent-alt: #8a7248;
+    --cmf-accent-alt-wash: rgb(138 114 72 / 0.14);
+
+    /* The rail's own surface: a warmer cream one step from the page. */
+    --cmf-surface-rail: #efe7da;
+    --cmf-on-rail: #1a1815;
+    --cmf-on-rail-muted: #6b5a3c;
+
     --cmf-rule: #ddd3c2;             /* hairline, like a print column rule */
     --cmf-rule-strong: #c3b59c;
 
@@ -80,6 +89,13 @@
     --cmf-accent-hover: #e58e70;
     --cmf-accent-wash: rgb(217 119 87 / 0.16);
     --cmf-on-accent: #1a1815;
+
+    --cmf-accent-alt: #a98e63;
+    --cmf-accent-alt-wash: rgb(169 142 99 / 0.16);
+
+    --cmf-surface-rail: #24201b;
+    --cmf-on-rail: #ede7dd;
+    --cmf-on-rail-muted: #b39c74;
 
     --cmf-rule: #3a342e;
     --cmf-rule-strong: #544c42;

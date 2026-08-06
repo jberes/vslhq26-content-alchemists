@@ -34,3 +34,12 @@ export function applyTheme(family, mode, density) {
     root.setAttribute('data-cm-mode', mode);
     root.setAttribute('data-cm-density', density);
 }
+
+export function applyRail(state) {
+    const root = document.documentElement;
+    if (state === 'icons' || state === 'labels') {
+        root.setAttribute('data-cm-rail', state);
+    } else {
+        root.removeAttribute('data-cm-rail');
+    }
+}

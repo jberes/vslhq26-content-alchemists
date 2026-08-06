@@ -13,10 +13,18 @@
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject ThemeService Theme
 
 <nav class="cm-rail" aria-label="Workspace">
     <div class="cm-rail__head">
         <span class="cm-wordmark">Castmill</span>
+        <button type="button" class="cm-rail__collapse"
+                title="@(Theme.RailCollapsed ? "Expand navigation" : "Collapse navigation")"
+                aria-label="@(Theme.RailCollapsed ? "Expand navigation" : "Collapse navigation")"
+                aria-expanded="@(Theme.RailCollapsed ? "false" : "true")"
+                @onclick="Theme.ToggleRailAsync">
+            @(Theme.RailCollapsed ? "»" : "«")
+        </button>
     </div>
 
     <div class="cm-rail__group">
@@ -31,6 +39,11 @@
                 <a class="cm-rail__item @Active("campaigns")" href="campaigns">
                     <span class="cm-rail__label">Campaigns</span>
                     <span class="cm-rail__count cm-mono">@Workspace.Campaigns.Count</span>
+                </a>
+            </li>
+            <li>
+                <a class="cm-rail__item @Active("brands")" href="brands">
+                    <span class="cm-rail__label">Brands</span>
                 </a>
             </li>
             <li>
@@ -102,7 +115,11 @@
 </nav>
 
 @code {
-    protected override void OnInitialized() => Workspace.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Workspace.Changed += OnChanged;
+        Theme.Changed += OnChanged; // the collapse toggle re-renders the chevron
+    }
 
     /// <summary>
     /// Marks the current workspace destination. Compared on the whole relative path so
@@ -170,5 +187,9 @@
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Workspace.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Workspace.Changed -= OnChanged;
+        Theme.Changed -= OnChanged;
+    }
 }

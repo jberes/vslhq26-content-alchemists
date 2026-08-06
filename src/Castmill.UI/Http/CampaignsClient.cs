@@ -13,7 +13,8 @@ public sealed record CampaignPreview(
     IReadOnlyList<ArtifactPreviewResponse> Artifacts,
     IReadOnlyList<ImageSlotResponse> ImageSlots,
     int ImagesFilled,
-    int ImagesTotal);
+    int ImagesTotal,
+    BrandSummaryResponse? Brand = null);
 
 /// <summary>Typed client for campaigns, artifacts and the preview projection.</summary>
 public sealed class CampaignsClient(ApiClient api)
@@ -27,13 +28,22 @@ public sealed class CampaignsClient(ApiClient api)
     public Task<CampaignPreview> GetPreviewAsync(Guid id, CancellationToken ct = default) =>
         api.GetAsync<CampaignPreview>($"api/v1/campaigns/{id}/preview", ct);
 
-    public Task<CampaignResponse> CreateAsync(string name, string? brief, CancellationToken ct = default) =>
-        api.PostAsync<CampaignCreateRequest, CampaignResponse>(
-            "api/v1/campaigns", new CampaignCreateRequest(name, brief), anonymous: false, ct);
+    /// <summary>The whole workspace dashboard in one call — never fetch per-campaign
+    /// previews to build a cross-campaign surface.</summary>
+    public Task<DashboardResponse> GetDashboardAsync(CancellationToken ct = default) =>
+        api.GetAsync<DashboardResponse>("api/v1/campaigns/dashboard", ct);
 
-    public Task<CampaignResponse> UpdateAsync(Guid id, string name, string? brief, CancellationToken ct = default) =>
+    public Task<CampaignResponse> CreateAsync(
+        string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
+        CancellationToken ct = default) =>
+        api.PostAsync<CampaignCreateRequest, CampaignResponse>(
+            "api/v1/campaigns", new CampaignCreateRequest(name, brief, brandId, links), anonymous: false, ct);
+
+    public Task<CampaignResponse> UpdateAsync(
+        Guid id, string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
+        CancellationToken ct = default) =>
         api.PutAsync<CampaignUpdateRequest, CampaignResponse>(
-            $"api/v1/campaigns/{id}", new CampaignUpdateRequest(name, brief), etag: null, ct);
+            $"api/v1/campaigns/{id}", new CampaignUpdateRequest(name, brief, brandId, links), etag: null, ct);
 
     /// <summary>Deletes the campaign and everything in it — artifacts, revisions, slots,
     /// schedule entries, runs. The server cascades explicitly; there is no undo.</summary>
@@ -49,6 +59,10 @@ public sealed class CampaignsClient(ApiClient api)
     public Task<(ArtifactResponse Artifact, string? ETag)> GetArtifactAsync(
         Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
         api.GetWithETagAsync<ArtifactResponse>($"api/v1/campaigns/{campaignId}/artifacts/{artifactId}", ct);
+
+    /// <summary>Deletes one artifact and its revisions. Server returns 204; no undo.</summary>
+    public Task DeleteArtifactAsync(Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/campaigns/{campaignId}/artifacts/{artifactId}", ct);
 
     public Task<ArtifactResponse> SaveArtifactAsync(
         Guid campaignId, Guid artifactId, string title, string contentJson, string? etag,

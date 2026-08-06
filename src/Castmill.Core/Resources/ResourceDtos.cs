@@ -6,15 +6,44 @@ namespace Castmill.Core.Resources;
 
 public sealed record CampaignCreateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
-    [property: MaxLength(8000)] string? Brief);
+    [property: MaxLength(8000)] string? Brief,
+    Guid? BrandId = null,
+    IReadOnlyList<CampaignLink>? Links = null);
 
 public sealed record CampaignUpdateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
-    [property: MaxLength(8000)] string? Brief);
+    [property: MaxLength(8000)] string? Brief,
+    Guid? BrandId = null,
+    IReadOnlyList<CampaignLink>? Links = null);
 
 public sealed record CampaignResponse(
     Guid Id, Guid OwnerId, string Name, string? Brief,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    Guid? BrandId = null,
+    IReadOnlyList<CampaignLink>? Links = null);
+
+/// <summary>One artifact row on the workspace dashboard (review queue / aging drafts).</summary>
+public sealed record DashboardArtifact(
+    Guid CampaignId, string CampaignName, Guid ArtifactId,
+    string Kind, string Title, string Status, DateTimeOffset UpdatedAt);
+
+/// <summary>Per-campaign counters for the campaigns index cards.</summary>
+public sealed record CampaignCounts(
+    Guid CampaignId, int Artifacts, int InReview, int ImagesFilled, int ImagesTotal);
+
+/// <summary>
+/// The workspace dashboard in ONE call. The front page and the campaigns index previously
+/// fetched a full preview per campaign (N+1, with every artifact preview and slot in each
+/// payload) to derive exactly this.
+/// </summary>
+public sealed record DashboardResponse(
+    IReadOnlyList<DashboardArtifact> ReviewQueue,
+    IReadOnlyList<DashboardArtifact> AgingDrafts,
+    IReadOnlyList<CampaignCounts> Campaigns,
+    int EmptySlots,
+    int CampaignsWithEmptySlots,
+    IReadOnlyList<string> EmptySlotModels,
+    Guid? FirstEmptySlotCampaign);
 
 // ---- Artifacts -------------------------------------------------------------
 
@@ -73,10 +102,30 @@ public sealed record ImageSlotPatchRequest(
 public sealed record GenerateVariantsRequest(
     [property: Range(1, 6)] int Variants = 2);
 
-public sealed record ImageVariantResponse(int Index, string Url, string Model);
+/// <summary>A persisted take for a slot. State: Candidate | Kept | Discarded.</summary>
+public sealed record ImageVariantResponse(
+    Guid Id, Guid SlotId, string Url, string ThumbUrl, string Model, string State,
+    string? SteeringNote, Guid? SourceVariantId, int Width, int Height, DateTimeOffset CreatedAt);
+
+public sealed record VariantStateRequest(
+    [property: Required, MaxLength(20)] string State);
+
+/// <summary>Steer a new take from an existing one: original prompt + the adjustment.</summary>
+public sealed record SteerVariantRequest(
+    [property: Required, MinLength(1), MaxLength(1000)] string Note,
+    [property: Range(1, 3)] int Variants = 1);
+
+/// <summary>Result envelope for generate/steer: the run id (pollable) + persisted takes.</summary>
+public sealed record VariantBatchResponse(
+    Guid RunId, Guid SlotId, string Kind,
+    IReadOnlyList<ImageVariantResponse> Variants,
+    IReadOnlyList<string>? Failures);
 
 public sealed record PlaceVariantRequest(
-    [property: Required, MaxLength(2000), Url] string Url,
+    /// <summary>The persisted variant to place. Preferred over Url.</summary>
+    Guid? VariantId,
+    /// <summary>Legacy: a variant URL from this slot's generate response.</summary>
+    [property: MaxLength(2000), Url] string? Url,
     /// <summary>Blog artifact whose ![stub:kind]() marker gets replaced; optional.</summary>
     Guid? BlogArtifactId);
 
@@ -117,14 +166,7 @@ public sealed record AssetResponse(
     Guid Id, string FileName, string ContentType, long SizeBytes,
     string BlobPath, DateTimeOffset CreatedAt);
 
-// ---- Brand profiles --------------------------------------------------------
-
-public sealed record BrandProfileRequest(
-    [property: Required, MinLength(1), MaxLength(200)] string Name,
-    string? StyleCardJson);
-
-public sealed record BrandProfileResponse(
-    Guid Id, string Name, string? StyleCardJson, DateTimeOffset UpdatedAt);
+// ---- Brand profiles: see Resources/BrandDtos.cs ----------------------------
 
 // ---- Settings (plaintext kinds only; encrypted kinds arrive in B3) ---------
 

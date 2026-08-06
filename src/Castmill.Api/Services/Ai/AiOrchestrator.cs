@@ -26,6 +26,7 @@ public interface IAiOrchestrator
 public sealed class AiOrchestrator(
     IFoundryClientFactory clients,
     IImagePlanService imagePlan,
+    IBrandContextService brands,
     CastmillDbContext db,
     ITenantProvider tenant,
     IPromptLog promptLog,
@@ -38,6 +39,7 @@ public sealed class AiOrchestrator(
         Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds,
         CancellationToken ct, Guid? runId = null)
     {
+        kinds = kinds?.Select(Generators.Normalize).ToArray();
         var wanted = kinds is { Length: > 0 }
             ? Generators.FanOut.Where(g => kinds.Contains(g.Kind, StringComparer.OrdinalIgnoreCase)).ToList()
             : [.. Generators.FanOut];
@@ -46,10 +48,13 @@ public sealed class AiOrchestrator(
         // visible from the moment the campaign has content, not at publish time.
         await imagePlan.EnsureSlotsAsync(campaign.Id, ct);
 
+        // Brand + campaign context resolve ONCE per run and steer every generator.
+        var brand = await brands.ResolveAsync(campaign, ct);
+
         var results = new List<GenerationResult>();
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
-            var blog = await RunBlogAsync(userId, campaign, transcript, brief, ct);
+            var blog = await RunBlogCoreAsync(userId, campaign, transcript, brief, brand, ct);
             results.Add(blog);
             await RecordProgressAsync(runId, results, ct);
         }
@@ -59,7 +64,7 @@ public sealed class AiOrchestrator(
         // model-side latency dominates and the Press Run consumes per-artifact results.
         foreach (var spec in wanted)
         {
-            var result = await RunGeneratorAsync(userId, campaign, transcript, brief, spec, ct);
+            var result = await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct);
             results.Add(result);
 
             // Image prompts seed the reserved slots, keeping each prompt tied to the
@@ -138,12 +143,17 @@ public sealed class AiOrchestrator(
     }
 
     public async Task<GenerationResult> RunGeneratorAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, CancellationToken ct)
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, CancellationToken ct) =>
+        await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, await brands.ResolveAsync(campaign, ct), ct);
+
+    private async Task<GenerationResult> RunGeneratorCoreAsync(
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, BrandContext brand, CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var response = await CallModelAsync(userId, "chat", spec.Kind, BuildPrompt(spec.Instructions, brief, transcript), ct);
+            var response = await CallModelAsync(userId, "chat", spec.Kind,
+                BuildPrompt(spec.Instructions, brief, transcript, brand, spec.Kind), ct);
             var json = ParseModelJson(response);
             var validation = spec.Validate(json, transcript);
             if (!validation.Passed)
@@ -162,7 +172,11 @@ public sealed class AiOrchestrator(
 
     /// <summary>Blog pipeline (B5.2): outline → draft → cross-model audit.</summary>
     public async Task<GenerationResult> RunBlogAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, CancellationToken ct)
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, CancellationToken ct) =>
+        await RunBlogCoreAsync(userId, campaign, transcript, brief, await brands.ResolveAsync(campaign, ct), ct);
+
+    private async Task<GenerationResult> RunBlogCoreAsync(
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, BrandContext brand, CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
         try
@@ -171,7 +185,7 @@ public sealed class AiOrchestrator(
                 """
                 Create an outline for a long-form blog post from the source content.
                 JSON schema: { "title": string, "sections": [ { "heading": string, "segmentIds": string[] } ], "citations": string[] }
-                """, brief, transcript), ct);
+                """, brief, transcript, brand, "blog"), ct);
 
             var draft = await CallModelAsync(userId, "chat", "blog-draft", BuildPrompt(
                 $$"""
@@ -181,7 +195,7 @@ public sealed class AiOrchestrator(
                 Target 1500-2500 words. Use markdown. Insert image stub markers like
                 ![stub:blog-hero]() and ![stub:blog-inline-1]() where images belong.
                 JSON schema: { "title": string, "markdown": string, "metaDescription": string, "citations": string[] }
-                """, brief, transcript), ct);
+                """, brief, transcript, brand, "blog"), ct);
 
             var draftJson = ParseModelJson(draft);
             var validation = Generators.ValidateBlog(draftJson, transcript);
@@ -231,16 +245,36 @@ public sealed class AiOrchestrator(
 
     // ---- Internals -----------------------------------------------------------
 
-    private static string BuildPrompt(string instructions, string? brief, TranscriptContent transcript) =>
-        $"""
+    /// <summary>
+    /// The ONE place prompt text is assembled. Order matters and is deliberate: contract →
+    /// generator instructions → per-brand template steering (rides WITH the instructions) →
+    /// campaign brief → brand style block → campaign context links → source transcript.
+    /// Labeled sections let the model distinguish contract vs steering vs facts.
+    /// </summary>
+    private static string BuildPrompt(
+        string instructions, string? brief, TranscriptContent transcript,
+        BrandContext? brand = null, string? kind = null)
+    {
+        var steering = kind is not null
+            && brand?.TemplateSteeringByKind.TryGetValue(kind, out var template) == true
+                ? $"\nBrand template steering: {template}\n"
+                : string.Empty;
+        var styleBlock = string.IsNullOrWhiteSpace(brand?.StyleBlock) ? string.Empty : $"{brand!.StyleBlock}\n";
+        var contextBlock = string.IsNullOrWhiteSpace(brand?.CampaignContextBlock)
+            ? string.Empty
+            : $"{brand!.CampaignContextBlock}\n";
+
+        return $"""
         {Generators.CommonContract}
 
         {instructions}
-
+        {steering}
         {(string.IsNullOrWhiteSpace(brief) ? "" : $"Campaign brief: {brief}\n")}
+        {styleBlock}{contextBlock}
         Source transcript (cite segment ids in square brackets):
         {TranscriptService.ToPromptText(transcript)}
         """;
+    }
 
     private async Task<string> CallModelAsync(Guid userId, string modelAlias, string kind, string prompt, CancellationToken ct)
     {

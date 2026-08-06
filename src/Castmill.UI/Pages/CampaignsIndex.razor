@@ -82,32 +82,25 @@
         await LoadSummariesAsync();
     }
 
+    /// <summary>One dashboard call carries every card's counters (was one preview per
+    /// campaign — an N+1 whose payloads included every artifact preview and slot).</summary>
     private async Task LoadSummariesAsync()
     {
-        var results = await Task.WhenAll(Workspace.Campaigns.Select(async c =>
+        try
         {
-            try
+            var dashboard = await Campaigns.GetDashboardAsync();
+            foreach (var counts in dashboard.Campaigns)
             {
-                var preview = await Campaigns.GetPreviewAsync(c.Id);
-                return (c.Id, Summary: new Summary(
-                    preview.Artifacts.Count,
-                    preview.Artifacts.Count(a => a.Status == ArtifactStatus.InReview),
-                    preview.ImagesFilled,
-                    preview.ImagesTotal));
+                _summaries[counts.CampaignId] = new Summary(
+                    counts.Artifacts, counts.InReview, counts.ImagesFilled, counts.ImagesTotal);
             }
-            catch (ApiException)
-            {
-                return (c.Id, Summary: (Summary?)null);
-            }
-            catch (HttpRequestException)
-            {
-                return (c.Id, Summary: (Summary?)null);
-            }
-        }));
-
-        foreach (var (id, summary) in results.Where(r => r.Summary is not null))
+        }
+        catch (ApiException)
         {
-            _summaries[id] = summary!;
+            // Cards render without counters; the campaign list itself already loaded.
+        }
+        catch (HttpRequestException)
+        {
         }
 
         StateHasChanged();

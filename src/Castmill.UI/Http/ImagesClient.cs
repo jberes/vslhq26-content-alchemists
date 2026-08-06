@@ -3,13 +3,6 @@ using Castmill.Core.Resources;
 
 namespace Castmill.UI.Http;
 
-/// <summary>Result of a variant generation pass for one slot.</summary>
-public sealed record VariantsResult(
-    Guid SlotId,
-    string Kind,
-    IReadOnlyList<ImageVariantResponse> Variants,
-    IReadOnlyList<string>? Failures);
-
 /// <summary>Result of placing a variant (and of a headline re-composite).</summary>
 public sealed record PlaceResult(ImageSlotResponse Slot, long? BlogVersion, bool? FontFallback);
 
@@ -36,24 +29,48 @@ public sealed class ImagesClient(ApiClient api)
             etag: null,
             ct);
 
-    /// <summary>Generates N variants against the slot's model. Live call — costs money.</summary>
-    public Task<VariantsResult> GenerateAsync(
+    /// <summary>Generates N variants against the slot's model. Live call — costs money.
+    /// The result carries persisted variants + a run id pollable at <c>runs/{id}</c>.</summary>
+    public Task<VariantBatchResponse> GenerateAsync(
         Guid campaignId, Guid slotId, int variants, CancellationToken ct = default) =>
-        api.PostAsync<object, VariantsResult>(
+        api.PostAsync<object, VariantBatchResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
             new { variants },
             anonymous: false,
             ct);
 
+    /// <summary>Every persisted take for the slot, newest first (discarded hidden by default).</summary>
+    public Task<List<ImageVariantResponse>> ListVariantsAsync(
+        Guid campaignId, Guid slotId, bool includeDiscarded = false, CancellationToken ct = default) =>
+        api.GetAsync<List<ImageVariantResponse>>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants?includeDiscarded={includeDiscarded}", ct);
+
+    /// <summary>Keep / discard / restore a take. A state flip — the pixels stay.</summary>
+    public Task<ImageVariantResponse> SetVariantStateAsync(
+        Guid campaignId, Guid slotId, Guid variantId, string state, CancellationToken ct = default) =>
+        api.PatchAsync<object, ImageVariantResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}",
+            new { state }, etag: null, ct);
+
+    /// <summary>New take(s) steered from an existing one ("add a face", "warmer background").</summary>
+    public Task<VariantBatchResponse> SteerAsync(
+        Guid campaignId, Guid slotId, Guid variantId, string note, int variants = 1,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, VariantBatchResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/steer",
+            new { note, variants },
+            anonymous: false,
+            ct);
+
     /// <summary>
-    /// Places a variant: crops to the slot's exact dimensions, publishes WebP, replaces the
-    /// blog's <c>![stub:kind]()</c> marker in place, composites the thumbnail headline.
+    /// Places a variant into its slot by id: the slot fills, the take flips Kept, the
+    /// blog's <c>![stub:kind]()</c> marker is replaced, the headline is composited.
     /// </summary>
     public Task<PlaceResult> PlaceAsync(
-        Guid campaignId, Guid slotId, string url, Guid? blogArtifactId, CancellationToken ct = default) =>
+        Guid campaignId, Guid slotId, Guid variantId, Guid? blogArtifactId, CancellationToken ct = default) =>
         api.PostAsync<object, PlaceResult>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/place",
-            new { url, blogArtifactId },
+            new { variantId, blogArtifactId },
             anonymous: false,
             ct);
 

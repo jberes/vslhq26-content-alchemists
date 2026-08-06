@@ -14,6 +14,7 @@
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
+@inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 
@@ -29,19 +30,43 @@
             }
             else
             {
-                <ul class="cm-focus__list">
-                    @foreach (var item in Editable)
+                @* Grouped by type: one collapsible group per lane category, items labelled
+                   with their kind. Each item carries a delete affordance with a confirm. *@
+                <div class="cm-tree">
+                    @foreach (var group in ArtifactGroups)
                     {
-                        <li>
-                            <button type="button"
-                                    class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
-                                    @onclick="() => SelectAsync(item.Id)">
-                                <span class="cm-focus__list-title">@item.Title</span>
-                                <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                        var collapsed = _collapsedGroups.Contains(group.Key);
+                        <div class="cm-tree__group">
+                            <button type="button" class="cm-tree__head"
+                                    aria-expanded="@(collapsed ? "false" : "true")"
+                                    @onclick="() => ToggleGroup(group.Key)">
+                                <span class="cm-tree__chevron" aria-hidden="true">@(collapsed ? "▸" : "▾")</span>
+                                <span class="cm-kicker">@group.Key</span>
+                                <span class="cm-meta">@group.Count()</span>
                             </button>
-                        </li>
+                            @if (!collapsed)
+                            {
+                                <ul class="cm-focus__list">
+                                    @foreach (var item in group)
+                                    {
+                                        <li class="cm-tree__row">
+                                            <button type="button"
+                                                    class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
+                                                    @onclick="() => SelectAsync(item.Id)">
+                                                <span class="cm-focus__list-title">@item.Title</span>
+                                                <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                            </button>
+                                            <button type="button" class="cm-tree__delete"
+                                                    title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
+                                                    aria-label="Delete @item.Title"
+                                                    @onclick="() => DeleteArtifactAsync(item)">✕</button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
                     }
-                </ul>
+                </div>
             }
 
             @if (_headings.Count > 0)
@@ -85,7 +110,7 @@
                     </div>
                 </header>
 
-                @if (_artifact.Kind == "clips")
+                @if (_artifact.Kind is "clips" or "clip-suggestions")
                 {
                     <ClipReview ContentJson="@_artifact.ContentJson" />
                 }
@@ -225,12 +250,6 @@
 </CampaignShell>
 
 @code {
-    /// <summary>Kinds Focus mode can edit — the markdown ones. A transcript is source, not copy.</summary>
-    private static readonly string[] EditableKinds =
-        ["blog", "landing-page", "newsletter", "email-sequence", "show-notes", "seo-brief", "clips",
-         "social-x", "social-linkedin", "social-facebook", "social-instagram", "social-threads", "social-bluesky",
-         "seo-keyword-plan"];
-
     /// <summary>Structured kinds render formatted but read-only (see StructuredContent).</summary>
     private bool IsStructured => _artifact is not null && StructuredContent.IsStructured(_artifact.Kind);
 
@@ -257,8 +276,66 @@
     [SupplyParameterFromQuery(Name = "artifact")]
     private Guid? RequestedArtifact { get; set; }
 
+    private readonly HashSet<string> _collapsedGroups = [];
+
     private IEnumerable<ArtifactPreviewResponse> Editable =>
-        Campaign.Artifacts.Where(a => EditableKinds.Contains(a.Kind, StringComparer.Ordinal));
+        Campaign.Artifacts.Where(a => ArtifactDisplay.Editable(a.Kind));
+
+    /// <summary>The tree's groups: lane categories in board order, kinds in registry order.</summary>
+    private IEnumerable<IGrouping<string, ArtifactPreviewResponse>> ArtifactGroups =>
+        Editable
+            .OrderBy(a => ArtifactDisplay.KindOrder(a.Kind))
+            .ThenBy(a => a.CreatedAt)
+            .GroupBy(a => ArtifactDisplay.Lane(a.Kind))
+            .OrderBy(g => Array.IndexOf(ArtifactDisplay.LaneOrder, g.Key) is var i && i >= 0
+                ? i
+                : ArtifactDisplay.LaneOrder.Length);
+
+    private void ToggleGroup(string lane)
+    {
+        if (!_collapsedGroups.Remove(lane))
+        {
+            _collapsedGroups.Add(lane);
+        }
+    }
+
+    /// <summary>
+    /// Deletes an artifact from the tree after a confirm. If the open artifact is the one
+    /// deleted, focus moves to the next remaining editable artifact.
+    /// </summary>
+    private async Task DeleteArtifactAsync(ArtifactPreviewResponse item)
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete \"{item.Title}\"?",
+            $"This removes the {ArtifactDisplay.KindLabel(item.Kind).ToLowerInvariant()} and its revision history. There is no undo.",
+            AcceptLabel: "Delete",
+            Destructive: true));
+
+        if (!accepted)
+        {
+            return;
+        }
+
+        try
+        {
+            await Campaigns.DeleteArtifactAsync(CampaignId, item.Id);
+
+            if (_artifactId == item.Id)
+            {
+                _artifact = null;
+                _artifactId = null;
+                RequestedArtifact = null;
+                Navigation.NavigateTo(CampaignViews.PathFor(CampaignId, CampaignView.Focus));
+            }
+
+            await Campaign.LoadAsync(CampaignId, force: true);
+            Notifier.ShowSuccess($"Deleted \"{item.Title}\".");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
 
     protected override void OnInitialized() => Campaign.Changed += OnChanged;
 

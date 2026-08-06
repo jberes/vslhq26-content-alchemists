@@ -1,0 +1,51 @@
+@* The Source Master's transcript list, extracted so it can decline to re-render.
+   A campaign transcript is hundreds of rows; the Mill Floor re-renders on every press-run
+   poll tick (800 ms) and every store notification, and diffing this list each time was
+   the board's dominant render cost. ShouldRender lets the rows re-render ONLY when the
+   transcript itself or the cited-row highlight actually changed.
+
+   The [data-seg] rows must stay in the DOM at all times — the provenance overlay measures
+   them by selector — so this memoizes rendering, never virtualizes rows away. *@
+@using Castmill.Core.Ai
+
+<ol class="cm-source__segments" data-cm-scroll>
+    @foreach (var segment in Transcript.Segments)
+    {
+        <li class="cm-seg @(Highlighted.Contains(segment.Id) ? "cm-seg--cited" : "")"
+            data-seg="@segment.Id">
+            <span class="cm-seg__label cm-mono">
+                @Clock(segment.StartSeconds)@(segment.Speaker is null ? "" : $" · {segment.Speaker}")
+            </span>
+            <span class="cm-seg__text">@segment.Text</span>
+        </li>
+    }
+</ol>
+
+@code {
+    private TranscriptContent? _renderedTranscript;
+    private readonly HashSet<string> _renderedHighlights = [];
+
+    [Parameter, EditorRequired] public TranscriptContent Transcript { get; set; } = default!;
+
+    /// <summary>Segment ids to mark as cited. The parent mutates one set in place, so the
+    /// comparison is by content, not reference.</summary>
+    [Parameter, EditorRequired] public IReadOnlySet<string> Highlighted { get; set; } = default!;
+
+    protected override bool ShouldRender() =>
+        !ReferenceEquals(_renderedTranscript, Transcript)
+        || !_renderedHighlights.SetEquals(Highlighted);
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Snapshot what was just rendered; skipped renders never reach here.
+        _renderedTranscript = Transcript;
+        _renderedHighlights.Clear();
+        _renderedHighlights.UnionWith(Highlighted);
+    }
+
+    private static string Clock(double seconds)
+    {
+        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
+    }
+}

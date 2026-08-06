@@ -58,14 +58,14 @@
                                         @onclick="() => OpenFocus(item)">
                                     <span class="cm-card__bar cm-card__bar--review" aria-hidden="true"></span>
                                     <span class="cm-card__body">
-                                        <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Artifact.Kind)</span>
-                                        <span class="cm-card__title">@item.Artifact.Title</span>
+                                        <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)</span>
+                                        <span class="cm-card__title">@item.Title</span>
                                         <span class="cm-meta">
-                                            Updated @ArtifactDisplay.Ago(item.Artifact.UpdatedAt, Now)
+                                            Updated @ArtifactDisplay.Ago(item.UpdatedAt, Now)
                                         </span>
                                     </span>
-                                    <span class="@ArtifactDisplay.StatusModifier(item.Artifact.Status)">
-                                        @ArtifactDisplay.StatusLabel(item.Artifact.Status)
+                                    <span class="@ArtifactDisplay.StatusModifier(item.Status)">
+                                        @ArtifactDisplay.StatusLabel(item.Status)
                                     </span>
                                 </button>
                             </li>
@@ -94,8 +94,8 @@
                             @foreach (var item in _aging)
                             {
                                 <li class="cm-row">
-                                    <span class="cm-row__label">@item.Artifact.Title</span>
-                                    <span class="cm-meta">@ArtifactDisplay.Ago(item.Artifact.UpdatedAt, Now)</span>
+                                    <span class="cm-row__label">@item.Title</span>
+                                    <span class="cm-meta">@ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
                                 </li>
                             }
                         </ul>
@@ -138,11 +138,9 @@
 </div>
 
 @code {
-    private sealed record ReviewItem(string CampaignName, Guid CampaignId, ArtifactPreviewResponse Artifact);
-
-    private readonly List<ReviewItem> _review = [];
-    private readonly List<ReviewItem> _aging = [];
-    private readonly HashSet<string> _slotModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<DashboardArtifact> _review = [];
+    private readonly List<DashboardArtifact> _aging = [];
+    private readonly List<string> _slotModels = [];
 
     private int _emptySlots;
     private int _campaignsWithSlots;
@@ -159,89 +157,41 @@
         await LoadDashboardAsync();
     }
 
-    /// <summary>
-    /// The front page is cross-campaign, so it reads one Preview per campaign rather than a
-    /// dedicated endpoint. Requests go out together instead of in series — with a dozen
-    /// campaigns the difference is the whole G4 budget (&lt; 1 s).
-    ///
-    /// If this ever needs to scale past a handful of campaigns it wants a real server-side
-    /// dashboard projection; that is a backend story, and this is where it would land.
-    /// </summary>
+    /// <summary>One server-side projection instead of a preview fetch per campaign —
+    /// the old N+1 was this page's whole G4 budget once campaigns accumulated.</summary>
     private async Task LoadDashboardAsync()
     {
-        var previews = await Task.WhenAll(Workspace.Campaigns.Select(async campaign =>
+        try
         {
-            try
-            {
-                return (Campaign: campaign, Preview: (CampaignPreview?)await Campaigns.GetPreviewAsync(campaign.Id));
-            }
-            catch (ApiException)
-            {
-                return (Campaign: campaign, Preview: null);
-            }
-            catch (HttpRequestException)
-            {
-                return (Campaign: campaign, Preview: null);
-            }
-        }));
+            var dashboard = await Campaigns.GetDashboardAsync();
 
-        _review.Clear();
-        _aging.Clear();
-        _slotModels.Clear();
-        _emptySlots = 0;
-        _campaignsWithSlots = 0;
-        _firstSlotCampaign = null;
-
-        var aging = DateTimeOffset.Now - TimeSpan.FromDays(7);
-
-        foreach (var (campaign, preview) in previews)
+            _review.Clear();
+            _review.AddRange(dashboard.ReviewQueue);
+            _aging.Clear();
+            _aging.AddRange(dashboard.AgingDrafts);
+            _slotModels.Clear();
+            _slotModels.AddRange(dashboard.EmptySlotModels);
+            _emptySlots = dashboard.EmptySlots;
+            _campaignsWithSlots = dashboard.CampaignsWithEmptySlots;
+            _firstSlotCampaign = dashboard.FirstEmptySlotCampaign;
+        }
+        catch (ApiException)
         {
-            if (preview is null)
-            {
-                continue;
-            }
-
-            foreach (var artifact in preview.Artifacts)
-            {
-                if (artifact.Status == ArtifactStatus.InReview)
-                {
-                    _review.Add(new ReviewItem(campaign.Name, campaign.Id, artifact));
-                }
-                else if (artifact.Status == ArtifactStatus.Draft && artifact.UpdatedAt < aging)
-                {
-                    _aging.Add(new ReviewItem(campaign.Name, campaign.Id, artifact));
-                }
-            }
-
-            var empty = preview.ImageSlots
-                .Where(s => !string.Equals(s.State, "Filled", StringComparison.Ordinal))
-                .ToList();
-
-            if (empty.Count > 0)
-            {
-                _emptySlots += empty.Count;
-                _campaignsWithSlots++;
-                _firstSlotCampaign ??= campaign.Id;
-
-                foreach (var model in empty.Select(s => s.ModelAlias).Where(m => !string.IsNullOrWhiteSpace(m)))
-                {
-                    _slotModels.Add(model!);
-                }
-            }
+            // The blocks render their empty states; the workspace itself already loaded.
+        }
+        catch (HttpRequestException)
+        {
         }
 
-        _review.Sort((a, b) => b.Artifact.UpdatedAt.CompareTo(a.Artifact.UpdatedAt));
-        _aging.Sort((a, b) => a.Artifact.UpdatedAt.CompareTo(b.Artifact.UpdatedAt));
         _loaded = true;
-
         StateHasChanged();
     }
 
-    private void OpenFocus(ReviewItem item)
+    private void OpenFocus(DashboardArtifact item)
     {
         Workspace.SetActive(item.CampaignId);
         Navigation.NavigateTo(
-            $"{CampaignViews.PathFor(item.CampaignId, CampaignView.Focus)}?artifact={item.Artifact.Id}");
+            $"{CampaignViews.PathFor(item.CampaignId, CampaignView.Focus)}?artifact={item.ArtifactId}");
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);

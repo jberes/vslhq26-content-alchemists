@@ -14,7 +14,9 @@
 @implements IDisposable
 @inject CampaignState Campaign
 @inject PressRunService PressRun
+@inject Castmill.UI.Http.CampaignsClient Campaigns
 @inject Castmill.UI.Http.GenerationClient Generation
+@inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 
@@ -39,18 +41,7 @@
                     <span>@Clock(transcript.Segments[^1].EndSeconds)</span>
                 </div>
 
-                <ol class="cm-source__segments" data-cm-scroll>
-                    @foreach (var segment in transcript.Segments)
-                    {
-                        <li class="cm-seg @(_highlighted.Contains(segment.Id) ? "cm-seg--cited" : "")"
-                            data-seg="@segment.Id">
-                            <span class="cm-seg__label cm-mono">
-                                @Clock(segment.StartSeconds)@(segment.Speaker is null ? "" : $" · {segment.Speaker}")
-                            </span>
-                            <span class="cm-seg__text">@segment.Text</span>
-                        </li>
-                    }
-                </ol>
+                <SourceTranscript Transcript="transcript" Highlighted="_highlighted" />
 
                 @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
                 {
@@ -115,10 +106,19 @@
                             </li>
                         }
                     </ul>
-                    <p class="cm-meta">
-                        Each artifact prints onto the board below the moment its generator
-                        finishes. Long-form pieces take a minute or two against live models.
-                    </p>
+                    @if (PressRun.IsRunning)
+                    {
+                        <p class="cm-meta">
+                            Each artifact prints onto the board below the moment its generator
+                            finishes. Long-form pieces take a minute or two against live models.
+                        </p>
+                    }
+                    else
+                    {
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="DismissRun">
+                            Done — back to the board
+                        </button>
+                    }
                 </div>
             }
             @if (Campaign.Transcript is not null && !PressRun.IsActiveFor(CampaignId) && MissingKinds.Any())
@@ -129,9 +129,8 @@
                     {
                         var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
                         <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@(_generating.Contains(kind))"
-                                @onclick="() => GenerateKindAsync(kind)">
-                            @(_generating.Contains(kind) ? $"Printing {label}…" : $"+ {label}")
+                                @onclick="() => GenerateKind(kind)">
+                            + @label
                         </button>
                     }
                 </div>
@@ -151,30 +150,75 @@
                     @foreach (var lane in Lanes)
                     {
                         <div class="cm-lane">
-                            <h2 class="cm-kicker cm-lane__label">@lane.Key</h2>
-                            <ul class="cm-lane__cards">
-                                @foreach (var artifact in lane)
-                                {
-                                    <li>
-                                        <button type="button"
-                                                class="cm-card cm-card--lane @(artifact.Id == ActiveId ? "cm-card--traced" : "") @(_justPrinted.Contains(artifact.Id) ? "cm-card--printed" : "")"
-                                                data-card="@artifact.Id"
-                                                @onmouseover="() => Hover(artifact)"
-                                                @onmouseout="Unhover"
-                                                @onclick="() => TogglePin(artifact)"
-                                                @ondblclick="() => OpenFocus(artifact)">
-                                            <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
-                                            <span class="cm-card__body">
-                                                <span class="cm-card__title">@artifact.Title</span>
-                                                <span class="cm-meta">@ArtifactDisplay.KindLabel(artifact.Kind)</span>
-                                                <span class="@ArtifactDisplay.StatusModifier(artifact.Status)">
-                                                    @ArtifactDisplay.StatusLabel(artifact.Status)
-                                                </span>
-                                            </span>
-                                        </button>
-                                    </li>
-                                }
-                            </ul>
+                            <h2 class="cm-kicker cm-lane__label">@lane.Name</h2>
+                            <div class="cm-lane__groups">
+                            @foreach (var kindGroup in lane.Cards
+                                .GroupBy(a => ArtifactDisplay.Resolve(a.Kind).Kind)
+                                .OrderBy(g => ArtifactDisplay.KindOrder(g.Key)))
+                            {
+                                <div class="cm-lane__group">
+                                    <h3 class="cm-lane__kind">
+                                        @ArtifactDisplay.KindLabel(kindGroup.Key)
+                                        @if (kindGroup.Count() > 1)
+                                        {
+                                            <span class="cm-meta cm-lane__kind-count">· @kindGroup.Count()</span>
+                                        }
+                                    </h3>
+                                    <ul class="cm-lane__cards">
+                                        @foreach (var artifact in kindGroup.OrderBy(a => a.CreatedAt))
+                                        {
+                                            <li>
+                                                <button type="button"
+                                                        class="cm-card cm-card--lane @(artifact.Id == ActiveId ? "cm-card--traced" : "") @(_justPrinted.Contains(artifact.Id) ? "cm-card--printed" : "")"
+                                                        data-card="@artifact.Id"
+                                                        @onmouseover="() => Hover(artifact)"
+                                                        @onmouseout="Unhover"
+                                                        @onclick="() => TogglePin(artifact)"
+                                                        @ondblclick="() => OpenFocus(artifact)">
+                                                    <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
+                                                    <span class="cm-card__body">
+                                                        <span class="cm-card__title">@artifact.Title</span>
+                                                        <span class="@ArtifactDisplay.StatusModifier(artifact.Status)">
+                                                            @ArtifactDisplay.StatusLabel(artifact.Status)
+                                                        </span>
+                                                    </span>
+                                                </button>
+                                                <button type="button" class="cm-card__delete"
+                                                        title="Delete @ArtifactDisplay.KindLabel(artifact.Kind)"
+                                                        aria-label="Delete @artifact.Title"
+                                                        @onclick="() => DeleteAsync(artifact)">✕</button>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            @if (lane.GhostKinds.Count > 0)
+                            {
+                                @* Ghost cards: content this run is still printing. No data-card
+                                   attribute — the provenance overlay must never try to measure
+                                   a card that has no citations yet. *@
+                                <div class="cm-lane__group">
+                                    <ul class="cm-lane__cards">
+                                        @foreach (var kind in lane.GhostKinds)
+                                        {
+                                            <li>
+                                                <div class="cm-card cm-card--lane cm-card--ghost" role="status"
+                                                     aria-label="Printing @ArtifactDisplay.KindLabel(kind)">
+                                                    <span class="cm-card__bar cm-card__bar--draft" aria-hidden="true"></span>
+                                                    <span class="cm-card__body">
+                                                        <span class="cm-skeleton cm-skeleton--title" aria-hidden="true"></span>
+                                                        <span class="cm-meta">@ArtifactDisplay.KindLabel(kind)</span>
+                                                        <span class="cm-meta cm-card__printing">
+                                                            <span class="cm-ai-dot" aria-hidden="true"></span> printing…
+                                                        </span>
+                                                    </span>
+                                                </div>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            </div>
                         </div>
                     }
                 </div>
@@ -195,7 +239,7 @@
             else
             {
                 <span class="cm-canvas__counts">
-                    @foreach (var group in Campaign.Artifacts.Where(a => a.Kind != "transcript").GroupBy(a => a.Status))
+                    @foreach (var group in Campaign.Artifacts.Where(a => ArtifactDisplay.OnBoard(a.Kind)).GroupBy(a => a.Status))
                     {
                         <span class="@ArtifactDisplay.StatusModifier(group.Key) cm-canvas__count">
                             @group.Count() @ArtifactDisplay.StatusLabel(group.Key).ToLowerInvariant()
@@ -215,8 +259,6 @@
 </CampaignShell>
 
 @code {
-    private static readonly string[] LaneOrder = ["Blog", "Social", "Email", "Clips", "Images", "Page/SEO"];
-
     private readonly HashSet<string> _highlighted = [];
     private readonly HashSet<Guid> _justPrinted = [];
     private readonly HashSet<Guid> _seenArtifacts = [];
@@ -226,7 +268,6 @@
     private Guid? _pinnedId;
     private bool _overview;
     private int _geometryEpoch;
-    private int _revealedCount;
 
     [Parameter] public Guid CampaignId { get; set; }
 
@@ -244,11 +285,41 @@
 
     private string ZoomCss => _overview ? "0.72" : "1";
 
-    private IEnumerable<IGrouping<string, ArtifactPreviewResponse>> Lanes =>
-        Campaign.Artifacts
-            .Where(a => a.Kind != "transcript")
-            .GroupBy(a => ArtifactDisplay.Lane(a.Kind))
-            .OrderBy(g => Array.IndexOf(LaneOrder, g.Key) is var i && i >= 0 ? i : LaneOrder.Length);
+    /// <summary>
+    /// Kinds this run is still printing that have no card yet — each renders as a ghost
+    /// card in its lane, so the board always shows that content is on the way (ADR-F13).
+    /// </summary>
+    private IReadOnlyList<string> PendingKinds =>
+        !PressRun.IsActiveFor(CampaignId) || !PressRun.IsRunning
+            ? []
+            : [.. PressRun.Kinds.Where(k =>
+                ArtifactDisplay.OnBoard(k)
+                && PressRun.Progress?.Items.Any(i => i.Kind == k) != true
+                && !Campaign.Artifacts.Any(a => ArtifactDisplay.Resolve(a.Kind).Kind == k))];
+
+    /// <summary>One lane per category, carrying both real cards and in-flight ghosts.</summary>
+    private IEnumerable<(string Name, List<ArtifactPreviewResponse> Cards, List<string> GhostKinds)> Lanes
+    {
+        get
+        {
+            var cards = Campaign.Artifacts.Where(a => ArtifactDisplay.OnBoard(a.Kind)).ToList();
+            var ghosts = PendingKinds;
+
+            var laneNames = cards.Select(c => ArtifactDisplay.Lane(c.Kind))
+                .Concat(ghosts.Select(ArtifactDisplay.Lane))
+                .Distinct()
+                .OrderBy(l => Array.IndexOf(ArtifactDisplay.LaneOrder, l) is var i && i >= 0
+                    ? i
+                    : ArtifactDisplay.LaneOrder.Length);
+
+            foreach (var lane in laneNames)
+            {
+                yield return (lane,
+                    cards.Where(c => ArtifactDisplay.Lane(c.Kind) == lane).ToList(),
+                    ghosts.Where(g => ArtifactDisplay.Lane(g) == lane).ToList());
+            }
+        }
+    }
 
     private string PressLine
     {
@@ -295,11 +366,13 @@
     private void TogglePin(ArtifactPreviewResponse artifact) =>
         _pinnedId = _pinnedId == artifact.Id ? null : artifact.Id;
 
-    /// <summary>On-demand menu entries; "social" fans out to the six real platform kinds.</summary>
+    /// <summary>
+    /// On-demand menu entries; "social" fans out to the six real platform kinds. Image
+    /// prompts are deliberately absent — the Image Studio owns seeding its own prompts.
+    /// </summary>
     private static readonly string[] AllKinds =
-        ["blog", "social", "email-sequence", "newsletter", "landing-page", "show-notes", "clips", "seo-brief"];
-
-    private readonly HashSet<string> _generating = [];
+        ["blog", "social", "email-sequence", "newsletter", "landing-page", "show-notes",
+         "clip-suggestions", "seo-brief"];
 
     private IEnumerable<string> MissingKinds
     {
@@ -320,51 +393,51 @@
     }
 
     /// <summary>
-    /// Prints one kind on demand against the live model, with per-button state — the
-    /// owner's "generate the rest when I ask, not up front".
+    /// Prints one kind on demand — the owner's "generate the rest when I ask, not up
+    /// front". Every press, even a single kind, rides the Press Run so the panel
+    /// narrates it live: queued → printing → ✓ with timing, never a dead button.
     /// </summary>
-    private async Task GenerateKindAsync(string kind)
+    private void GenerateKind(string kind)
     {
-        if (Campaign.TranscriptArtifactId is not { } transcriptId || !_generating.Add(kind))
+        if (Campaign.TranscriptArtifactId is not { } transcriptId)
         {
             return;
         }
 
-        StateHasChanged();
+        var kinds = kind == "social" ? ArtifactDisplay.SocialKinds : [kind];
+        PressRun.Start(CampaignId, transcriptId, null, kinds);
+    }
+
+    private void DismissRun() => PressRun.Acknowledge();
+
+    /// <summary>Deletes one artifact after a confirm; the board reloads from the server.</summary>
+    private async Task DeleteAsync(ArtifactPreviewResponse artifact)
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete \"{artifact.Title}\"?",
+            $"This removes the {ArtifactDisplay.KindLabel(artifact.Kind).ToLowerInvariant()} and its revision history. There is no undo.",
+            AcceptLabel: "Delete",
+            Destructive: true));
+
+        if (!accepted)
+        {
+            return;
+        }
 
         try
         {
-            if (kind == "social")
+            await Campaigns.DeleteArtifactAsync(CampaignId, artifact.Id);
+            if (_pinnedId == artifact.Id)
             {
-                // Six per-platform generators, one press: rides the run path so the
-                // press panel narrates each platform as it lands.
-                var finished = await Generation.GenerateAsync(
-                    CampaignId, transcriptId, null, ArtifactDisplay.SocialKinds);
-                Notifier.ShowSuccess($"Social set printed · {finished.Succeeded} of {ArtifactDisplay.SocialKinds.Length}.");
-            }
-            else
-            {
-                var item = await Generation.GenerateOneAsync(CampaignId, kind, transcriptId, null);
-                if (item.Success)
-                {
-                    Notifier.ShowSuccess($"{ArtifactDisplay.KindLabel(kind)} printed · {item.DurationMs / 1000.0:0.0}s");
-                }
-                else
-                {
-                    Notifier.ShowError(item.Error ?? $"{ArtifactDisplay.KindLabel(kind)} failed.");
-                }
+                _pinnedId = null;
             }
 
             await Campaign.LoadAsync(CampaignId, force: true);
+            Notifier.ShowSuccess($"Deleted \"{artifact.Title}\".");
         }
-        catch (Castmill.UI.Http.ApiException ex)
+        catch (Http.ApiException ex)
         {
             Notifier.ShowError(ex.Message);
-        }
-        finally
-        {
-            _generating.Remove(kind);
-            StateHasChanged();
         }
     }
 
@@ -425,20 +498,9 @@
         StateHasChanged();
     });
 
-    private void OnPressRunChanged() => InvokeAsync(async () =>
-    {
-        var progress = PressRun.Progress;
-
-        // Reload the board only when something new actually completed — polling happens
-        // every 800 ms, completions every few seconds.
-        if (progress is not null && progress.Completed > _revealedCount)
-        {
-            _revealedCount = progress.Completed;
-            await Campaign.LoadAsync(CampaignId, force: true);
-        }
-
-        StateHasChanged();
-    });
+    private void OnPressRunChanged() => InvokeAsync(StateHasChanged);
+    // The board reload on completion lives in PressRunService now, so the floor refreshes
+    // even when this view is not mounted; here only the render needs to happen.
 
     public void Dispose()
     {

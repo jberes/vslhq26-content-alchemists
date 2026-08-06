@@ -11,6 +11,8 @@
 @implements IDisposable
 @inject CampaignState Campaign
 @inject ImagesClient Images
+@inject StudioRunService StudioRun
+@inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
@@ -41,7 +43,7 @@
                                 <li>
                                     <button type="button"
                                             class="cm-studio__slot @(slot.Id == _selectedId ? "cm-studio__slot--active" : null)"
-                                            @onclick="() => SelectSlot(slot)">
+                                            @onclick="() => SelectSlotAsync(slot)">
                                         <span>@ArtifactDisplay.SlotLabel(slot.Kind)</span>
                                         @if (slot.State == "Filled")
                                         {
@@ -72,8 +74,22 @@
 
                             <div>
                                 <span class="cm-kicker">Prompt</span>
-                                <textarea class="cm-studio__prompt" @bind="_prompt" @bind:after="SavePromptAsync"
+                                @* oninput, not onchange: the Generate button must enable while
+                                   typing, not after the field loses focus. The PATCH waits for blur. *@
+                                <textarea class="cm-studio__prompt" @bind="_prompt" @bind:event="oninput"
+                                          @onblur="SavePromptAsync"
                                           placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
+                                @if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
+                                {
+                                    <p class="cm-meta">
+                                        No prompt yet — write one, or let the AI draft a prompt for
+                                        every slot from the transcript's strongest moments.
+                                    </p>
+                                    <button type="button" class="cm-button cm-button--quiet" disabled="@_seeding"
+                                            @onclick="SeedPromptsAsync">
+                                        @(_seeding ? "Writing prompts from the source… (~30s)" : "Seed all prompts from the source")
+                                    </button>
+                                }
                                 <div class="cm-studio__chips">
                                     @foreach (var chip in ConstraintChips)
                                     {
@@ -121,47 +137,86 @@
                                         <span>@n</span>
                                     </label>
                                 }
-                                <button type="button" class="cm-button" disabled="@(_generating || !CanGenerate)"
+                                <button type="button" class="cm-button" disabled="@(IsGenerating || !CanGenerate)"
                                         @onclick="GenerateAsync">
-                                    @(_generating ? $"Generating {_variantCount} variants…" : $"Generate {_variantCount} variants")
+                                    @(IsGenerating ? "Generating…" : $"Generate {_variantCount} variants")
                                 </button>
                                 <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
                             </div>
+                            @if (Campaign.Brand is { } studioBrand)
+                            {
+                                <p class="cm-meta">
+                                    @studioBrand.Name's image style and palette are appended to
+                                    every prompt automatically.
+                                </p>
+                            }
+                            @if (!CanGenerate && !IsGenerating)
+                            {
+                                <p class="cm-meta">
+                                    @(string.IsNullOrWhiteSpace(_prompt)
+                                        ? "Generate enables as soon as this slot has a prompt."
+                                        : _status is null
+                                            ? "Waiting for provider readiness…"
+                                            : "No image provider is configured — see the model list above.")
+                                </p>
+                            }
                             @if (_generateError is not null)
                             {
                                 <p class="cm-form__error" role="alert">@_generateError</p>
                             }
 
-                            @if (_generating)
-                            {
-                                <div class="cm-studio__grid">
-                                    @for (var i = 0; i < _variantCount; i++)
+                            @* The take gallery: every persisted variant for this slot, kept
+                               first. In-flight renders show one shimmering tile each, with
+                               already-finished takes filling in as the run reports progress. *@
+                            <div>
+                                <span class="cm-kicker">Takes</span>
+                                @if (IsGenerating)
+                                {
+                                    <p class="cm-meta">
+                                        <span class="cm-ai-dot" aria-hidden="true"></span>
+                                        Generating @StudioRun.ExpectedVariants — @(StudioRun.Progress?.Completed ?? 0) done…
+                                    </p>
+                                }
+                                else if (_gallery.Count == 0)
+                                {
+                                    <p class="cm-meta">No takes yet. Generate some — every take is kept here until you discard it.</p>
+                                }
+                                <div class="cm-gallery">
+                                    @if (IsGenerating)
                                     {
-                                        <div class="cm-studio__skeleton"></div>
-                                    }
-                                </div>
-                            }
-                            else if (_variants.Count > 0)
-                            {
-                                <div>
-                                    <span class="cm-kicker">Pick one to place</span>
-                                    <p class="cm-meta">Placing publishes it and replaces the blog's image stub in the manuscript.</p>
-                                    <div class="cm-studio__grid">
-                                        @foreach (var variant in _variants)
+                                        @for (var i = 0; i < Math.Max(0, StudioRun.ExpectedVariants - (StudioRun.Progress?.Completed ?? 0)); i++)
                                         {
-                                            <button type="button" class="cm-studio__tile" disabled="@_placing"
-                                                    @onclick="() => PlaceAsync(variant)">
-                                                <img src="@variant.Url" alt="Variant @variant.Index for @ArtifactDisplay.SlotLabel(slot2.Kind)" loading="lazy" />
-                                                <span class="cm-studio__tile-label cm-mono">v@(variant.Index) · @variant.Model</span>
-                                            </button>
+                                            <div class="cm-skeleton cm-skeleton--tile"></div>
                                         }
-                                    </div>
-                                    @foreach (var failure in _failures)
+                                    }
+                                    @foreach (var variant in OrderedGallery)
                                     {
-                                        <p class="cm-form__error">@failure</p>
+                                        <button type="button" class="cm-gallery__tile" @onclick="() => OpenVariant(variant)">
+                                            <img src="@variant.ThumbUrl" width="@variant.Width" height="@variant.Height"
+                                                 loading="lazy" decoding="async"
+                                                 alt="Take for @ArtifactDisplay.SlotLabel(slot2.Kind)" />
+                                            <span class="cm-gallery__meta">
+                                                <span class="cm-mono">@variant.Model</span>
+                                                @if (variant.State == "Kept")
+                                                {
+                                                    <span class="cm-badge cm-badge--done">KEPT</span>
+                                                }
+                                                @if (variant.SteeringNote is not null)
+                                                {
+                                                    <span class="cm-meta" title="@variant.SteeringNote">steered</span>
+                                                }
+                                            </span>
+                                        </button>
                                     }
                                 </div>
-                            }
+                                @foreach (var failure in _failures)
+                                {
+                                    <p class="cm-form__error">@failure</p>
+                                }
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="ToggleDiscardedAsync">
+                                    @(_showDiscarded ? "Hide discarded takes" : "Show discarded takes")
+                                </button>
+                            </div>
 
                             @if (slot2.State == "Filled" && slot2.PublishedUrl is { } published)
                             {
@@ -176,30 +231,99 @@
                                     </div>
                                 </div>
 
-                                @if (slot2.Kind == "youtube-thumbnail")
-                                {
-                                    <div>
-                                        <span class="cm-kicker">Thumbnail headline</span>
-                                        <p class="cm-meta">Composited server-side over the image — never sent to the model (ADR-013).</p>
-                                        <div class="cm-studio__row">
-                                            <input class="cm-input" maxlength="32" @bind="_headline"
-                                                   placeholder="Up to 32 characters" />
-                                            <span class="cm-mono cm-meta">@(_headline?.Length ?? 0)/32</span>
-                                            <label class="cm-studio__model">
-                                                <input type="checkbox" @bind="_safeArea" />
-                                                <span>keep YouTube's timestamp corner clear</span>
-                                            </label>
-                                            <button type="button" class="cm-button cm-button--quiet"
-                                                    disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
-                                                    @onclick="CompositeAsync">
-                                                @(_compositing ? "Compositing…" : "Composite headline")
-                                            </button>
-                                        </div>
+                                <div>
+                                    <span class="cm-kicker">Overlay text</span>
+                                    <p class="cm-meta">
+                                        Composited server-side over the placed image — never sent to
+                                        the model (ADR-013), so editing it never costs a render.
+                                    </p>
+                                    <div class="cm-studio__row">
+                                        <input class="cm-input" maxlength="32" @bind="_headline"
+                                               placeholder="Up to 32 characters" />
+                                        <span class="cm-mono cm-meta">@(_headline?.Length ?? 0)/32</span>
+                                        <label class="cm-studio__model">
+                                            <input type="checkbox" @bind="_safeArea" />
+                                            <span>@(slot2.Kind == "youtube-thumbnail"
+                                                ? "keep YouTube's timestamp corner clear"
+                                                : "respect the safe-area inset")</span>
+                                        </label>
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
+                                                @onclick="CompositeAsync">
+                                            @(_compositing ? "Compositing…" : "Composite overlay text")
+                                        </button>
                                     </div>
-                                }
+                                </div>
                             }
                         </section>
                     }
+                </div>
+            }
+
+            @if (_openVariant is { } take)
+            {
+                @* The take dialog: full-size view + steering + keep/discard/place. Custom
+                   .cm-modal like the app's confirm dialog — Escape closes, backdrop closes. *@
+                <div class="cm-modal" role="presentation" @onclick="CloseVariant">
+                    <div class="cm-modal__panel cm-modal__panel--studio" role="dialog" aria-modal="true"
+                         aria-labelledby="cm-variant-title" tabindex="-1"
+                         @ref="_dialogPanel"
+                         @onclick:stopPropagation
+                         @onkeydown="OnDialogKey">
+                        <h2 id="cm-variant-title" class="cm-front__block-title">
+                            @ArtifactDisplay.SlotLabel(Selected?.Kind ?? "") take
+                            <span class="cm-meta"> · @take.Model · @take.Width×@take.Height</span>
+                        </h2>
+
+                        <img class="cm-variant__preview" src="@take.Url"
+                             width="@take.Width" height="@take.Height"
+                             alt="Full-size take" />
+
+                        @if (take.SteeringNote is { } note)
+                        {
+                            <p class="cm-meta">Steered from an earlier take: “@note”</p>
+                        }
+
+                        <label class="cm-field">
+                            <span class="cm-field__label">Steer a new take from this one</span>
+                            <textarea class="cm-input cm-textarea" rows="2" @bind="_steerNote" @bind:event="oninput"
+                                      placeholder="e.g. add the host's face on the right, warmer background"></textarea>
+                        </label>
+                        <div class="cm-studio__chips">
+                            @foreach (var chip in SteerChips)
+                            {
+                                <button type="button" class="cm-studio__chip" @onclick="() => AppendSteerChip(chip)">+ @chip</button>
+                            }
+                        </div>
+
+                        <div class="cm-form__actions">
+                            <button type="button" class="cm-button" disabled="@_placing"
+                                    @onclick="() => PlaceAsync(take)">
+                                @(_placing ? "Placing…" : "Place in slot")
+                            </button>
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    disabled="@(string.IsNullOrWhiteSpace(_steerNote) || IsGenerating)"
+                                    @onclick="() => SteerAsync(take)">
+                                New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
+                            </button>
+                            @if (take.State != "Kept")
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick='() => SetStateAsync(take, "Kept")'>Keep</button>
+                            }
+                            @if (take.State != "Discarded")
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick='() => SetStateAsync(take, "Discarded")'>Throw away</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
+                            }
+                            <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
+                        </div>
+                    </div>
                 </div>
             }
         </div>
@@ -222,6 +346,17 @@
         "brand-warm palette",
     ];
 
+    /// <summary>Quick adjustments for steering a new take from an existing one.</summary>
+    private static readonly string[] SteerChips =
+    [
+        "add a face",
+        "change the background",
+        "more contrast",
+        "zoom out",
+        "warmer light",
+        "remove any text",
+    ];
+
     private Guid? _selectedId;
     private string _prompt = string.Empty;
     private string? _savedPrompt;
@@ -229,14 +364,19 @@
     private string? _pickedAlias;
     private int _variantCount = 2;
     private bool _reserving;
-    private bool _generating;
+    private bool _seeding;
     private bool _placing;
     private bool _compositing;
+    private bool _showDiscarded;
     private string? _generateError;
-    private List<ImageVariantResponse> _variants = [];
+    private List<ImageVariantResponse> _gallery = [];
     private List<string> _failures = [];
     private string? _headline;
     private bool _safeArea = true;
+    private ImageVariantResponse? _openVariant;
+    private string _steerNote = string.Empty;
+    private ElementReference _dialogPanel;
+    private bool _dialogNeedsFocus;
 
     [Parameter] public Guid CampaignId { get; set; }
 
@@ -245,24 +385,69 @@
 
     private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
 
+    private bool IsGenerating => _selectedId is { } id && StudioRun.IsActiveFor(id);
+
     private bool CanGenerate => !string.IsNullOrWhiteSpace(_prompt) &&
         _status?.ImageProviders.Any(p => p.Ready) == true;
 
-    protected override void OnInitialized() => Campaign.Changed += OnChanged;
+    /// <summary>Kept takes lead, then candidates, then (when shown) discarded — newest first.</summary>
+    private IEnumerable<ImageVariantResponse> OrderedGallery =>
+        _gallery
+            .OrderBy(v => v.State switch { "Kept" => 0, "Candidate" => 1, _ => 2 })
+            .ThenByDescending(v => v.CreatedAt);
+
+    protected override void OnInitialized()
+    {
+        Campaign.Changed += OnChanged;
+        StudioRun.Changed += OnStudioRunChanged;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
-        SyncSelection();
+        await SyncSelectionAsync();
         _status ??= await LoadStatusAsync();
     }
 
-    private void OnChanged() => InvokeAsync(() =>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        SyncSelection();
+        if (_dialogNeedsFocus)
+        {
+            _dialogNeedsFocus = false;
+            await _dialogPanel.FocusAsync();
+        }
+    }
+
+    private void OnChanged() => InvokeAsync(async () =>
+    {
+        await SyncSelectionAsync();
         StateHasChanged();
     });
 
-    private void SyncSelection()
+    /// <summary>When the run finishes, the gallery reloads and failures surface.</summary>
+    private void OnStudioRunChanged() => InvokeAsync(async () =>
+    {
+        if (!StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
+        {
+            if (StudioRun.Error is { } error)
+            {
+                _generateError = error;
+            }
+            else if (StudioRun.Result is { } result)
+            {
+                _failures = [.. (result.Failures ?? []).Select(f => $"Take {f} failed — the rest are fine.")];
+                if (result.Variants.Count == 0 && _failures.Count > 0)
+                {
+                    _generateError = "No takes came back. Try again, or a simpler prompt.";
+                }
+            }
+
+            await ReloadGalleryAsync();
+        }
+
+        StateHasChanged();
+    });
+
+    private async Task SyncSelectionAsync()
     {
         if (Campaign.ImageSlots.Count == 0)
         {
@@ -270,8 +455,86 @@
         }
         if (_selectedId is null || Campaign.ImageSlots.All(s => s.Id != _selectedId))
         {
-            SelectSlot(Campaign.ImageSlots[0]);
+            await SelectSlotAsync(Campaign.ImageSlots[0]);
         }
+    }
+
+    private async Task ReloadGalleryAsync()
+    {
+        if (_selectedId is not { } slotId)
+        {
+            return;
+        }
+        try
+        {
+            _gallery = await Images.ListVariantsAsync(CampaignId, slotId, _showDiscarded);
+        }
+        catch (ApiException)
+        {
+            // The gallery just stays as it was; the next action retries.
+        }
+    }
+
+    private async Task ToggleDiscardedAsync()
+    {
+        _showDiscarded = !_showDiscarded;
+        await ReloadGalleryAsync();
+    }
+
+    private void OpenVariant(ImageVariantResponse variant)
+    {
+        _openVariant = variant;
+        _steerNote = string.Empty;
+        _dialogNeedsFocus = true;
+    }
+
+    private void CloseVariant() => _openVariant = null;
+
+    private void OnDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseVariant();
+        }
+    }
+
+    private void AppendSteerChip(string chip) =>
+        _steerNote = string.IsNullOrWhiteSpace(_steerNote)
+            ? chip
+            : $"{_steerNote.TrimEnd().TrimEnd(',', '.')}, {chip}";
+
+    private async Task SetStateAsync(ImageVariantResponse variant, string state)
+    {
+        try
+        {
+            var updated = await Images.SetVariantStateAsync(CampaignId, variant.SlotId, variant.Id, state);
+            _gallery = [.. _gallery.Select(v => v.Id == updated.Id ? updated : v)];
+            if (!_showDiscarded && state == "Discarded")
+            {
+                _gallery = [.. _gallery.Where(v => v.Id != updated.Id)];
+                CloseVariant();
+            }
+            else if (_openVariant?.Id == updated.Id)
+            {
+                _openVariant = updated;
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private void SteerAsync(ImageVariantResponse source)
+    {
+        if (Selected is not { } slot || string.IsNullOrWhiteSpace(_steerNote))
+        {
+            return;
+        }
+        _generateError = null;
+        _failures = [];
+        StudioRun.StartSteer(CampaignId, slot.Id, source.Id, _steerNote.Trim());
+        CloseVariant();
     }
 
     private async Task<AiStatusResponse?> LoadStatusAsync()
@@ -286,17 +549,19 @@
         }
     }
 
-    private void SelectSlot(ImageSlotResponse slot)
+    private async Task SelectSlotAsync(ImageSlotResponse slot)
     {
         _selectedId = slot.Id;
         _prompt = slot.Prompt ?? string.Empty;
         _savedPrompt = slot.Prompt;
         _pickedAlias = null;
-        _variants = [];
+        _gallery = [];
         _failures = [];
         _generateError = null;
+        _openVariant = null;
         _headline = slot.HeadlineText;
         _safeArea = slot.SafeArea;
+        await ReloadGalleryAsync();
     }
 
     private async Task ReserveAsync()
@@ -314,6 +579,38 @@
         finally
         {
             _reserving = false;
+        }
+    }
+
+    /// <summary>
+    /// Runs the image-prompts generator through the fan-out path — the only path that
+    /// seeds slot prompts server-side, each tied to the transcript moment it illustrates.
+    /// </summary>
+    private async Task SeedPromptsAsync()
+    {
+        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+        _seeding = true;
+        try
+        {
+            await Generation.GenerateAsync(CampaignId, transcriptId, null, ["image-prompts"]);
+            await Campaign.LoadAsync(CampaignId, force: true);
+            if (Selected is { } refreshed)
+            {
+                _prompt = refreshed.Prompt ?? string.Empty;
+                _savedPrompt = refreshed.Prompt;
+            }
+            Notifier.ShowSuccess("Every slot now has a prompt drawn from the transcript.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _seeding = false;
         }
     }
 
@@ -357,6 +654,8 @@
         }
     }
 
+    /// <summary>Fires the run through StudioRunService, so it survives navigating away —
+    /// the studio shows one skeleton tile per expected take while the press works.</summary>
     private async Task GenerateAsync()
     {
         if (Selected is not { } slot)
@@ -365,30 +664,9 @@
         }
         await SavePromptAsync();
 
-        _generating = true;
         _generateError = null;
-        _variants = [];
         _failures = [];
-        StateHasChanged();
-
-        try
-        {
-            var result = await Images.GenerateAsync(CampaignId, slot.Id, _variantCount);
-            _variants = [.. result.Variants];
-            _failures = [.. (result.Failures ?? []).Select(f => $"Variant {f} failed — the rest are fine.")];
-            if (_variants.Count == 0)
-            {
-                _generateError = "No variants came back. Try again, or a simpler prompt.";
-            }
-        }
-        catch (ApiException ex)
-        {
-            _generateError = ex.Message;
-        }
-        finally
-        {
-            _generating = false;
-        }
+        StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount);
     }
 
     private async Task PlaceAsync(ImageVariantResponse variant)
@@ -402,12 +680,13 @@
         {
             // The blog carries the ![stub:kind]() markers; if one exists, placing rewrites it.
             var blogId = Campaign.Artifacts.FirstOrDefault(a => a.Kind == "blog")?.Id;
-            var result = await Images.PlaceAsync(CampaignId, slot.Id, variant.Url, blogId);
-            _variants = [];
+            var result = await Images.PlaceAsync(CampaignId, slot.Id, variant.Id, blogId);
+            CloseVariant();
             Notifier.ShowSuccess(result.BlogVersion is null
                 ? "Placed and published."
                 : "Placed, published, and the blog's stub is now the real image.");
             await Campaign.LoadAsync(CampaignId, force: true);
+            await ReloadGalleryAsync();
         }
         catch (ApiException ex)
         {
@@ -480,5 +759,9 @@
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max].TrimEnd() + "…";
 
-    public void Dispose() => Campaign.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Campaign.Changed -= OnChanged;
+        StudioRun.Changed -= OnStudioRunChanged;
+    }
 }

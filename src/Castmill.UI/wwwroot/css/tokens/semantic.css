@@ -16,6 +16,11 @@
     --cm-surface-sunken: var(--cmf-surface-sunken);
     --cm-surface-inverse: var(--cmf-surface-inverse);
 
+    /* The workspace rail's own surface + text, so chrome reads apart from content. */
+    --cm-surface-rail: var(--cmf-surface-rail);
+    --cm-on-rail: var(--cmf-on-rail);
+    --cm-on-rail-muted: var(--cmf-on-rail-muted);
+
     /* ---- Content ------------------------------------------------------------- */
     --cm-on-surface: var(--cmf-on-surface);
     --cm-on-surface-muted: var(--cmf-on-surface-muted);
@@ -31,6 +36,10 @@
     --cm-accent-hover: var(--cmf-accent-hover);
     --cm-accent-wash: var(--cmf-accent-wash);
     --cm-on-accent: var(--cmf-on-accent);
+
+    /* Second accent for decoration only — never behind text (no contrast pair). */
+    --cm-accent-alt: var(--cmf-accent-alt);
+    --cm-accent-alt-wash: var(--cmf-accent-alt-wash);
 
     /* ---- Rules --------------------------------------------------------------- */
     --cm-rule: var(--cmf-rule);

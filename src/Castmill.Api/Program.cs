@@ -64,6 +64,7 @@ builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions
 builder.Services.AddSingleton<IPromptLog, PromptLog>();
 builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
+builder.Services.AddScoped<IBrandContextService, BrandContextService>();
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
 // Image path (B9): provider seam (ADR-015) → slot-accurate crop + headline
 // compositing (ADR-013) → typed image plan (ADR-012).
