@@ -1556,7 +1556,9 @@
    label owns its own line and the actions sit on an even grid, so a lane of six or of
    two reads the same and nothing half-wraps mid-row. */
 .cm-board__more {
-    margin: var(--cm-space-4) var(--cm-space-4) 0;
+    /* The tray needs air beneath it: the first lane label sat right under its border,
+       reading as one block with the board rather than a separate control surface. */
+    margin: var(--cm-space-4) var(--cm-space-4) var(--cm-space-8);
     padding: var(--cm-space-3);
     max-inline-size: 62rem;
     border: 1px solid var(--cm-rule);
