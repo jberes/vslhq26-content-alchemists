@@ -46,6 +46,10 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         var heads = view.FindAll(".cm-tree__head").Select(h => h.TextContent).ToList();
         Assert.Contains(heads, h => h.Contains("Blog", StringComparison.Ordinal) && h.Contains('1'));
         Assert.Contains(heads, h => h.Contains("Social", StringComparison.Ordinal) && h.Contains('1'));
+
+        // Parenthesised, so the number reads as a count of the section rather than as part
+        // of the name — "BLOG 2" scans as a title, "BLOG (2)" as a header with a count.
+        Assert.All(view.FindAll(".cm-tree__count"), c => Assert.Matches(@"^\(\d+\)$", c.TextContent.Trim()));
     }
 
     [Fact]

@@ -47,7 +47,7 @@
                                     @onclick="() => ToggleGroup(group.Key)">
                                 <span class="cm-tree__chevron" aria-hidden="true">@(collapsed ? "▸" : "▾")</span>
                                 <span class="cm-kicker">@group.Key</span>
-                                <span class="cm-meta">@group.Count()</span>
+                                <span class="cm-tree__count cm-mono">(@group.Count())</span>
                             </button>
                             @if (!collapsed)
                             {

@@ -203,12 +203,12 @@
                                 .OrderBy(g => ArtifactDisplay.KindOrder(g.Key)))
                             {
                                 <div class="cm-lane__group">
+                                    @* Always show the count, not only when >1: a header that
+                                       sometimes carries a number and sometimes does not reads
+                                       as inconsistent rather than as tidy. *@
                                     <h3 class="cm-lane__kind">
-                                        @ArtifactDisplay.KindLabel(kindGroup.Key)
-                                        @if (kindGroup.Count() > 1)
-                                        {
-                                            <span class="cm-meta cm-lane__kind-count">· @kindGroup.Count()</span>
-                                        }
+                                        <span>@ArtifactDisplay.KindLabel(kindGroup.Key)</span>
+                                        <span class="cm-lane__kind-count cm-mono">(@kindGroup.Count())</span>
                                     </h3>
                                     <ul class="cm-lane__cards">
                                         @foreach (var artifact in kindGroup.OrderBy(a => a.CreatedAt))

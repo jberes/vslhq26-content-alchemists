@@ -623,18 +623,27 @@
     flex: 0 0 auto;
 }
 
+/* Same treatment as the tree's section headers, so the two surfaces that group the same
+   artifacts by the same registry also look like they agree. */
 .cm-lane__kind {
-    margin: 0 0 var(--cm-space-1);
-    padding-inline-start: var(--cm-space-1);
+    display: flex;
+    align-items: baseline;
+    gap: var(--cm-space-2);
+    margin: 0 0 var(--cm-space-2);
+    padding: var(--cm-space-1) var(--cm-space-2);
     border-inline-start: 2px solid var(--cm-accent-alt);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
     font-family: var(--cm-font-body);
     font-size: var(--cm-text-meta);
     font-weight: 600;
-    color: var(--cm-on-surface-muted);
+    color: var(--cm-on-surface);
 }
 
 .cm-lane__kind-count {
+    margin-inline-start: auto;
     font-weight: 400;
+    color: var(--cm-on-surface-muted);
 }
 
 .cm-lane__cards {
@@ -846,15 +855,22 @@
     margin-block-end: var(--cm-space-4);
 }
 
+/* A solid band, not bare text. These separate the tree into sections, and a borderless
+   label the same weight as the rows under it did not read as a header at all. */
 .cm-tree__head {
     display: flex;
     align-items: baseline;
     gap: var(--cm-space-2);
     inline-size: 100%;
-    padding: var(--cm-space-1) var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
     border: 0;
-    background: transparent;
-    color: var(--cm-on-surface-muted);
+    border-block-end: 1px solid var(--cm-rule);
+    /* Sticky so the section you are scrolled inside stays named. */
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 1;
+    background: var(--cm-surface-sunken);
+    color: var(--cm-on-surface);
     font: inherit;
     text-align: start;
     cursor: pointer;
@@ -862,6 +878,14 @@
 
 .cm-tree__head:hover {
     background: var(--cm-accent-wash);
+}
+
+/* The count sits at the end of the band rather than trailing the label, so a column of
+   headers lines its numbers up. */
+.cm-tree__count {
+    margin-inline-start: auto;
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-meta);
 }
 
 .cm-tree__chevron {
