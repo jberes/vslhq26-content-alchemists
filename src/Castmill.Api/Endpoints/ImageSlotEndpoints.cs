@@ -49,7 +49,8 @@ public static class ImageSlotEndpoints
 
     internal static ImageSlotResponse ToResponse(ImageSlot s) =>
         new(s.Id, s.CampaignId, s.Kind, s.TargetWidth, s.TargetHeight, s.Prompt, s.ModelAlias,
-            s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt);
+            s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt,
+            s.ArtifactId);
 
     private static async Task<IResult> ListAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
     {

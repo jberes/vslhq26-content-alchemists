@@ -4,6 +4,9 @@ using System.Text.Json;
 
 namespace Castmill.UI.Http;
 
+/// <summary>A file the API returned, ready to be handed to the browser's download path.</summary>
+public sealed record DownloadedFile(string FileName, string ContentType, byte[] Bytes);
+
 /// <summary>
 /// Thin typed wrapper over the chokepoint's HttpClient. Its job is response interpretation:
 /// turning status codes into the typed envelope and capturing ETags for conditional writes.
@@ -17,6 +20,26 @@ public sealed class ApiClient(HttpClient http)
     {
         using var response = await http.GetAsync(url, ct);
         return await ReadAsync<T>(response, ct);
+    }
+
+    /// <summary>
+    /// GET returning raw bytes and the server's own file name. For downloads: the export
+    /// endpoints are authenticated, so a plain link cannot fetch them — the Bearer token
+    /// lives in the client, not in a cookie.
+    /// </summary>
+    public async Task<DownloadedFile> DownloadAsync(string url, CancellationToken ct = default)
+    {
+        using var response = await http.GetAsync(url, ct);
+        await ThrowIfFailedAsync(response, ct);
+
+        var name = response.Content.Headers.ContentDisposition?.FileNameStar
+                   ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                   ?? "download";
+
+        return new DownloadedFile(
+            name,
+            response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream",
+            await response.Content.ReadAsByteArrayAsync(ct));
     }
 
     /// <summary>GET that also surfaces the ETag, for anything that will later be written back.</summary>

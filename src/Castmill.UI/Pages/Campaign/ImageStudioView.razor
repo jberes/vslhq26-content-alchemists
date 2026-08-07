@@ -130,7 +130,15 @@
                             @* A campaign can hold more than one blog — every regenerate prints a
                                new take as its own artifact. Placing used to patch whichever blog
                                was oldest, so ask only when it is genuinely ambiguous. *@
-                            @if (IsBlogSlot(slot2.Kind) && Blogs.Count > 1)
+                            @if (slot2.ArtifactId is { } owner)
+                            {
+                                <p class="cm-meta">
+                                    Belongs to
+                                    <strong>@(Blogs.FirstOrDefault(b => b.Id == owner)?.Title ?? "a blog that has been deleted")</strong>
+                                    — placing rewrites that blog's stub.
+                                </p>
+                            }
+                            else if (IsBlogSlot(slot2.Kind) && Blogs.Count > 1)
                             {
                                 <div class="cm-studio__row">
                                     <span class="cm-kicker">Place into</span>
@@ -409,9 +417,14 @@
     /// <c>Artifacts.FirstOrDefault(a =&gt; a.Kind == "blog")</c>, which is the OLDEST blog because
     /// the preview is ordered by kind then creation — so with two blogs, placing an image for
     /// the second one silently patched the first one's markdown.
+    ///
+    /// A slot reserved for a specific blog now carries that blog's id, so it answers for
+    /// itself; the picker is only needed for legacy slots reserved before slots were
+    /// artifact-scoped, which have no id to follow.
     /// </summary>
     private Guid? TargetBlogId =>
-        _targetBlogId is { } picked && Blogs.Any(b => b.Id == picked) ? picked : Blogs.FirstOrDefault()?.Id;
+        Selected?.ArtifactId
+        ?? (_targetBlogId is { } picked && Blogs.Any(b => b.Id == picked) ? picked : Blogs.FirstOrDefault()?.Id);
 
     /// <summary>Only these slot kinds have a stub marker in a blog; the rest place standalone.</summary>
     private static bool IsBlogSlot(string kind) =>

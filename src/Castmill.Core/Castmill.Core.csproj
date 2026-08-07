@@ -6,4 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+
+  <ItemGroup>
+    <!-- Pure helpers (payload shape handling, name formatting) are unit-tested directly
+         rather than only through the endpoints that use them. -->
+    <InternalsVisibleTo Include="Castmill.Api.Tests" />
+  </ItemGroup>
+
 </Project>

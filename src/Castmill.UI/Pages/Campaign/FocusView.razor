@@ -16,6 +16,8 @@
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
 @inject ImagesClient Images
+@inject ExportClient Exports
+@inject IFileDownloader Downloader
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -215,6 +217,24 @@
                             @ArtifactDisplay.StatusLabel(_artifact.Status). Scheduling lives on the Wire (F8).
                         </span>
                     }
+
+                    @* Getting the work out (roadmap 5.6). The markdown IS the stored format,
+                       so .md is a copy rather than a conversion — which is the whole reason
+                       the editor's contract was kept to markdown. *@
+                    <span class="cm-focus__export">
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_exporting" @onclick="@(() => ExportArtifactAsync("md"))">
+                            Download .md
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_exporting" @onclick="@(() => ExportArtifactAsync("docx"))">
+                            .docx
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_exporting" @onclick="ExportCampaignAsync">
+                            Whole campaign (.zip)
+                        </button>
+                    </span>
                 </footer>
             }
         </div>
@@ -832,6 +852,35 @@
         {
             _regenerating = false;
             StateHasChanged();
+        }
+    }
+
+    // ---- Exports (roadmap 5.6) ------------------------------------------------
+
+    private bool _exporting;
+
+    private Task ExportArtifactAsync(string format) =>
+        _artifact is null ? Task.CompletedTask
+            : DownloadAsync(() => Exports.ArtifactAsync(CampaignId, _artifact.Id, format));
+
+    private Task ExportCampaignAsync() => DownloadAsync(() => Exports.CampaignAsync(CampaignId));
+
+    private async Task DownloadAsync(Func<Task<DownloadedFile>> fetch)
+    {
+        _exporting = true;
+        try
+        {
+            var file = await fetch();
+            await Downloader.SaveAsync(file);
+            Notifier.ShowSuccess($"Downloaded {file.FileName}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _exporting = false;
         }
     }
 

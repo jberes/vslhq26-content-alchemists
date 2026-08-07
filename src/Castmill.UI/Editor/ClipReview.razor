@@ -73,6 +73,13 @@
             @foreach (var (clip, i) in _clips.Select((c, i) => (c, i)))
             {
                 <li class="cm-clips__clip @(_done.Contains(i) ? "cm-clips__clip--done" : "")">
+                    @if (clip.Score is { } score)
+                    {
+                        @* A suggested ordering, not a prediction — no vendor in this category
+                           publishes a validation study for their "virality" number, and ours
+                           is a blend of the model's own judgement with the clip's length. *@
+                        <span class="cm-clips__score cm-mono" title="Suggested ranking — hook, payoff, self-containedness and length">@score</span>
+                    }
                     <span class="cm-mono">@Clock(clip.InSeconds)–@Clock(clip.OutSeconds)</span>
                     <span class="cm-clips__hook">
                         @(string.IsNullOrWhiteSpace(clip.ClipTitle) ? clip.Hook : clip.ClipTitle)
@@ -120,7 +127,9 @@
         string? ClipTitle,
         string? Description,
         IReadOnlyList<string> Hashtags,
-        IReadOnlyList<string> PlatformFit)
+        IReadOnlyList<string> PlatformFit,
+        /// <summary>Composite ranking 0-100, computed server-side; null on older artifacts.</summary>
+        int? Score)
     {
         public double LengthSeconds => OutSeconds - InSeconds;
 
@@ -170,13 +179,26 @@
                             : [],
                         clip.TryGetProperty("platformFit", out var fit)
                             ? fit.EnumerateArray().Select(p => p.GetString() ?? "").ToList()
-                            : []));
+                            : [],
+                        clip.TryGetProperty("score", out var score) && score.ValueKind == JsonValueKind.Number
+                            ? score.GetInt32()
+                            : null));
                 }
             }
         }
         catch (JsonException)
         {
             // An unparseable clips payload renders as empty rather than crashing Focus.
+        }
+
+        // Best moment first when the server scored them. OrderByDescending is stable, so an
+        // unscored artifact (or a tie) keeps the model's own order — and the ordinal export
+        // names then follow the list, which is what makes the output folder read correctly.
+        if (_clips.Any(c => c.Score is not null))
+        {
+            var ranked = _clips.OrderByDescending(c => c.Score ?? 0).ToList();
+            _clips.Clear();
+            _clips.AddRange(ranked);
         }
     }
 

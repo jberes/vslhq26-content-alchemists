@@ -2507,3 +2507,25 @@
 .cm-clips__length--off {
     color: var(--cm-warning);
 }
+
+/* Clip ranking badge. Presented as a suggested ordering rather than a prediction — see the
+   markup comment: nobody in this category publishes a validation study for these numbers. */
+.cm-clips__score {
+    flex: 0 0 auto;
+    min-inline-size: 2.5ch;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-accent-wash);
+    color: var(--cm-accent);
+    font-size: var(--cm-text-meta);
+    text-align: center;
+}
+
+/* Export actions sit at the end of the Focus footer, pushed away from the status controls
+   so "Back to draft" and "Download .docx" are never adjacent by accident. */
+.cm-focus__export {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+    margin-inline-start: auto;
+}

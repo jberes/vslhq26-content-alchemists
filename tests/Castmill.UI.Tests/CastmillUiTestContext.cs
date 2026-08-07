@@ -112,6 +112,18 @@ public sealed class StubHttpHandler : HttpMessageHandler
     public void OnStatus(HttpMethod method, string path, HttpStatusCode status) =>
         _routes[$"{method} {path}"] = () => new HttpResponseMessage(status);
 
+    /// <summary>A file download, complete with the Content-Disposition the client reads the
+    /// name from — exports name their own files server-side.</summary>
+    public void OnFile(string path, string fileName, string contentType, byte[] bytes) =>
+        _routes[$"GET {path}"] = () =>
+        {
+            var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            content.Headers.ContentDisposition =
+                new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileName = fileName };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        };
+
     /// <summary>
     /// Gates a route: requests to it hang until the returned completion source is resolved.
     /// The only way to express "the model is still generating" against a stub transport.

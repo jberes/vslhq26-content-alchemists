@@ -65,6 +65,46 @@ public sealed class ClipBatchExportTests : CastmillUiTestContext
         Assert.Contains("outside the 15–60s window", flagged[0].TextContent, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Scored clips lead with the best moment. The score is computed server-side from the
+    /// model's own judgement blended with the clip's length, and the row shows it so the
+    /// ordering is legible rather than mysterious.
+    /// </summary>
+    [Fact]
+    public async Task Scored_clips_are_ranked_best_first_and_show_their_score()
+    {
+        const string scored = """
+            {"title":"Clips","clips":[
+              {"inSeconds":10,"outSeconds":40,"hook":"middling","clipTitle":"Middling","score":52,"platformFit":["shorts"]},
+              {"inSeconds":60,"outSeconds":95,"hook":"the best bit","clipTitle":"The best bit","score":91,"platformFit":["shorts"]},
+              {"inSeconds":120,"outSeconds":150,"hook":"weak","clipTitle":"Weak","score":31,"platformFit":["shorts"]}
+            ],"citations":["s01"]}
+            """;
+
+        var view = Render<ClipReview>(p => p.Add(c => c.ContentJson, scored));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-clips__clip").Count == 3, TimeSpan.FromSeconds(5));
+
+        var titles = view.FindAll(".cm-clips__hook").Select(h => h.TextContent.Trim()).ToList();
+        Assert.StartsWith("The best bit", titles[0], StringComparison.Ordinal);
+        Assert.StartsWith("Weak", titles[2], StringComparison.Ordinal);
+
+        Assert.Equal(["91", "52", "31"], view.FindAll(".cm-clips__score").Select(s => s.TextContent.Trim()));
+    }
+
+    /// <summary>An unscored artifact keeps the model's own order rather than reshuffling.</summary>
+    [Fact]
+    public async Task Unscored_clips_keep_the_order_they_came_in()
+    {
+        var view = Render<ClipReview>(p => p.Add(c => c.ContentJson, ThreeClips));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-clips__clip").Count == 3, TimeSpan.FromSeconds(5));
+
+        Assert.Empty(view.FindAll(".cm-clips__score"));
+        var titles = view.FindAll(".cm-clips__hook").Select(h => h.TextContent.Trim()).ToList();
+        Assert.StartsWith("Deploy time, halved", titles[0], StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Without_a_local_engine_the_batch_button_is_disabled_with_the_reason()
     {

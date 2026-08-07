@@ -120,6 +120,13 @@ public sealed class ImageSlot : ITenantScoped
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public Guid CampaignId { get; set; }
+    /// <summary>
+    /// The artifact this slot belongs to, for kinds that are per-artifact rather than
+    /// per-campaign — a campaign can hold several blogs and each needs its own header and
+    /// inline images. Null means campaign-wide (the youtube-thumbnail and social-card slots,
+    /// and every slot reserved before this column existed).
+    /// </summary>
+    public Guid? ArtifactId { get; set; }
     /// <summary>youtube-thumbnail · blog-header · blog-inline-1..3 · social-card.</summary>
     public required string Kind { get; set; }
     public int TargetWidth { get; set; }

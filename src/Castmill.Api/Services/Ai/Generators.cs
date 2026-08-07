@@ -8,7 +8,13 @@ public sealed record ValidationOutcome(bool Passed, IReadOnlyList<string> Warnin
 public sealed record GeneratorSpec(
     string Kind,
     string Instructions,
-    Func<JsonElement, TranscriptContent, ValidationOutcome> Validate);
+    Func<JsonElement, TranscriptContent, ValidationOutcome> Validate,
+    /// <summary>
+    /// Optional deterministic pass over the model's output BEFORE validation. Exists for the
+    /// clip generator, which asks the model which segments a clip spans and then computes the
+    /// timings itself rather than trusting numbers the model wrote.
+    /// </summary>
+    Func<JsonElement, TranscriptContent, JsonElement>? Transform = null);
 
 /// <summary>
 /// The fan-out set (B5.3/B5.4). Every generator returns strict JSON with a
@@ -90,18 +96,31 @@ public static class Generators
             "clip-suggestions",
             $$"""
             Suggest 3-6 vertical short-form clips (YouTube Shorts, Reels, TikTok) from the transcript.
-            Use segment timings for in/out points; points MUST fall inside the transcript's time range.
-            Each clip MUST run between {{MinClipSeconds}} and {{MaxClipSeconds}} seconds — that is the
-            short-form window, and a clip outside it will not be published as-is.
-            Pick moments that stand alone without setup: a concrete claim, a number, a story beat,
-            a contrarian take. Do not pick a moment that starts mid-sentence.
+
+            DO NOT WRITE TIMESTAMPS. Identify each clip by the transcript SEGMENT IDS it spans
+            — "startSegmentId" and "endSegmentId" — and the exact in/out points are computed
+            from the transcript. A clip must begin at the start of a segment, never mid-sentence.
+
+            Aim for {{MinClipSeconds}}-{{MaxClipSeconds}} seconds of segments; 20-45 seconds is
+            the sweet spot. Pick moments that stand alone with no setup: a concrete claim, a
+            number, a story beat, a contrarian take. If the first segment is throat-clearing
+            ("so, yeah, anyway"), start at the next one. Prefer ending on the payoff rather
+            than on a trailing "…and so, you know".
+
+            Also score each clip 0-10 on:
+              "hook": would this stop someone scrolling in the first two seconds?
+              "selfContained": could someone who started here follow it with no prior context?
+              "payoff": does it deliver something, or just trail off?
+              "emotion": does it land — surprise, conviction, humour, relief?
+
             For each clip also write the copy its upload form needs:
               "clipTitle": under 100 characters, no clickbait, states the payoff.
               "description": 1-2 sentences.
               "hashtags": 2-5 tags, no leading '#'.
-            JSON schema: { "title": string, "clips": [ { "inSeconds": number, "outSeconds": number, "hook": string, "clipTitle": string, "description": string, "hashtags": string[], "platformFit": string[] } ], "citations": string[] }
+            JSON schema: { "title": string, "clips": [ { "startSegmentId": string, "endSegmentId": string, "hook": string, "clipTitle": string, "description": string, "hashtags": string[], "platformFit": string[], "scores": { "hook": number, "selfContained": number, "payoff": number, "emotion": number } } ], "citations": string[] }
             """,
-            ValidateClips));
+            ValidateClips,
+            ClipBoundaries.Apply));
 
         specs.Add(new GeneratorSpec(
             "seo-brief",

@@ -87,6 +87,28 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
         Assert.Empty(view.FindAll("select[aria-label='Blog to place this image into']"));
     }
 
+    /// <summary>
+    /// Slots reserved for a specific blog carry its id, so they answer for themselves and no
+    /// picker is needed — even with several blogs in the campaign. That is the durable fix;
+    /// the picker only covers legacy slots reserved before slots were artifact-scoped.
+    /// </summary>
+    [Fact]
+    public async Task A_slot_that_belongs_to_a_blog_places_into_that_blog_with_no_picker()
+    {
+        _slotArtifactId = SecondBlogId;
+        StubPreview(Blog(FirstBlogId, "The first blog"), Blog(SecondBlogId, "The second blog"));
+
+        var view = await OpenTakeAsync();
+
+        Assert.Empty(view.FindAll("select[aria-label='Blog to place this image into']"));
+
+        await PlaceAsync(view);
+
+        var body = LastPlaceBody();
+        Assert.Contains(SecondBlogId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(FirstBlogId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private async Task<IRenderedComponent<ImageStudioView>> OpenTakeAsync()
@@ -110,6 +132,7 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
                               && b.Path.EndsWith("/place", StringComparison.Ordinal)).Body;
 
     private string _slotKind = "blog-header";
+    private Guid? _slotArtifactId;
 
     private void StubPreview(params ArtifactPreviewResponse[] artifacts) =>
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
@@ -120,7 +143,8 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
         null, null, true, state,
         state == "Filled" ? "https://public.example/x.webp" : null,
         state == "Filled" ? "https://public.example/x.webp" : null,
-        DateTimeOffset.UtcNow);
+        DateTimeOffset.UtcNow,
+        _slotArtifactId);
 
     private static ImageVariantResponse Take() => new(
         TakeId, SlotId,

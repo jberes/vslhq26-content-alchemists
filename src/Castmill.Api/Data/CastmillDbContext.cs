@@ -87,8 +87,24 @@ public sealed class CastmillDbContext(
             e.Property(s => s.PublishedUrl).HasMaxLength(2000);
             e.Property(s => s.BaseImagePath).HasMaxLength(1000);
             e.Property(s => s.BaseImageUrl).HasMaxLength(2000);
-            // One slot per kind per campaign: reservation is idempotent by construction.
-            e.HasIndex(s => new { s.TenantId, s.CampaignId, s.Kind }).IsUnique();
+            // One slot per kind per ARTIFACT, and one per campaign for the artifact-less
+            // kinds. Widened from (Tenant, Campaign, Kind): that made blog-header unique per
+            // campaign, so a second blog could never own its own header image — its prompts
+            // were silently skipped because the campaign's slot was already filled.
+            //
+            // TWO indexes, not one. SQL Server treats NULLs as equal in a unique index, so a
+            // single index over the nullable ArtifactId would reject a second campaign-wide
+            // slot of a different kind; adding IS NOT NULL to escape that would leave the
+            // campaign-wide rows unconstrained entirely — which is exactly the idempotent
+            // reservation this index exists to guarantee.
+            e.HasIndex(s => new { s.TenantId, s.CampaignId, s.ArtifactId, s.Kind })
+                .IsUnique()
+                .HasFilter("[ArtifactId] IS NOT NULL")
+                .HasDatabaseName("IX_ImageSlots_Tenant_Campaign_Artifact_Kind");
+            e.HasIndex(s => new { s.TenantId, s.CampaignId, s.Kind })
+                .IsUnique()
+                .HasFilter("[ArtifactId] IS NULL")
+                .HasDatabaseName("IX_ImageSlots_Tenant_Campaign_Kind_NoArtifact");
             e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
         });
 

@@ -7,7 +7,14 @@ using Microsoft.EntityFrameworkCore;
 namespace Castmill.Api.Services.Images;
 
 /// <summary>One reserved slot's shape: what it is and the exact pixels it must end up at.</summary>
-public sealed record SlotTemplate(string Kind, int Width, int Height, string AspectRatio, bool Headline);
+public sealed record SlotTemplate(
+    string Kind, int Width, int Height, string AspectRatio, bool Headline,
+    /// <summary>
+    /// True when the slot belongs to a single artifact rather than the campaign. A campaign
+    /// can hold several blogs and each needs its own header and inline images; a YouTube
+    /// thumbnail or social card is about the campaign, so there is one.
+    /// </summary>
+    bool PerArtifact = false);
 
 public interface IImagePlanService
 {
@@ -15,14 +22,18 @@ public interface IImagePlanService
     /// Reserves the campaign's six typed slots (ADR-012). Idempotent: re-running a
     /// campaign never duplicates or resets slots that already hold an image.
     /// </summary>
-    Task<IReadOnlyList<ImageSlot>> EnsureSlotsAsync(Guid campaignId, CancellationToken ct);
+    /// <param name="artifactId">
+    /// The artifact these per-artifact slots belong to (a specific blog). Null reserves the
+    /// campaign-wide set, which is what a campaign with one blog has always had.
+    /// </param>
+    Task<IReadOnlyList<ImageSlot>> EnsureSlotsAsync(Guid campaignId, CancellationToken ct, Guid? artifactId = null);
 
     /// <summary>
     /// Copies prompts from a generated image-prompts artifact onto empty slots,
     /// keeping the transcript segment that motivated each one. Never overwrites a
     /// prompt the user edited on a filled slot.
     /// </summary>
-    Task<int> SeedPromptsAsync(Guid campaignId, string imagePromptsContentJson, CancellationToken ct);
+    Task<int> SeedPromptsAsync(Guid campaignId, string imagePromptsContentJson, CancellationToken ct, Guid? artifactId = null);
 }
 
 public sealed class ImagePlanService(
@@ -38,23 +49,29 @@ public sealed class ImagePlanService(
     public static readonly SlotTemplate[] Templates =
     [
         new("youtube-thumbnail", 1280, 720, "16:9", Headline: true),
-        new("blog-header", 1600, 840, "16:9", Headline: false),
-        new("blog-inline-1", 1200, 675, "16:9", Headline: false),
-        new("blog-inline-2", 1200, 675, "16:9", Headline: false),
-        new("blog-inline-3", 1200, 675, "16:9", Headline: false),
+        new("blog-header", 1600, 840, "16:9", Headline: false, PerArtifact: true),
+        new("blog-inline-1", 1200, 675, "16:9", Headline: false, PerArtifact: true),
+        new("blog-inline-2", 1200, 675, "16:9", Headline: false, PerArtifact: true),
+        new("blog-inline-3", 1200, 675, "16:9", Headline: false, PerArtifact: true),
         new("social-card", 1200, 1200, "1:1", Headline: false),
     ];
 
     public static SlotTemplate? Template(string kind) =>
         Templates.FirstOrDefault(t => t.Kind.Equals(kind, StringComparison.OrdinalIgnoreCase));
 
-    public async Task<IReadOnlyList<ImageSlot>> EnsureSlotsAsync(Guid campaignId, CancellationToken ct)
+    public async Task<IReadOnlyList<ImageSlot>> EnsureSlotsAsync(
+        Guid campaignId, CancellationToken ct, Guid? artifactId = null)
     {
-        var existing = await db.ImageSlots.Where(s => s.CampaignId == campaignId).ToListAsync(ct);
+        var existing = await db.ImageSlots
+            .Where(s => s.CampaignId == campaignId && s.ArtifactId == artifactId)
+            .ToListAsync(ct);
         var now = clock.GetUtcNow();
         var added = false;
 
-        foreach (var template in Templates)
+        // Reserving for an artifact creates only the per-artifact slots, and reserving for
+        // the campaign only the campaign-wide ones — otherwise every blog would get its own
+        // YouTube thumbnail and the campaign would get a header belonging to no blog.
+        foreach (var template in Templates.Where(t => t.PerArtifact == (artifactId is not null)))
         {
             if (existing.Any(s => s.Kind.Equals(template.Kind, StringComparison.OrdinalIgnoreCase)))
             {
@@ -65,6 +82,7 @@ public sealed class ImagePlanService(
                 Id = Guid.NewGuid(),
                 TenantId = tenant.TenantId ?? throw new InvalidOperationException("Slot reservation requires a tenant."),
                 CampaignId = campaignId,
+                ArtifactId = artifactId,
                 Kind = template.Kind,
                 TargetWidth = template.Width,
                 TargetHeight = template.Height,
@@ -85,7 +103,8 @@ public sealed class ImagePlanService(
         return [.. existing.OrderBy(s => Array.FindIndex(Templates, t => t.Kind == s.Kind))];
     }
 
-    public async Task<int> SeedPromptsAsync(Guid campaignId, string imagePromptsContentJson, CancellationToken ct)
+    public async Task<int> SeedPromptsAsync(
+        Guid campaignId, string imagePromptsContentJson, CancellationToken ct, Guid? artifactId = null)
     {
         var prompts = ParsePrompts(imagePromptsContentJson);
         if (prompts.Count == 0)
@@ -93,7 +112,7 @@ public sealed class ImagePlanService(
             return 0;
         }
 
-        var slots = await EnsureSlotsAsync(campaignId, ct);
+        var slots = await EnsureSlotsAsync(campaignId, ct, artifactId);
         var now = clock.GetUtcNow();
         var seeded = 0;
 

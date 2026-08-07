@@ -224,7 +224,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             // Field names are the contract, so they are the stable thing to match on.
             if (prompt.Contains("\"platformFit\"", StringComparison.Ordinal))
             {
-                return """{"title":"Clips","clips":[{"inSeconds":0,"outSeconds":9,"hook":"h","clipTitle":"Deploy time, halved","description":"d","hashtags":["devops"],"platformFit":["tiktok"]}],"citations":["S2"]}""";
+                // Segment ids, not timestamps — the generator computes in/out from the
+                // transcript now, so a fake that returns times would exercise a path the
+                // real model no longer takes.
+                return """{"title":"Clips","clips":[{"startSegmentId":"S1","endSegmentId":"S3","hook":"h","clipTitle":"Deploy time, halved","description":"d","hashtags":["devops"],"platformFit":["tiktok"],"scores":{"hook":8,"selfContained":7,"payoff":8,"emotion":6}}],"citations":["S2"]}""";
             }
             if (prompt.Contains("Produce an SEO brief", StringComparison.Ordinal))
             {

@@ -7,6 +7,7 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Export;
 using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Services.Media;
@@ -85,6 +86,7 @@ builder.Services.Configure<PublishOptions>(builder.Configuration.GetSection(Publ
 builder.Services.Configure<SeoOptions>(builder.Configuration.GetSection(SeoOptions.SectionName));
 builder.Services.AddScoped<IPublishBrokerClient, PublishBrokerClient>();
 builder.Services.AddScoped<ISeoProvider, DataForSeoProvider>();
+builder.Services.AddSingleton<IExportService, ExportService>();
 
 // Outbound HTTP: standard resilience (retry + circuit breaker + timeout) on
 // every dependency (B8) — transient upstream blips never surface as user errors.
@@ -284,6 +286,7 @@ app.MapImageEndpoints();
 app.MapImageSlotEndpoints();
 app.MapMediaEndpoints();
 app.MapPublishEndpoints();
+app.MapExportEndpoints();
 app.MapScheduleEndpoints();
 app.MapSeoEndpoints();
 

@@ -91,7 +91,13 @@ public sealed record ImageSlotResponse(
     Guid Id, Guid CampaignId, string Kind, int TargetWidth, int TargetHeight,
     string? Prompt, string? ModelAlias, string? SourceSegmentId,
     string? HeadlineText, bool SafeArea, string State, string? PublishedUrl, string? BaseImageUrl,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>
+    /// The artifact this slot belongs to, for per-artifact kinds (a specific blog's header
+    /// and inline images). Null for campaign-wide slots. Placing an image rewrites THIS
+    /// artifact's stub markers.
+    /// </summary>
+    Guid? ArtifactId = null);
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,

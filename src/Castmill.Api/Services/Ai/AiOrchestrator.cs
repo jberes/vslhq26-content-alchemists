@@ -69,12 +69,21 @@ public sealed class AiOrchestrator(
         var brand = await brands.ResolveAsync(campaign, ct);
 
         var results = new List<GenerationResult>();
+        // The blog this run's image prompts belong to. A run that adds a second blog seeds
+        // that blog's own slots rather than finding the first blog's already filled and
+        // silently seeding nothing.
+        Guid? blogArtifactId = null;
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
             for (var copy = 0; copy < copies; copy++)
             {
                 var blog = await RunBlogCoreAsync(userId, campaign, transcript, brief, brand, ct);
                 results.Add(blog);
+                if (blog is { Success: true, ArtifactId: { } blogId })
+                {
+                    blogArtifactId ??= blogId;
+                    await imagePlan.EnsureSlotsAsync(campaign.Id, ct, blogId);
+                }
                 await RecordProgressAsync(runId, results, ct);
             }
         }
@@ -94,7 +103,13 @@ public sealed class AiOrchestrator(
                 var artifact = await db.Artifacts.FindAsync([artifactId], ct);
                 if (artifact is not null)
                 {
+                    // Campaign-wide slots (thumbnail, social card) always; the blog-scoped
+                    // ones only when this run actually produced a blog to attach them to.
                     await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct);
+                    if (blogArtifactId is { } blogId)
+                    {
+                        await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct, blogId);
+                    }
                 }
             }
 
@@ -176,6 +191,12 @@ public sealed class AiOrchestrator(
             var response = await CallModelAsync(userId, "chat", spec.Kind,
                 BuildPrompt(spec.Instructions, brief, transcript, brand, spec.Kind), ct);
             var json = ParseModelJson(response);
+            // Deterministic pass before validation — clip in/out points are computed from
+            // the transcript rather than taken from numbers the model wrote.
+            if (spec.Transform is { } transform)
+            {
+                json = transform(json, transcript);
+            }
             var validation = spec.Validate(json, transcript);
             if (!validation.Passed)
             {
