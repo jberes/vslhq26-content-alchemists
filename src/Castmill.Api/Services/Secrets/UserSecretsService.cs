@@ -13,6 +13,10 @@ public enum SecretKind
     BrokerToken,
     /// <summary>Credential for an optional non-Foundry image provider (ADR-015).</summary>
     ImageProviderKey,
+    /// <summary>Credential for the non-Foundry second-pass text provider (ADR-020).</summary>
+    TechEditKey,
+    /// <summary>Bearer token for the customer knowledge-base gateway the Tech Edit consults.</summary>
+    KnowledgeBaseToken,
 }
 
 public interface IUserSecretsService

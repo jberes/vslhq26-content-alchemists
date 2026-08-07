@@ -56,16 +56,63 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         var body = await response.Content.ReadFromJsonAsync<FanOutResponse>();
         Assert.NotNull(body);
         Assert.Equal(0, body.Failed);
-        // blog + 6 social + email + newsletter + landing + notes + clips + seo-brief + images = 14
-        Assert.Equal(14, body.Succeeded);
+        // Every fan-out generator, plus blog (which runs its own outline→draft→audit pipeline
+        // and so is not in FanOut). Derived rather than hard-coded: a literal here goes stale
+        // the moment a generator is added, and reads as a regression rather than a new kind.
+        Assert.Equal(Generators.FanOut.Count + 1, body.Succeeded);
 
         // Every artifact persisted; previews list them all (plus the transcript).
         var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
             $"/api/v1/campaigns/{campaignId}/artifacts");
-        Assert.Equal(15, previews!.Count);
+        Assert.Equal(Generators.FanOut.Count + 2, previews!.Count);
         Assert.Contains(previews, p => p.Kind == "blog");
         Assert.Contains(previews, p => p.Kind == "social-x");
         Assert.Contains(previews, p => p.Kind == "image-prompts");
+    }
+
+    /// <summary>
+    /// "Three more LinkedIn posts." Kinds is a SET server-side — repeating the kind in the
+    /// array still generates it once — so the count is its own field, and each copy lands as
+    /// its own artifact row rather than overwriting the last.
+    /// </summary>
+    [Fact]
+    public async Task A_count_prints_that_many_of_each_requested_kind()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/ai/campaigns/{campaignId}/generate",
+            new
+            {
+                transcriptArtifactId = transcriptId,
+                brief = "Angle this at pricing objections",
+                kinds = new[] { "social-linkedin" },
+                count = 3,
+            });
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<FanOutResponse>();
+        Assert.Equal(3, body!.Succeeded);
+
+        var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
+            $"/api/v1/campaigns/{campaignId}/artifacts");
+        var posts = previews!.Where(p => p.Kind == "social-linkedin").ToList();
+        Assert.Equal(3, posts.Count);
+        // Three distinct rows, not one row saved three times.
+        Assert.Equal(3, posts.Select(p => p.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_count_over_the_cap_is_clamped_rather_than_honoured()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var response = await client.PostAsJsonAsync($"/api/v1/ai/campaigns/{campaignId}/generate",
+            new { transcriptArtifactId = transcriptId, kinds = new[] { "newsletter" }, count = 500 });
+
+        // Rejected at the boundary by the Range attribute, never reaching the model.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -171,9 +218,13 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             {
                 return """{"title":"Notes","summaryMarkdown":"s","chapters":[{"startSeconds":0,"title":"Intro"}],"citations":["S1"]}""";
             }
-            if (prompt.Contains("short vertical clips", StringComparison.Ordinal))
+            // Keyed off the schema's field name, not the prose: the clip prompt's wording has
+            // already been rewritten once ("short vertical clips" → "vertical short-form
+            // clips"), which silently dropped this branch and sank the kind in the fan-out.
+            // Field names are the contract, so they are the stable thing to match on.
+            if (prompt.Contains("\"platformFit\"", StringComparison.Ordinal))
             {
-                return """{"title":"Clips","clips":[{"inSeconds":0,"outSeconds":2,"hook":"h","platformFit":["tiktok"]}],"citations":["S2"]}""";
+                return """{"title":"Clips","clips":[{"inSeconds":0,"outSeconds":9,"hook":"h","clipTitle":"Deploy time, halved","description":"d","hashtags":["devops"],"platformFit":["tiktok"]}],"citations":["S2"]}""";
             }
             if (prompt.Contains("Produce an SEO brief", StringComparison.Ordinal))
             {

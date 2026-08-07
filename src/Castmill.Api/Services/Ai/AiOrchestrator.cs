@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Images;
+using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
@@ -18,15 +19,26 @@ public interface IAiOrchestrator
     /// are written to that run row as they land so the Press Run can poll progress
     /// from any instance while this call is still in flight (B9.8).
     /// </summary>
-    Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds, CancellationToken ct, Guid? runId = null);
+    Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds, CancellationToken ct, Guid? runId = null, int copies = 1);
     /// <summary>Opens a run row for progress polling (B9.8) before the fan-out starts.</summary>
-    Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct);
+    Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct, int copies = 1);
+
+    /// <summary>
+    /// Second pass over an existing artifact (ADR-020): a different model family re-edits it,
+    /// optionally briefed by the customer knowledge base. Unlike every other AI path this
+    /// revises the artifact <b>in place</b> behind a revision snapshot rather than printing a
+    /// new row, so the version filmstrip shows the edit and can restore the take before it.
+    /// </summary>
+    Task<TechEditResult> RunTechEditAsync(
+        Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
+        string? steering, bool useKnowledgeBase, CancellationToken ct);
 }
 
 public sealed class AiOrchestrator(
-    IFoundryClientFactory clients,
+    IChatProviderRegistry chatProviders,
     IImagePlanService imagePlan,
     IBrandContextService brands,
+    IKnowledgeBaseClient knowledge,
     CastmillDbContext db,
     ITenantProvider tenant,
     IPromptLog promptLog,
@@ -37,12 +49,17 @@ public sealed class AiOrchestrator(
 
     public async Task<IReadOnlyList<GenerationResult>> RunFanOutAsync(
         Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, string[]? kinds,
-        CancellationToken ct, Guid? runId = null)
+        CancellationToken ct, Guid? runId = null, int copies = 1)
     {
+        copies = Math.Clamp(copies, 1, GenerateRequest.MaxCopies);
         kinds = kinds?.Select(Generators.Normalize).ToArray();
-        var wanted = kinds is { Length: > 0 }
+        var selected = kinds is { Length: > 0 }
             ? Generators.FanOut.Where(g => kinds.Contains(g.Kind, StringComparer.OrdinalIgnoreCase)).ToList()
             : [.. Generators.FanOut];
+
+        // Kind-major rather than round-robin, so "3 more LinkedIn posts" arrives as three
+        // LinkedIn posts in a row on the board rather than interleaved with everything else.
+        var wanted = selected.SelectMany(spec => Enumerable.Repeat(spec, copies)).ToList();
 
         // The image plan is reserved by the run (ADR-012): empty slots must be
         // visible from the moment the campaign has content, not at publish time.
@@ -54,9 +71,12 @@ public sealed class AiOrchestrator(
         var results = new List<GenerationResult>();
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
-            var blog = await RunBlogCoreAsync(userId, campaign, transcript, brief, brand, ct);
-            results.Add(blog);
-            await RecordProgressAsync(runId, results, ct);
+            for (var copy = 0; copy < copies; copy++)
+            {
+                var blog = await RunBlogCoreAsync(userId, campaign, transcript, brief, brand, ct);
+                results.Add(blog);
+                await RecordProgressAsync(runId, results, ct);
+            }
         }
 
         // Per-artifact granularity, partial failures allowed (ADR-006): one bad
@@ -86,11 +106,12 @@ public sealed class AiOrchestrator(
     }
 
     /// <summary>Creates the run row the Press Run polls; returns its id.</summary>
-    public async Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct)
+    public async Task<Guid> StartRunAsync(Guid campaignId, string[]? kinds, CancellationToken ct, int copies = 1)
     {
-        var total = kinds is { Length: > 0 }
+        var total = (kinds is { Length: > 0 }
             ? kinds.Length
-            : Generators.FanOut.Count + 1; // +1 for the blog pipeline
+            : Generators.FanOut.Count + 1) // +1 for the blog pipeline
+            * Math.Clamp(copies, 1, GenerateRequest.MaxCopies);
         var now = clock.GetUtcNow();
         var run = new GenerationRun
         {
@@ -243,6 +264,202 @@ public sealed class AiOrchestrator(
         }
     }
 
+    /// <summary>
+    /// The Tech Edit (ADR-020). Same schema in, same schema out: the model is handed the
+    /// artifact's own payload and must return that same shape edited, which is then run
+    /// through the identical validator pass 1 had to satisfy. A second pass can therefore
+    /// never produce an artifact the first pass would have rejected — and the contract works
+    /// for every kind without a per-kind output schema.
+    /// </summary>
+    public async Task<TechEditResult> RunTechEditAsync(
+        Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
+        string? steering, bool useKnowledgeBase, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var provider = "foundry";
+        var knowledgeUsed = false;
+        try
+        {
+            var kind = Generators.Normalize(artifact.Kind);
+            var payload = ExtractContent(artifact.ContentJson);
+            if (payload is null)
+            {
+                return TechEditFail(artifact, "This artifact has no readable content payload.", stopwatch);
+            }
+
+            var brand = await brands.ResolveAsync(campaign, ct);
+            provider = await chatProviders.ResolveNameAsync(userId, FoundryClientFactory.TechEditAlias, ct);
+
+            var knowledgeBlock = string.Empty;
+            if (useKnowledgeBase)
+            {
+                var answer = await knowledge.AskAsync(userId, BuildKnowledgeQuery(artifact, payload.Value, campaign), ct);
+                if (answer is not null)
+                {
+                    knowledgeUsed = true;
+                    knowledgeBlock = $"\n{answer.ToPromptBlock()}\n";
+                }
+            }
+
+            var instructions = $$"""
+                You are the technical editor on this artifact. It has already been drafted and
+                validated; your job is to make it more accurate, more specific and more useful
+                to a technical reader — not to rewrite it for the sake of rewriting.
+
+                Correct anything the knowledge base contradicts, replace vague claims with
+                concrete ones it supports, and link to a source URL where one genuinely backs a
+                statement. Leave the structure, length and voice alone unless they are the
+                problem. If a passage is already right, return it unchanged.
+
+                Return the SAME JSON schema you are given, edited, wrapped like this:
+                { "artifact": { ...the same shape as the current content... },
+                  "changes": [ { "what": string, "why": string, "sourceUrl": string } ] }
+
+                Every field present in the current content must still be present, including
+                "citations", which must keep citing real transcript segment ids.
+                {{knowledgeBlock}}
+                Current content:
+                {{payload.Value.GetRawText()}}
+                """;
+
+            var response = await CallModelAsync(userId, FoundryClientFactory.TechEditAlias,
+                $"{kind}-tech-edit", BuildPrompt(instructions, steering, transcript, brand, kind), ct);
+
+            var parsed = ParseModelJson(response);
+            if (!parsed.TryGetProperty("artifact", out var edited) || edited.ValueKind != JsonValueKind.Object)
+            {
+                return TechEditFail(artifact, "The tech edit returned no artifact payload.", stopwatch);
+            }
+
+            var validation = Validate(kind, edited, transcript);
+            if (!validation.Passed)
+            {
+                // The draft on disk is still the validated one; refusing to write is the
+                // whole point of running the same validator pass 1 used.
+                return TechEditFail(artifact, $"Tech edit rejected by validation: {validation.FatalError}", stopwatch);
+            }
+
+            var changes = ReadChanges(parsed);
+            var warnings = new List<string>(validation.Warnings);
+            warnings.AddRange(changes.Select(c => $"Tech edit: {c}"));
+
+            var now = clock.GetUtcNow();
+            await Endpoints.ArtifactEndpoints.SnapshotRevisionAsync(db, artifact, "tech-edit", now, ct);
+
+            artifact.ContentJson = JsonSerializer.Serialize(new
+            {
+                content = edited,
+                validation = new { validation.Passed, Warnings = warnings },
+            }, Json);
+            if (edited.TryGetProperty("title", out var title)
+                && title.ValueKind == JsonValueKind.String
+                && title.GetString() is { Length: > 0 } titleText)
+            {
+                artifact.Title = titleText.Length > 300 ? titleText[..300] : titleText;
+            }
+            artifact.Version++;
+            artifact.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+
+            return new TechEditResult(true, null, artifact.Id, artifact.Version, provider, knowledgeUsed,
+                changes, warnings, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Tech edit failed for artifact {ArtifactId}", artifact.Id);
+            return TechEditFail(artifact,
+                ex is AiNotConfiguredException ? ex.Message : $"Tech edit failed: {ex.GetType().Name}",
+                stopwatch, provider, knowledgeUsed);
+        }
+    }
+
+    /// <summary>Runs the kind's own pass-1 validator; blog has its own pipeline and validator.</summary>
+    private static ValidationOutcome Validate(string kind, JsonElement json, TranscriptContent transcript) =>
+        kind.Equals("blog", StringComparison.OrdinalIgnoreCase)
+            ? Generators.ValidateBlog(json, transcript)
+            : Generators.Find(kind) is { } spec
+                ? spec.Validate(json, transcript)
+                // An unregistered kind (hand-authored, or one that predates the registry) still
+                // gets the common contract rather than being waved through unchecked.
+                : Generators.ValidateCommon(json, transcript);
+
+    /// <summary>
+    /// Unwraps the orchestrator's <c>{ content, validation }</c> envelope. Hand-authored
+    /// payloads keep their fields at the top level, so both shapes have to be handled — the
+    /// same split <c>ArtifactContent.FindMarkdownHost</c> makes on the client.
+    /// </summary>
+    internal static JsonElement? ExtractContent(string contentJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(contentJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+            return root.TryGetProperty("content", out var inner) && inner.ValueKind == JsonValueKind.Object
+                ? inner.Clone()
+                : root.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The question put to the knowledge base. Built from what the artifact is ABOUT — title
+    /// plus meta description plus headings — rather than its full body, which would bury the
+    /// topic in prose the gateway has to re-summarise.
+    /// </summary>
+    private static string BuildKnowledgeQuery(Artifact artifact, JsonElement payload, Campaign campaign)
+    {
+        var parts = new List<string> { artifact.Title };
+        if (payload.TryGetProperty("metaDescription", out var meta) && meta.ValueKind == JsonValueKind.String)
+        {
+            parts.Add(meta.GetString()!);
+        }
+        if (payload.TryGetProperty("markdown", out var markdown) && markdown.ValueKind == JsonValueKind.String)
+        {
+            parts.AddRange(markdown.GetString()!
+                .Split('\n')
+                .Where(line => line.StartsWith("## ", StringComparison.Ordinal))
+                .Select(line => line[3..].Trim())
+                .Take(8));
+        }
+        parts.Add(campaign.Name);
+
+        var query = string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct());
+        return query.Length > 900 ? query[..900] : query;
+    }
+
+    private static IReadOnlyList<string> ReadChanges(JsonElement parsed)
+    {
+        if (!parsed.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return [.. changes.EnumerateArray()
+            .Where(c => c.ValueKind == JsonValueKind.Object && c.TryGetProperty("what", out _))
+            .Select(c =>
+            {
+                var what = c.GetProperty("what").GetString() ?? string.Empty;
+                var why = c.TryGetProperty("why", out var w) ? w.GetString() : null;
+                var source = c.TryGetProperty("sourceUrl", out var s) ? s.GetString() : null;
+                var text = string.IsNullOrWhiteSpace(why) ? what : $"{what} — {why}";
+                return string.IsNullOrWhiteSpace(source) ? text : $"{text} ({source})";
+            })
+            .Where(t => t.Length > 0)];
+    }
+
+    private static TechEditResult TechEditFail(
+        Artifact artifact, string error, Stopwatch stopwatch,
+        string provider = "foundry", bool knowledgeUsed = false) =>
+        new(false, error, artifact.Id, artifact.Version, provider, knowledgeUsed, [], [],
+            stopwatch.ElapsedMilliseconds);
+
     // ---- Internals -----------------------------------------------------------
 
     /// <summary>
@@ -283,7 +500,10 @@ public sealed class AiOrchestrator(
         var responseText = string.Empty;
         try
         {
-            var client = await clients.CreateChatClientAsync(userId, modelAlias, ct);
+            // Through the registry, not the Foundry factory directly: an alias mapped to a
+            // ready non-Foundry text provider resolves there, everything else stays on
+            // Foundry. The log entry below therefore covers both providers (ADR-020).
+            var client = await chatProviders.ResolveAsync(userId, modelAlias, ct);
             var response = await client.GetResponseAsync(prompt, cancellationToken: ct);
             responseText = response.Text;
             success = true;

@@ -112,6 +112,46 @@ public sealed class AiValidatorTests
         Assert.Equal(2, fenced.GetProperty("a").GetInt32());
     }
 
+    /// <summary>
+    /// The Tech Edit hands the model the artifact's own payload, so it has to find that
+    /// payload under both shapes: the orchestrator wraps generator output as
+    /// { content, validation }, while hand-authored artifacts keep their fields at the top.
+    /// Feeding back the wrapper instead of the content would ask the model to edit our
+    /// bookkeeping.
+    /// </summary>
+    [Fact]
+    public void Tech_edit_reads_the_payload_from_both_artifact_shapes()
+    {
+        var wrapped = AiOrchestrator.ExtractContent(
+            """{"content":{"title":"t","markdown":"body","citations":["S1"]},"validation":{"Passed":true,"Warnings":[]}}""");
+        Assert.NotNull(wrapped);
+        Assert.Equal("body", wrapped.Value.GetProperty("markdown").GetString());
+        Assert.False(wrapped.Value.TryGetProperty("validation", out _));
+
+        var flat = AiOrchestrator.ExtractContent("""{"title":"t","markdown":"body","citations":["S1"]}""");
+        Assert.Equal("body", flat!.Value.GetProperty("markdown").GetString());
+
+        Assert.Null(AiOrchestrator.ExtractContent("not json"));
+        Assert.Null(AiOrchestrator.ExtractContent("[1,2,3]"));
+    }
+
+    /// <summary>
+    /// A second pass runs its output through the SAME validator the first pass had to
+    /// satisfy, so it can never downgrade an artifact into a state generation would have
+    /// rejected — here, by dropping the citations that carry provenance.
+    /// </summary>
+    [Fact]
+    public void A_tech_edit_that_drops_citations_fails_the_same_contract_generation_uses()
+    {
+        var spec = Generators.Find("social-x")!;
+
+        var edited = Json("""{"title":"t","text":"a sharper post","hashtags":[]}""");
+        Assert.False(spec.Validate(edited, Transcript).Passed);
+
+        var kept = Json("""{"title":"t","text":"a sharper post","hashtags":[],"citations":["S1"]}""");
+        Assert.True(spec.Validate(kept, Transcript).Passed);
+    }
+
     [Fact]
     public void Plain_text_ingest_produces_stable_segment_ids()
     {

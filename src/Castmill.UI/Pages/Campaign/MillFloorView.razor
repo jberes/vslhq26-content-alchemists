@@ -121,22 +121,64 @@
                     }
                 </div>
             }
-            @if (Campaign.Transcript is not null && !PressRun.IsActiveFor(CampaignId) && MissingKinds.Any())
+            @if (Campaign.Transcript is not null && !PressRun.IsActiveFor(CampaignId))
             {
                 <div class="cm-board__more">
                     <span class="cm-kicker">Print more from this source</span>
+                    @* Every kind is offered, not just the ones missing. A campaign that already
+                       has a blog is exactly the campaign that wants a second one on a different
+                       angle — hiding the chip once you own one made "add another" unreachable. *@
                     <div class="cm-board__more-grid">
-                        @foreach (var kind in MissingKinds)
+                        @foreach (var kind in AllKinds)
                         {
                             var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
-                            <button type="button" class="cm-print-chip"
-                                    title="Generate @label from this transcript"
-                                    @onclick="() => GenerateKind(kind)">
+                            var owned = CountOf(kind);
+                            <button type="button"
+                                    class="cm-print-chip @(_addKind == kind ? "cm-print-chip--active" : null)"
+                                    title="@(owned == 0 ? $"Generate {label} from this transcript" : $"Add another {label} — you have {owned}")"
+                                    @onclick="() => ToggleAdd(kind)">
                                 <span class="cm-print-chip__plus" aria-hidden="true">+</span>
                                 <span class="cm-print-chip__label">@label</span>
+                                @if (owned > 0)
+                                {
+                                    <span class="cm-meta cm-print-chip__count">@owned</span>
+                                }
                             </button>
                         }
                     </div>
+
+                    @if (_addKind is { } adding)
+                    {
+                        <div class="cm-board__add">
+                            <label class="cm-field cm-board__add-angle">
+                                <span class="cm-field__label">
+                                    Angle for @(adding == "social" ? "these posts" : ArtifactDisplay.KindLabel(adding))
+                                    <span class="cm-meta">optional</span>
+                                </span>
+                                <input class="cm-input" @bind="_addAngle" @bind:event="oninput"
+                                       placeholder="Make this one about pricing objections." />
+                            </label>
+                            <div class="cm-board__add-count">
+                                <span class="cm-kicker">How many</span>
+                                @foreach (var n in CountChoices)
+                                {
+                                    <label class="cm-fanout__item">
+                                        <input type="radio" name="cm-add-count" checked="@(_addCount == n)"
+                                               @onchange="() => _addCount = n" />
+                                        <span>@n</span>
+                                    </label>
+                                }
+                            </div>
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button" @onclick="() => GenerateKind(adding)">
+                                    @AddButtonLabel(adding)
+                                </button>
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="CancelAdd">
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    }
                 </div>
             }
 
@@ -293,13 +335,32 @@
     /// Kinds this run is still printing that have no card yet — each renders as a ghost
     /// card in its lane, so the board always shows that content is on the way (ADR-F13).
     /// </summary>
-    private IReadOnlyList<string> PendingKinds =>
-        !PressRun.IsActiveFor(CampaignId) || !PressRun.IsRunning
-            ? []
-            : [.. PressRun.Kinds.Where(k =>
-                ArtifactDisplay.OnBoard(k)
-                && PressRun.Progress?.Items.Any(i => i.Kind == k) != true
-                && !Campaign.Artifacts.Any(a => ArtifactDisplay.Resolve(a.Kind).Kind == k))];
+    /// <summary>
+    /// Ghost cards for work still in flight. Counted rather than keyed on presence: a run that
+    /// adds a SECOND blog is a run whose kind the board already shows, so a presence check made
+    /// every added piece invisible while it printed. One ghost per copy still outstanding.
+    /// </summary>
+    private IReadOnlyList<string> PendingKinds
+    {
+        get
+        {
+            if (!PressRun.IsActiveFor(CampaignId) || !PressRun.IsRunning)
+            {
+                return [];
+            }
+
+            var ghosts = new List<string>();
+            foreach (var kind in PressRun.Kinds.Where(ArtifactDisplay.OnBoard))
+            {
+                var done = PressRun.Progress?.Items.Count(i => i.Kind == kind) ?? 0;
+                for (var i = done; i < PressRun.Copies; i++)
+                {
+                    ghosts.Add(kind);
+                }
+            }
+            return ghosts;
+        }
+    }
 
     /// <summary>One lane per category, carrying both real cards and in-flight ghosts.</summary>
     private IEnumerable<(string Name, List<ArtifactPreviewResponse> Cards, List<string> GhostKinds)> Lanes
@@ -378,28 +439,39 @@
         ["blog", "social", "email-sequence", "newsletter", "landing-page", "show-notes",
          "clip-suggestions", "seo-brief"];
 
-    private IEnumerable<string> MissingKinds
+    private static readonly int[] CountChoices = [1, 2, 3, 5];
+
+    private string? _addKind;
+    private string _addAngle = string.Empty;
+    private int _addCount = 1;
+
+    /// <summary>How many of a kind the campaign already holds; "social" counts the set.</summary>
+    private int CountOf(string kind) => kind == "social"
+        ? ArtifactDisplay.SocialKinds.Min(k => Campaign.Artifacts.Count(a => a.Kind == k))
+        : Campaign.Artifacts.Count(a => ArtifactDisplay.Resolve(a.Kind).Kind == kind);
+
+    private void ToggleAdd(string kind)
     {
-        get
-        {
-            var have = Campaign.Artifacts.Select(a => a.Kind).ToHashSet(StringComparer.Ordinal);
-            foreach (var kind in AllKinds)
-            {
-                var satisfied = kind == "social"
-                    ? ArtifactDisplay.SocialKinds.All(have.Contains)
-                    : have.Contains(kind);
-                if (!satisfied)
-                {
-                    yield return kind;
-                }
-            }
-        }
+        _addKind = _addKind == kind ? null : kind;
+        _addAngle = string.Empty;
+        _addCount = 1;
+    }
+
+    private void CancelAdd() => _addKind = null;
+
+    private string AddButtonLabel(string kind)
+    {
+        var noun = kind == "social" ? "social set" : ArtifactDisplay.KindLabel(kind).ToLowerInvariant();
+        var verb = CountOf(kind) > 0 ? "Add" : "Print";
+        return _addCount == 1 ? $"{verb} 1 {noun}" : $"{verb} {_addCount} {noun}s";
     }
 
     /// <summary>
     /// Prints one kind on demand — the owner's "generate the rest when I ask, not up
     /// front". Every press, even a single kind, rides the Press Run so the panel
     /// narrates it live: queued → printing → ✓ with timing, never a dead button.
+    /// The angle rides as the run's brief, which is the same channel Focus mode's
+    /// steering box already uses.
     /// </summary>
     private void GenerateKind(string kind)
     {
@@ -409,7 +481,9 @@
         }
 
         var kinds = kind == "social" ? ArtifactDisplay.SocialKinds : [kind];
-        PressRun.Start(CampaignId, transcriptId, null, kinds);
+        var angle = string.IsNullOrWhiteSpace(_addAngle) ? null : _addAngle.Trim();
+        PressRun.Start(CampaignId, transcriptId, angle, kinds, _addCount);
+        _addKind = null;
     }
 
     private void DismissRun() => PressRun.Acknowledge();

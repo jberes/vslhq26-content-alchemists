@@ -250,7 +250,88 @@ public sealed class MediaEngineTests
         }
     }
 
+    /// <summary>
+    /// Captions used to be burned 260px from the bottom of a 1920px canvas — inside TikTok's
+    /// own caption/handle/button stack, which occupies roughly the lowest 320px. Text partly
+    /// underneath the platform UI is unreadable, and 85% of short-form is watched muted, so
+    /// this is the content rather than a garnish.
+    /// </summary>
+    [Fact]
+    public void Captions_are_placed_clear_of_the_platform_chrome()
+    {
+        var path = ClipExporter.WriteAss(
+            [new TranscriptSegment("s01", 0, 2, null, "Deploy time, halved")],
+            clipStart: 0, clipEnd: 3);
+
+        try
+        {
+            var ass = File.ReadAllText(path);
+
+            // The canvas the margins are relative to must match the output, or every size
+            // in the style sheet is scaled against libass's 384×288 default.
+            Assert.Contains($"PlayResX: {ClipExporter.VerticalWidth}", ass, StringComparison.Ordinal);
+            Assert.Contains($"PlayResY: {ClipExporter.VerticalHeight}", ass, StringComparison.Ordinal);
+            Assert.Contains("ScaledBorderAndShadow: yes", ass, StringComparison.Ordinal);
+
+            // Clear of the ~320px bottom stack, with room to spare.
+            Assert.True(ClipExporter.CaptionMarginV >= 400,
+                $"Captions sit {ClipExporter.CaptionMarginV}px from the bottom — inside platform chrome.");
+            Assert.Contains($",{ClipExporter.CaptionMarginV},", ass, StringComparison.Ordinal);
+
+            // Big enough to read on a phone at arm's length.
+            Assert.True(ClipExporter.CaptionFontSize >= 70,
+                $"Caption size {ClipExporter.CaptionFontSize} is subtitle-sized, not short-form-sized.");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Loudness, measured on the real output rather than asserted from the argument list.
+    /// Platforms normalize to about -14 LUFS; a clip left at whatever the source happened to
+    /// be arrives noticeably louder or quieter than the feed around it.
+    /// </summary>
+    [Fact]
+    public async Task An_exported_clip_is_normalised_to_the_social_loudness_target()
+    {
+        SkipUnlessToolingPresent();
+        var video = await SynthesizeVideoAsync();
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+
+        var output = await ClipExporter.ExportAsync(
+            new ClipExportRequest(video, 1.0, 8.0, ReEncode: true, CropVertical: true,
+                Captions: null, outputDir),
+            null,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var loudness = await MeasureLoudnessAsync(output);
+            // Single-pass loudnorm lands close but not exactly on target; the point is that
+            // it is in the social band rather than at broadcast -24.
+            Assert.InRange(loudness, -18.0, -10.0);
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
     // ---- fixtures ---------------------------------------------------------------
+
+    /// <summary>Integrated loudness (LUFS) of a file, via ffmpeg's EBU R128 meter.</summary>
+    private static async Task<double> MeasureLoudnessAsync(string path)
+    {
+        var (_, stderr) = await Ffmpeg.RunAsync(
+            ["-hide_banner", "-i", path, "-af", "ebur128=framelog=verbose", "-f", "null", "-"],
+            null, null, TestContext.Current.CancellationToken, allowNonZeroExit: true);
+
+        var match = System.Text.RegularExpressions.Regex.Match(stderr, @"I:\s*(-?\d+(?:\.\d+)?)\s*LUFS");
+        Assert.True(match.Success, $"ffmpeg reported no integrated loudness. Output:\n{stderr[^Math.Min(600, stderr.Length)..]}");
+        return double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
 
     /// <summary>Reads the encoded frame size back with ffprobe — the only honest check
     /// that a filter chain produced the canvas the platform expects.</summary>

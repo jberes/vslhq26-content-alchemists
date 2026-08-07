@@ -51,6 +51,12 @@ public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncL
         builder.UseSetting("Ai:Foundry:ApiKey", "");
         builder.UseSetting("Ai:Models:chat", "");
         builder.UseSetting("Ai:Models:image", "");
+        // Second-pass provider and knowledge gateway (ADR-020) stay off in tests: a run that
+        // silently reached a real Anthropic key or a real customer gateway would be both a
+        // surprise bill and a data-egress no test asked for.
+        builder.UseSetting("Ai:Models:chat-tech-edit", "");
+        builder.UseSetting("Ai:TextProviders:anthropic:Enabled", "false");
+        builder.UseSetting("KnowledgeBase:BaseUrl", "");
         builder.UseSetting("Seo:ApiKey", "");
         // High enough that functional tests never trip it; the rate-limit test
         // uses its own factory with a tiny limit.

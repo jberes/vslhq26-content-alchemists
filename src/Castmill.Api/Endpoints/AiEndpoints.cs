@@ -5,6 +5,8 @@ using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Knowledge;
+using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
@@ -35,6 +37,10 @@ public static class AiEndpoints
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
         group.MapPost("/campaigns/{campaignId:guid}/generate/{kind}", GenerateOneAsync)
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
+        // Second pass over one existing artifact (ADR-020). Revises in place behind a
+        // revision snapshot, so unlike generate it returns the artifact, not a new row.
+        group.MapPost("/campaigns/{campaignId:guid}/artifacts/{artifactId:guid}/tech-edit", TechEditAsync)
+            .Validate<TechEditRequest>().RequireRateLimiting("ai");
         // B9.8: Press Run progress. A plain read, so it is not on the "ai" partition —
         // polling progress must never consume the generation budget.
         group.MapGet("/runs/{runId:guid}", RunAsync);
@@ -108,6 +114,9 @@ public static class AiEndpoints
         ClaimsPrincipal principal,
         IFoundryClientFactory clients,
         IImageProviderRegistry imageProviders,
+        IChatProviderRegistry textProviders,
+        IKnowledgeBaseClient knowledge,
+        IUserSecretsService secrets,
         IOptions<AiOptions> options,
         CancellationToken ct)
     {
@@ -137,13 +146,24 @@ public static class AiEndpoints
         // instead of letting the user watch a generate fail.
         var providers = await imageProviders.StatusAsync(userId, ct);
 
+        // Same idea for text (ADR-020): the Tech Edit button reads this so an unconfigured
+        // provider is a disabled control with a reason, never a failed click (G3).
+        var text = await textProviders.StatusAsync(userId, ct);
+        // Config plus a stored token. Deliberately not a live probe: /status is polled by
+        // every client on load, and a round trip to someone else's gateway on each one is a
+        // cost we would be imposing on them, not ourselves.
+        var knowledgeReady = knowledge.IsConfigured
+            && await secrets.GetAsync(userId, SecretKind.KnowledgeBaseToken, ct) is { Length: > 0 };
+
         return Results.Ok(new AiStatusResponse(
             credentials?.Source ?? "none",
             credentials is not null,
             models,
             options.Value.Speech.IsConfigured,
             probeResult,
-            [.. providers.Select(p => new ImageProviderReadiness(p.Name, p.Ready, p.Reason))]));
+            [.. providers.Select(p => new ImageProviderReadiness(p.Name, p.Ready, p.Reason))],
+            [.. text.Select(p => new TextProviderReadiness(p.Name, p.Ready, p.Reason))],
+            knowledgeReady));
     }
 
     private static IResult Log(ClaimsPrincipal principal, IPromptLog promptLog) =>
@@ -253,11 +273,12 @@ public static class AiEndpoints
 
         // Open the run row first: the client can start polling /ai/runs/{id} the
         // moment it has the id, while this request is still generating (B9.8).
-        var runId = await orchestrator.StartRunAsync(campaignId, request.Kinds, ct);
+        var runId = await orchestrator.StartRunAsync(campaignId, request.Kinds, ct, request.Count);
         response.Headers.Append("Castmill-Run-Id", runId.ToString());
 
         var results = await orchestrator.RunFanOutAsync(
-            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds, ct, runId);
+            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds, ct,
+            runId, request.Count);
 
         // Per-phase costs for the Press Run UI (G7).
         response.Headers.Append("Server-Timing",
@@ -297,6 +318,65 @@ public static class AiEndpoints
             return Results.NotFound();
         }
         return Results.Ok(await orchestrator.RunGeneratorAsync(userId, campaign, transcript, request.Brief, spec, ct));
+    }
+
+    /// <summary>
+    /// Runs the Tech Edit over one artifact (ADR-020). Follows the AI group's convention of
+    /// reporting a misconfigured provider as an unsuccessful result rather than a 500 — the
+    /// user pressed a button, and a 500 tells them nothing they can act on.
+    /// </summary>
+    private static async Task<IResult> TechEditAsync(
+        Guid campaignId,
+        Guid artifactId,
+        TechEditRequest request,
+        ClaimsPrincipal principal,
+        IAiOrchestrator orchestrator,
+        CastmillDbContext db,
+        HttpResponse response,
+        CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var artifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == artifactId && a.CampaignId == campaignId, ct);
+        if (artifact is null)
+        {
+            return Results.NotFound();
+        }
+
+        if (artifact.Kind.Equals("transcript", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                detail: "A transcript is source material, not an artifact to edit.");
+        }
+
+        // The pass re-cites transcript segments, so it must be shown the same transcript
+        // rendering pass 1 saw — segment ids differ between ingest paths (S1 vs s01).
+        var transcriptArtifact = await db.Artifacts
+            .Where(a => a.CampaignId == campaignId && a.Kind == "transcript")
+            .OrderBy(a => a.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (transcriptArtifact is null || TranscriptService.Parse(transcriptArtifact.ContentJson) is not { } transcript)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                detail: "This campaign has no readable transcript to check the edit against.");
+        }
+
+        var result = await orchestrator.RunTechEditAsync(
+            AuthEndpoints.GetUserId(principal), campaign, artifact, transcript,
+            request.Steering, request.UseKnowledgeBase, ct);
+
+        if (result.Success)
+        {
+            response.Headers.ETag = $"\"{result.Version}\"";
+        }
+        return Results.Ok(result);
     }
 
     // ---- Shared ----------------------------------------------------------------

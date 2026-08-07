@@ -57,10 +57,12 @@ public sealed class GenerationClient(ApiClient api)
     /// </summary>
     public Task<RunFinished> GenerateAsync(
         Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds,
-        CancellationToken ct = default) =>
+        int count = 1, CancellationToken ct = default) =>
         api.PostAsync<object, RunFinished>(
             $"api/v1/ai/campaigns/{campaignId}/generate",
-            new { transcriptArtifactId, brief, kinds },
+            // count, not repeated kinds: the server treats kinds as a set, so asking for
+            // "social-linkedin" three times in the array still prints one.
+            new { transcriptArtifactId, brief, kinds, count },
             anonymous: false,
             ct);
 
@@ -72,6 +74,20 @@ public sealed class GenerationClient(ApiClient api)
         api.PostAsync<object, RunItem>(
             $"api/v1/ai/campaigns/{campaignId}/generate/{Uri.EscapeDataString(kind)}",
             new { transcriptArtifactId, brief },
+            anonymous: false,
+            ct);
+
+    /// <summary>
+    /// Second pass over one artifact (backend ADR-020). Unlike <see cref="GenerateOneAsync"/>
+    /// this revises the artifact in place behind a revision snapshot, so the caller keeps its
+    /// artifact id and just takes the new version.
+    /// </summary>
+    public Task<TechEditResult> TechEditAsync(
+        Guid campaignId, Guid artifactId, string? steering, bool useKnowledgeBase,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, TechEditResult>(
+            $"api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/tech-edit",
+            new { steering, useKnowledgeBase },
             anonymous: false,
             ct);
 

@@ -112,14 +112,19 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         var grid = view.Find(".cm-board__more-grid");
         var chips = grid.QuerySelectorAll(".cm-print-chip");
 
-        // Blog exists already, so it is not offered; the rest of the on-demand set is.
-        Assert.Equal(7, chips.Length);
+        // EVERY on-demand kind is offered, including ones the campaign already has: a
+        // campaign with a blog is exactly the one that wants a second blog on another angle.
+        Assert.Equal(8, chips.Length);
         Assert.All(chips, chip =>
         {
             Assert.NotNull(chip.QuerySelector(".cm-print-chip__plus"));
             Assert.NotNull(chip.QuerySelector(".cm-print-chip__label"));
         });
         Assert.Contains(chips, c => c.TextContent.Contains("Social set (6)", StringComparison.Ordinal));
+
+        // The one you already own says so, so "another" has something to count from.
+        var blogChip = chips.Single(c => c.TextContent.Contains("Blog", StringComparison.Ordinal));
+        Assert.Equal("1", blogChip.QuerySelector(".cm-print-chip__count")!.TextContent);
     }
 
     [Fact]

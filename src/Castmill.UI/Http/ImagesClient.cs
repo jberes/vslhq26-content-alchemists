@@ -6,6 +6,9 @@ namespace Castmill.UI.Http;
 /// <summary>Result of placing a variant (and of a headline re-composite).</summary>
 public sealed record PlaceResult(ImageSlotResponse Slot, long? BlogVersion, bool? FontFallback);
 
+/// <summary>Where an editor-uploaded image ended up in the public container.</summary>
+public sealed record UploadedImage(string Url);
+
 /// <summary>Typed client for the image plan + studio (backend B9 / ADR-012/013/015).</summary>
 public sealed class ImagesClient(ApiClient api)
 {
@@ -90,4 +93,17 @@ public sealed class ImagesClient(ApiClient api)
     /// <summary>Provider readiness + model map for the studio's model gating (B9.5).</summary>
     public Task<AiStatusResponse> GetAiStatusAsync(CancellationToken ct = default) =>
         api.GetAsync<AiStatusResponse>("api/v1/ai/status", ct);
+
+    /// <summary>
+    /// Publishes an image pasted or dropped into the manuscript and returns its URL. The
+    /// document only ever holds the URL — base64 images are rejected by the editor because
+    /// they would blow the artifact's content cap and every export path.
+    /// </summary>
+    public Task<UploadedImage> UploadImageAsync(
+        Guid campaignId, string fileName, string contentType, string base64, CancellationToken ct = default) =>
+        api.PostAsync<object, UploadedImage>(
+            $"api/v1/campaigns/{campaignId}/images/upload",
+            new { fileName, contentType, base64 },
+            anonymous: false,
+            ct);
 }

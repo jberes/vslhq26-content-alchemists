@@ -12,6 +12,7 @@ import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
+import { TableKit } from '@tiptap/extension-table';
 import { Markdown } from 'tiptap-markdown';
 
 /**
@@ -43,6 +44,10 @@ export function extensions({ placeholder = null } = {}) {
         Link.configure({ openOnClick: false, autolink: false }),
         TaskList,
         TaskItem.configure({ nested: true }),
+        // GFM tables. Real markdown, so they survive the round trip and render natively on
+        // GitHub — unlike a toggle/details block, which has no markdown representation at
+        // all and would need html:false reversed to store it.
+        TableKit.configure({ table: { resizable: false } }),
         Markdown.configure({
             html: false,            // no HTML passthrough: the contract is markdown only
             tightLists: true,

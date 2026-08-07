@@ -8,6 +8,7 @@ using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Images;
+using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Services.Media;
 using Castmill.Api.Services.Publish;
 using Castmill.Api.Services.Secrets;
@@ -63,6 +64,12 @@ builder.Services.AddSingleton<IBlobSasService, BlobSasService>();
 builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
 builder.Services.AddSingleton<IPromptLog, PromptLog>();
 builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
+// Text-provider seam (ADR-020): Foundry serves every pass-1 generator; an optional
+// non-Foundry provider serves the second-pass Tech Edit so it crosses model families.
+builder.Services.AddTextProviders(builder.Configuration);
+builder.Services.Configure<KnowledgeBaseOptions>(
+    builder.Configuration.GetSection(KnowledgeBaseOptions.SectionName));
+builder.Services.AddScoped<IKnowledgeBaseClient, KnowledgeBaseClient>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<IBrandContextService, BrandContextService>();
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
@@ -86,6 +93,9 @@ builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.Fro
 builder.Services.AddHttpClient("broker").AddStandardResilienceHandler();
 builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
 builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
+    .AddStandardResilienceHandler();
+builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(60))
     .AddStandardResilienceHandler();
 
 builder.Services.AddDbContext<CastmillDbContext>(options =>

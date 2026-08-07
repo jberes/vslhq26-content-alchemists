@@ -27,6 +27,9 @@ public sealed class FoundryClientFactory(
     IUserSecretsService secrets,
     IOptions<AiOptions> options) : IFoundryClientFactory
 {
+    /// <summary>Model alias for the second-pass Tech Edit (ADR-020).</summary>
+    public const string TechEditAlias = "chat-tech-edit";
+
     private readonly AiOptions _options = options.Value;
 
     public async Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct)
@@ -96,8 +99,11 @@ public sealed class FoundryClientFactory(
     {
         if (!_options.Models.TryGetValue(modelAlias, out var value) || string.IsNullOrWhiteSpace(value))
         {
-            // chat-audit intentionally falls back to chat when unset.
-            if (modelAlias.Equals("chat-audit", StringComparison.OrdinalIgnoreCase))
+            // The second-opinion aliases intentionally fall back to chat when unset, so a
+            // deployment that has not configured them still gets a (same-family) pass rather
+            // than a failure.
+            if (modelAlias.Equals("chat-audit", StringComparison.OrdinalIgnoreCase)
+                || modelAlias.Equals(TechEditAlias, StringComparison.OrdinalIgnoreCase))
             {
                 return ResolveMapping("chat");
             }

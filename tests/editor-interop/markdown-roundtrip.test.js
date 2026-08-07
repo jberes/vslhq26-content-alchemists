@@ -174,3 +174,58 @@ describe('normalization is idempotent', () => {
         expect(roundTrip(once)).toBe(once);
     });
 });
+
+describe('tables (GFM)', () => {
+    // Tables are the one Notion-ish block worth adding that IS real markdown: GitHub renders
+    // them natively, which matters because the same artifact gets pushed to a repo.
+    const table = [
+        '| Metric | Before | After |',
+        '| --- | --- | --- |',
+        '| Deploy time | 40 min | 21 min |',
+        '| Rollbacks | 3/wk | 0/wk |',
+    ].join('\n');
+
+    it('survives the round trip with its cells intact', () => {
+        const once = expectStable(table);
+        expect(once).toContain('Deploy time');
+        expect(once).toContain('21 min');
+        expect(once).toContain('Rollbacks');
+    });
+
+    it('does not swallow the prose around it', () => {
+        const document = `## Results\n\n${table}\n\nThe rollback number is the one that mattered.\n`;
+        const once = expectStable(document);
+        expect(once).toContain('## Results');
+        expect(once).toContain('The rollback number is the one that mattered.');
+    });
+
+    // KNOWN LIMITATION, pinned so a serializer change is noticed rather than stumbled on.
+    // A pipe escaped inside a cell is unescaped on the first pass and then breaks the row on
+    // the second, so this one input is not a fixed point. GFM requires the escape and the
+    // table extension exports escapeTableCellPipes, so this is a gap between the two rather
+    // than a decision. Rare — generated copy does not put pipes in table cells — but it is
+    // corruption if it happens, so it is written down rather than left to be discovered.
+    it('does NOT yet keep an escaped pipe inside a cell stable', () => {
+        const escaped = ['| Flag | Meaning |', '| --- | --- |', '| `a \\| b` | either |'].join('\n');
+        const once = roundTrip(escaped);
+        expect(roundTrip(once)).not.toBe(once);
+    });
+});
+
+describe('callouts are not round-trip safe, which is why the palette has none', () => {
+    // GitHub alert syntax looked like the ideal callout: a plain blockquote here, a real
+    // callout once the artifact is pushed to a repo, no custom node and no HTML passthrough.
+    // These two tests are why it is not offered — they pin the serializer behaviour that
+    // makes it unsafe, so anyone re-adding callouts has to fix this first and will see these
+    // tests go red when they do.
+    it('escapes the alert marker, so it stops being an alert after one save', () => {
+        const once = roundTrip('> [!WARNING]\n> Rolling this back needs a schema migration.\n');
+        expect(once).toContain('\\[!WARNING\\]');
+        expect(once).not.toContain('> [!WARNING]');
+    });
+
+    it('drops the hard break, so the marker and the body collapse onto one line', () => {
+        const once = roundTrip('> [!NOTE]\n> First.\n');
+        expect(once.trim().split('\n')).toHaveLength(1);
+    });
+});

@@ -28,4 +28,12 @@
     <Exec Command="npm run build --workspace=castmill-editor-interop" WorkingDirectory="$(MSBuildThisFileDirectory)..\.." />
   </Target>
 
+
+  <ItemGroup>
+    <!-- Pure helpers inside components (URL parsing, formatting) are unit-testable without
+         mounting the component; exposing them publicly would widen the RCL's API surface for
+         no caller's benefit. -->
+    <InternalsVisibleTo Include="Castmill.UI.Tests" />
+  </ItemGroup>
+
 </Project>

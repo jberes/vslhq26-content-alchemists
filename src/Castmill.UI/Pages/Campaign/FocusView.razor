@@ -4,6 +4,7 @@
    artifact's ETag. *@
 @page "/campaigns/{CampaignId:guid}/focus"
 @using Castmill.Core
+@using Castmill.Core.Ai
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Editor
@@ -14,6 +15,7 @@
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
+@inject ImagesClient Images
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -130,7 +132,63 @@
                             OnCommit="CommitAsync"
                             OnChanged="MarkDirty"
                             OnHeadings="OnHeadings"
+                            OnRequestMedia="OpenMediaDialog"
+                            OnImageFile="UploadDroppedImageAsync"
                             @ref="_editor" />
+
+                @if (_mediaDialog is { } media)
+                {
+                    <div class="cm-modal" role="presentation" @onclick="CloseMediaDialog">
+                        <div class="cm-modal__panel" role="dialog" aria-modal="true"
+                             aria-labelledby="cm-media-title" tabindex="-1"
+                             @onclick:stopPropagation>
+                            <h2 id="cm-media-title" class="cm-front__block-title">
+                                @(media == "youtube" ? "Insert a YouTube video" : "Insert an image")
+                            </h2>
+
+                            @if (media == "image" && CampaignImages.Any())
+                            {
+                                @* This campaign's own generated images first: they are almost
+                                   always what the writer means, and pasting a blob URL by hand
+                                   is exactly the friction the Image Studio already removed. *@
+                                <span class="cm-kicker">From this campaign</span>
+                                <ul class="cm-media__picks">
+                                    @foreach (var slot in CampaignImages)
+                                    {
+                                        <li>
+                                            <button type="button" class="cm-media__pick"
+                                                    @onclick="() => InsertImageAsync(slot.PublishedUrl!, ArtifactDisplay.SlotLabel(slot.Kind))">
+                                                <img src="@slot.PublishedUrl" alt="" loading="lazy" />
+                                                <span class="cm-meta">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+                                            </button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+
+                            <label class="cm-field">
+                                <span class="cm-field__label">
+                                    @(media == "youtube" ? "YouTube URL or video id" : "Image URL")
+                                </span>
+                                <input class="cm-input" @bind="_mediaUrl" @bind:event="oninput"
+                                       placeholder="@(media == "youtube" ? "https://www.youtube.com/watch?v=…" : "https://…")" />
+                            </label>
+
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button"
+                                        disabled="@string.IsNullOrWhiteSpace(_mediaUrl)"
+                                        @onclick="ConfirmMediaAsync">Insert</button>
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick="CloseMediaDialog">Cancel</button>
+                            </div>
+
+                            @if (media == "image")
+                            {
+                                <p class="cm-meta">You can also paste or drag an image straight into the text.</p>
+                            }
+                        </div>
+                    </div>
+                }
                 }
 
                 <footer class="cm-focus__foot">
@@ -177,7 +235,30 @@
                                 @onclick="RegenerateAsync">
                             @(_regenerating ? "Regenerating…" : "Regenerate whole")
                         </button>
+                        @* Second pass, deliberately a different model family (ADR-020).
+                           Disabled with the reason rather than hidden, so an unconfigured
+                           provider explains itself instead of the button just not existing. *@
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@(_regenerating || !TechEditReady)"
+                                title="@TechEditReason"
+                                @onclick="TechEditAsync">
+                            @(_regenerating ? "Working…" : $"Tech Edit · {TechEditProvider}")
+                        </button>
                     </div>
+                    @if (KnowledgeBaseReady)
+                    {
+                        <label class="cm-fanout__item">
+                            <input type="checkbox" @bind="_useKnowledgeBase" />
+                            <span>Consult the knowledge base</span>
+                        </label>
+                    }
+                    @* Shown whether or not the button is live: "this will run on Foundry
+                       instead" is exactly the case where the control still works but the
+                       result is not the cross-family pass the user asked for. *@
+                    @if (TechEditReason is { Length: > 0 } reason)
+                    {
+                        <p class="cm-meta">@reason</p>
+                    }
                     @if (_producerLog.Count > 0)
                     {
                         <ul class="cm-log">
@@ -188,8 +269,9 @@
                         </ul>
                     }
                     <p class="cm-meta">
-                        Regenerate currently prints a <em>new take</em> as its own artifact
-                        (backend 🔶 5.7) — the filmstrip below only rings manual saves and restores.
+                        Regenerate prints a <em>new take</em> as its own artifact (backend 🔶 5.7).
+                        A Tech Edit revises <em>this</em> artifact in place and rings the filmstrip,
+                        so you can compare it against the take before it.
                     </p>
                 </div>
 
@@ -269,6 +351,31 @@
     private string _saveState = "Saved on blur";
     private string? _loadError;
     private bool _selecting;
+    private bool _useKnowledgeBase;
+    private AiStatusResponse? _aiStatus;
+
+    /// <summary>
+    /// The provider that would serve a Tech Edit. Foundry always can (the alias falls back to
+    /// "chat"), so the button is never dead — a configured second family just makes it a
+    /// genuine cross-model pass rather than a same-family one.
+    /// </summary>
+    private TextProviderReadiness? TechEditProviderStatus =>
+        _aiStatus?.TextProviders?.FirstOrDefault(p => p.Ready)
+        ?? _aiStatus?.TextProviders?.FirstOrDefault();
+
+    private string TechEditProvider => TechEditProviderStatus is { Ready: true, Name: var name } ? name : "Foundry";
+
+    private bool TechEditReady => _aiStatus?.EndpointConfigured == true;
+
+    private string? TechEditReason => _aiStatus is null
+        ? "Checking model configuration…"
+        : !_aiStatus.EndpointConfigured
+            ? "No model credentials configured, so there is nothing to run a second pass on."
+            : TechEditProviderStatus is { Ready: false, Reason: { Length: > 0 } reason }
+                ? $"Second-pass provider unavailable ({reason}) — this will run on Foundry instead."
+                : null;
+
+    private bool KnowledgeBaseReady => _aiStatus?.KnowledgeBaseReady == true;
 
     [Parameter] public Guid CampaignId { get; set; }
 
@@ -338,6 +445,27 @@
     }
 
     protected override void OnInitialized() => Campaign.Changed += OnChanged;
+
+    /// <summary>
+    /// Model readiness for the Tech Edit control. Best-effort: if /ai/status is unreachable
+    /// the button falls back to disabled-with-a-reason rather than taking the page down.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+        try
+        {
+            _aiStatus = await Images.GetAiStatusAsync();
+        }
+        catch (ApiException)
+        {
+            _aiStatus = null;
+        }
+        StateHasChanged();
+    }
 
     protected override Task OnParametersSetAsync() => SyncSelectionAsync();
 
@@ -640,6 +768,200 @@
             _regenerating = false;
             StateHasChanged();
         }
+    }
+
+    /// <summary>
+    /// The second pass (ADR-020). Unlike Regenerate this does NOT reload-and-jump: the
+    /// artifact keeps its id and takes a new version, so the manuscript is updated in place
+    /// and the filmstrip picks up the "tech-edit" ring — exactly what restoring a revision
+    /// already does.
+    /// </summary>
+    private async Task TechEditAsync()
+    {
+        if (_artifact is null)
+        {
+            return;
+        }
+
+        _regenerating = true;
+        _producerLog.Clear();
+        _producerLog.Add(_useKnowledgeBase
+            ? $"tech edit queued {_artifact.Kind} · consulting the knowledge base…"
+            : $"tech edit queued {_artifact.Kind} · second pass on {TechEditProvider}…");
+        StateHasChanged();
+
+        try
+        {
+            var result = await Generation.TechEditAsync(
+                CampaignId, _artifact.Id,
+                string.IsNullOrWhiteSpace(_steering) ? null : _steering,
+                _useKnowledgeBase);
+
+            if (!result.Success)
+            {
+                _producerLog.Add($"tech edit failed · {result.Error}");
+                Notifier.ShowError(result.Error ?? "Tech edit failed.");
+                return;
+            }
+
+            _producerLog.Add(
+                $"tech edited {_artifact.Kind} · {result.DurationMs} ms · {result.Provider}"
+                + (result.KnowledgeBaseUsed ? " · knowledge base consulted" : string.Empty)
+                + $" · {result.Changes.Count} change{(result.Changes.Count == 1 ? "" : "s")}");
+            foreach (var change in result.Changes)
+            {
+                _producerLog.Add($"  · {change}");
+            }
+
+            // Reload the artifact itself rather than the whole campaign: the id is unchanged,
+            // only its content and version moved.
+            var (updated, etag) = await Campaigns.GetArtifactAsync(CampaignId, _artifact.Id);
+            _artifact = updated;
+            _etag = etag;
+            _markdown = ArtifactContent.ToMarkdown(updated.ContentJson);
+            _saveState = $"Tech edited · v{result.Version}";
+            await LoadRevisionsAsync(_artifact.Id);
+            Notifier.ShowSuccess($"Tech edit applied · v{result.Version}.");
+        }
+        catch (ApiException ex)
+        {
+            _producerLog.Add($"tech edit failed · {ex.Message}");
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _regenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    // ---- Media insertion (roadmap 5.4) ----------------------------------------
+
+    private string? _mediaDialog;
+    private string _mediaUrl = string.Empty;
+
+    /// <summary>Filled image slots in this campaign — the first-class insert candidates.</summary>
+    private IEnumerable<ImageSlotResponse> CampaignImages =>
+        Campaign.ImageSlots.Where(s => s.State == "Filled" && !string.IsNullOrWhiteSpace(s.PublishedUrl));
+
+    private void OpenMediaDialog(string kind)
+    {
+        _mediaDialog = kind;
+        _mediaUrl = string.Empty;
+    }
+
+    private void CloseMediaDialog()
+    {
+        _mediaDialog = null;
+        _mediaUrl = string.Empty;
+    }
+
+    private async Task ConfirmMediaAsync()
+    {
+        var url = _mediaUrl.Trim();
+        if (url.Length == 0)
+        {
+            return;
+        }
+
+        if (_mediaDialog == "youtube")
+        {
+            var id = YouTubeId(url);
+            if (id is null)
+            {
+                Notifier.ShowError("That doesn't look like a YouTube URL or video id.");
+                return;
+            }
+            CloseMediaDialog();
+            if (_editor is not null)
+            {
+                await _editor.InsertYouTubeAsync(id, null);
+            }
+            return;
+        }
+
+        await InsertImageAsync(url, null);
+    }
+
+    private async Task InsertImageAsync(string url, string? alt)
+    {
+        CloseMediaDialog();
+        if (_editor is not null)
+        {
+            await _editor.InsertImageAsync(url, alt);
+        }
+    }
+
+    /// <summary>
+    /// A pasted or dropped file. The bytes go to the public container and only the URL ever
+    /// enters the document — the editor refuses base64 images for exactly this reason.
+    /// </summary>
+    private async Task UploadDroppedImageAsync(EditorImageUpload upload)
+    {
+        try
+        {
+            _saveState = "Uploading image…";
+            StateHasChanged();
+            var result = await Images.UploadImageAsync(
+                CampaignId, upload.FileName, upload.ContentType, upload.Base64);
+            if (_editor is not null)
+            {
+                await _editor.InsertImageAsync(result.Url, Path.GetFileNameWithoutExtension(upload.FileName));
+            }
+            _saveState = "Image inserted — commits on blur";
+        }
+        catch (ApiException ex)
+        {
+            _saveState = "Not saved";
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Pulls the 11-character video id out of the URL forms people actually paste. Returns
+    /// null rather than guessing — a wrong id renders a broken thumbnail into the artifact.
+    /// </summary>
+    internal static string? YouTubeId(string input)
+    {
+        var value = input.Trim();
+        if (value.Length == 11 && value.All(c => char.IsLetterOrDigit(c) || c is '-' or '_'))
+        {
+            return value;
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        if (uri.Host.EndsWith("youtu.be", StringComparison.OrdinalIgnoreCase))
+        {
+            var id = uri.AbsolutePath.Trim('/');
+            return id.Length == 11 ? id : null;
+        }
+
+        if (!uri.Host.Contains("youtube.", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        // /watch?v=…, /shorts/…, /embed/…
+        var v = uri.Query.TrimStart('?')
+            .Split('&')
+            .Select(pair => pair.Split('=', 2))
+            .FirstOrDefault(pair => pair.Length == 2 && pair[0] == "v")?[1];
+        if (v is { Length: 11 })
+        {
+            return v;
+        }
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var last = segments.LastOrDefault();
+        return last is { Length: 11 } ? last : null;
     }
 
     private void OnChanged() => InvokeAsync(async () =>

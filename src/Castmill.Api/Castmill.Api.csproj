@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Official Anthropic SDK, MIT. Used only by the second-pass Tech Edit (ADR-020):
+         it returns a Microsoft.Extensions.AI IChatClient, so ADR-005's "all AI behind
+         Microsoft.Extensions.AI" holds and no call site learns a second abstraction. -->
+    <PackageReference Include="Anthropic" Version="12.39.0" />
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />

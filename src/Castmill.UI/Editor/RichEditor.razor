@@ -31,6 +31,20 @@
     /// <summary>Raised whenever the heading structure changes; feeds the outline rail.</summary>
     [Parameter] public EventCallback<IReadOnlyList<EditorHeading>> OnHeadings { get; set; }
 
+    /// <summary>
+    /// Raised when the palette asks for media — "image" or "youtube". The dialog lives on
+    /// this side of the boundary, not in the bundle: the editor only ever receives the
+    /// finished src back through <see cref="InsertImageAsync"/>.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnRequestMedia { get; set; }
+
+    /// <summary>
+    /// Raised when an image file is pasted or dropped onto the surface. The bytes never enter
+    /// the document — base64 images are disallowed, and would blow both the artifact's size
+    /// cap and every export — so the host uploads and calls back with a URL.
+    /// </summary>
+    [Parameter] public EventCallback<EditorImageUpload> OnImageFile { get; set; }
+
     [Parameter] public string? Placeholder { get; set; }
 
     [Parameter] public bool Editable { get; set; } = true;
@@ -71,6 +85,15 @@
 
     [JSInvokable]
     public Task NotifyHeadingsAsync(EditorHeading[] headings) => OnHeadings.InvokeAsync(headings);
+
+    /// <summary>Palette asked for a media dialog. "image" | "youtube".</summary>
+    [JSInvokable]
+    public Task RequestMediaAsync(string kind) => OnRequestMedia.InvokeAsync(kind);
+
+    /// <summary>A pasted or dropped image file, base64-encoded for the interop hop.</summary>
+    [JSInvokable]
+    public Task UploadImageAsync(string fileName, string contentType, string base64) =>
+        OnImageFile.InvokeAsync(new EditorImageUpload(fileName, contentType, base64));
 
     /// <summary>Moves the caret to a heading — the outline rail's click target.</summary>
     public async Task GoToAsync(int position)

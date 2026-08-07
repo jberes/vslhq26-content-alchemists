@@ -127,6 +127,22 @@
                                 }
                             </div>
 
+                            @* A campaign can hold more than one blog — every regenerate prints a
+                               new take as its own artifact. Placing used to patch whichever blog
+                               was oldest, so ask only when it is genuinely ambiguous. *@
+                            @if (IsBlogSlot(slot2.Kind) && Blogs.Count > 1)
+                            {
+                                <div class="cm-studio__row">
+                                    <span class="cm-kicker">Place into</span>
+                                    <select class="cm-input" @bind="_targetBlogId" aria-label="Blog to place this image into">
+                                        @foreach (var blog in Blogs)
+                                        {
+                                            <option value="@blog.Id">@blog.Title</option>
+                                        }
+                                    </select>
+                                </div>
+                            }
+
                             <div class="cm-studio__row">
                                 <span class="cm-kicker">Variants</span>
                                 @foreach (var n in VariantChoices)
@@ -374,6 +390,7 @@
     private string? _headline;
     private bool _safeArea = true;
     private ImageVariantResponse? _openVariant;
+    private Guid? _targetBlogId;
     private string _steerNote = string.Empty;
     private ElementReference _dialogPanel;
     private bool _dialogNeedsFocus;
@@ -382,6 +399,23 @@
 
     private ImageSlotResponse? Selected =>
         Campaign.ImageSlots.FirstOrDefault(s => s.Id == _selectedId);
+
+    /// <summary>Blogs in the campaign, oldest first — the candidates a stub can be placed into.</summary>
+    private IReadOnlyList<ArtifactPreviewResponse> Blogs =>
+        [.. Campaign.Artifacts.Where(a => a.Kind == "blog").OrderBy(a => a.CreatedAt)];
+
+    /// <summary>
+    /// The blog whose <c>![stub:kind]()</c> markers a placement rewrites. This used to be
+    /// <c>Artifacts.FirstOrDefault(a =&gt; a.Kind == "blog")</c>, which is the OLDEST blog because
+    /// the preview is ordered by kind then creation — so with two blogs, placing an image for
+    /// the second one silently patched the first one's markdown.
+    /// </summary>
+    private Guid? TargetBlogId =>
+        _targetBlogId is { } picked && Blogs.Any(b => b.Id == picked) ? picked : Blogs.FirstOrDefault()?.Id;
+
+    /// <summary>Only these slot kinds have a stub marker in a blog; the rest place standalone.</summary>
+    private static bool IsBlogSlot(string kind) =>
+        kind.StartsWith("blog-", StringComparison.Ordinal);
 
     private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
 
@@ -679,8 +713,7 @@
         try
         {
             // The blog carries the ![stub:kind]() markers; if one exists, placing rewrites it.
-            var blogId = Campaign.Artifacts.FirstOrDefault(a => a.Kind == "blog")?.Id;
-            var result = await Images.PlaceAsync(CampaignId, slot.Id, variant.Id, blogId);
+            var result = await Images.PlaceAsync(CampaignId, slot.Id, variant.Id, TargetBlogId);
             CloseVariant();
             Notifier.ShowSuccess(result.BlogVersion is null
                 ? "Placed and published."

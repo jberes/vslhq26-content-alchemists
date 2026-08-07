@@ -22,6 +22,9 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     /// <summary>The kinds this run was asked for, in request order — the press panel's rows.</summary>
     public IReadOnlyList<string> Kinds { get; private set; } = [];
 
+    /// <summary>How many of each kind this run prints — the board draws one ghost per copy.</summary>
+    public int Copies { get; private set; } = 1;
+
     public RunProgress? Progress { get; private set; }
 
     public bool IsRunning { get; private set; }
@@ -34,7 +37,8 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     public bool IsActiveFor(Guid campaignId) =>
         CampaignId == campaignId && (IsRunning || Progress is not null);
 
-    public void Start(Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds)
+    /// <param name="copies">How many of each kind to print — "3 more LinkedIn posts".</param>
+    public void Start(Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds, int copies = 1)
     {
         ArgumentNullException.ThrowIfNull(kinds);
 
@@ -45,12 +49,13 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
 
         CampaignId = campaignId;
         Kinds = kinds;
+        Copies = copies;
         Progress = null;
         Error = null;
         IsRunning = true;
         Changed?.Invoke();
 
-        _ = RunAsync(campaignId, transcriptArtifactId, brief, kinds, _cts.Token);
+        _ = RunAsync(campaignId, transcriptArtifactId, brief, kinds, copies, _cts.Token);
     }
 
     /// <summary>Clears the finished run once the canvas has finished revealing it.</summary>
@@ -68,12 +73,12 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     public void Dispose() => _cts?.Cancel();
 
     private async Task RunAsync(
-        Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds, CancellationToken ct)
+        Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds, int copies, CancellationToken ct)
     {
         var startedAfter = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(10);
 
         // The long POST. Held as a task; its completion ends the loop below.
-        var generate = generation.GenerateAsync(campaignId, transcriptArtifactId, brief, kinds, ct);
+        var generate = generation.GenerateAsync(campaignId, transcriptArtifactId, brief, kinds, copies, ct);
 
         try
         {

@@ -20,6 +20,18 @@ public sealed record RenderImagesRequest(
 public sealed record RenderedImage(string Slot, string Url);
 
 /// <summary>
+/// An image pasted or dropped into the editor. Base64 rather than multipart because it
+/// arrives through a JS-interop hop, which cannot hand .NET a stream.
+/// </summary>
+public sealed record ImageUploadRequest(
+    [property: Required, MaxLength(260)] string FileName,
+    [property: Required, MaxLength(100)] string ContentType,
+    /// <summary>Bytes, base64, no data: prefix. Capped at ~11 MB encoded (8 MB decoded).</summary>
+    [property: Required, MaxLength(12_000_000)] string Base64);
+
+public sealed record ImageUploadResponse(string Url);
+
+/// <summary>
 /// B5.4: image-prompts artifact → generated WebP in the public container →
 /// blog ![stub:slot]() markers replaced with real URLs.
 /// </summary>
@@ -31,8 +43,86 @@ public static class ImageEndpoints
             .Validate<RenderImagesRequest>()
             .RequireAuthorization("TenantAllowed")
             .RequireRateLimiting("ai");
+        // Editor-side upload: an image pasted or dropped into the manuscript. Not on the
+        // "ai" partition — this costs storage, not model spend.
+        routes.MapPost("/api/v1/campaigns/{campaignId:guid}/images/upload", UploadAsync)
+            .Validate<ImageUploadRequest>()
+            .RequireAuthorization("TenantAllowed")
+            .RequireRateLimiting("writes");
         return routes;
     }
+
+    /// <summary>Largest image the editor will accept. Base64 inflates the body by ~33%.</summary>
+    internal const int MaxUploadBytes = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// Content types we will publish, each paired with the magic bytes that prove it. The
+    /// declared type is never trusted: this writes to a PUBLIC container, so a mislabelled
+    /// upload would be served to anyone with the URL as whatever the sniffer decides it is.
+    /// </summary>
+    private static readonly (string ContentType, string Extension, byte[] Magic)[] AllowedImages =
+    [
+        ("image/webp", "webp", [0x52, 0x49, 0x46, 0x46]),   // "RIFF" (…WEBP at offset 8)
+        ("image/png", "png", [0x89, 0x50, 0x4E, 0x47]),
+        ("image/jpeg", "jpg", [0xFF, 0xD8, 0xFF]),
+        ("image/gif", "gif", [0x47, 0x49, 0x46, 0x38]),
+    ];
+
+    private static async Task<IResult> UploadAsync(
+        Guid campaignId,
+        ImageUploadRequest request,
+        IPublicContentStore publicStore,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        if (!publicStore.IsConfigured)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "No public content container is configured, so images cannot be published.");
+        }
+
+        // Tenant-filtered by the global query filter — an id from another tenant is a 404.
+        if (!await db.Campaigns.AnyAsync(c => c.Id == campaignId, ct))
+        {
+            return Results.NotFound();
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(request.Base64);
+        }
+        catch (FormatException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, detail: "Image data is not valid base64.");
+        }
+
+        if (bytes.Length == 0 || bytes.Length > MaxUploadBytes)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status413PayloadTooLarge,
+                detail: $"Images must be between 1 byte and {MaxUploadBytes / (1024 * 1024)} MB.");
+        }
+
+        var match = AllowedImages.FirstOrDefault(a => StartsWith(bytes, a.Magic));
+        if (match.ContentType is null)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                detail: "Only PNG, JPEG, GIF and WebP images can be inserted.");
+        }
+
+        // The blob name comes from a GUID, never the user's filename: a filename reaches a
+        // public URL, and sanitizing one correctly is a losing game.
+        var path = $"campaigns/{campaignId}/images/uploads/{Guid.NewGuid():N}.{match.Extension}";
+        var url = await publicStore.PublishAsync(path, bytes, match.ContentType, ct);
+
+        return Results.Ok(new ImageUploadResponse(url.ToString()));
+    }
+
+    private static bool StartsWith(byte[] bytes, byte[] magic) =>
+        bytes.Length >= magic.Length && bytes.AsSpan(0, magic.Length).SequenceEqual(magic);
 
     private static async Task<IResult> RenderAsync(
         Guid campaignId,

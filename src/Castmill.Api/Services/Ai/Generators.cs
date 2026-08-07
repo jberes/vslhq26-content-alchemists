@@ -152,7 +152,11 @@ public static class Generators
             : new ValidationOutcome(true, []);
     }
 
-    private static ValidationOutcome ValidateCommon(
+    /// <summary>
+    /// The provenance contract every generator shares. Internal rather than private so the
+    /// Tech Edit can hold an unregistered kind to it instead of waving the pass through.
+    /// </summary>
+    internal static ValidationOutcome ValidateCommon(
         JsonElement json, TranscriptContent transcript,
         string? requireString = null, string? requireArray = null, int minItems = 0)
     {

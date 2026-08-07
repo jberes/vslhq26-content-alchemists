@@ -1013,6 +1013,10 @@
 }
 
 .cm-editor__slash-item {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    inline-size: 100%;
     padding: var(--cm-space-2) var(--cm-space-4);
     border: 0;
     background: transparent;
@@ -1026,6 +1030,187 @@
 .cm-editor__slash-item--active,
 .cm-editor__slash-item:hover {
     background: var(--cm-accent-wash);
+}
+
+/* Fixed-width glyph gutter so every label starts on the same x, whatever the icon. */
+.cm-editor__slash-icon {
+    flex: 0 0 auto;
+    inline-size: 2ch;
+    color: var(--cm-on-surface-muted);
+    font-family: var(--cm-font-mono);
+    text-align: center;
+}
+
+/* Group headings appear only in the unfiltered list: with three results left, three
+   headings above them is noise rather than structure. */
+.cm-editor__slash-group {
+    margin: 0;
+    padding: var(--cm-space-3) var(--cm-space-4) var(--cm-space-1);
+    color: var(--cm-on-surface-subtle);
+    font-size: var(--cm-text-meta);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.cm-editor__slash-empty {
+    margin: 0;
+    padding: var(--cm-space-3) var(--cm-space-4);
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-meta);
+}
+
+/* ---- Block gutter: drag handle + insert (F4) ------------------------------------- */
+
+/* Same load-bearing override as the slash menu: display:flex beats [hidden]. */
+.cm-editor__gutter[hidden] {
+    display: none;
+}
+
+.cm-editor__gutter {
+    position: absolute;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-1);
+    /* Sits in the margin to the LEFT of the block it points at, so it never reflows text. */
+    transform: translateX(calc(-100% - var(--cm-space-2)));
+}
+
+.cm-editor__gutter-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 1.4rem;
+    block-size: 1.4rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface-subtle);
+    font: inherit;
+    font-family: var(--cm-font-mono);
+    line-height: 1;
+    cursor: grab;
+}
+
+.cm-editor__gutter-add {
+    cursor: pointer;
+}
+
+.cm-editor__gutter-button:hover {
+    background: var(--cm-accent-wash);
+    color: var(--cm-accent);
+}
+
+.cm-editor__gutter-grip:active {
+    cursor: grabbing;
+}
+
+/* ---- Selection bubble menu (F4) --------------------------------------------------- */
+
+.cm-editor__bubble {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    box-shadow: var(--cm-shadow-lg);
+}
+
+.cm-editor__bubble-button {
+    inline-size: 1.75rem;
+    block-size: 1.75rem;
+    border: 0;
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cm-editor__bubble-button:hover {
+    background: var(--cm-accent-wash);
+}
+
+/* The toolbar reports state, not just actions: an already-bold selection says so. */
+.cm-editor__bubble-button--on {
+    background: var(--cm-accent-wash);
+    color: var(--cm-accent);
+}
+
+.cm-editor__bubble-bold { font-weight: 700; }
+.cm-editor__bubble-italic { font-style: italic; }
+.cm-editor__bubble-strike { text-decoration: line-through; }
+.cm-editor__bubble-code { font-family: var(--cm-font-mono); }
+
+/* ---- Insert-media dialog (F4 / story 5.4) ----------------------------------------- */
+
+.cm-media__picks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+    gap: var(--cm-space-3);
+    margin: var(--cm-space-2) 0 var(--cm-space-4);
+    padding: 0;
+    list-style: none;
+}
+
+.cm-media__pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    inline-size: 100%;
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.cm-media__pick:hover {
+    border-color: var(--cm-accent);
+    background: var(--cm-accent-wash);
+}
+
+.cm-media__pick img {
+    inline-size: 100%;
+    block-size: 4.5rem;
+    border-radius: var(--cm-radius-sm);
+    object-fit: cover;
+}
+
+/* ---- Tables in the manuscript (F4) ------------------------------------------------ */
+
+.cm-editor__surface table {
+    inline-size: 100%;
+    margin-block: var(--cm-space-4);
+    border-collapse: collapse;
+    font-size: var(--cm-text-meta);
+}
+
+.cm-editor__surface :is(th, td) {
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    text-align: start;
+    vertical-align: top;
+}
+
+.cm-editor__surface th {
+    background: var(--cm-surface-sunken);
+    font-weight: 600;
+}
+
+.cm-editor__surface .selectedCell::after {
+    position: absolute;
+    inset: 0;
+    background: var(--cm-accent-wash);
+    pointer-events: none;
+    content: '';
 }
 
 /* ---- Mill Floor canvas (F5) ----------------------------------------------------- */
@@ -1616,6 +1801,42 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* The chip stays available once you own one of a kind, so it carries how many you
+   already have — "add another" needs to say what "another" is being added to. */
+.cm-print-chip__count {
+    margin-inline-start: auto;
+    flex: 0 0 auto;
+    font-family: var(--cm-font-mono);
+}
+
+.cm-print-chip--active {
+    border-color: var(--cm-accent);
+    background: var(--cm-accent-wash);
+}
+
+.cm-board__add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--cm-space-4);
+    margin-block-start: var(--cm-space-4);
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-board__add-angle {
+    flex: 1 1 22ch;
+    min-inline-size: 0;
+}
+
+.cm-board__add-count {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
 }
 
 /* ---- SEO / AEO desk (F9) ---------------------------------------------------------- */

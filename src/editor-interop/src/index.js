@@ -6,34 +6,21 @@
 // with change, blur and heading events reported back through callbacks. Keeping the surface
 // this small is what makes the editor swappable forever (ADR-F03).
 
-import { Editor } from '@tiptap/core';
+import { Editor, Extension } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import { extensions, parse, serialize, roundTrip } from './markdown.js';
+import { mountSlashMenu, filterItems, SLASH_GROUPS } from './slash.js';
+import { mountGutter, blockMoveShortcuts } from './gutter.js';
+import { bubbleExtension } from './bubble.js';
 
-export { parse, serialize, roundTrip };
-
-/** Block types offered by the slash menu, in the order they appear. */
-const SLASH_ITEMS = [
-    { label: 'Heading 1', run: c => c.toggleHeading({ level: 1 }) },
-    { label: 'Heading 2', run: c => c.toggleHeading({ level: 2 }) },
-    { label: 'Heading 3', run: c => c.toggleHeading({ level: 3 }) },
-    { label: 'Paragraph', run: c => c.setParagraph() },
-    { label: 'Bullet list', run: c => c.toggleBulletList() },
-    { label: 'Numbered list', run: c => c.toggleOrderedList() },
-    { label: 'Task list', run: c => c.toggleTaskList() },
-    { label: 'Quote', run: c => c.toggleBlockquote() },
-    { label: 'Code block', run: c => c.toggleCodeBlock() },
-    { label: 'Divider', run: c => c.setHorizontalRule() },
-    { label: 'Bold', run: c => c.toggleBold() },
-    { label: 'Italic', run: c => c.toggleItalic() },
-];
+export { parse, serialize, roundTrip, filterItems, SLASH_GROUPS };
 
 /**
  * Mounts an editor into `element`.
  *
  * @param {HTMLElement} element host element, emptied on init
  * @param {string} markdown initial content
- * @param {object} callbacks { onChange, onBlur, onHeadings } — each optional
+ * @param {object} callbacks { onChange, onBlur, onHeadings, onRequestMedia } — each optional
  * @param {object} options { placeholder, editable }
  */
 export function init(element, markdown = '', callbacks = {}, options = {}) {
@@ -45,24 +32,48 @@ export function init(element, markdown = '', callbacks = {}, options = {}) {
         ? Placeholder.configure({ placeholder: options.placeholder })
         : null;
 
-    const editor = new Editor({
+    let editor = null;
+    const bubble = bubbleExtension(() => editor);
+
+    // Keyboard reorder. A drag-only affordance is unusable without a mouse, and Alt+↑/↓ is
+    // faster than dragging even with one.
+    const moveShortcuts = Extension.create({
+        name: 'castmillBlockMove',
+        addKeyboardShortcuts() {
+            return blockMoveShortcuts(this.editor);
+        },
+    });
+
+    editor = new Editor({
         element,
-        extensions: extensions({ placeholder }),
+        extensions: [
+            ...extensions({ placeholder }),
+            bubble.extension,
+            moveShortcuts,
+        ],
         content: markdown,
         editable: options.editable !== false,
         editorProps: {
             attributes: { class: 'cm-editor__surface', spellcheck: 'true' },
+            handlePaste: (_view, event) => handleMediaDrop(event.clipboardData, callbacks),
+            handleDrop: (_view, event) => handleMediaDrop(event.dataTransfer, callbacks),
         },
         onUpdate: () => {
             callbacks.onChange?.();
             emitHeadings();
         },
+        onSelectionUpdate: () => bubble.refresh(),
         // Persistence commits on blur, not per keystroke (Frontend-Architecture.md §3.3):
         // at most one keystroke-burst of work is ever at risk.
         onBlur: () => callbacks.onBlur?.(getMarkdown()),
     });
 
-    const slash = mountSlashMenu(editor, element);
+    element.appendChild(bubble.element);
+
+    const slash = mountSlashMenu(editor, element, {
+        onRequest: kind => callbacks.onRequestMedia?.(kind),
+    });
+    const gutter = mountGutter(editor, element, { onInsert: () => slash.openHere() });
 
     function getMarkdown() {
         return editor.storage.markdown.getMarkdown();
@@ -124,125 +135,33 @@ export function init(element, markdown = '', callbacks = {}, options = {}) {
         },
         destroy() {
             slash.destroy();
+            gutter.destroy();
+            bubble.element.remove();
             editor.destroy();
         },
     };
 }
 
 /**
- * The `/` slash menu. Implemented as a small DOM list rather than through TipTap's suggestion
- * plugin + a floating-ui dependency: twelve static items do not need either, and every
- * kilobyte counts against the < 250 KB gzip budget (story 5.1).
+ * Pasting or dropping an image file. The bytes cannot go into the document — base64 images
+ * are disallowed (they would blow both the artifact's size cap and every export), so the
+ * file is handed to .NET, uploaded, and comes back as a URL through insertImage.
+ *
+ * Returns true only when a file was claimed, so ordinary text paste is untouched.
  */
-function mountSlashMenu(editor, host) {
-    const menu = document.createElement('div');
-    menu.className = 'cm-editor__slash';
-    menu.setAttribute('role', 'listbox');
-    menu.hidden = true;
-    host.appendChild(menu);
-
-    let index = 0;
-    let open = false;
-
-    for (const [i, item] of SLASH_ITEMS.entries()) {
-        const option = document.createElement('button');
-        option.type = 'button';
-        option.className = 'cm-editor__slash-item';
-        option.textContent = item.label;
-        option.setAttribute('role', 'option');
-        option.addEventListener('mousedown', event => {
-            event.preventDefault();
-            choose(i);
-        });
-        menu.appendChild(option);
+function handleMediaDrop(transfer, callbacks) {
+    const file = [...(transfer?.files ?? [])].find(f => f.type.startsWith('image/'));
+    if (!file || !callbacks.onImageFile) {
+        return false;
     }
 
-    function highlight() {
-        for (const [i, child] of [...menu.children].entries()) {
-            child.setAttribute('aria-selected', String(i === index));
-            child.classList.toggle('cm-editor__slash-item--active', i === index);
-        }
-    }
-
-    function show() {
-        open = true;
-        index = 0;
-        menu.hidden = false;
-        position();
-        highlight();
-    }
-
-    /** Places the menu at the caret — a palette pinned to a corner reads as a bug. */
-    function position() {
-        try {
-            const caret = editor.view.coordsAtPos(editor.state.selection.from);
-            const base = host.getBoundingClientRect();
-            menu.style.insetBlockStart = `${caret.bottom - base.top + 6}px`;
-            menu.style.insetInlineStart = `${Math.max(0, caret.left - base.left)}px`;
-        } catch {
-            // Selection not measurable (empty doc edge cases): keep the default spot.
-        }
-    }
-
-    function hide() {
-        open = false;
-        menu.hidden = true;
-    }
-
-    function choose(i) {
-        // Remove the "/" the user typed before applying the block change.
-        const { from } = editor.state.selection;
-        editor.chain().focus().deleteRange({ from: from - 1, to: from }).run();
-        SLASH_ITEMS[i].run(editor.chain().focus()).run();
-        hide();
-    }
-
-    function onKeyDown(event) {
-        if (!open) {
-            if (event.key === '/') {
-                // Only at the start of an empty block, so "and/or" mid-sentence is just text.
-                if (editor.state.selection.$from.parent.textContent.length === 0) {
-                    setTimeout(show, 0);
-                }
-            }
-
-            return;
-        }
-
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            index = (index + (event.key === 'ArrowDown' ? 1 : -1) + SLASH_ITEMS.length) % SLASH_ITEMS.length;
-            highlight();
-        } else if (event.key === 'Enter' || event.key === 'Tab') {
-            event.preventDefault();
-            choose(index);
-        } else if (event.key === 'Escape') {
-            event.preventDefault();
-            hide();
-        } else if (event.key.length === 1) {
-            // Typing anything else means it was not a command after all.
-            hide();
-        }
-    }
-
-    host.addEventListener('keydown', onKeyDown, true);
-
-    // Click-away and focus loss both close the menu; key handling alone left it stranded
-    // whenever the user clicked back into the text.
-    const onDocPointerDown = event => {
-        if (open && !menu.contains(event.target)) {
-            hide();
-        }
+    const reader = new FileReader();
+    reader.onload = () => {
+        const base64 = String(reader.result).split(',')[1] ?? '';
+        callbacks.onImageFile(file.name, file.type, base64);
     };
-    document.addEventListener('mousedown', onDocPointerDown, true);
-
-    return {
-        destroy() {
-            host.removeEventListener('keydown', onKeyDown, true);
-            document.removeEventListener('mousedown', onDocPointerDown, true);
-            menu.remove();
-        },
-    };
+    reader.readAsDataURL(file);
+    return true;
 }
 
 /**
@@ -260,5 +179,7 @@ export function initFor(element, markdown, dotnet, options = {}) {
         onChange: () => dotnet.invokeMethodAsync('NotifyChangedAsync'),
         onBlur: md => dotnet.invokeMethodAsync('NotifyBlurAsync', md),
         onHeadings: headings => dotnet.invokeMethodAsync('NotifyHeadingsAsync', headings),
+        onRequestMedia: kind => dotnet.invokeMethodAsync('RequestMediaAsync', kind),
+        onImageFile: (name, type, base64) => dotnet.invokeMethodAsync('UploadImageAsync', name, type, base64),
     }, options);
 }

@@ -36,6 +36,33 @@ public static class ClipExporter
     public const int VerticalHeight = 1920;
 
     /// <summary>
+    /// Where captions sit, measured from the BOTTOM of the 1920px canvas (ASS MarginV).
+    ///
+    /// This was 260, which put the text inside TikTok's own bottom chrome — the caption,
+    /// handle and button stack occupy roughly the lowest 320px, so the burned-in captions
+    /// were partly underneath it. Community-measured safe areas put a cross-platform box at
+    /// roughly y ∈ [230, 1500] from the top; 800 from the bottom lands captions around 55%
+    /// down, clear of Reels' top chrome and TikTok's bottom stack, and near where the eye
+    /// already is. Platforms move their UI several times a year, which is why this is a
+    /// named constant rather than a number buried in a style string.
+    /// </summary>
+    public const int CaptionMarginV = 800;
+
+    /// <summary>
+    /// Caption size on the 1080-wide canvas. The category norm is 70–110px and heavy; 64px
+    /// Arial read as a subtitle track rather than as short-form captions, and 85% of
+    /// short-form is watched muted, so the captions ARE the content.
+    /// </summary>
+    public const int CaptionFontSize = 84;
+
+    /// <summary>
+    /// Loudness target. FFmpeg's loudnorm defaults (I=-24, LRA=7, TP=-2) are broadcast
+    /// levels; every social platform normalizes to about -14 LUFS, so a clip mastered to the
+    /// default arrives audibly quieter than everything around it.
+    /// </summary>
+    public const string LoudnessFilter = "loudnorm=I=-14:TP=-1.5:LRA=11";
+
+    /// <summary>
     /// Scale-to-cover, then crop to the exact canvas. The earlier <c>crop=ih*9/16:ih</c>
     /// cropped in SOURCE pixels, so 1920×1080 came out 608×1080 — the right shape at the
     /// wrong resolution, which every platform then re-encodes. It also hard-failed on any
@@ -99,11 +126,20 @@ public static class ClipExporter
                     arguments.AddRange(["-vf", string.Join(',', filters)]);
                 }
 
+                // Loudness: every platform normalizes, so a clip left at the source's level
+                // arrives louder or quieter than the feed around it. Measured per clip, not
+                // per source — each clip is published on its own.
+                arguments.AddRange(["-af", LoudnessFilter]);
+
                 // yuv420p is the compatibility floor for every social player; without it a
-                // 4:4:4 source encodes to a file some platforms refuse.
+                // 4:4:4 source encodes to a file some platforms refuse. High profile, a
+                // closed GOP of 2× the frame rate and 48 kHz stereo audio are what YouTube's
+                // own upload recommendations ask for.
                 arguments.AddRange(
-                    ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k"]);
+                    ["-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
+                     "-profile:v", "high", "-pix_fmt", "yuv420p",
+                     "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+                     "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]);
             }
             else
             {
@@ -194,13 +230,22 @@ public static class ClipExporter
         var ass = new StringBuilder();
         ass.AppendLine("[Script Info]");
         ass.AppendLine("ScriptType: v4.00+");
-        ass.AppendLine("PlayResX: 1080");
-        ass.AppendLine("PlayResY: 1920");
+        // Must equal the OUTPUT resolution: every font size and margin below is relative to
+        // it, and libass's default 384×288 would scale the whole style sheet wrongly.
+        ass.AppendLine(CultureInfo.InvariantCulture, $"PlayResX: {VerticalWidth}");
+        ass.AppendLine(CultureInfo.InvariantCulture, $"PlayResY: {VerticalHeight}");
+        ass.AppendLine("ScaledBorderAndShadow: yes");
+        // 2 = no wrapping at the smart-wrap points; long lines break on width alone, which
+        // is what short captions want.
+        ass.AppendLine("WrapStyle: 2");
         ass.AppendLine();
         ass.AppendLine("[V4+ Styles]");
         ass.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-        // Alignment 2 = bottom-centre; MarginV 260 of 1920 clears TikTok/Reels chrome.
-        ass.AppendLine("Style: Castmill,Arial,64,&H00F3F2F2,&H00202020,&H80000000,-1,3,1,2,60,60,260,1");
+        // Alignment 2 = bottom-centre. MarginV is measured from the bottom of the 1920px
+        // canvas; see CaptionMarginV for why it is 800 and not the 260 this used to be.
+        // Heavier outline (4) because these are read over moving video, not over black.
+        ass.AppendLine(CultureInfo.InvariantCulture,
+            $"Style: Castmill,Arial,{CaptionFontSize},&H00FFFFFF,&H00202020,&H80000000,-1,4,1,2,80,80,{CaptionMarginV},1");
         ass.AppendLine();
         ass.AppendLine("[Events]");
         ass.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
