@@ -605,14 +605,22 @@
     padding-block-start: var(--cm-space-2);
 }
 
-/* Kind sub-groups inside a lane: every artifact kind gets its own labelled row, so
+/* Kind sub-groups inside a lane: every artifact kind gets its own labelled column, so
    categories never visually mix (the pre-registry board dumped unmapped kinds into
-   Social). Groups stack vertically inside the lane's content column. */
+   Social) while the lane stays ONE horizontal row — a swimlane reads across, and
+   stacking the groups turned each lane into a tall column that buried the board. */
 .cm-lane__groups {
     display: flex;
-    flex-direction: column;
-    gap: var(--cm-space-3);
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--cm-space-6);
     min-inline-size: 0;
+}
+
+/* Each group is a column of cards under its kind label; groups sit side by side and the
+   board scrolls in-region, so a lane never grows taller than its cards. */
+.cm-lane__group {
+    flex: 0 0 auto;
 }
 
 .cm-lane__kind {
@@ -2263,4 +2271,18 @@
 
 .cm-wire__note {
     max-inline-size: 60ch;
+}
+
+/* Clip rows: an exported clip stays visibly done so a batch reads at a glance, and a
+   suggestion outside the short-form window says so rather than failing at upload time. */
+.cm-clips__clip--done {
+    border-inline-start: 2px solid var(--cm-status-published);
+}
+
+.cm-clips__length {
+    margin-inline-start: var(--cm-space-2);
+}
+
+.cm-clips__length--off {
+    color: var(--cm-warning);
 }

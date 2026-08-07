@@ -1,3 +1,4 @@
+using System.Globalization;
 using Castmill.Core.Ai;
 using Castmill.Media;
 
@@ -132,6 +133,100 @@ public sealed class MediaEngineTests
     }
 
     [Fact]
+    public async Task Vertical_export_is_exactly_1080x1920_from_a_landscape_source()
+    {
+        SkipUnlessToolingPresent();
+        var video = await SynthesizeVideoAsync(); // 1280×720
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+
+        var output = await ClipExporter.ExportAsync(
+            new ClipExportRequest(video, 1.0, 4.0, ReEncode: true, CropVertical: true,
+                Captions: null, outputDir),
+            null,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            // The old crop cut in SOURCE pixels, so 1280×720 came out 405×720 — the right
+            // shape at the wrong resolution. Platforms re-encode anything off-spec.
+            var (width, height) = await ProbeSizeAsync(output);
+            Assert.Equal(ClipExporter.VerticalWidth, width);
+            Assert.Equal(ClipExporter.VerticalHeight, height);
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Vertical_export_survives_a_source_taller_than_9_by_16()
+    {
+        SkipUnlessToolingPresent();
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+        var tall = Path.Combine(outputDir, "tall-source.mp4");
+        Directory.CreateDirectory(outputDir);
+        await Ffmpeg.RunAsync(
+            ["-y", "-f", "lavfi", "-i", "testsrc2=size=720x1600:rate=30:duration=4",
+             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", tall],
+            TimeSpan.FromSeconds(4), null, TestContext.Current.CancellationToken);
+
+        try
+        {
+            // crop=ih*9/16:ih asked for a 900 px crop from a 720 px frame and ffmpeg
+            // aborted: "Invalid too big or non positive size for width".
+            var output = await ClipExporter.ExportAsync(
+                new ClipExportRequest(tall, 0.5, 3.0, ReEncode: true, CropVertical: true,
+                    Captions: null, outputDir),
+                null,
+                TestContext.Current.CancellationToken);
+
+            var (width, height) = await ProbeSizeAsync(output);
+            Assert.Equal(ClipExporter.VerticalWidth, width);
+            Assert.Equal(ClipExporter.VerticalHeight, height);
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Publishing_copy_is_written_beside_the_clip()
+    {
+        SkipUnlessToolingPresent();
+        var video = await SynthesizeVideoAsync();
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+
+        var output = await ClipExporter.ExportAsync(
+            new ClipExportRequest(video, 1.0, 3.0, ReEncode: false, CropVertical: false,
+                Captions: null, outputDir,
+                new ClipMetadata(
+                    "Deploy time, halved",
+                    "How the team cut the pipeline down.",
+                    ["devops", "shipping"],
+                    "It cut deploy time in half."),
+                OutputName: "clip-01-vertical"),
+            null,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.Equal("clip-01-vertical.mp4", Path.GetFileName(output));
+
+            var sidecar = Path.ChangeExtension(output, ".txt");
+            var copy = await File.ReadAllTextAsync(sidecar, TestContext.Current.CancellationToken);
+            Assert.StartsWith("Deploy time, halved", copy, StringComparison.Ordinal);
+            Assert.Contains("#devops #shipping", copy, StringComparison.Ordinal);
+            Assert.Contains("hook:", copy, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Ass_subtitles_are_clip_relative_and_escape_override_braces()
     {
         // Pure function — no tooling needed.
@@ -156,6 +251,30 @@ public sealed class MediaEngineTests
     }
 
     // ---- fixtures ---------------------------------------------------------------
+
+    /// <summary>Reads the encoded frame size back with ffprobe — the only honest check
+    /// that a filter chain produced the canvas the platform expects.</summary>
+    private static async Task<(int Width, int Height)> ProbeSizeAsync(string path)
+    {
+        var ffprobe = Path.Combine(Path.GetDirectoryName(Ffmpeg.Find()!)!, "ffprobe");
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = ffprobe,
+            RedirectStandardOutput = true,
+            ArgumentList =
+            {
+                "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-of", "csv=p=0", path,
+            },
+        })!;
+
+        var output = await process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        var parts = output.Trim().Split(',');
+        return (int.Parse(parts[0], CultureInfo.InvariantCulture),
+                int.Parse(parts[1], CultureInfo.InvariantCulture));
+    }
 
     private static void SkipUnlessToolingPresent()
     {

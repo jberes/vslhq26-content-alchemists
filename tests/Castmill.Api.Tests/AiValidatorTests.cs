@@ -72,6 +72,37 @@ public sealed class AiValidatorTests
     }
 
     [Fact]
+    public void Clips_outside_the_short_form_window_warn_but_still_pass()
+    {
+        var spec = Generators.Find("clip-suggestions")!;
+
+        // 3 s and 19 s clips: both inside the source, both unusable as Shorts as-is.
+        var result = spec.Validate(Json("""
+            {"title":"t","clips":[
+              {"inSeconds":0,"outSeconds":3,"hook":"h","platformFit":["tiktok"]},
+              {"inSeconds":0,"outSeconds":19,"hook":"h","platformFit":["shorts"]}
+            ],"citations":["S1"]}
+            """), Transcript);
+
+        // A bad length is a note to the human, not a reason to sink the run.
+        Assert.True(result.Passed);
+        Assert.Single(result.Warnings, w => w.Contains("runs 3s", StringComparison.Ordinal));
+        Assert.All(result.Warnings, w => Assert.Contains("short-form window", w, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_clip_inside_the_short_form_window_warns_about_nothing()
+    {
+        var spec = Generators.Find("clip-suggestions")!;
+        var result = spec.Validate(Json("""
+            {"title":"t","clips":[{"inSeconds":2,"outSeconds":19,"hook":"h","clipTitle":"Deploy time, halved","platformFit":["shorts"]}],"citations":["S1"]}
+            """), Transcript);
+
+        Assert.True(result.Passed);
+        Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
     public void Model_json_parses_with_or_without_code_fences()
     {
         var bare = AiOrchestrator.ParseModelJson("""{"a":1}""");

@@ -45,19 +45,42 @@
                 <input type="checkbox" @bind="_reencode" /> <span>Frame-accurate (re-encode)</span>
             </label>
             <label class="cm-fanout__item">
-                <input type="checkbox" @bind="_vertical" /> <span>9:16 crop</span>
+                <input type="checkbox" @bind="_vertical" /> <span>Vertical 1080×1920</span>
             </label>
             <label class="cm-fanout__item">
                 <input type="checkbox" @bind="_captions" /> <span>Burn captions</span>
             </label>
+
+            @* One click for the whole set: exporting six clips used to be six clicks,
+               each waiting on the last. Sequential on purpose — parallel ffmpeg runs
+               just fight for the same cores and finish no sooner. *@
+            <button type="button" class="cm-button"
+                    disabled="@(!CanExport || _batchRunning)"
+                    @onclick="ExportAllAsync">
+                @(_batchRunning ? $"Exporting {_batchDone + 1} of {_clips.Count}…" : $"Export all {_clips.Count}")
+            </button>
         </div>
+
+        @if (_batchRunning || _batchDone > 0)
+        {
+            <div class="cm-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                 aria-valuenow="@BatchPercent">
+                <div class="cm-progress__fill" style="inline-size: @BatchPercent%"></div>
+            </div>
+        }
 
         <ul class="cm-clips__list">
             @foreach (var (clip, i) in _clips.Select((c, i) => (c, i)))
             {
-                <li class="cm-clips__clip">
+                <li class="cm-clips__clip @(_done.Contains(i) ? "cm-clips__clip--done" : "")">
                     <span class="cm-mono">@Clock(clip.InSeconds)–@Clock(clip.OutSeconds)</span>
-                    <span class="cm-clips__hook">@clip.Hook</span>
+                    <span class="cm-clips__hook">
+                        @(string.IsNullOrWhiteSpace(clip.ClipTitle) ? clip.Hook : clip.ClipTitle)
+                        <span class="cm-meta cm-clips__length @(clip.IsShortsLength ? "" : "cm-clips__length--off")">
+                            @($"{clip.OutSeconds - clip.InSeconds:F0}s")
+                            @(clip.IsShortsLength ? "" : " — outside the 15–60s window")
+                        </span>
+                    </span>
                     <span class="cm-chips">
                         @foreach (var platform in clip.PlatformFit)
                         {
@@ -65,32 +88,60 @@
                         }
                     </span>
                     <button type="button" class="cm-button cm-button--quiet"
-                            disabled="@(!Media.CanProcessLocally || Media.LastPicked is null || _exporting == i)"
+                            disabled="@(!CanExport || _batchRunning || _exporting == i)"
                             @onclick="() => ExportAsync(clip, i)">
-                        @(_exporting == i ? _exportStage : "Export")
+                        @(_exporting == i ? _exportStage : _done.Contains(i) ? "Re-export" : "Export")
                     </button>
                 </li>
             }
         </ul>
 
-        @if (_lastOutput is { } output)
+        @if (_lastFolder is { } folder)
         {
-            <p class="cm-meta">Saved to <span class="cm-mono">@output</span></p>
+            <p class="cm-meta">
+                Saved to <span class="cm-mono">@folder</span> — each clip ships with a
+                <span class="cm-mono">.txt</span> holding its title, description and tags.
+            </p>
         }
     }
 </div>
 
 @code {
-    private sealed record Clip(double InSeconds, double OutSeconds, string Hook, IReadOnlyList<string> PlatformFit);
+    /// <summary>The short-form window the generator is prompted and validated against
+    /// (Generators.MinClipSeconds/MaxClipSeconds) — repeated here so the row can flag a
+    /// clip the model returned anyway.</summary>
+    private const double MinShortsSeconds = 15;
+    private const double MaxShortsSeconds = 60;
+
+    private sealed record Clip(
+        double InSeconds,
+        double OutSeconds,
+        string Hook,
+        string? ClipTitle,
+        string? Description,
+        IReadOnlyList<string> Hashtags,
+        IReadOnlyList<string> PlatformFit)
+    {
+        public double LengthSeconds => OutSeconds - InSeconds;
+
+        public bool IsShortsLength => LengthSeconds >= MinShortsSeconds && LengthSeconds <= MaxShortsSeconds;
+    }
 
     private readonly List<Clip> _clips = [];
+    private readonly HashSet<int> _done = [];
 
     private bool _reencode = true;
     private bool _vertical = true;
     private bool _captions = true;
     private int _exporting = -1;
     private string _exportStage = "Exporting…";
-    private string? _lastOutput;
+    private string? _lastFolder;
+    private bool _batchRunning;
+    private int _batchDone;
+
+    private bool CanExport => Media.CanProcessLocally && Media.LastPicked is not null;
+
+    private int BatchPercent => _clips.Count == 0 ? 0 : (int)(100.0 * _batchDone / _clips.Count);
 
     /// <summary>The clips artifact's ContentJson.</summary>
     [Parameter, EditorRequired] public string ContentJson { get; set; } = string.Empty;
@@ -110,6 +161,13 @@
                         clip.GetProperty("inSeconds").GetDouble(),
                         clip.GetProperty("outSeconds").GetDouble(),
                         clip.TryGetProperty("hook", out var hook) ? hook.GetString() ?? "" : "",
+                        // Publishing copy is newer than the first clips artifacts, so every
+                        // field is optional: an older artifact still renders and exports.
+                        clip.TryGetProperty("clipTitle", out var title) ? title.GetString() : null,
+                        clip.TryGetProperty("description", out var description) ? description.GetString() : null,
+                        clip.TryGetProperty("hashtags", out var tags) && tags.ValueKind == JsonValueKind.Array
+                            ? tags.EnumerateArray().Select(t => t.GetString() ?? "").Where(t => t.Length > 0).ToList()
+                            : [],
                         clip.TryGetProperty("platformFit", out var fit)
                             ? fit.EnumerateArray().Select(p => p.GetString() ?? "").ToList()
                             : []));
@@ -126,13 +184,79 @@
 
     private async Task ExportAsync(Clip clip, int index)
     {
-        if (Media.LastPicked is not { } source)
+        try
+        {
+            var output = await ExportOneAsync(clip, index);
+            if (output is not null)
+            {
+                Notifier.ShowSuccess($"Clip exported · {System.IO.Path.GetFileName(output)}");
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Exports every suggestion in order. Sequential by design: ffmpeg already saturates
+    /// the cores, so running six at once finishes no sooner and makes progress unreadable.
+    /// One failure is reported and the rest still run — the same partial-failure rule the
+    /// generation fan-out uses.
+    /// </summary>
+    private async Task ExportAllAsync()
+    {
+        if (!CanExport || _clips.Count == 0)
         {
             return;
         }
 
+        _batchRunning = true;
+        _batchDone = 0;
+        var failures = new List<string>();
+
+        try
+        {
+            foreach (var (clip, index) in _clips.Select((c, i) => (c, i)))
+            {
+                try
+                {
+                    await ExportOneAsync(clip, index);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+                {
+                    failures.Add($"{Clock(clip.InSeconds)}: {ex.Message}");
+                }
+
+                _batchDone++;
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _batchRunning = false;
+            StateHasChanged();
+        }
+
+        if (failures.Count == 0)
+        {
+            Notifier.ShowSuccess($"{_clips.Count} clips exported.");
+        }
+        else
+        {
+            Notifier.ShowWarning(
+                $"{_clips.Count - failures.Count} of {_clips.Count} exported. {failures[0]}");
+        }
+    }
+
+    private async Task<string?> ExportOneAsync(Clip clip, int index)
+    {
+        if (Media.LastPicked is not { } source)
+        {
+            return null;
+        }
+
         _exporting = index;
-        _lastOutput = null;
 
         var progress = new Progress<PipelineProgress>(p =>
         {
@@ -148,17 +272,19 @@
                     .ToList()
                 : null;
 
-            _lastOutput = await Media.ExportClipAsync(
+            var output = await Media.ExportClipAsync(
                 source,
-                new ClipExportOptions(clip.InSeconds, clip.OutSeconds, _reencode, _vertical, _captions),
+                new ClipExportOptions(
+                    clip.InSeconds, clip.OutSeconds, _reencode, _vertical, _captions,
+                    new ClipPublishCopy(clip.ClipTitle, clip.Description, clip.Hashtags, clip.Hook),
+                    // Ordinal names keep a batch sorted the way the suggestions read.
+                    $"clip-{index + 1:00}{(_vertical ? "-vertical" : "")}"),
                 captionSegments,
                 progress);
 
-            Notifier.ShowSuccess($"Clip exported · {System.IO.Path.GetFileName(_lastOutput)}");
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
-        {
-            Notifier.ShowError(ex.Message);
+            _done.Add(index);
+            _lastFolder = System.IO.Path.GetDirectoryName(output);
+            return output;
         }
         finally
         {

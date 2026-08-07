@@ -74,8 +74,13 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(options);
 
-        var downloads = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        // One folder per source, under Downloads: a six-clip batch used to scatter six
+        // files (plus their metadata sidecars) into a folder that already has hundreds.
+        var outputDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Downloads",
+            "Castmill clips",
+            Path.GetFileNameWithoutExtension(source.FileName));
 
         var engineProgress = new Progress<MediaProgress>(p =>
             progress.Report(new PipelineProgress(p.Stage, p.Percent, p.Detail)));
@@ -88,7 +93,11 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
                 options.ReEncode,
                 options.CropVertical,
                 options.BurnCaptions ? captionSegments : null,
-                downloads),
+                outputDirectory,
+                options.PublishCopy is { } copy
+                    ? new ClipMetadata(copy.Title, copy.Description, copy.Hashtags, copy.Hook)
+                    : null,
+                options.OutputName),
             engineProgress,
             ct);
     }

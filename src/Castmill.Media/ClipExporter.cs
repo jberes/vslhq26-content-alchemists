@@ -10,19 +10,43 @@ public sealed record ClipExportRequest(
     double EndSeconds,
     /// <summary>Frame-accurate re-encode; false = fast stream copy (keyframe-aligned cuts).</summary>
     bool ReEncode,
-    /// <summary>Centre-crop to 9:16 for vertical platforms. Forces a re-encode.</summary>
+    /// <summary>Reframe to vertical 1080×1920 for Shorts/Reels/TikTok. Forces a re-encode.</summary>
     bool CropVertical,
     /// <summary>Transcript segments to burn as captions. Forces a re-encode.</summary>
     IReadOnlyList<TranscriptSegment>? Captions,
-    string OutputDirectory);
+    string OutputDirectory,
+    /// <summary>Written beside the clip as a .txt so the upload form can be filled from it.</summary>
+    ClipMetadata? Metadata = null,
+    /// <summary>Overrides the derived file stem, so a batch reads as clip-01, clip-02…</summary>
+    string? OutputName = null);
+
+/// <summary>Per-clip publishing copy — the title/description/tags an upload form wants.</summary>
+public sealed record ClipMetadata(
+    string? Title, string? Description, IReadOnlyList<string>? Hashtags, string? Hook);
 
 /// <summary>
-/// Desktop clip export (roadmap E7.5): stream-copy and re-encode modes, optional 9:16
-/// centre crop, optional burned ASS captions, always <c>+faststart</c> so the file streams
-/// before it has fully downloaded wherever it is posted.
+/// Desktop clip export (roadmap E7.5): stream-copy and re-encode modes, optional vertical
+/// reframe to a platform-exact 1080×1920, optional burned ASS captions, always
+/// <c>+faststart</c> so the file streams before it has fully downloaded wherever it is posted.
 /// </summary>
 public static class ClipExporter
 {
+    /// <summary>Short-form canvas — YouTube Shorts, Reels and TikTok all take 1080×1920.</summary>
+    public const int VerticalWidth = 1080;
+    public const int VerticalHeight = 1920;
+
+    /// <summary>
+    /// Scale-to-cover, then crop to the exact canvas. The earlier <c>crop=ih*9/16:ih</c>
+    /// cropped in SOURCE pixels, so 1920×1080 came out 608×1080 — the right shape at the
+    /// wrong resolution, which every platform then re-encodes. It also hard-failed on any
+    /// source TALLER than 9:16 (720×1600 asks for a 900 px crop from a 720 px frame:
+    /// "Invalid too big or non positive size for width"). Cover-then-crop yields exactly
+    /// 1080×1920 from landscape, square and tall sources alike — all three measured.
+    /// </summary>
+    internal static string VerticalFilter =>
+        $"scale={VerticalWidth}:{VerticalHeight}:force_original_aspect_ratio=increase," +
+        $"crop={VerticalWidth}:{VerticalHeight},setsar=1";
+
     public static async Task<string> ExportAsync(
         ClipExportRequest request, IProgress<MediaProgress>? progress, CancellationToken ct = default)
     {
@@ -35,10 +59,11 @@ public static class ClipExporter
 
         Directory.CreateDirectory(request.OutputDirectory);
 
-        var stem = Path.GetFileNameWithoutExtension(request.SourcePath);
-        var output = Path.Combine(
-            request.OutputDirectory,
-            $"{stem}-clip-{(int)request.StartSeconds}s-{(int)request.EndSeconds}s{(request.CropVertical ? "-916" : "")}.mp4");
+        var stem = request.OutputName is { Length: > 0 } named
+            ? Sanitize(named)
+            : $"{Path.GetFileNameWithoutExtension(request.SourcePath)}-clip-" +
+              $"{(int)request.StartSeconds}s-{(int)request.EndSeconds}s{(request.CropVertical ? "-916" : "")}";
+        var output = Path.Combine(request.OutputDirectory, $"{stem}.mp4");
 
         var clipLength = TimeSpan.FromSeconds(request.EndSeconds - request.StartSeconds);
         var mustEncode = request.ReEncode || request.CropVertical || request.Captions is { Count: > 0 };
@@ -58,9 +83,11 @@ public static class ClipExporter
                 var filters = new List<string>();
                 if (request.CropVertical)
                 {
-                    filters.Add("crop=ih*9/16:ih"); // centre crop; platform UI margins are the caption style's job
+                    filters.Add(VerticalFilter);
                 }
 
+                // Captions LAST: the ASS canvas is authored at 1080×1920, so it must be
+                // burned after the reframe or the text scales with the crop.
                 if (request.Captions is { Count: > 0 } captions)
                 {
                     assPath = WriteAss(captions, request.StartSeconds, request.EndSeconds);
@@ -72,7 +99,11 @@ public static class ClipExporter
                     arguments.AddRange(["-vf", string.Join(',', filters)]);
                 }
 
-                arguments.AddRange(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac"]);
+                // yuv420p is the compatibility floor for every social player; without it a
+                // 4:4:4 source encodes to a file some platforms refuse.
+                arguments.AddRange(
+                    ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k"]);
             }
             else
             {
@@ -88,6 +119,12 @@ public static class ClipExporter
                 progress?.Report(new MediaProgress(mustEncode ? "re-encoding clip" : "copying clip", p * 100)));
 
             await Ffmpeg.RunAsync(arguments, clipLength, percent, ct);
+
+            if (request.Metadata is { } metadata)
+            {
+                await WriteMetadataAsync(output, metadata, request, ct);
+            }
+
             progress?.Report(new MediaProgress("done", 100, output));
             return output;
         }
@@ -98,6 +135,52 @@ public static class ClipExporter
                 File.Delete(assPath);
             }
         }
+    }
+
+    /// <summary>
+    /// Drops the clip's publishing copy beside the file. Uploading is manual until a
+    /// channel integration exists, and retyping a title from another window is exactly the
+    /// kind of friction that makes a generated clip go unused.
+    /// </summary>
+    private static async Task WriteMetadataAsync(
+        string clipPath, ClipMetadata metadata, ClipExportRequest request, CancellationToken ct)
+    {
+        var sidecar = new StringBuilder();
+        sidecar.AppendLine(metadata.Title ?? Path.GetFileNameWithoutExtension(clipPath));
+        sidecar.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(metadata.Description))
+        {
+            sidecar.AppendLine(metadata.Description);
+            sidecar.AppendLine();
+        }
+
+        if (metadata.Hashtags is { Count: > 0 } tags)
+        {
+            sidecar.AppendLine(string.Join(' ', tags.Select(t => t.StartsWith('#') ? t : $"#{t}")));
+            sidecar.AppendLine();
+        }
+
+        sidecar.AppendLine(CultureInfo.InvariantCulture,
+            $"— cut from {Path.GetFileName(request.SourcePath)} at " +
+            $"{TimeSpan.FromSeconds(request.StartSeconds):h\\:mm\\:ss}–{TimeSpan.FromSeconds(request.EndSeconds):h\\:mm\\:ss}");
+        if (!string.IsNullOrWhiteSpace(metadata.Hook))
+        {
+            sidecar.AppendLine(CultureInfo.InvariantCulture, $"— hook: {metadata.Hook}");
+        }
+
+        await File.WriteAllTextAsync(
+            Path.ChangeExtension(clipPath, ".txt"), sidecar.ToString(), ct);
+    }
+
+    /// <summary>Keeps a model-written title from becoming an illegal file name.</summary>
+    private static string Sanitize(string name)
+    {
+        var cleaned = new string(name
+            .Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == ':' ? '-' : c)
+            .ToArray())
+            .Trim();
+        return cleaned.Length <= 80 ? cleaned : cleaned[..80].TrimEnd();
     }
 
     /// <summary>

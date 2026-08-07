@@ -88,9 +88,18 @@ public static class Generators
 
         specs.Add(new GeneratorSpec(
             "clip-suggestions",
-            """
-            Suggest 3-6 short vertical clips from the transcript. Use segment timings for in/out points; points MUST fall inside the transcript's time range.
-            JSON schema: { "title": string, "clips": [ { "inSeconds": number, "outSeconds": number, "hook": string, "platformFit": string[] } ], "citations": string[] }
+            $$"""
+            Suggest 3-6 vertical short-form clips (YouTube Shorts, Reels, TikTok) from the transcript.
+            Use segment timings for in/out points; points MUST fall inside the transcript's time range.
+            Each clip MUST run between {{MinClipSeconds}} and {{MaxClipSeconds}} seconds — that is the
+            short-form window, and a clip outside it will not be published as-is.
+            Pick moments that stand alone without setup: a concrete claim, a number, a story beat,
+            a contrarian take. Do not pick a moment that starts mid-sentence.
+            For each clip also write the copy its upload form needs:
+              "clipTitle": under 100 characters, no clickbait, states the payoff.
+              "description": 1-2 sentences.
+              "hashtags": 2-5 tags, no leading '#'.
+            JSON schema: { "title": string, "clips": [ { "inSeconds": number, "outSeconds": number, "hook": string, "clipTitle": string, "description": string, "hashtags": string[], "platformFit": string[] } ], "citations": string[] }
             """,
             ValidateClips));
 
@@ -178,6 +187,12 @@ public static class Generators
             : new ValidationOutcome(true, text.Length > cap * 0.95 ? [$"Post is within {cap - text.Length} chars of the cap."] : []);
     }
 
+    /// <summary>The short-form window every platform shares. Enforced as a warning, not a
+    /// fatal error: an over-long suggestion is still a usable moment a human can trim, and
+    /// sinking the whole run over one clip would cost a full fan-out.</summary>
+    internal const int MinClipSeconds = 15;
+    internal const int MaxClipSeconds = 60;
+
     private static ValidationOutcome ValidateClips(JsonElement json, TranscriptContent transcript)
     {
         var common = ValidateCommon(json, transcript, requireArray: "clips", minItems: 1);
@@ -186,6 +201,7 @@ public static class Generators
             return common;
         }
         var maxEnd = transcript.Segments.Max(s => s.EndSeconds);
+        var warnings = new List<string>(common.Warnings);
         foreach (var clip in json.GetProperty("clips").EnumerateArray())
         {
             if (!clip.TryGetProperty("inSeconds", out var inS) || !clip.TryGetProperty("outSeconds", out var outS))
@@ -199,8 +215,23 @@ public static class Generators
                 return new ValidationOutcome(false, [],
                     $"Clip [{start:F1}s–{end:F1}s] falls outside the source duration (0–{maxEnd:F1}s).");
             }
+
+            var length = end - start;
+            if (length < MinClipSeconds || length > MaxClipSeconds)
+            {
+                warnings.Add(
+                    $"Clip [{start:F0}s–{end:F0}s] runs {length:F0}s, outside the " +
+                    $"{MinClipSeconds}–{MaxClipSeconds}s short-form window — trim it before publishing.");
+            }
+
+            if (clip.TryGetProperty("clipTitle", out var title)
+                && title.ValueKind == JsonValueKind.String
+                && title.GetString() is { Length: > 100 })
+            {
+                warnings.Add("A clip title is over YouTube's 100-character limit and will be truncated.");
+            }
         }
-        return new ValidationOutcome(true, []);
+        return new ValidationOutcome(true, warnings);
     }
 
     private static ValidationOutcome ValidateSeoBrief(JsonElement json, TranscriptContent transcript)

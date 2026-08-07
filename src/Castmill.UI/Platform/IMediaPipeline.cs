@@ -17,8 +17,16 @@ public sealed record ClipExportOptions(
     double StartSeconds,
     double EndSeconds,
     bool ReEncode,
+    /// <summary>Reframe to a platform-exact vertical 1080×1920.</summary>
     bool CropVertical,
-    bool BurnCaptions);
+    bool BurnCaptions,
+    /// <summary>Publishing copy written beside the clip as a .txt (upload is still manual).</summary>
+    ClipPublishCopy? PublishCopy = null,
+    /// <summary>File stem, so a batch reads as clip-01, clip-02… instead of timestamps.</summary>
+    string? OutputName = null);
+
+public sealed record ClipPublishCopy(
+    string? Title, string? Description, IReadOnlyList<string>? Hashtags, string? Hook);
 
 /// <summary>
 /// The media seam between the shells (Roadmap §2.2). Desktop implements it with the local

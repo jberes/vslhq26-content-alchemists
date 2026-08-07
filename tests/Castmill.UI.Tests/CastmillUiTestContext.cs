@@ -28,7 +28,7 @@ public abstract class CastmillUiTestContext : BunitContext
         Services.AddSingleton<IUiStateStore>(UiState);
         Services.AddSingleton<IShellInfo>(Shell);
         Services.AddSingleton<IAuthTokenProvider>(Tokens);
-        Services.AddSingleton<IMediaPipeline>(new TestMediaPipeline());
+        Services.AddSingleton<IMediaPipeline>(Media);
 
         // Replace the real HttpClient with one that answers from Http's route table, so
         // AuthState can load /me without a network.
@@ -42,6 +42,8 @@ public abstract class CastmillUiTestContext : BunitContext
     protected TestAuthTokenProvider Tokens { get; } = new();
 
     protected StubHttpHandler Http { get; } = new();
+
+    protected TestMediaPipeline Media { get; } = new();
 
     /// <summary>Signs the fake user in and stubs /me, which is what most tests want.</summary>
     protected void SignInTestUser(string email = "demo@castmill.local")
@@ -193,16 +195,31 @@ public sealed class TestUiStateStore : IUiStateStore
     }
 }
 
-/// <summary>Media pipeline double: capability off, like the web shell.</summary>
+/// <summary>
+/// Media pipeline double. Capability is OFF by default, like the web shell; a test that
+/// exercises the desktop path calls <see cref="EnableLocalProcessing"/> and then reads
+/// <see cref="Exports"/> to assert what was cut.
+/// </summary>
 public sealed class TestMediaPipeline : IMediaPipeline
 {
-    public bool CanProcessLocally => false;
+    private bool _local;
 
-    public string? UnavailableReason => "Not available in tests.";
+    public bool CanProcessLocally => _local;
 
-    public PickedMedia? LastPicked => null;
+    public string? UnavailableReason => _local ? null : "Not available in tests.";
 
-    public Task<PickedMedia?> PickMediaAsync() => Task.FromResult<PickedMedia?>(null);
+    public PickedMedia? LastPicked { get; private set; }
+
+    /// <summary>Every clip export this session, in order — the batch's evidence.</summary>
+    public List<ClipExportOptions> Exports { get; } = [];
+
+    public void EnableLocalProcessing(string fileName = "webinar.mp4")
+    {
+        _local = true;
+        LastPicked = new PickedMedia($"/tmp/{fileName}", fileName, 1024);
+    }
+
+    public Task<PickedMedia?> PickMediaAsync() => Task.FromResult(LastPicked);
 
     public Task<LocalTranscription> TranscribeAsync(
         PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default) =>
@@ -211,8 +228,17 @@ public sealed class TestMediaPipeline : IMediaPipeline
     public Task<string> ExportClipAsync(
         PickedMedia source, ClipExportOptions options,
         IReadOnlyList<Castmill.Core.Ai.TranscriptSegment>? captionSegments,
-        IProgress<PipelineProgress> progress, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+        IProgress<PipelineProgress> progress, CancellationToken ct = default)
+    {
+        if (!_local)
+        {
+            throw new NotSupportedException("Not available in tests.");
+        }
+
+        Exports.Add(options);
+        progress.Report(new PipelineProgress("re-encoding clip", 100));
+        return Task.FromResult($"/tmp/Castmill clips/webinar/{options.OutputName ?? "clip"}.mp4");
+    }
 }
 
 public sealed class TestShellInfo : IShellInfo
