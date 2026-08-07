@@ -30,6 +30,8 @@ public sealed class CastmillDbContext(
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ClipJob> ClipJobs => Set<ClipJob>();
+    public DbSet<GitRepoProfile> GitRepoProfiles => Set<GitRepoProfile>();
+    public DbSet<GitPublication> GitPublications => Set<GitPublication>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -106,6 +108,31 @@ public sealed class CastmillDbContext(
                 .HasFilter("[ArtifactId] IS NULL")
                 .HasDatabaseName("IX_ImageSlots_Tenant_Campaign_Kind_NoArtifact");
             e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<GitRepoProfile>(e =>
+        {
+            e.Property(p => p.Name).HasMaxLength(200);
+            e.Property(p => p.Owner).HasMaxLength(100);
+            e.Property(p => p.Repo).HasMaxLength(100);
+            e.Property(p => p.BaseBranch).HasMaxLength(255);
+            e.Property(p => p.Preset).HasMaxLength(20);
+            e.Property(p => p.Mode).HasMaxLength(20);
+            e.HasIndex(p => new { p.TenantId, p.BrandId });
+            e.HasQueryFilter(p => p.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<GitPublication>(e =>
+        {
+            e.Property(p => p.Branch).HasMaxLength(255);
+            e.Property(p => p.CommitSha).HasMaxLength(64);
+            e.Property(p => p.PullRequestUrl).HasMaxLength(500);
+            e.Property(p => p.Status).HasMaxLength(20);
+            e.Property(p => p.ContentPath).HasMaxLength(500);
+            // Re-publishing an artifact to the same repo updates this row rather than
+            // opening a second branch and a second pull request.
+            e.HasIndex(p => new { p.TenantId, p.ArtifactId, p.RepoProfileId }).IsUnique();
+            e.HasQueryFilter(p => p.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<ScheduleEntry>(e =>

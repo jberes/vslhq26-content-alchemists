@@ -311,6 +311,79 @@ public sealed class BrandProfile : ITenantScoped
 }
 
 /// <summary>
+/// A GitHub repository generated content is published into (ADR-021, optional feature).
+///
+/// Scoped to a brand rather than a campaign: a repo is a property of the SITE, and a brand
+/// already models "one voice, one identity". A null <see cref="BrandId"/> is the tenant's
+/// default. The token is never on this row — it lives in secret custody
+/// (<c>SecretKind.GitHubToken</c>).
+/// </summary>
+public sealed class GitRepoProfile : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+
+    /// <summary>Null = the tenant-wide default.</summary>
+    public Guid? BrandId { get; set; }
+
+    public required string Name { get; set; }
+    public required string Owner { get; set; }
+    public required string Repo { get; set; }
+
+    /// <summary>Null resolves to the repository's own default branch.</summary>
+    public string? BaseBranch { get; set; }
+
+    /// <summary>hugo · jekyll · astro · nextjs · custom — drives the layout defaults.</summary>
+    public required string Preset { get; set; }
+
+    /// <summary>
+    /// Paths, file-name template, front-matter mapping and date format as typed JSON
+    /// (ADR-003), so adding a static-site preset costs no migration. Validated at the
+    /// boundary; the four generators differ enough that these are not cosmetic — Jekyll's
+    /// YYYY-MM-DD filename prefix is mandatory and Astro fails the BUILD on an unexpected
+    /// front-matter key.
+    /// </summary>
+    public required string LayoutJson { get; set; }
+
+    /// <summary>pull-request · direct-commit. Chosen per publish; this is the default.</summary>
+    public string Mode { get; set; } = "pull-request";
+
+    /// <summary>Draft PRs do not notify reviewers, which is the right default for a bot.</summary>
+    public bool OpenAsDraftPr { get; set; } = true;
+
+    public bool IsDefault { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// One publish. Doubles as the idempotency key: re-publishing an artifact must update the
+/// existing branch and reuse its open PR rather than opening a second one, which is the
+/// single detail naive implementations get wrong.
+/// </summary>
+public sealed class GitPublication : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid ArtifactId { get; set; }
+    public Guid RepoProfileId { get; set; }
+
+    public required string Branch { get; set; }
+    public required string CommitSha { get; set; }
+    public int? PullRequestNumber { get; set; }
+    public string? PullRequestUrl { get; set; }
+
+    /// <summary>Open · Merged · Closed · Committed (direct-commit mode).</summary>
+    public required string Status { get; set; }
+
+    /// <summary>The content file that was written, so a re-publish targets the same path.</summary>
+    public required string ContentPath { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
 /// Per-user setting. Values of secret kinds (Foundry key, broker token) are stored
 /// AES-256-GCM encrypted (Phase B3); plaintext secret values must never reach this row.
 /// </summary>

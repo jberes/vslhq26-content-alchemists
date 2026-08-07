@@ -87,12 +87,18 @@ builder.Services.Configure<SeoOptions>(builder.Configuration.GetSection(SeoOptio
 builder.Services.AddScoped<IPublishBrokerClient, PublishBrokerClient>();
 builder.Services.AddScoped<ISeoProvider, DataForSeoProvider>();
 builder.Services.AddSingleton<IExportService, ExportService>();
+// Optional git publishing (ADR-021): the customer's own repo, their own fine-grained PAT.
+builder.Services.AddScoped<IGitHubClient, GitHubClient>();
+builder.Services.AddScoped<IGitHubPublisher, GitHubPublisher>();
 
 // Outbound HTTP: standard resilience (retry + circuit breaker + timeout) on
 // every dependency (B8) — transient upstream blips never surface as user errors.
 builder.Services.AddHttpClient("speech", client => client.Timeout = TimeSpan.FromMinutes(5))
     .AddStandardResilienceHandler();
 builder.Services.AddHttpClient("broker").AddStandardResilienceHandler();
+builder.Services.AddHttpClient(GitHubClient.HttpClientName,
+        client => client.Timeout = TimeSpan.FromMinutes(3))
+    .AddStandardResilienceHandler();
 builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
 builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
     .AddStandardResilienceHandler();
@@ -287,6 +293,7 @@ app.MapImageSlotEndpoints();
 app.MapMediaEndpoints();
 app.MapPublishEndpoints();
 app.MapExportEndpoints();
+app.MapGitPublishEndpoints();
 app.MapScheduleEndpoints();
 app.MapSeoEndpoints();
 

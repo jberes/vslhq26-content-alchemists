@@ -17,6 +17,8 @@ public enum SecretKind
     TechEditKey,
     /// <summary>Bearer token for the customer knowledge-base gateway the Tech Edit consults.</summary>
     KnowledgeBaseToken,
+    /// <summary>Fine-grained GitHub PAT for the optional git publishing backend (ADR-021).</summary>
+    GitHubToken,
 }
 
 public interface IUserSecretsService
