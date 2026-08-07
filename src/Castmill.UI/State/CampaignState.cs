@@ -22,6 +22,9 @@ public sealed class CampaignState(CampaignsClient campaigns)
     private Task? _inFlight;
     private Guid? _inFlightId;
 
+    /// <summary>The campaign whose last load failed — see the guard in <see cref="LoadAsync"/>.</summary>
+    private Guid? _failedId;
+
     public Guid? CampaignId { get; private set; }
 
     public CampaignResponse? Campaign { get; private set; }
@@ -98,7 +101,21 @@ public sealed class CampaignState(CampaignsClient campaigns)
             {
                 return Task.CompletedTask;
             }
+
+            // Already FAILED. Without this the store retries forever: a failure fires
+            // Changed, the view re-renders, the shell's OnParametersSetAsync runs again and
+            // calls straight back in — and because a failed load leaves Campaign null, the
+            // "already loaded" check above never catches it. That loop hammers the API and
+            // makes the page flash between "Loading campaign…" and the error, which is
+            // exactly what a pending migration produced. Retrying is an explicit force.
+            if (_failedId == campaignId)
+            {
+                return Task.CompletedTask;
+            }
         }
+
+        // An explicit reload gets a clean slate, including a second chance after a failure.
+        _failedId = null;
 
         _inFlightId = campaignId;
 
@@ -170,6 +187,17 @@ public sealed class CampaignState(CampaignsClient campaigns)
         {
             LoadError = "Couldn't reach the Castmill API.";
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Deliberately broad. This task is awaited from a component lifecycle method, so
+            // anything that escapes here surfaces as an unhandled renderer exception and the
+            // page dies rather than showing a message — which is what a pending migration
+            // did: the API returned a 500 whose body was an HTML error page, and interpreting
+            // that threw something neither of the clauses above names. A campaign that
+            // cannot load is a message, never a dead screen.
+            LoadError = $"This campaign couldn't be loaded ({ex.GetType().Name}). "
+                        + "The API log will say why.";
+        }
         finally
         {
             if (_inFlightId == campaignId)
@@ -180,6 +208,9 @@ public sealed class CampaignState(CampaignsClient campaigns)
 
             if (CampaignId == campaignId)
             {
+                // Recorded before notifying: the notification re-renders, and the re-render
+                // calls back into LoadAsync, which needs to already know this one failed.
+                _failedId = LoadError is null ? null : campaignId;
                 IsLoading = false;
                 Changed?.Invoke();
             }
@@ -190,6 +221,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
     {
         _inFlight = null;
         _inFlightId = null;
+        _failedId = null;
         CampaignId = null;
         Campaign = null;
         Brand = null;

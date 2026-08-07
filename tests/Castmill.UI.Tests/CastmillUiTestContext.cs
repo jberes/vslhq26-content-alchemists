@@ -112,6 +112,18 @@ public sealed class StubHttpHandler : HttpMessageHandler
     public void OnStatus(HttpMethod method, string path, HttpStatusCode status) =>
         _routes[$"{method} {path}"] = () => new HttpResponseMessage(status);
 
+    /// <summary>An HTML error body — what ASP.NET's developer exception page actually returns,
+    /// as opposed to the problem-details JSON the client hopes for.</summary>
+    public void OnHtml(string path, HttpStatusCode status, string html) =>
+        _routes[$"GET {path}"] = () => new HttpResponseMessage(status)
+        {
+            Content = new StringContent(html, System.Text.Encoding.UTF8, "text/html"),
+        };
+
+    /// <summary>Transport-level failure: the API is not there at all.</summary>
+    public void OnThrow(HttpMethod method, string path, Func<Exception> error) =>
+        _routes[$"{method} {path}"] = () => throw error();
+
     /// <summary>A file download, complete with the Content-Disposition the client reads the
     /// name from — exports name their own files server-side.</summary>
     public void OnFile(string path, string fileName, string contentType, byte[] bytes) =>
