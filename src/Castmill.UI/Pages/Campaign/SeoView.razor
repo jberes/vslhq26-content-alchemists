@@ -348,10 +348,11 @@
     protected override void OnParametersSet() => LoadPlanFromState();
 
     private void OnChanged() => InvokeAsync(() =>
+        StoreEvents.GuardedAsync(() =>
     {
         LoadPlanFromState();
-        StateHasChanged();
-    });
+        return Task.CompletedTask;
+    }, Notifier, StateHasChanged, "Reading the keyword plan"));
 
     /// <summary>The plan is an artifact like any other — newest wins.</summary>
     private void LoadPlanFromState()

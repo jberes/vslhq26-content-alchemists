@@ -65,14 +65,43 @@ public static class ImageSlotEndpoints
             .ToList());
     }
 
+    /// <summary>
+    /// Reserves the campaign-wide slots, or — with <paramref name="artifactId"/> — the
+    /// per-artifact set for one blog. Blog imagery is scoped to a specific blog, so a campaign
+    /// with two blogs has two headers; without this parameter the endpoint could only ever
+    /// express the campaign-wide half of the plan, and a blog added after generation would
+    /// have nowhere to put its images.
+    /// </summary>
     private static async Task<IResult> ReserveAsync(
-        Guid campaignId, IImagePlanService plan, CastmillDbContext db, CancellationToken ct)
+        Guid campaignId, string? artifactId, IImagePlanService plan, CastmillDbContext db, CancellationToken ct)
     {
+        // Bound as a string, not Guid?, on purpose. A client that interpolates an unset id
+        // sends "?artifactId=", and minimal-API binding turns that into a thrown
+        // BadHttpRequestException rather than null — an unhandled exception in the log for
+        // what plainly means "the campaign-wide set".
+        Guid? target = null;
+        if (!string.IsNullOrEmpty(artifactId))
+        {
+            if (!Guid.TryParse(artifactId, out var parsed))
+            {
+                return Results.Problem("artifactId must be a GUID.", statusCode: 400);
+            }
+            target = parsed;
+        }
+
         if (!await db.Campaigns.AnyAsync(c => c.Id == campaignId, ct))
         {
             return Results.NotFound();
         }
-        var slots = await plan.EnsureSlotsAsync(campaignId, ct);
+
+        // Tenant-filtered, so this also refuses another tenant's artifact id.
+        if (target is { } id
+            && !await db.Artifacts.AnyAsync(a => a.Id == id && a.CampaignId == campaignId, ct))
+        {
+            return Results.NotFound();
+        }
+
+        var slots = await plan.EnsureSlotsAsync(campaignId, ct, target);
         return Results.Ok(slots.Select(ToResponse).ToList());
     }
 

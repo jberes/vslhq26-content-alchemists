@@ -12,9 +12,35 @@
 @inject WorkspaceState Workspace
 
 <div class="cm-campaign-frame">
-    <CampaignHeader Current="View" />
+    @* The HEADER is inside a boundary too. It reads the same store and renders the tab
+       strip, so a throw there is just as fatal — and being outside the boundary it went
+       straight to Blazor's generic error bar with the view frozen mid-load. *@
+    @* No @key here: sibling boundaries may not share one, and the outer boundary already
+       carries the campaign id, so switching campaigns resets both. *@
+    <ErrorBoundary>
+        <ChildContent>
+            <CampaignHeader Current="View" />
+        </ChildContent>
+        <ErrorContent Context="headerError">
+            <p class="cm-form__error" role="alert">
+                The campaign header failed: @headerError.GetType().Name — @headerError.Message
+            </p>
+        </ErrorContent>
+    </ErrorBoundary>
 
-    @if (Campaign.LoadError is { } error)
+    @if (_shellError is { } shellError)
+    {
+        <div class="cm-page">
+            <EmptyState Kicker="Campaign"
+                        Headline="This campaign couldn't be opened."
+                        Detail="@shellError">
+                <Action>
+                    <button type="button" class="cm-button" @onclick="Recover">Try again</button>
+                </Action>
+            </EmptyState>
+        </div>
+    }
+    else if (Campaign.LoadError is { } error)
     {
         <div class="cm-page">
             <EmptyState Kicker="Campaign"
@@ -67,23 +93,36 @@
     /// </summary>
     protected override async Task OnParametersSetAsync()
     {
-        await Workspace.LoadAsync();
-
-        // Keep the rail's active-campaign card in step with the route, so a deep link or a
-        // browser Back lands with the rail showing the right campaign.
-        if (Workspace.Active?.Id != CampaignId)
+        // Everything here is guarded. An exception escaping a lifecycle method is not a
+        // caught error the user can read — it is Blazor's generic "An unhandled error has
+        // occurred" bar plus a view frozen on "Loading campaign…", which is exactly what
+        // this screen did.
+        try
         {
-            Workspace.SetActive(CampaignId);
-        }
+            await Workspace.LoadAsync();
 
-        await Campaign.LoadAsync(CampaignId);
+            // Keep the rail's active-campaign card in step with the route, so a deep link or
+            // a browser Back lands with the rail showing the right campaign.
+            if (Workspace.Active?.Id != CampaignId)
+            {
+                Workspace.SetActive(CampaignId);
+            }
+
+            await Campaign.LoadAsync(CampaignId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _shellError = $"{ex.GetType().Name}: {ex.Message}";
+        }
     }
 
     private ErrorBoundary? _boundary;
+    private string? _shellError;
 
     /// <summary>Clears the boundary and reloads, so "try again" is a real retry.</summary>
     private async Task Recover()
     {
+        _shellError = null;
         _boundary?.Recover();
         await Campaign.LoadAsync(CampaignId, force: true);
     }

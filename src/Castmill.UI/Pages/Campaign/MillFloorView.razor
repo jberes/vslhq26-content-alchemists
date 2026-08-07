@@ -584,6 +584,7 @@
     };
 
     private void OnCampaignChanged() => InvokeAsync(() =>
+        StoreEvents.GuardedAsync(() =>
     {
         // Track which artifacts are new so the Press Run's print-in animation applies to
         // exactly the cards that just landed, in completion order.
@@ -595,8 +596,8 @@
             }
         }
 
-        StateHasChanged();
-    });
+        return Task.CompletedTask;
+    }, Notifier, StateHasChanged, "Refreshing the floor"));
 
     private void OnPressRunChanged() => InvokeAsync(StateHasChanged);
     // The board reload on completion lives in PressRunService now, so the floor refreshes

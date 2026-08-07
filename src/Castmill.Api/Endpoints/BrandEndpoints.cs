@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Tenancy;
@@ -14,8 +15,11 @@ namespace Castmill.Api.Endpoints;
 /// templates (per-generator steering). Everything generation-side reads brands through
 /// <see cref="Services.Ai.BrandContextService"/>.
 /// </summary>
-public static class BrandEndpoints
+public static partial class BrandEndpoints
 {
+    [GeneratedRegex("^#[0-9a-fA-F]{6}$")]
+    private static partial Regex HexColor();
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>The kinds a brand asset can be — small on purpose; "other" is the escape hatch.</summary>
@@ -78,6 +82,17 @@ public static class BrandEndpoints
         if (card.Colors is { Count: > 12 })
         {
             return Results.Problem("A style card holds at most 12 colours.", statusCode: 400);
+        }
+
+        // BrandColor.Hex carries a [RegularExpression], but the Validate<T> filter runs
+        // Validator.TryValidateObject, which does NOT recurse into nested objects or
+        // collections — so that annotation never ran and any string reached the database.
+        // It has to be checked here: these values are composited into images and emitted as
+        // CSS, where a non-hex string is a broken render, not a cosmetic problem.
+        if (card.Colors?.FirstOrDefault(c => !HexColor().IsMatch(c.Hex ?? string.Empty)) is { } bad)
+        {
+            return Results.Problem(
+                $"Colour '{bad.Role}' must be a six-digit hex value like #0A66C2.", statusCode: 400);
         }
 
         if (card.BannedPhrases is { } phrases && (phrases.Count > 50 || phrases.Any(p => p.Length > 200)))

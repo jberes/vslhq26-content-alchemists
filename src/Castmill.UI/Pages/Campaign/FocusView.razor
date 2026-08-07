@@ -1201,11 +1201,12 @@
         return last is { Length: 11 } ? last : null;
     }
 
-    private void OnChanged() => InvokeAsync(async () =>
+    private void OnChanged() => InvokeAsync(() =>
+        StoreEvents.GuardedAsync(async () =>
     {
         StateHasChanged();
         await SyncSelectionAsync();
-    });
+    }, Notifier, StateHasChanged, "Opening the artifact"));
 
     public void Dispose() => Campaign.Changed -= OnChanged;
 }

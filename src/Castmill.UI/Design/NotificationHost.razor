@@ -1,6 +1,7 @@
 @* Toast host: bottom-right of the content pane, dark panel, auto-dismiss (the handoff's
    §0 spec). Mounted once by ShellLayout; features only ever call INotifier. *@
 @using Castmill.UI.Design
+@using Castmill.UI.State
 @implements IDisposable
 @inject Notifier Notifier
 
@@ -37,7 +38,10 @@
         }
     }
 
-    private async Task DismissLaterAsync(Notification note)
+    // Fire-and-forget across a delay, so it can outlive the component: navigating away inside
+    // the auto-dismiss window disposes us mid-wait and InvokeAsync throws. Unobserved, that
+    // reaches Blazor's global error UI — the toast host would take the whole app down.
+    private Task DismissLaterAsync(Notification note) => StoreEvents.DetachedAsync(async () =>
     {
         await Task.Delay(note.Duration);
         await InvokeAsync(() =>
@@ -45,7 +49,7 @@
             Notifier.Dismiss(note.Id);
             _scheduled.Remove(note.Id);
         });
-    }
+    });
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 

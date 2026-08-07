@@ -593,7 +593,8 @@
         }
     }
 
-    private void OnChanged() => InvokeAsync(async () =>
+    private void OnChanged() => InvokeAsync(() =>
+        StoreEvents.GuardedAsync(async () =>
     {
         await SyncSelectionAsync();
         // Keyed on the brand, not on the result: a brand with NO face assets would otherwise
@@ -603,15 +604,15 @@
             _facesLoadedFor = brandId;
             await LoadBrandFacesAsync();
         }
-        StateHasChanged();
-    });
+    }, Notifier, StateHasChanged, "Refreshing the studio"));
 
     /// <summary>
     /// Takes appear as they land, not all at once at the end. The server persists each
     /// variant inside the generation loop, so every poll tick can already see the ones that
     /// have finished — waiting for the whole batch just hid work that was already done.
     /// </summary>
-    private void OnStudioRunChanged() => InvokeAsync(async () =>
+    private void OnStudioRunChanged() => InvokeAsync(() =>
+        StoreEvents.GuardedAsync(async () =>
     {
         if (StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
         {
@@ -635,9 +636,7 @@
 
             await ReloadGalleryAsync();
         }
-
-        StateHasChanged();
-    });
+    }, Notifier, StateHasChanged, "Loading the takes"));
 
     private async Task SyncSelectionAsync()
     {

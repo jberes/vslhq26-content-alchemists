@@ -56,6 +56,30 @@ public sealed class CampaignState(CampaignsClient campaigns)
 
     public event Action? Changed;
 
+    /// <summary>
+    /// Notifies subscribers without letting one of them break the store.
+    ///
+    /// Changed is raised SYNCHRONOUSLY from inside LoadAsync, outside any try — so a
+    /// subscriber that throws used to propagate out of the caller's lifecycle method,
+    /// surface as Blazor's generic "An unhandled error has occurred", and leave IsLoading
+    /// stuck true with the view showing "Loading campaign…" forever. A broken subscriber is
+    /// now recorded and named rather than taking the whole screen down.
+    /// </summary>
+    private void RaiseChanged()
+    {
+        foreach (var handler in Changed?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((Action)handler)();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LoadError ??= $"A view failed to update ({ex.GetType().Name}: {ex.Message}).";
+            }
+        }
+    }
+
     // ---- Derived views the surfaces read ------------------------------------
 
     /// <summary>Artifacts waiting on a human — the front page's primary column.</summary>
@@ -136,7 +160,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
         TranscriptArtifactId = null;
         LoadError = null;
         IsLoading = true;
-        Changed?.Invoke();
+        RaiseChanged();
 
         _inFlight = LoadCoreAsync(campaignId);
         return _inFlight;
@@ -212,7 +236,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
                 // calls back into LoadAsync, which needs to already know this one failed.
                 _failedId = LoadError is null ? null : campaignId;
                 IsLoading = false;
-                Changed?.Invoke();
+                RaiseChanged();
             }
         }
     }
@@ -233,7 +257,7 @@ public sealed class CampaignState(CampaignsClient campaigns)
         TranscriptArtifactId = null;
         IsLoading = false;
         LoadError = null;
-        Changed?.Invoke();
+        RaiseChanged();
     }
 
     private static readonly System.Text.Json.JsonSerializerOptions TranscriptJson =

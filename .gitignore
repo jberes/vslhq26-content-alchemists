@@ -2,7 +2,11 @@
 bin/
 obj/
 artifacts/
-publish/
+# Anchored deliberately. Unanchored, this matched ANY directory named "publish" at any
+# depth, which silently excluded src/Castmill.Api/Services/Publish/ — four source files —
+# from the repo, so a clean clone did not compile. Only `dotnet publish -o publish` at the
+# root is build output; nested publish output is already covered by bin/.
+/publish/
 *.binlog
 
 # --- IDE / user state ---

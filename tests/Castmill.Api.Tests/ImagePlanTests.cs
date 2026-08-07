@@ -173,13 +173,26 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
             new CampaignCreateRequest("Slots", null))).Content.ReadFromJsonAsync<CampaignResponse>())!;
 
-        // Reservation is idempotent: two calls still leave exactly six slots.
+        // Blog imagery is scoped to ONE blog, so the plan comes in two halves: the
+        // campaign-wide slots, plus a per-artifact set for each blog. Reserving without an
+        // artifact must NOT create blog slots belonging to no blog.
         var reserved = await (await client.PostAsync($"/api/v1/campaigns/{campaign.Id}/image-slots/reserve", null))
             .Content.ReadFromJsonAsync<List<ImageSlotResponse>>();
+        Assert.Equal(2, reserved!.Count);
+        Assert.All(reserved, s => Assert.Null(s.ArtifactId));
+
+        var blogId = await CreateBlogAsync(client, campaign.Id);
+        var blogSlots = await (await client.PostAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/reserve?artifactId={blogId}", null))
+            .Content.ReadFromJsonAsync<List<ImageSlotResponse>>();
+        Assert.Equal(4, blogSlots!.Count);
+        Assert.All(blogSlots, s => Assert.Equal(blogId, s.ArtifactId));
+
+        // Reservation is idempotent: repeating both calls still leaves exactly six slots.
         await client.PostAsync($"/api/v1/campaigns/{campaign.Id}/image-slots/reserve", null);
+        await client.PostAsync($"/api/v1/campaigns/{campaign.Id}/image-slots/reserve?artifactId={blogId}", null);
         var slots = (await client.GetFromJsonAsync<List<ImageSlotResponse>>(
             $"/api/v1/campaigns/{campaign.Id}/image-slots"))!;
-        Assert.Equal(6, reserved!.Count);
         Assert.Equal(6, slots.Count);
         Assert.All(slots, s => Assert.Equal("Empty", s.State));
 
@@ -275,7 +288,9 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         var client = await AuthedClientAsync(app);
         var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
             new CampaignCreateRequest("Slots", null))).Content.ReadFromJsonAsync<CampaignResponse>())!;
-        var slots = (await (await client.PostAsync($"/api/v1/campaigns/{campaign.Id}/image-slots/reserve", null))
+        var blog = await CreateBlogAsync(client, campaign.Id);
+        var slots = (await (await client.PostAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/reserve?artifactId={blog}", null))
             .Content.ReadFromJsonAsync<List<ImageSlotResponse>>())!;
         var slot = slots.Single(s => s.Kind == "blog-header");
 
@@ -346,5 +361,44 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         // A provider that isn't enabled never reaches the registry at all.
         Assert.DoesNotContain(status!.ImageProviders, p => p.Name == "off-by-default");
         Assert.Contains(status.ImageProviders, p => p.Name == "foundry");
+    }
+
+    /// <summary>
+    /// A client that interpolates an unset id sends "?artifactId=", which minimal-API binding
+    /// turns into a thrown BadHttpRequestException for a Guid? parameter. It plainly means
+    /// "the campaign-wide set", and must not be an exception in the log.
+    /// </summary>
+    [Fact]
+    public async Task An_empty_artifact_id_reserves_the_campaign_wide_set_rather_than_throwing()
+    {
+        var client = await AuthedClientAsync(factory);
+        var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
+            new CampaignCreateRequest("Empty id", null))).Content.ReadFromJsonAsync<CampaignResponse>())!;
+
+        var response = await client.PostAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/reserve?artifactId=", null);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var slots = (await response.Content.ReadFromJsonAsync<List<ImageSlotResponse>>())!;
+        Assert.Equal(2, slots.Count);
+        Assert.All(slots, s => Assert.Null(s.ArtifactId));
+
+        // A non-empty value that is not a GUID is a client error, reported as one.
+        var garbage = await client.PostAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/reserve?artifactId=nonsense", null);
+        Assert.Equal(HttpStatusCode.BadRequest, garbage.StatusCode);
+    }
+
+    /// <summary>
+    /// Blog image slots hang off a specific blog, so a test that wants them needs a blog to
+    /// hang them from — reserving campaign-wide no longer creates any.
+    /// </summary>
+    private static async Task<Guid> CreateBlogAsync(HttpClient client, Guid campaignId)
+    {
+        var blog = (await (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaignId}/artifacts",
+            new ArtifactCreateRequest("blog", "Draft",
+                """{"content":{"title":"Draft","markdown":"Intro"},"validation":{}}"""))).Content
+            .ReadFromJsonAsync<ArtifactResponse>())!;
+        return blog.Id;
     }
 }

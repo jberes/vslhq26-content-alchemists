@@ -9,6 +9,8 @@
    allowed to touch getBoundingClientRect (ADR-F10) — and is redone on scroll, zoom,
    resize and theme change. The maths and the drawing decisions stay here in .NET. *@
 @using Castmill.UI.Design
+@using Castmill.UI.State
+@inject INotifier Notifier
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IJSRuntime Js
@@ -166,13 +168,14 @@
         await OnHighlight.InvokeAsync(segmentIds);
     }
 
-    private void OnThemeChanged() => InvokeAsync(async () =>
+    private void OnThemeChanged() => InvokeAsync(() => StoreEvents.GuardedAsync(async () =>
     {
         // Colours come from tokens, but a family switch changes fonts and therefore
         // layout — geometry must be re-measured, not assumed (ADR-F09's acceptance).
+        // This is JS interop: it throws if the canvas is gone, and unguarded that fault
+        // reaches the renderer rather than any ErrorBoundary.
         await RedrawAsync();
-        StateHasChanged();
-    });
+    }, Notifier, StateHasChanged, "Redrawing the overlay"));
 
     private static string Fmt(double value) =>
         value.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
