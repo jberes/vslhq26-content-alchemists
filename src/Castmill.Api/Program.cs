@@ -12,6 +12,7 @@ using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Services.Media;
 using Castmill.Api.Services.Publish;
+using Castmill.Api.Services.Scout;
 using Castmill.Api.Services.Secrets;
 using Castmill.Api.Services.Seo;
 using Castmill.Api.Tenancy;
@@ -88,6 +89,8 @@ builder.Services.AddScoped<IPublishBrokerClient, PublishBrokerClient>();
 builder.Services.AddScoped<ISeoProvider, DataForSeoProvider>();
 builder.Services.AddSingleton<IExportService, ExportService>();
 // Optional git publishing (ADR-021): the customer's own repo, their own fine-grained PAT.
+builder.Services.AddScoped<IContentInventory, ContentInventory>();
+builder.Services.AddScoped<IContentScout, ContentScout>();
 builder.Services.AddScoped<IGitHubClient, GitHubClient>();
 builder.Services.AddScoped<IGitHubPublisher, GitHubPublisher>();
 

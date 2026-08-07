@@ -2549,3 +2549,53 @@
     font-family: var(--cm-font-mono);
     font-size: var(--cm-text-meta);
 }
+
+/* ---- Content Scout suggestions (E4) ----------------------------------------------- */
+
+.cm-seo__scout {
+    margin-block-start: var(--cm-space-6);
+}
+
+.cm-scout__focus {
+    flex: 1 1 24ch;
+    min-inline-size: 0;
+}
+
+.cm-scout__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    margin: var(--cm-space-4) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.cm-scout__item {
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    border-inline-start-width: 3px;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+}
+
+/* Already-covered reads as settled rather than as an action waiting to be taken —
+   a suggestion NOT to write something is a real answer, not a failed one. */
+.cm-scout__item--covered {
+    border-inline-start-color: var(--cm-on-surface-subtle);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-scout__item--refresh {
+    border-inline-start-color: var(--cm-accent-alt);
+}
+
+.cm-scout__item--new {
+    border-inline-start-color: var(--cm-accent);
+}
+
+.cm-scout__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--cm-space-2);
+}

@@ -63,6 +63,34 @@ public sealed record ImageProviderReadiness(string Name, bool Ready, string? Rea
 
 public sealed record TextProviderReadiness(string Name, bool Ready, string? Reason);
 
+/// <summary>Something the Scout suggests making — or explicitly suggests NOT making.</summary>
+public sealed record ScoutSuggestion(
+    string Kind,
+    string Title,
+    string Angle,
+    IReadOnlyList<string> TargetKeywords,
+    string Rationale,
+    /// <summary>new · refresh · covered. "covered" is a real answer, not a failure.</summary>
+    string Coverage,
+    /// <summary>Real URLs backing a "covered" or "refresh" verdict.</summary>
+    IReadOnlyList<ScoutEvidence> Evidence);
+
+public sealed record ScoutEvidence(string Title, string Url);
+
+/// <summary>One tool call the Scout made — the trace that keeps the agent inspectable.</summary>
+public sealed record ScoutStep(string Tool, string Query, string Result);
+
+public sealed record ScoutResult(
+    bool Success,
+    string? Error,
+    IReadOnlyList<ScoutSuggestion> Suggestions,
+    IReadOnlyList<ScoutStep> Trace,
+    long DurationMs);
+
+public sealed record ScoutRequest(
+    [property: MaxLength(500)] string? Focus,
+    [property: Range(1, 10)] int Count = 5);
+
 /// <summary>Body of a Tech Edit request (ADR-020).</summary>
 public sealed record TechEditRequest(
     [property: MaxLength(4000)] string? Steering,

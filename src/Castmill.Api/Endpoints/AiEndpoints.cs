@@ -6,6 +6,7 @@ using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Knowledge;
+using Castmill.Api.Services.Scout;
 using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
@@ -41,6 +42,9 @@ public static class AiEndpoints
         // revision snapshot, so unlike generate it returns the artifact, not a new row.
         group.MapPost("/campaigns/{campaignId:guid}/artifacts/{artifactId:guid}/tech-edit", TechEditAsync)
             .Validate<TechEditRequest>().RequireRateLimiting("ai");
+        // The Content Scout (E4): an agent loop, so it is on the "ai" partition.
+        group.MapPost("/campaigns/{campaignId:guid}/scout", ScoutAsync)
+            .Validate<ScoutRequest>().RequireRateLimiting("ai");
         // B9.8: Press Run progress. A plain read, so it is not on the "ai" partition —
         // polling progress must never consume the generation budget.
         group.MapGet("/runs/{runId:guid}", RunAsync);
@@ -377,6 +381,29 @@ public static class AiEndpoints
             response.Headers.ETag = $"\"{result.Version}\"";
         }
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Proposes what to make next, gap-checked against what is already published and already
+    /// drafted. Reports a misconfigured provider as an unsuccessful result rather than a 500,
+    /// like every other generation path here.
+    /// </summary>
+    private static async Task<IResult> ScoutAsync(
+        Guid campaignId,
+        ScoutRequest request,
+        ClaimsPrincipal principal,
+        IContentScout scout,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        return Results.Ok(await scout.RunAsync(
+            AuthEndpoints.GetUserId(principal), campaign, request.Focus, request.Count, ct));
     }
 
     // ---- Shared ----------------------------------------------------------------

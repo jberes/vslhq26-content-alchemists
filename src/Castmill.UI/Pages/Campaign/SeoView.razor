@@ -7,6 +7,7 @@
 @page "/campaigns/{CampaignId:guid}/seo"
 @using System.Text.Json
 @using ApexCharts
+@using Castmill.Core.Ai
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
@@ -15,6 +16,7 @@
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject SeoClient Seo
+@inject ScoutClient Scout
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
 @inject Microsoft.JSInterop.IJSRuntime Js
@@ -148,6 +150,92 @@
                         </ul>
                     </section>
                 </div>
+
+                @* The Content Scout (E4). This generalises the per-keyword "Draft as artifact"
+                   button above: it spans every kind rather than only blogs, and — the point —
+                   it checks what we have already published and already drafted first. *@
+                <section class="cm-seo__scout">
+                    <h2>Suggested content</h2>
+                    <p class="cm-meta">
+                        Checks the keyword picture against what is already published and already
+                        drafted, so it can tell you what to skip as well as what to write.
+                    </p>
+
+                    <div class="cm-studio__row">
+                        <label class="cm-field cm-scout__focus">
+                            <span class="cm-field__label">Focus <span class="cm-meta">optional</span></span>
+                            <input class="cm-input" @bind="_scoutFocus" @bind:event="oninput"
+                                   placeholder="Security and governance for embedded analytics" />
+                        </label>
+                        <button type="button" class="cm-button" disabled="@_scouting" @onclick="ScoutAsync">
+                            @(_scouting ? "Scouting…" : "Find opportunities")
+                        </button>
+                    </div>
+
+                    @if (_scout is { } scout)
+                    {
+                        @* The trace, not a spinner. An agent that thinks silently would be the
+                           first black box here; its tool calls are the honest progress story. *@
+                        @if (scout.Trace.Count > 0)
+                        {
+                            <ul class="cm-log">
+                                @foreach (var step in scout.Trace)
+                                {
+                                    <li class="cm-mono cm-meta">@step.Tool · @step.Query — @step.Result</li>
+                                }
+                            </ul>
+                        }
+
+                        @if (!scout.Success)
+                        {
+                            <p class="cm-meta">@scout.Error</p>
+                        }
+                        else if (scout.Suggestions.Count == 0)
+                        {
+                            <p class="cm-meta">Nothing worth adding right now.</p>
+                        }
+                        else
+                        {
+                            <ul class="cm-scout__list">
+                                @foreach (var suggestion in scout.Suggestions)
+                                {
+                                    <li class="cm-scout__item cm-scout__item--@suggestion.Coverage">
+                                        <div class="cm-scout__head">
+                                            <span class="cm-chip cm-mono">@CoverageLabel(suggestion.Coverage)</span>
+                                            <strong>@suggestion.Title</strong>
+                                            <span class="cm-meta">@ArtifactDisplay.KindLabel(suggestion.Kind)</span>
+                                        </div>
+                                        <p class="cm-meta">@suggestion.Angle</p>
+                                        <p class="cm-meta">@suggestion.Rationale</p>
+
+                                        @if (suggestion.Evidence.Count > 0)
+                                        {
+                                            <p class="cm-meta">
+                                                Already covered by:
+                                                @foreach (var evidence in suggestion.Evidence)
+                                                {
+                                                    <a href="@evidence.Url" target="_blank" rel="noopener noreferrer">
+                                                        @(string.IsNullOrWhiteSpace(evidence.Title) ? evidence.Url : evidence.Title)
+                                                    </a>
+                                                    <text> </text>
+                                                }
+                                            </p>
+                                        }
+
+                                        @if (suggestion.Coverage != "covered")
+                                        {
+                                            <button type="button" class="cm-button cm-button--quiet"
+                                                    disabled="@(_drafting == suggestion.Title)"
+                                                    @onclick="() => DraftSuggestionAsync(suggestion)">
+                                                @(_drafting == suggestion.Title ? "Drafting…" : $"Draft this {ArtifactDisplay.KindLabel(suggestion.Kind).ToLowerInvariant()}")
+                                            </button>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
+                </section>
 
                 <section class="cm-seo__metadata">
                     <h2>Blog metadata</h2>
@@ -356,6 +444,89 @@
         finally
         {
             _sharing = false;
+        }
+    }
+
+    // ---- Content Scout (E4) ---------------------------------------------------
+
+    private string _scoutFocus = string.Empty;
+    private bool _scouting;
+    private ScoutResult? _scout;
+
+    private static string CoverageLabel(string coverage) => coverage switch
+    {
+        "covered" => "already covered",
+        "refresh" => "refresh",
+        _ => "new",
+    };
+
+    private async Task ScoutAsync()
+    {
+        _scouting = true;
+        _scout = null;
+        StateHasChanged();
+
+        try
+        {
+            _scout = await Scout.RunAsync(
+                CampaignId, string.IsNullOrWhiteSpace(_scoutFocus) ? null : _scoutFocus.Trim(), 5);
+
+            if (!_scout.Success)
+            {
+                Notifier.ShowError(_scout.Error ?? "The scout could not finish.");
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _scouting = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Turns a suggestion into a real draft, using the angle as the brief — the same channel
+    /// the Mill Floor's "add another" and Focus mode's steering already use.
+    /// </summary>
+    private async Task DraftSuggestionAsync(ScoutSuggestion suggestion)
+    {
+        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _drafting = suggestion.Title;
+        StateHasChanged();
+
+        try
+        {
+            var brief = $"Title it \"{suggestion.Title}\". {suggestion.Angle}"
+                + (suggestion.TargetKeywords.Count > 0
+                    ? $" Target these search terms: {string.Join(", ", suggestion.TargetKeywords)}."
+                    : string.Empty);
+
+            var item = await Generation.GenerateOneAsync(CampaignId, suggestion.Kind, transcriptId, brief);
+            if (item.Success)
+            {
+                Notifier.ShowSuccess($"Drafted \"{suggestion.Title}\" · {item.DurationMs / 1000.0:0.0}s");
+                await Campaign.LoadAsync(CampaignId, force: true);
+            }
+            else
+            {
+                Notifier.ShowError(item.Error ?? "Draft failed.");
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _drafting = null;
+            StateHasChanged();
         }
     }
 

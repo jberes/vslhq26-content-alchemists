@@ -64,6 +64,7 @@ public static class CastmillUiServices
         services.AddScoped<ImagesClient>();
         services.AddScoped<ExportClient>();
         services.AddScoped<GitClient>();
+        services.AddScoped<ScoutClient>();
         services.AddScoped<IFileDownloader, FileDownloader>();
         services.AddScoped<BrandsClient>();
         services.AddScoped<ScheduleClient>();
