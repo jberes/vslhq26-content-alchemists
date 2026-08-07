@@ -693,12 +693,16 @@
     background: var(--cm-surface-raised);
     box-shadow: var(--cm-shadow-lg);
     opacity: 0;
+    /* An opacity:0 element still receives clicks, so without this the invisible toolbar
+       swallowed every click in the card's top-right corner. */
+    pointer-events: none;
     transition: opacity var(--cm-motion);
 }
 
 .cm-lane__cards > li:hover .cm-card__tools,
 .cm-card__tools:focus-within {
     opacity: 1;
+    pointer-events: auto;
 }
 
 /* Never fade the toolbar out from under a keyboard user mid-interaction. */
@@ -2425,33 +2429,39 @@
 }
 
 /* ---- Take lightbox (F10) ----------------------------------------------------------
-   The image is the subject, so it gets the room: a dark stage that fills the viewport
-   with the controls as a rail beside it, rather than a form the picture sits inside.
-   The old panel capped the image at the width of a text dialog, which made judging a
-   1600x840 header impossible — the one thing this screen exists for. */
+   The image is the subject, so it gets the room: a calm stage that fills the viewport with
+   the controls as a rail beside it, rather than a form the picture sits inside. The old
+   panel capped the image at the width of a text dialog, which made judging a 1600x840
+   header impossible — the one thing this screen exists for.
+
+   NOTE: the space scale is 1,2,3,4,6,8,12. There is no --cm-space-5, and referencing one
+   silently drops the whole declaration, which is how this rail first shipped with no
+   padding at all. CssTokenReferenceTests now fails the build on an undefined token. */
 
 .cm-lightbox {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 22rem;
-    inline-size: min(96vw, 110rem);
-    block-size: min(94vh, 62rem);
+    grid-template-columns: minmax(0, 1fr) clamp(20rem, 26vw, 26rem);
+    inline-size: min(100%, 96rem);
+    block-size: min(100%, 56rem);
     overflow: hidden;
-    border-radius: var(--cm-radius-md);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-lg);
     background: var(--cm-surface-raised);
     box-shadow: var(--cm-shadow-lg);
 }
 
-/* Neutral dark behind the art: a light surface biases how every generated image reads,
-   and these are judged for publication. */
+/* Neutral, slightly recessed ground behind the art: a bright surface biases how every
+   generated image reads, and these are being judged for publication. */
 .cm-lightbox__stage {
     display: flex;
     align-items: center;
     justify-content: center;
     min-inline-size: 0;
+    min-block-size: 0;
     margin: 0;
-    padding: var(--cm-space-5);
+    padding: var(--cm-space-8);
     background:
-        linear-gradient(0deg, rgb(0 0 0 / 55%), rgb(0 0 0 / 55%)),
+        radial-gradient(120% 90% at 50% 0%, rgb(255 255 255 / 6%), transparent 70%),
         var(--cm-surface-sunken);
 }
 
@@ -2461,17 +2471,16 @@
     /* Never upscale past native: a stretched take looks worse than the file is. */
     inline-size: auto;
     block-size: auto;
-    border-radius: var(--cm-radius-sm);
-    box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 35%);
+    border-radius: var(--cm-radius-md);
+    box-shadow: 0 1.25rem 2.5rem rgb(0 0 0 / 28%);
     object-fit: contain;
 }
 
 .cm-lightbox__rail {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-5);
     min-inline-size: 0;
-    padding: var(--cm-space-5);
+    min-block-size: 0;
     overflow-y: auto;
     border-inline-start: 1px solid var(--cm-rule);
     background: var(--cm-surface);
@@ -2480,24 +2489,48 @@
     font-size: var(--cm-text-body);
 }
 
+.cm-lightbox__head {
+    padding: var(--cm-space-6) var(--cm-space-6) var(--cm-space-4);
+    border-block-end: 1px solid var(--cm-rule);
+}
+
 .cm-lightbox__head h2 {
     margin: 0 0 var(--cm-space-1);
-    font-size: var(--cm-text-h3);
+    font-size: var(--cm-text-h4);
+    line-height: 1.2;
 }
 
 .cm-lightbox__group {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-2);
-    padding-block-end: var(--cm-space-5);
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-6);
     border-block-end: 1px solid var(--cm-rule);
 }
 
+/* Labels sit tight to the control they name, and apart from the one above. */
+.cm-lightbox__group .cm-kicker {
+    margin-block-end: calc(var(--cm-space-2) * -1);
+}
+
+.cm-lightbox__group .cm-textarea {
+    min-block-size: 6rem;
+    resize: vertical;
+}
+
+/* Pinned to the bottom of the rail, so the commit action is always in the same place
+   however long the panel above it grows. */
 .cm-lightbox__actions {
     display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--cm-space-2);
     margin-block-start: auto;
+    padding: var(--cm-space-4) var(--cm-space-6);
+    border-block-start: 1px solid var(--cm-rule);
+    background: var(--cm-surface);
+    position: sticky;
+    inset-block-end: 0;
 }
 
 /* Band colours behind overlay text. A short opinionated set, because the job is
@@ -2509,21 +2542,41 @@
 }
 
 .cm-swatch {
-    inline-size: 2.25rem;
-    block-size: 2.25rem;
+    position: relative;
+    inline-size: 2rem;
+    block-size: 2rem;
     padding: 0;
-    border: 2px solid var(--cm-rule-strong);
-    border-radius: var(--cm-radius-sm);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: 50%;
     background: var(--cm-surface);
     color: var(--cm-on-surface-muted);
     font: inherit;
     font-size: var(--cm-text-meta);
+    line-height: 1;
     cursor: pointer;
+    transition: transform var(--cm-motion), box-shadow var(--cm-motion);
 }
 
+.cm-swatch:hover {
+    transform: scale(1.08);
+}
+
+/* A ring rather than a border swap, so the swatch's own colour is never altered by
+   selection — the point of the control is judging that colour. */
 .cm-swatch--on {
-    border-color: var(--cm-accent);
-    box-shadow: 0 0 0 2px var(--cm-accent-wash);
+    box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 4px var(--cm-accent);
+}
+
+/* "No band" reads as an empty state, not as a white swatch. */
+.cm-swatch--none::after {
+    position: absolute;
+    inset: 0;
+    display: block;
+    border-radius: 50%;
+    background: linear-gradient(
+        to bottom right,
+        transparent calc(50% - 1px), var(--cm-on-surface-subtle) 50%, transparent calc(50% + 1px));
+    content: '';
 }
 
 @media (max-width: 60rem) {
@@ -2531,6 +2584,10 @@
     .cm-lightbox {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+    }
+
+    .cm-lightbox__stage {
+        padding: var(--cm-space-4);
     }
 
     .cm-lightbox__rail {
@@ -2747,4 +2804,36 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: var(--cm-space-2);
+}
+
+/* ---- Brand lockup ------------------------------------------------------------------ */
+
+.cm-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    min-inline-size: 0;
+}
+
+/* Optically matched to the wordmark's cap height rather than its line box, which is why
+   this is not simply 1em. */
+.cm-brand__mark {
+    inline-size: 1.35em;
+    block-size: 1.35em;
+    flex: 0 0 auto;
+    color: var(--cm-on-surface);
+}
+
+/* Collapsed rail: the mark alone is the identity, so it stays and the word goes. Keyed on
+   the same data-cm-rail attribute the rest of the collapse uses, not an invented class. */
+@media (max-width: 1179.98px) {
+    :root:not([data-cm-rail="labels"]) .cm-wordmark {
+        display: none;
+    }
+}
+
+@media (min-width: 900px) {
+    :root[data-cm-rail="icons"] .cm-wordmark {
+        display: none;
+    }
 }

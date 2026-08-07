@@ -1,0 +1,36 @@
+@* The Castmill mark.
+
+   ONE SOURCE, MANY PIECES — which is the whole product in a glyph: a full-height bar on the
+   left is the source master, and three bars fan right at decreasing lengths as the pieces cut
+   from it. It replaces a literal millstone (a terracotta disc with eight spokes and a square
+   eye) that read as a wagon wheel or a ship's helm at any size, and said nothing about what
+   the app does.
+
+   Geometry is on a 456 grid so the same drawing serves the app icon. Content sits inside
+   108–348 (~53% of the canvas), comfortably within the ~66% safe area that Android adaptive
+   icons and macOS masking crop to — the mark survives a circular mask untouched.
+
+   Colour comes from currentColor and the accent token, so it inherits both theme families
+   and both modes rather than carrying its own palette. *@
+
+<svg class="cm-mark @Class" viewBox="0 0 456 456" role="img" aria-label="@Label"
+     xmlns="http://www.w3.org/2000/svg" focusable="false">
+    @* The source master: one bar, spanning the full height of the fan beside it. *@
+    <rect x="108" y="140" width="40" height="176" rx="20" fill="currentColor" />
+
+    @* The pieces cut from it. The longest carries the accent — the hero output. *@
+    <rect x="176" y="140" width="172" height="40" rx="20" fill="var(--cm-accent)" />
+    <rect x="176" y="208" width="120" height="40" rx="20" fill="currentColor" opacity="0.85" />
+    <rect x="176" y="276" width="76" height="40" rx="20" fill="currentColor" opacity="0.6" />
+</svg>
+
+@code {
+    /// <summary>Extra class for sizing at the call site; the mark itself is size-agnostic.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>
+    /// Empty when the mark sits beside the wordmark — the text already names the product, and
+    /// a second "Castmill" is noise to a screen reader.
+    /// </summary>
+    [Parameter] public string Label { get; set; } = "Castmill";
+}

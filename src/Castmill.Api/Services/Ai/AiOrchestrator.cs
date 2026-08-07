@@ -190,7 +190,9 @@ public sealed class AiOrchestrator(
         {
             var response = await CallModelAsync(userId, "chat", spec.Kind,
                 BuildPrompt(spec.Instructions, brief, transcript, brand, spec.Kind), ct);
-            var json = ParseModelJson(response);
+            // Markers like [s03][s08] are for grounding, not for the copy someone
+            // publishes; provenance stays in the citations array.
+            var json = CitationMarkers.Strip(ParseModelJson(response));
             // Deterministic pass before validation — clip in/out points are computed from
             // the transcript rather than taken from numbers the model wrote.
             if (spec.Transform is { } transform)
@@ -239,7 +241,7 @@ public sealed class AiOrchestrator(
                 JSON schema: { "title": string, "markdown": string, "metaDescription": string, "citations": string[] }
                 """, brief, transcript, brand, "blog"), ct);
 
-            var draftJson = ParseModelJson(draft);
+            var draftJson = CitationMarkers.Strip(ParseModelJson(draft));
             var validation = Generators.ValidateBlog(draftJson, transcript);
             if (!validation.Passed)
             {
@@ -346,7 +348,7 @@ public sealed class AiOrchestrator(
             var response = await CallModelAsync(userId, FoundryClientFactory.TechEditAlias,
                 $"{kind}-tech-edit", BuildPrompt(instructions, steering, transcript, brand, kind), ct);
 
-            var parsed = ParseModelJson(response);
+            var parsed = CitationMarkers.Strip(ParseModelJson(response));
             if (!parsed.TryGetProperty("artifact", out var edited) || edited.ValueKind != JsonValueKind.Object)
             {
                 return TechEditFail(artifact, "The tech edit returned no artifact payload.", stopwatch);
@@ -509,7 +511,9 @@ public sealed class AiOrchestrator(
         {steering}
         {(string.IsNullOrWhiteSpace(brief) ? "" : $"Campaign brief: {brief}\n")}
         {styleBlock}{contextBlock}
-        Source transcript (cite segment ids in square brackets):
+        Source transcript. Ground every claim in it and list the ids you used in the
+        "citations" array — but NEVER write those ids into the prose itself: the body is
+        published copy, and "[s03][s08]" in the middle of a sentence is a defect.
         {TranscriptService.ToPromptText(transcript)}
         """;
     }

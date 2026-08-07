@@ -335,13 +335,12 @@
                                         @foreach (var (label, value) in HeadlineBackgrounds)
                                         {
                                             <button type="button"
-                                                    class="cm-swatch @(_headlineBackground == value ? "cm-swatch--on" : null)"
+                                                    class="cm-swatch @(value is null ? "cm-swatch--none" : null) @(_headlineBackground == value ? "cm-swatch--on" : null)"
                                                     style="@(value is null ? null : $"background:{value}")"
                                                     title="@label"
                                                     aria-label="@label"
                                                     aria-pressed="@((_headlineBackground == value).ToString().ToLowerInvariant())"
                                                     @onclick="() => _headlineBackground = value">
-                                                @(value is null ? "None" : "")
                                             </button>
                                         }
                                     </div>

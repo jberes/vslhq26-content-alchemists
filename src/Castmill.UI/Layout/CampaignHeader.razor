@@ -42,7 +42,12 @@
             {
                 <button type="button" role="tab"
                         class="cm-tabs__tab"
-                        aria-selected="@(view == Current)"
+                        @* A bool renders as a PRESENCE-only attribute in Blazor, so this
+                           produced `aria-selected` with no value and the CSS selector
+                           [aria-selected="true"] never matched — the active tab was
+                           indistinguishable from the rest. Same trap as aria-expanded on
+                           the artifact tree. *@
+                        aria-selected="@(view == Current ? "true" : "false")"
                         @onclick="() => Go(view)">
                     @label
                 </button>

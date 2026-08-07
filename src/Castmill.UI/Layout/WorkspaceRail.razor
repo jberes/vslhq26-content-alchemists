@@ -17,7 +17,12 @@
 
 <nav class="cm-rail" aria-label="Workspace">
     <div class="cm-rail__head">
-        <span class="cm-wordmark">Castmill</span>
+        @* Mark + wordmark as one lockup. The mark is decorative here: the word beside it
+           already names the product, so a second announcement is noise. *@
+        <span class="cm-brand">
+            <CastmillMark Class="cm-brand__mark" Label="" />
+            <span class="cm-wordmark">Castmill</span>
+        </span>
         <button type="button" class="cm-rail__collapse"
                 title="@(Theme.RailCollapsed ? "Expand navigation" : "Collapse navigation")"
                 aria-label="@(Theme.RailCollapsed ? "Expand navigation" : "Collapse navigation")"

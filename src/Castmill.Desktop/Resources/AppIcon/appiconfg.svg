@@ -1,26 +1,21 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Castmill mark: a millstone — terracotta stone, square eye, eight furrows cut toward
-     the rim. The product's whole vocabulary is the mill (Mill Floor, the plate, a run).
+<!-- Castmill mark: ONE SOURCE, MANY PIECES. A full-height bar on the left is the source
+     master; three bars fan right at decreasing lengths as the pieces cut from it.
 
-     Geometry is deliberately conservative: the stone spans 240 of 456 units (~53%), well
-     inside the ~66% safe area that Android adaptive icons and macOS masking crop to.
-     Square caps and a square eye — the Industry Blueprint family has no rounded corners.
-     Checked at 224/64/32/16 px and under a circular mask before being committed. -->
+     This replaces a literal millstone (terracotta disc, eight spokes, square eye) that read
+     as a wagon wheel or a ship's helm at icon size and said nothing about the product.
+
+     Identical geometry to Layout/CastmillMark.razor, so the icon and the in-app lockup are
+     one drawing rather than two things that drift. Content spans 108-348 of 456 (~53%),
+     comfortably inside the ~66% safe area that Android adaptive icons and macOS masking
+     crop to; the fan survives a circular mask untouched. Fully rounded caps (rx = half the
+     bar height) read cleanly down to 16 px, where spokes turned to mush. -->
 <svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="228" cy="228" r="120" fill="#C0552E" />
-    <circle cx="228" cy="228" r="120" fill="none" stroke="#F7F3EC" stroke-width="8" />
+    <!-- The source master. -->
+    <rect x="108" y="140" width="40" height="176" rx="20" fill="#F7F3EC" />
 
-    <g fill="#F7F3EC">
-        <g transform="rotate(0 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(45 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(90 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(135 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(180 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(225 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(270 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-        <g transform="rotate(315 228 228)"><rect x="272" y="217" width="58" height="22" /></g>
-    </g>
-
-    <rect x="200" y="200" width="56" height="56" fill="#F7F3EC" />
-    <rect x="216" y="216" width="24" height="24" fill="#1C1A17" />
+    <!-- The pieces. The longest carries the terracotta accent — the hero output. -->
+    <rect x="176" y="140" width="172" height="40" rx="20" fill="#C0552E" />
+    <rect x="176" y="208" width="120" height="40" rx="20" fill="#F7F3EC" fill-opacity="0.85" />
+    <rect x="176" y="276" width="76" height="40" rx="20" fill="#F7F3EC" fill-opacity="0.6" />
 </svg>
