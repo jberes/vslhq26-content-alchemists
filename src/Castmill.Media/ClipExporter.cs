@@ -18,7 +18,29 @@ public sealed record ClipExportRequest(
     /// <summary>Written beside the clip as a .txt so the upload form can be filled from it.</summary>
     ClipMetadata? Metadata = null,
     /// <summary>Overrides the derived file stem, so a batch reads as clip-01, clip-02…</summary>
-    string? OutputName = null);
+    string? OutputName = null,
+    /// <summary>How to fill the vertical canvas. Ignored unless <see cref="CropVertical"/>.</summary>
+    ReframeMode Reframe = ReframeMode.Crop,
+    /// <summary>Big text over the opening seconds — the hook the clip was chosen for.</summary>
+    string? HookOverlay = null,
+    /// <summary>Holds the last frame and fades, so the clip ends rather than stops.</summary>
+    bool EndCard = false,
+    /// <summary>Also writes a 1080×1920 cover frame beside the clip.</summary>
+    bool CoverFrame = false);
+
+/// <summary>How a non-vertical source is made to fill a 1080×1920 canvas.</summary>
+public enum ReframeMode
+{
+    /// <summary>Scale to cover, then crop the centre. Right when the subject is centred.</summary>
+    Crop,
+
+    /// <summary>
+    /// The whole frame, letterboxed over a blurred copy of itself. Nothing is cut off, which
+    /// makes it the honest fallback when we do not know where to look — a screen share or a
+    /// wide two-shot loses its content to a centre crop.
+    /// </summary>
+    BlurredPillarbox,
+}
 
 /// <summary>Per-clip publishing copy — the title/description/tags an upload form wants.</summary>
 public sealed record ClipMetadata(
@@ -62,6 +84,9 @@ public static class ClipExporter
     /// </summary>
     public const string LoudnessFilter = "loudnorm=I=-14:TP=-1.5:LRA=11";
 
+    /// <summary>How long the held last frame runs for.</summary>
+    internal const double EndCardSeconds = 1.2;
+
     /// <summary>
     /// Scale-to-cover, then crop to the exact canvas. The earlier <c>crop=ih*9/16:ih</c>
     /// cropped in SOURCE pixels, so 1920×1080 came out 608×1080 — the right shape at the
@@ -73,6 +98,54 @@ public static class ClipExporter
     internal static string VerticalFilter =>
         $"scale={VerticalWidth}:{VerticalHeight}:force_original_aspect_ratio=increase," +
         $"crop={VerticalWidth}:{VerticalHeight},setsar=1";
+
+    /// <summary>
+    /// The whole frame over a blurred, darkened copy of itself.
+    ///
+    /// The honest fallback when we do not know where the subject is: a centre crop of a
+    /// screen share or a wide two-shot throws away the content. gblur has a nicer falloff
+    /// than boxblur, and the brightness cut stops the background competing with the captions.
+    /// The inset sits at 38% rather than centred, reserving the lower third for caption text.
+    /// </summary>
+    internal static string PillarboxFilter =>
+        "split=2[cmbg][cmfg];" +
+        $"[cmbg]scale={VerticalWidth}:{VerticalHeight}:force_original_aspect_ratio=increase," +
+        $"crop={VerticalWidth}:{VerticalHeight},gblur=sigma=40,eq=brightness=-0.08[cmbgb];" +
+        $"[cmfg]scale={VerticalWidth}:-2[cmfgs];" +
+        "[cmbgb][cmfgs]overlay=(W-w)/2:(H-h)*0.38:shortest=1,setsar=1";
+
+    /// <summary>
+    /// The hook, held over the opening beat and faded at both ends. Retention work says to
+    /// keep logos and title cards OUT of the first three seconds; the hook is the exception
+    /// because it is the reason someone stops scrolling.
+    /// </summary>
+    internal static string HookFilter(string hook, string? fontFile)
+    {
+        const double hold = 2.6;
+        const double fade = 0.25;
+
+        var font = string.IsNullOrWhiteSpace(fontFile) ? string.Empty : $"fontfile={Escape(fontFile)}:";
+        return $"drawtext={font}text={Escape(Shorten(hook))}:" +
+               "fontsize=76:fontcolor=white:borderw=8:bordercolor=black:line_spacing=14:" +
+               "x=(w-text_w)/2:y=380:" +
+               FormattableString.Invariant($"enable='between(t,0,{hold})':") +
+               FormattableString.Invariant(
+                   $"alpha='if(lt(t,{fade}),t/{fade},if(gt(t,{hold - fade}),({hold}-t)/{fade},1))'");
+    }
+
+    /// <summary>
+    /// drawtext takes a filtergraph argument, so its own separators have to be escaped or the
+    /// filter string simply fails to parse — a colon in a model-written hook is common.
+    /// </summary>
+    private static string Escape(string value) =>
+        "'" + value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("'", "", StringComparison.Ordinal)
+            .Replace(":", "\\:", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal) + "'";
+
+    private static string Shorten(string hook) =>
+        hook.Length <= 60 ? hook : hook[..60].TrimEnd() + "…";
 
     public static async Task<string> ExportAsync(
         ClipExportRequest request, IProgress<MediaProgress>? progress, CancellationToken ct = default)
@@ -105,12 +178,16 @@ public static class ClipExporter
                 // -ss BEFORE -i seeks fast on the demuxer; the re-encode then makes the cut
                 // frame-accurate. Captions are authored clip-relative, so they line up.
                 arguments.AddRange(["-ss", Seconds(request.StartSeconds), "-i", request.SourcePath]);
-                arguments.AddRange(["-t", Seconds(clipLength.TotalSeconds)]);
+                // -t caps the OUTPUT, so the end card's padded frames have to be inside it
+                // or tpad's work is trimmed straight back off again.
+                arguments.AddRange(["-t", Seconds(clipLength.TotalSeconds + (request.EndCard ? EndCardSeconds : 0))]);
 
                 var filters = new List<string>();
                 if (request.CropVertical)
                 {
-                    filters.Add(VerticalFilter);
+                    filters.Add(request.Reframe == ReframeMode.BlurredPillarbox
+                        ? PillarboxFilter
+                        : VerticalFilter);
                 }
 
                 // Captions LAST: the ASS canvas is authored at 1080×1920, so it must be
@@ -119,6 +196,21 @@ public static class ClipExporter
                 {
                     assPath = WriteAss(captions, request.StartSeconds, request.EndSeconds);
                     filters.Add($"ass={assPath}");
+                }
+
+                if (request.HookOverlay is { Length: > 0 } hook)
+                {
+                    filters.Add(HookFilter(hook, null));
+                }
+
+                if (request.EndCard)
+                {
+                    // Clone the last frame and fade out, so the clip finishes rather than
+                    // simply stopping mid-motion.
+                    filters.Add(FormattableString.Invariant(
+                        $"tpad=stop_mode=clone:stop_duration={EndCardSeconds}"));
+                    filters.Add(FormattableString.Invariant(
+                        $"fade=t=out:st={clipLength.TotalSeconds + EndCardSeconds - 0.3:0.###}:d=0.3"));
                 }
 
                 if (filters.Count > 0)
@@ -156,6 +248,11 @@ public static class ClipExporter
 
             await Ffmpeg.RunAsync(arguments, clipLength, percent, ct);
 
+            if (request.CoverFrame)
+            {
+                await WriteCoverAsync(output, ct);
+            }
+
             if (request.Metadata is { } metadata)
             {
                 await WriteMetadataAsync(output, metadata, request, ct);
@@ -171,6 +268,23 @@ public static class ClipExporter
                 File.Delete(assPath);
             }
         }
+    }
+
+    /// <summary>
+    /// A cover frame beside the clip, at the platform's own thumbnail size.
+    ///
+    /// ffmpeg's <c>thumbnail</c> filter picks the most representative frame of a window
+    /// rather than whatever happens to be at t=0 — which is very often a blink or a cut.
+    /// Taken from the first few seconds because a cover should show the moment the clip
+    /// opens on, not something from the middle the viewer has not seen yet.
+    /// </summary>
+    private static async Task WriteCoverAsync(string clipPath, CancellationToken ct)
+    {
+        var cover = Path.ChangeExtension(clipPath, ".cover.jpg");
+        await Ffmpeg.RunAsync(
+            ["-y", "-hide_banner", "-ss", "0", "-t", "3", "-i", clipPath,
+             "-vf", "thumbnail=n=60", "-frames:v", "1", "-q:v", "2", cover],
+            null, null, ct);
     }
 
     /// <summary>

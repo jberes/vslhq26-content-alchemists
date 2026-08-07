@@ -50,6 +50,20 @@
             <label class="cm-fanout__item">
                 <input type="checkbox" @bind="_captions" /> <span>Burn captions</span>
             </label>
+            @* The honest fallback when the subject is not centred: a screen share or a wide
+               two-shot loses its content to a centre crop. *@
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_pillarbox" /> <span>Keep the whole frame (blurred edges)</span>
+            </label>
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_hookOverlay" /> <span>Hook on screen</span>
+            </label>
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_endCard" /> <span>End card</span>
+            </label>
+            <label class="cm-fanout__item">
+                <input type="checkbox" @bind="_coverFrame" /> <span>Cover frame</span>
+            </label>
 
             @* One click for the whole set: exporting six clips used to be six clicks,
                each waiting on the last. Sequential on purpose — parallel ffmpeg runs
@@ -142,6 +156,10 @@
     private bool _reencode = true;
     private bool _vertical = true;
     private bool _captions = true;
+    private bool _pillarbox;
+    private bool _hookOverlay;
+    private bool _endCard = true;
+    private bool _coverFrame = true;
     private int _exporting = -1;
     private string _exportStage = "Exporting…";
     private string? _lastFolder;
@@ -300,7 +318,11 @@
                     clip.InSeconds, clip.OutSeconds, _reencode, _vertical, _captions,
                     new ClipPublishCopy(clip.ClipTitle, clip.Description, clip.Hashtags, clip.Hook),
                     // Ordinal names keep a batch sorted the way the suggestions read.
-                    $"clip-{index + 1:00}{(_vertical ? "-vertical" : "")}"),
+                    $"clip-{index + 1:00}{(_vertical ? "-vertical" : "")}",
+                    _pillarbox,
+                    _hookOverlay && !string.IsNullOrWhiteSpace(clip.Hook) ? clip.Hook : null,
+                    _endCard,
+                    _coverFrame),
                 captionSegments,
                 progress);
 

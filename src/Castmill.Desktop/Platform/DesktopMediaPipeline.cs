@@ -97,7 +97,11 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
                 options.PublishCopy is { } copy
                     ? new ClipMetadata(copy.Title, copy.Description, copy.Hashtags, copy.Hook)
                     : null,
-                options.OutputName),
+                options.OutputName,
+                options.Pillarbox ? ReframeMode.BlurredPillarbox : ReframeMode.Crop,
+                options.HookOverlay,
+                options.EndCard,
+                options.CoverFrame),
             engineProgress,
             ct);
     }

@@ -105,6 +105,41 @@ public sealed class ClipBatchExportTests : CastmillUiTestContext
         Assert.StartsWith("Deploy time, halved", titles[0], StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The finishing options ride with every clip in the batch. The hook only goes on screen
+    /// when the clip actually has one — an empty overlay would burn a blank box into the video.
+    /// </summary>
+    [Fact]
+    public async Task The_finishing_options_travel_with_every_clip_in_the_batch()
+    {
+        Media.EnableLocalProcessing();
+
+        var view = Render<ClipReview>(p => p.Add(c => c.ContentJson, ThreeClips));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-clips__clip").Count == 3, TimeSpan.FromSeconds(5));
+
+        Toggle(view, "Keep the whole frame");
+        Toggle(view, "Hook on screen");
+
+        await view.FindAll("button").First(b => b.TextContent.Contains("Export all", StringComparison.Ordinal))
+            .ClickAsync();
+        await view.WaitForStateAsync(() => Media.Exports.Count == 3, TimeSpan.FromSeconds(5));
+
+        Assert.All(Media.Exports, e => Assert.True(e.Pillarbox));
+        Assert.Equal("Deploy time halved", Media.Exports[0].HookOverlay);
+
+        // On by default: a clip that just stops mid-motion reads as broken, and a cover frame
+        // is needed by every upload form.
+        Assert.All(Media.Exports, e => Assert.True(e.EndCard));
+        Assert.All(Media.Exports, e => Assert.True(e.CoverFrame));
+    }
+
+    private static void Toggle(IRenderedComponent<ClipReview> view, string label) =>
+        view.FindAll(".cm-clips__options label")
+            .First(l => l.TextContent.Contains(label, StringComparison.Ordinal))
+            .QuerySelector("input")!
+            .Change(true);
+
     [Fact]
     public void Without_a_local_engine_the_batch_button_is_disabled_with_the_reason()
     {

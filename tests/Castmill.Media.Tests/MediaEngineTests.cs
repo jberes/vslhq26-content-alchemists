@@ -319,6 +319,76 @@ public sealed class MediaEngineTests
         }
     }
 
+    /// <summary>
+    /// The blurred-pillarbox fallback, measured. A centre crop of a screen share or a wide
+    /// two-shot throws the content away; this keeps the whole frame and fills the canvas with
+    /// a blurred copy of it. It is a split/overlay graph, so the thing that actually goes
+    /// wrong is the filtergraph failing to parse — which only a real run catches.
+    /// </summary>
+    [Fact]
+    public async Task Pillarbox_reframe_produces_a_full_canvas_with_nothing_cropped_away()
+    {
+        SkipUnlessToolingPresent();
+        var video = await SynthesizeVideoAsync(); // 1280×720
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+
+        var output = await ClipExporter.ExportAsync(
+            new ClipExportRequest(video, 1.0, 5.0, ReEncode: true, CropVertical: true,
+                Captions: null, outputDir, Reframe: ReframeMode.BlurredPillarbox),
+            null,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var (width, height) = await ProbeSizeAsync(output);
+            Assert.Equal(ClipExporter.VerticalWidth, width);
+            Assert.Equal(ClipExporter.VerticalHeight, height);
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Hook overlay, end card and cover frame together. drawtext takes a filtergraph
+    /// argument, so a colon in a model-written hook breaks the whole filter string unless it
+    /// is escaped — exactly the kind of thing that only fails against real ffmpeg.
+    /// </summary>
+    [Fact]
+    public async Task A_hook_with_punctuation_an_end_card_and_a_cover_frame_all_render()
+    {
+        SkipUnlessToolingPresent();
+        var video = await SynthesizeVideoAsync();
+        var outputDir = Path.Combine(Path.GetTempPath(), $"castmill-clips-{Guid.NewGuid():N}");
+
+        var output = await ClipExporter.ExportAsync(
+            new ClipExportRequest(video, 1.0, 5.0, ReEncode: true, CropVertical: true,
+                Captions: null, outputDir,
+                HookOverlay: "Deploy time: halved — here's how (100% real)",
+                EndCard: true,
+                CoverFrame: true),
+            null,
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.True(File.Exists(output));
+
+            // The end card holds the last frame, so the clip is LONGER than the cut.
+            var duration = await Ffmpeg.ProbeDurationAsync(output);
+            Assert.InRange(duration.TotalSeconds, 4.5, 6.5);
+
+            var cover = Path.ChangeExtension(output, ".cover.jpg");
+            Assert.True(File.Exists(cover), "no cover frame was written beside the clip");
+            Assert.True(new FileInfo(cover).Length > 1000, "the cover frame is suspiciously small");
+        }
+        finally
+        {
+            Directory.Delete(outputDir, recursive: true);
+        }
+    }
+
     // ---- fixtures ---------------------------------------------------------------
 
     /// <summary>Integrated loudness (LUFS) of a file, via ffmpeg's EBU R128 meter.</summary>

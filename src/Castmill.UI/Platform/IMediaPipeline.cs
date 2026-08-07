@@ -23,7 +23,19 @@ public sealed record ClipExportOptions(
     /// <summary>Publishing copy written beside the clip as a .txt (upload is still manual).</summary>
     ClipPublishCopy? PublishCopy = null,
     /// <summary>File stem, so a batch reads as clip-01, clip-02… instead of timestamps.</summary>
-    string? OutputName = null);
+    string? OutputName = null,
+    /// <summary>
+    /// Keep the whole frame over a blurred copy of itself instead of centre-cropping. The
+    /// honest choice when the subject is not centred — a screen share or a wide two-shot
+    /// loses its content to a crop.
+    /// </summary>
+    bool Pillarbox = false,
+    /// <summary>The clip's hook, held over the opening beat.</summary>
+    string? HookOverlay = null,
+    /// <summary>Hold the last frame and fade, so the clip ends rather than stops.</summary>
+    bool EndCard = false,
+    /// <summary>Write a cover frame beside the clip.</summary>
+    bool CoverFrame = false);
 
 public sealed record ClipPublishCopy(
     string? Title, string? Description, IReadOnlyList<string>? Hashtags, string? Hook);
