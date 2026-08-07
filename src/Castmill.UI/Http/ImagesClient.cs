@@ -83,10 +83,11 @@ public sealed class ImagesClient(ApiClient api)
 
     /// <summary>Re-composites the thumbnail headline over the placed base image — no model call.</summary>
     public Task<PlaceResult> CompositeAsync(
-        Guid campaignId, Guid slotId, string headline, bool safeArea, CancellationToken ct = default) =>
+        Guid campaignId, Guid slotId, string headline, bool safeArea,
+        string? headlineBackground = null, CancellationToken ct = default) =>
         api.PostAsync<object, PlaceResult>(
             "api/v1/images/composite",
-            new { campaignId, slotId, headline, safeArea },
+            new { campaignId, slotId, headline, safeArea, headlineBackground },
             anonymous: false,
             ct);
 

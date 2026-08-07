@@ -2374,20 +2374,119 @@
     color: var(--cm-on-surface-muted);
 }
 
-.cm-modal__panel--studio {
-    max-inline-size: min(60rem, 92vw);
-    max-block-size: 92vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--cm-space-3);
+/* ---- Take lightbox (F10) ----------------------------------------------------------
+   The image is the subject, so it gets the room: a dark stage that fills the viewport
+   with the controls as a rail beside it, rather than a form the picture sits inside.
+   The old panel capped the image at the width of a text dialog, which made judging a
+   1600x840 header impossible — the one thing this screen exists for. */
+
+.cm-lightbox {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 22rem;
+    inline-size: min(96vw, 110rem);
+    block-size: min(94vh, 62rem);
+    overflow: hidden;
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+    box-shadow: var(--cm-shadow-lg);
 }
 
-.cm-variant__preview {
-    inline-size: 100%;
+/* Neutral dark behind the art: a light surface biases how every generated image reads,
+   and these are judged for publication. */
+.cm-lightbox__stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-inline-size: 0;
+    margin: 0;
+    padding: var(--cm-space-5);
+    background:
+        linear-gradient(0deg, rgb(0 0 0 / 55%), rgb(0 0 0 / 55%)),
+        var(--cm-surface-sunken);
+}
+
+.cm-lightbox__image {
+    max-inline-size: 100%;
+    max-block-size: 100%;
+    /* Never upscale past native: a stretched take looks worse than the file is. */
+    inline-size: auto;
     block-size: auto;
-    border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-sm);
+    box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 35%);
+    object-fit: contain;
+}
+
+.cm-lightbox__rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-5);
+    min-inline-size: 0;
+    padding: var(--cm-space-5);
+    overflow-y: auto;
+    border-inline-start: 1px solid var(--cm-rule);
+    background: var(--cm-surface);
+    /* The rail was set in meta-size type throughout, which is why it read as fine print
+       rather than as controls. */
+    font-size: var(--cm-text-body);
+}
+
+.cm-lightbox__head h2 {
+    margin: 0 0 var(--cm-space-1);
+    font-size: var(--cm-text-h3);
+}
+
+.cm-lightbox__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding-block-end: var(--cm-space-5);
+    border-block-end: 1px solid var(--cm-rule);
+}
+
+.cm-lightbox__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+    margin-block-start: auto;
+}
+
+/* Band colours behind overlay text. A short opinionated set, because the job is
+   legibility over an unpredictable generated background. */
+.cm-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+}
+
+.cm-swatch {
+    inline-size: 2.25rem;
+    block-size: 2.25rem;
+    padding: 0;
+    border: 2px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    cursor: pointer;
+}
+
+.cm-swatch--on {
+    border-color: var(--cm-accent);
+    box-shadow: 0 0 0 2px var(--cm-accent-wash);
+}
+
+@media (max-width: 60rem) {
+    /* Stacked on narrow screens: the image still leads, the rail scrolls under it. */
+    .cm-lightbox {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+    }
+
+    .cm-lightbox__rail {
+        border-inline-start: 0;
+        border-block-start: 1px solid var(--cm-rule);
+    }
 }
 
 /* ---- The Wire (workspace scope) -------------------------------------------------- */

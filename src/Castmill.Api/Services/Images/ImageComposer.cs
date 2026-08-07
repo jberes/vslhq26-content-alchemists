@@ -16,7 +16,12 @@ public interface IImageComposer
     /// re-encodes it (ADR-013). Models mangle small text, so the headline is
     /// composited after generation — editing it never costs another render.
     /// </summary>
-    CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea);
+    /// <param name="backgroundColor">
+    /// Optional solid band behind the text, as "#RRGGBB". Generated backgrounds are busy and
+    /// unpredictable, so a drop shadow alone is not always enough to keep a headline legible;
+    /// a band is the reliable answer and it is the author's call, not ours.
+    /// </param>
+    CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea, string? backgroundColor = null);
 
     /// <summary>Scales the longest edge down to <paramref name="maxEdge"/> for gallery
     /// thumbnails; the full-size WebP stays the source of truth.</summary>
@@ -84,7 +89,7 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         return encoded.ToArray();
     }
 
-    public CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea)
+    public CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea, string? backgroundColor = null)
     {
         using var bitmap = SKBitmap.Decode(image)
             ?? throw new InvalidOperationException("Bytes are not a decodable image.");
@@ -114,6 +119,25 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         }
 
         var baseline = bitmap.Height - inset;
+
+        // The band is drawn first, sized from the measured text rather than guessed, so it
+        // fits whatever the shrink-to-fit loop above settled on.
+        if (ParseColor(backgroundColor) is { } band)
+        {
+            var metrics = font.Metrics;
+            var padX = textSize * 0.4f;
+            var padY = textSize * 0.25f;
+            var width = font.MeasureText(headline);
+            var rect = new SKRect(
+                inset - padX,
+                baseline + metrics.Ascent - padY,
+                inset + width + padX,
+                baseline + metrics.Descent + padY);
+
+            using var bandPaint = new SKPaint { Color = band, IsAntialias = true };
+            canvas.DrawRoundRect(rect, textSize * 0.12f, textSize * 0.12f, bandPaint);
+        }
+
         canvas.DrawText(headline, inset, baseline, SKTextAlign.Left, font, shadow);
         canvas.DrawText(headline, inset, baseline, SKTextAlign.Left, font, fill);
 
@@ -129,6 +153,13 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
             ?? throw new InvalidOperationException("WebP encoding failed.");
         return new CompositeResult(encoded.ToArray(), fallback, typeface.FamilyName);
     }
+
+    /// <summary>
+    /// "#RRGGBB" or "#RRGGBBAA" → a colour. Anything unparseable yields null and simply
+    /// means no band: a bad colour must not fail a composite the user already paid to render.
+    /// </summary>
+    internal static SKColor? ParseColor(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && SKColor.TryParse(value, out var color) ? color : null;
 
     /// <summary>Scale to cover, then crop the centre — aspect is preserved, never squashed.</summary>
     internal static SKBitmap CentreCrop(SKBitmap source, int width, int height)

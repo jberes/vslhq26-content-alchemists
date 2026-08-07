@@ -11,6 +11,7 @@
 @implements IDisposable
 @inject CampaignState Campaign
 @inject ImagesClient Images
+@inject BrandsClient BrandsApi
 @inject StudioRunService StudioRun
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
@@ -201,6 +202,14 @@
                                         Generating @StudioRun.ExpectedVariants — @(StudioRun.Progress?.Completed ?? 0) done…
                                     </p>
                                 }
+                                else if (_galleryError is { } galleryError)
+                                {
+                                    <p class="cm-form__error" role="alert">
+                                        Couldn't load your takes — @galleryError
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                @onclick="ReloadGalleryAsync">Try again</button>
+                                    </p>
+                                }
                                 else if (_gallery.Count == 0)
                                 {
                                     <p class="cm-meta">No takes yet. Generate some — every take is kept here until you discard it.</p>
@@ -289,63 +298,123 @@
                 @* The take dialog: full-size view + steering + keep/discard/place. Custom
                    .cm-modal like the app's confirm dialog — Escape closes, backdrop closes. *@
                 <div class="cm-modal" role="presentation" @onclick="CloseVariant">
-                    <div class="cm-modal__panel cm-modal__panel--studio" role="dialog" aria-modal="true"
+                    <div class="cm-lightbox" role="dialog" aria-modal="true"
                          aria-labelledby="cm-variant-title" tabindex="-1"
                          @ref="_dialogPanel"
                          @onclick:stopPropagation
                          @onkeydown="OnDialogKey">
-                        <h2 id="cm-variant-title" class="cm-front__block-title">
-                            @ArtifactDisplay.SlotLabel(Selected?.Kind ?? "") take
-                            <span class="cm-meta"> · @take.Model · @take.Width×@take.Height</span>
-                        </h2>
 
-                        <img class="cm-variant__preview" src="@take.Url"
-                             width="@take.Width" height="@take.Height"
-                             alt="Full-size take" />
+                        @* The image is the subject, so it gets the room. Everything else is
+                           a rail beside it rather than a form the picture sits inside. *@
+                        <figure class="cm-lightbox__stage">
+                            <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                        </figure>
 
-                        @if (take.SteeringNote is { } note)
-                        {
-                            <p class="cm-meta">Steered from an earlier take: “@note”</p>
-                        }
+                        <div class="cm-lightbox__rail">
+                            <header class="cm-lightbox__head">
+                                <h2 id="cm-variant-title">@ArtifactDisplay.SlotLabel(Selected?.Kind ?? "")</h2>
+                                <p class="cm-meta cm-mono">@take.Width×@take.Height · @take.Model</p>
+                                @if (take.SteeringNote is { } note)
+                                {
+                                    <p class="cm-meta">Steered from an earlier take: “@note”</p>
+                                }
+                            </header>
 
-                        <label class="cm-field">
-                            <span class="cm-field__label">Steer a new take from this one</span>
-                            <textarea class="cm-input cm-textarea" rows="2" @bind="_steerNote" @bind:event="oninput"
-                                      placeholder="e.g. add the host's face on the right, warmer background"></textarea>
-                        </label>
-                        <div class="cm-studio__chips">
-                            @foreach (var chip in SteerChips)
+                            @if (Selected is { } headlineSlot && headlineSlot.SafeArea)
                             {
-                                <button type="button" class="cm-studio__chip" @onclick="() => AppendSteerChip(chip)">+ @chip</button>
+                                @* Overlay controls live here because this is where you can SEE
+                                   the result. Models mangle small text, so the headline is
+                                   composited after generation (ADR-013) — editing it is free. *@
+                                <section class="cm-lightbox__group">
+                                    <span class="cm-kicker">Overlay text</span>
+                                    <input class="cm-input" maxlength="32" @bind="_headline"
+                                           placeholder="Up to 32 characters" />
+
+                                    <span class="cm-kicker">Behind the text</span>
+                                    <div class="cm-swatches">
+                                        @foreach (var (label, value) in HeadlineBackgrounds)
+                                        {
+                                            <button type="button"
+                                                    class="cm-swatch @(_headlineBackground == value ? "cm-swatch--on" : null)"
+                                                    style="@(value is null ? null : $"background:{value}")"
+                                                    title="@label"
+                                                    aria-label="@label"
+                                                    aria-pressed="@((_headlineBackground == value).ToString().ToLowerInvariant())"
+                                                    @onclick="() => _headlineBackground = value">
+                                                @(value is null ? "None" : "")
+                                            </button>
+                                        }
+                                    </div>
+
+                                    <label class="cm-fanout__item">
+                                        <input type="checkbox" @bind="_safeArea" />
+                                        <span>Keep clear of platform UI</span>
+                                    </label>
+
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
+                                            @onclick="CompositeAsync">
+                                        @(_compositing ? "Applying…" : "Apply overlay")
+                                    </button>
+                                    <p class="cm-meta">No model call — editing the overlay is free.</p>
+                                </section>
                             }
-                        </div>
 
-                        <div class="cm-form__actions">
-                            <button type="button" class="cm-button" disabled="@_placing"
-                                    @onclick="() => PlaceAsync(take)">
-                                @(_placing ? "Placing…" : "Place in slot")
-                            </button>
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    disabled="@(string.IsNullOrWhiteSpace(_steerNote) || IsGenerating)"
-                                    @onclick="() => SteerAsync(take)">
-                                New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
-                            </button>
-                            @if (take.State != "Kept")
-                            {
+                            <section class="cm-lightbox__group">
+                                <span class="cm-kicker">Steer a new take</span>
+                                <textarea class="cm-input cm-textarea" rows="3" @bind="_steerNote" @bind:event="oninput"
+                                          placeholder="e.g. warmer background, more negative space top-left"></textarea>
+                                <div class="cm-studio__chips">
+                                    @foreach (var chip in SteerChips)
+                                    {
+                                        <button type="button" class="cm-studio__chip" @onclick="() => AppendSteerChip(chip)">+ @chip</button>
+                                    }
+                                </div>
+
+                                @if (BrandFaces.Any())
+                                {
+                                    @* A face the brand already defines, appended as prompt
+                                       steering. The descriptor IS the prompt text — that is
+                                       what BrandAsset.Name is for. *@
+                                    <span class="cm-kicker">Add a face</span>
+                                    <div class="cm-studio__chips">
+                                        @foreach (var face in BrandFaces)
+                                        {
+                                            <button type="button" class="cm-studio__chip"
+                                                    @onclick="() => AppendSteerChip(FacePrompt(face))">+ @face</button>
+                                        }
+                                    </div>
+                                }
+
                                 <button type="button" class="cm-button cm-button--quiet"
-                                        @onclick='() => SetStateAsync(take, "Kept")'>Keep</button>
-                            }
-                            @if (take.State != "Discarded")
-                            {
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        @onclick='() => SetStateAsync(take, "Discarded")'>Throw away</button>
-                            }
-                            else
-                            {
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
-                            }
-                            <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
+                                        disabled="@(string.IsNullOrWhiteSpace(_steerNote) || IsGenerating)"
+                                        @onclick="() => SteerAsync(take)">
+                                    New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
+                                </button>
+                            </section>
+
+                            <footer class="cm-lightbox__actions">
+                                <button type="button" class="cm-button" disabled="@_placing"
+                                        @onclick="() => PlaceAsync(take)">
+                                    @(_placing ? "Placing…" : "Place in slot")
+                                </button>
+                                @if (take.State != "Kept")
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            @onclick='() => SetStateAsync(take, "Kept")'>Keep</button>
+                                }
+                                @if (take.State != "Discarded")
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            @onclick='() => SetStateAsync(take, "Discarded")'>Throw away</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
+                                }
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
+                            </footer>
                         </div>
                     </div>
                 </div>
@@ -393,6 +462,57 @@
     private bool _compositing;
     private bool _showDiscarded;
     private string? _generateError;
+    private string? _galleryError;
+    private string? _headlineBackground;
+
+    /// <summary>
+    /// Band colours behind overlay text. A short, opinionated set beats a colour wheel here:
+    /// the job is legibility over an unpredictable generated background, and near-black or
+    /// near-white at high opacity is what actually achieves it.
+    /// </summary>
+    private static readonly (string Label, string? Value)[] HeadlineBackgrounds =
+    [
+        ("No band", null),
+        ("Black", "#000000"),
+        ("Charcoal", "#1F2933"),
+        ("White", "#FFFFFF"),
+        ("Slate", "#2F4858"),
+    ];
+
+    /// <summary>
+    /// Faces the brand already defines. The label doubles as prompt text ("the host, short
+    /// dark hair"), which is what BrandAsset.Label is for — so adding a face is prompt
+    /// steering, not pixel compositing.
+    /// </summary>
+    private List<string> _brandFaces = [];
+
+    private IReadOnlyList<string> BrandFaces => _brandFaces;
+
+    /// <summary>The steering line a brand face contributes. Its label IS the prompt text.</summary>
+    private static string FacePrompt(string face) => $"include {face}";
+
+    private async Task LoadBrandFacesAsync()
+    {
+        if (Campaign.Brand is not { } brand)
+        {
+            _brandFaces = [];
+            return;
+        }
+
+        try
+        {
+            var assets = await BrandsApi.ListAssetsAsync(brand.Id);
+            _brandFaces = [.. assets
+                .Where(a => a.Kind.Equals("face", StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.Label ?? a.FileName)
+                .Where(label => !string.IsNullOrWhiteSpace(label))];
+        }
+        catch (ApiException)
+        {
+            // No faces offered rather than a broken panel; the steer box still works.
+            _brandFaces = [];
+        }
+    }
     private List<ImageVariantResponse> _gallery = [];
     private List<string> _failures = [];
     private string? _headline;
@@ -467,12 +587,25 @@
     private void OnChanged() => InvokeAsync(async () =>
     {
         await SyncSelectionAsync();
+        if (_brandFaces.Count == 0 && Campaign.Brand is not null)
+        {
+            await LoadBrandFacesAsync();
+        }
         StateHasChanged();
     });
 
-    /// <summary>When the run finishes, the gallery reloads and failures surface.</summary>
+    /// <summary>
+    /// Takes appear as they land, not all at once at the end. The server persists each
+    /// variant inside the generation loop, so every poll tick can already see the ones that
+    /// have finished — waiting for the whole batch just hid work that was already done.
+    /// </summary>
     private void OnStudioRunChanged() => InvokeAsync(async () =>
     {
+        if (StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
+        {
+            await ReloadGalleryAsync();
+        }
+
         if (!StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
         {
             if (StudioRun.Error is { } error)
@@ -515,10 +648,14 @@
         try
         {
             _gallery = await Images.ListVariantsAsync(CampaignId, slotId, _showDiscarded);
+            _galleryError = null;
         }
-        catch (ApiException)
+        catch (ApiException ex)
         {
-            // The gallery just stays as it was; the next action retries.
+            // Say so. Swallowing this was worse than useless: switching slots clears the
+            // gallery first, so a failed reload left an empty grid with no message — takes
+            // the user had just paid for looked like they had been thrown away.
+            _galleryError = ex.Message;
         }
     }
 
@@ -607,6 +744,7 @@
         _generateError = null;
         _openVariant = null;
         _headline = slot.HeadlineText;
+        _headlineBackground = slot.HeadlineBackground;
         _safeArea = slot.SafeArea;
         await ReloadGalleryAsync();
     }
@@ -753,7 +891,7 @@
         _compositing = true;
         try
         {
-            var result = await Images.CompositeAsync(CampaignId, slot.Id, _headline!, _safeArea);
+            var result = await Images.CompositeAsync(CampaignId, slot.Id, _headline!, _safeArea, _headlineBackground);
             Notifier.ShowSuccess(result.FontFallback == true
                 ? "Headline composited (system typeface — the display font wasn't available server-side)."
                 : "Headline composited.");

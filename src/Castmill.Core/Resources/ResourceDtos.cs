@@ -92,6 +92,8 @@ public sealed record ImageSlotResponse(
     string? Prompt, string? ModelAlias, string? SourceSegmentId,
     string? HeadlineText, bool SafeArea, string State, string? PublishedUrl, string? BaseImageUrl,
     DateTimeOffset UpdatedAt,
+    /// <summary>Solid band behind the headline, "#RRGGBB"; null = none.</summary>
+    string? HeadlineBackground = null,
     /// <summary>
     /// The artifact this slot belongs to, for per-artifact kinds (a specific blog's header
     /// and inline images). Null for campaign-wide slots. Placing an image rewrites THIS
@@ -141,7 +143,9 @@ public sealed record CompositeHeadlineRequest(
     [property: Required] Guid CampaignId,
     [property: Required] Guid SlotId,
     [property: Required, MinLength(1), MaxLength(32)] string Headline,
-    bool SafeArea = true);
+    bool SafeArea = true,
+    /// <summary>Solid band behind the text, "#RRGGBB". Null or unparseable = no band.</summary>
+    [property: MaxLength(9)] string? HeadlineBackground = null);
 
 // ---- Schedule mirror (B9.6 / ADR-016) --------------------------------------
 

@@ -138,6 +138,13 @@ public sealed class ImageSlot : ITenantScoped
     public string? SourceSegmentId { get; set; }
     /// <summary>Composited headline (thumbnails only); applied server-side, never prompted (ADR-013).</summary>
     public string? HeadlineText { get; set; }
+
+    /// <summary>
+    /// Optional solid band behind the headline, "#RRGGBB". Generated backgrounds are busy and
+    /// unpredictable, so a shadow alone does not always keep text legible. Stored on the slot
+    /// because placing a variant re-composites, and the band has to survive that.
+    /// </summary>
+    public string? HeadlineBackground { get; set; }
     public bool SafeArea { get; set; }
     /// <summary>Empty | Filled.</summary>
     public required string State { get; set; }

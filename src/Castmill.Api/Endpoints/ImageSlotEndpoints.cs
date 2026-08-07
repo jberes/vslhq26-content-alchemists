@@ -50,7 +50,7 @@ public static class ImageSlotEndpoints
     internal static ImageSlotResponse ToResponse(ImageSlot s) =>
         new(s.Id, s.CampaignId, s.Kind, s.TargetWidth, s.TargetHeight, s.Prompt, s.ModelAlias,
             s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt,
-            s.ArtifactId);
+            s.HeadlineBackground, s.ArtifactId);
 
     private static async Task<IResult> ListAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
     {
@@ -433,7 +433,7 @@ public static class ImageSlotEndpoints
         bool? fontFallback = null;
         if (!string.IsNullOrWhiteSpace(slot.HeadlineText))
         {
-            var composited = await CompositeSlotAsync(slot, slot.HeadlineText!, slot.SafeArea, publicStore, composer, now, ct);
+            var composited = await CompositeSlotAsync(slot, slot.HeadlineText!, slot.SafeArea, slot.HeadlineBackground, publicStore, composer, now, ct);
             if (composited is null)
             {
                 return Results.Problem(statusCode: StatusCodes.Status409Conflict,
@@ -494,7 +494,9 @@ public static class ImageSlotEndpoints
         var now = clock.GetUtcNow();
         slot.HeadlineText = request.Headline;
         slot.SafeArea = request.SafeArea;
-        var composited = await CompositeSlotAsync(slot, request.Headline, request.SafeArea, publicStore, composer, now, ct);
+        slot.HeadlineBackground = request.HeadlineBackground;
+        var composited = await CompositeSlotAsync(
+            slot, request.Headline, request.SafeArea, request.HeadlineBackground, publicStore, composer, now, ct);
         if (composited is null)
         {
             return Results.Problem(statusCode: StatusCodes.Status409Conflict,
@@ -534,7 +536,7 @@ public static class ImageSlotEndpoints
         db.ImageSlots.SingleOrDefaultAsync(s => s.Id == slotId && s.CampaignId == campaignId, ct);
 
     private static async Task<CompositeResult?> CompositeSlotAsync(
-        ImageSlot slot, string headline, bool safeArea,
+        ImageSlot slot, string headline, bool safeArea, string? background,
         IPublicContentStore publicStore, IImageComposer composer,
         DateTimeOffset now, CancellationToken ct)
     {
@@ -543,7 +545,7 @@ public static class ImageSlotEndpoints
         {
             return null;
         }
-        var result = composer.ComposeHeadline(baseBytes, headline, safeArea);
+        var result = composer.ComposeHeadline(baseBytes, headline, safeArea, background);
         var url = await publicStore.PublishAsync(
             CompositePath(slot.CampaignId, slot.Kind), result.Image, "image/webp", ct);
         slot.PublishedUrl = url.ToString();

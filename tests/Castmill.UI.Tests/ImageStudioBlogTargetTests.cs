@@ -122,7 +122,7 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
 
     private static async Task PlaceAsync(IRenderedComponent<ImageStudioView> view)
     {
-        var place = view.FindAll(".cm-modal__panel--studio button")
+        var place = view.FindAll(".cm-lightbox button")
             .First(b => b.TextContent.Contains("Place in slot", StringComparison.Ordinal));
         await place.ClickAsync();
     }
@@ -144,7 +144,8 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
         state == "Filled" ? "https://public.example/x.webp" : null,
         state == "Filled" ? "https://public.example/x.webp" : null,
         DateTimeOffset.UtcNow,
-        _slotArtifactId);
+        HeadlineBackground: null,
+        ArtifactId: _slotArtifactId);
 
     private static ImageVariantResponse Take() => new(
         TakeId, SlotId,

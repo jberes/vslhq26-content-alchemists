@@ -85,6 +85,7 @@ public sealed class CastmillDbContext(
             e.Property(s => s.ModelAlias).HasMaxLength(100);
             e.Property(s => s.SourceSegmentId).HasMaxLength(50);
             e.Property(s => s.HeadlineText).HasMaxLength(32);
+            e.Property(s => s.HeadlineBackground).HasMaxLength(9);
             e.Property(s => s.State).HasMaxLength(20);
             e.Property(s => s.PublishedUrl).HasMaxLength(2000);
             e.Property(s => s.BaseImagePath).HasMaxLength(1000);

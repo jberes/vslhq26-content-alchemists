@@ -58,13 +58,13 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         await view.Find(".cm-gallery__tile").ClickAsync();
 
-        var dialog = view.Find(".cm-modal__panel--studio");
-        Assert.Contains("full-size", dialog.QuerySelector(".cm-variant__preview")!.GetAttribute("alt"),
+        var dialog = view.Find(".cm-lightbox");
+        Assert.Contains("full-size", dialog.QuerySelector(".cm-lightbox__image")!.GetAttribute("alt"),
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Steer a new take", dialog.TextContent, StringComparison.Ordinal);
 
         await dialog.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
-        Assert.Empty(view.FindAll(".cm-modal__panel--studio"));
+        Assert.Empty(view.FindAll(".cm-lightbox"));
     }
 
     [Fact]
@@ -80,14 +80,14 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
         StubPatchResult(Take(TakeId, "Discarded"));
 
         await view.Find(".cm-gallery__tile").ClickAsync();
-        var discard = view.FindAll(".cm-modal__panel--studio button")
+        var discard = view.FindAll(".cm-lightbox button")
             .First(b => b.TextContent.Contains("Throw away", StringComparison.Ordinal));
         await discard.ClickAsync();
 
         Assert.Contains(Http.Requests, r =>
             r.Method == HttpMethod.Patch
             && r.RequestUri!.AbsolutePath.EndsWith($"variants/{TakeId}", StringComparison.Ordinal));
-        Assert.Empty(view.FindAll(".cm-modal__panel--studio")); // dialog closed with the discard
+        Assert.Empty(view.FindAll(".cm-lightbox")); // dialog closed with the discard
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
                 DateTimeOffset.UtcNow), null, null));
 
         await view.Find(".cm-gallery__tile").ClickAsync();
-        var place = view.FindAll(".cm-modal__panel--studio button")
+        var place = view.FindAll(".cm-lightbox button")
             .First(b => b.TextContent.Contains("Place in slot", StringComparison.Ordinal));
         await place.ClickAsync();
 
