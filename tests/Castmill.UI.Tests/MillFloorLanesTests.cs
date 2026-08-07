@@ -5,6 +5,7 @@ using Castmill.UI.Design;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
 using Castmill.UI.State;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
@@ -142,7 +143,7 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         Http.OnStatus(HttpMethod.Delete,
             $"api/v1/campaigns/{CampaignId}/artifacts/{artifactId}", System.Net.HttpStatusCode.NoContent);
 
-        await view.Find(".cm-card__delete").ClickAsync();
+        await view.Find(".cm-card__tool--danger").ClickAsync();
 
         Assert.Single(confirm.Requests);
         Assert.Contains(Http.Requests, r =>
@@ -164,10 +165,59 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
         await WaitForTextAsync(view, "Spared draft");
 
-        await view.Find(".cm-card__delete").ClickAsync();
+        await view.Find(".cm-card__tool--danger").ClickAsync();
 
         Assert.DoesNotContain(Http.Requests, r => r.Method == HttpMethod.Delete);
         Assert.Contains("Spared draft", view.Markup, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Editing used to need a double-click: undiscoverable, and with no keyboard or touch
+    /// equivalent at all. The card's actions are now buttons on a hover toolbar.
+    /// </summary>
+    [Fact]
+    public async Task The_edit_tool_opens_focus_on_that_artifact_in_one_click()
+    {
+        StubPreview(Artifact("blog", "Editable draft"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Editable draft");
+
+        var artifactId = StubbedArtifacts.Single().Id;
+        var navigation = Services.GetRequiredService<NavigationManager>();
+
+        await view.Find(".cm-card__tools button:not(.cm-card__tool--danger)").ClickAsync();
+
+        Assert.Contains("/focus", navigation.Uri, StringComparison.Ordinal);
+        Assert.Contains($"artifact={artifactId}", navigation.Uri, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Deleting destroys the revision ring too, which is work the user may not realise is
+    /// attached. The dialog has to say that, and its accept button must not read as the
+    /// harmless default.
+    /// </summary>
+    [Fact]
+    public async Task The_delete_confirm_names_what_is_destroyed_and_is_marked_destructive()
+    {
+        StubPreview(Artifact("blog", "Doomed draft"));
+
+        var confirm = new AutoConfirm(accept: false);
+        Services.AddScoped<IConfirmService>(_ => confirm);
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Doomed draft");
+
+        await view.Find(".cm-card__tool--danger").ClickAsync();
+
+        var request = Assert.Single(confirm.Requests);
+        Assert.True(request.Destructive, "a permanent delete must be styled as destructive");
+        Assert.Contains("Doomed draft", request.Message, StringComparison.Ordinal);
+        Assert.Contains("revision history", request.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no undo", request.Message, StringComparison.OrdinalIgnoreCase);
+        // "Delete blog post forever" — never a bare "OK" the user clicks through.
+        Assert.Contains("forever", request.AcceptLabel, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Cancel", request.CancelLabel, StringComparison.OrdinalIgnoreCase);
     }
 
     // ---- helpers ---------------------------------------------------------------

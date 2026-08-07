@@ -679,31 +679,57 @@
     color: var(--cm-on-surface-subtle);
 }
 
-/* Delete affordance: hidden until the card is hovered or the button itself is focused,
-   so the board stays calm; always reachable by keyboard (focus reveals it). */
-.cm-card__delete {
+/* Card toolbar: hidden until the card is hovered or a tool is focused, so the board stays
+   calm; always reachable by keyboard, because focus reveals it. Editing used to require a
+   double-click, which is undiscoverable and has no keyboard or touch equivalent. */
+.cm-card__tools {
     position: absolute;
     inset-block-start: var(--cm-space-1);
     inset-inline-end: var(--cm-space-1);
-    inline-size: 22px;
-    block-size: 22px;
-    border: 1px solid var(--cm-rule);
+    display: flex;
+    gap: var(--cm-space-1);
+    padding: 2px;
     border-radius: var(--cm-radius-sm);
     background: var(--cm-surface-raised);
+    box-shadow: var(--cm-shadow-lg);
+    opacity: 0;
+    transition: opacity var(--cm-motion);
+}
+
+.cm-lane__cards > li:hover .cm-card__tools,
+.cm-card__tools:focus-within {
+    opacity: 1;
+}
+
+/* Never fade the toolbar out from under a keyboard user mid-interaction. */
+@media (prefers-reduced-motion: reduce) {
+    .cm-card__tools {
+        transition: none;
+    }
+}
+
+.cm-card__tool {
+    inline-size: 24px;
+    block-size: 24px;
+    padding: 0;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
     color: var(--cm-on-surface-muted);
     font-size: var(--cm-text-meta);
     line-height: 1;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity var(--cm-motion), color var(--cm-motion);
+    transition: color var(--cm-motion), border-color var(--cm-motion);
 }
 
-.cm-lane__cards > li:hover .cm-card__delete,
-.cm-card__delete:focus-visible {
-    opacity: 1;
+.cm-card__tool:hover {
+    color: var(--cm-accent);
+    border-color: var(--cm-accent);
 }
 
-.cm-card__delete:hover {
+/* Destructive tools say so on hover — the colour is a warning, and the confirm behind it
+   is the actual guard. */
+.cm-card__tool--danger:hover {
     color: var(--cm-danger);
     border-color: var(--cm-danger);
 }

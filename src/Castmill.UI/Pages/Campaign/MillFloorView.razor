@@ -219,8 +219,7 @@
                                                         data-card="@artifact.Id"
                                                         @onmouseover="() => Hover(artifact)"
                                                         @onmouseout="Unhover"
-                                                        @onclick="() => TogglePin(artifact)"
-                                                        @ondblclick="() => OpenFocus(artifact)">
+                                                        @onclick="() => TogglePin(artifact)">
                                                     <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
                                                     <span class="cm-card__body">
                                                         <span class="cm-card__title">@artifact.Title</span>
@@ -229,10 +228,26 @@
                                                         </span>
                                                     </span>
                                                 </button>
-                                                <button type="button" class="cm-card__delete"
-                                                        title="Delete @ArtifactDisplay.KindLabel(artifact.Kind)"
-                                                        aria-label="Delete @artifact.Title"
-                                                        @onclick="() => DeleteAsync(artifact)">✕</button>
+
+                                                @* Hover toolbar. Editing used to need a
+                                                   double-click, which is undiscoverable and has
+                                                   no keyboard or touch equivalent — a card is a
+                                                   button, so its actions are buttons too. *@
+                                                <div class="cm-card__tools" role="group"
+                                                     aria-label="Actions for @artifact.Title">
+                                                    <button type="button" class="cm-card__tool"
+                                                            title="Edit @ArtifactDisplay.KindLabel(artifact.Kind)"
+                                                            aria-label="Edit @artifact.Title"
+                                                            @onclick="() => OpenFocus(artifact)">
+                                                        <span aria-hidden="true">✎</span>
+                                                    </button>
+                                                    <button type="button" class="cm-card__tool cm-card__tool--danger"
+                                                            title="Delete @ArtifactDisplay.KindLabel(artifact.Kind)"
+                                                            aria-label="Delete @artifact.Title"
+                                                            @onclick="() => DeleteAsync(artifact)">
+                                                        <span aria-hidden="true">🗑</span>
+                                                    </button>
+                                                </div>
                                             </li>
                                         }
                                     </ul>
@@ -491,10 +506,17 @@
     /// <summary>Deletes one artifact after a confirm; the board reloads from the server.</summary>
     private async Task DeleteAsync(ArtifactPreviewResponse artifact)
     {
+        // Named explicitly, and spelling out what ELSE goes with it: the revision ring holds
+        // every earlier take, so deleting an artifact throws away work the user may not
+        // realise is attached to it. "There is no undo" is the load-bearing sentence.
+        var kind = ArtifactDisplay.KindLabel(artifact.Kind).ToLowerInvariant();
         var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
-            $"Delete \"{artifact.Title}\"?",
-            $"This removes the {ArtifactDisplay.KindLabel(artifact.Kind).ToLowerInvariant()} and its revision history. There is no undo.",
-            AcceptLabel: "Delete",
+            $"Permanently delete this {kind}?",
+            $"\u201c{artifact.Title}\u201d and its full revision history will be destroyed. "
+            + "Any images placed into it stay in the library, but the piece itself cannot be "
+            + "recovered — this is not the same as archiving, and there is no undo.",
+            AcceptLabel: $"Delete {kind} forever",
+            CancelLabel: "Keep it",
             Destructive: true));
 
         if (!accepted)
