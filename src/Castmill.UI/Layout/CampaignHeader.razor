@@ -40,13 +40,20 @@
         <div class="cm-tabs" role="tablist" aria-label="Campaign views">
             @foreach (var (view, segment, label) in CampaignViews.All)
             {
+                @* aria-selected is written as a STRING, not a bool: a bool renders as a
+                   presence-only attribute, so `aria-selected="@(view == Current)"` emitted a
+                   bare `aria-selected` and the stylesheet's [aria-selected="true"] never
+                   matched — the active tab looked like the other three. Same trap as
+                   aria-expanded on the artifact tree.
+
+                   This comment lives ABOVE the tag on purpose. Inside an attribute list Razor
+                   does NOT strip it; it emits the whole comment as an attribute NAME, and the
+                   browser then throws InvalidCharacterError on setAttribute and tears down the
+                   render tree — a blank campaign with Blazor's global error bar. bUnit will
+                   not catch it: AngleSharp accepts invalid attribute names where a real
+                   browser refuses them. *@
                 <button type="button" role="tab"
                         class="cm-tabs__tab"
-                        @* A bool renders as a PRESENCE-only attribute in Blazor, so this
-                           produced `aria-selected` with no value and the CSS selector
-                           [aria-selected="true"] never matched — the active tab was
-                           indistinguishable from the rest. Same trap as aria-expanded on
-                           the artifact tree. *@
                         aria-selected="@(view == Current ? "true" : "false")"
                         @onclick="() => Go(view)">
                     @label
