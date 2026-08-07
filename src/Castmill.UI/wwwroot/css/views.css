@@ -2529,3 +2529,23 @@
     gap: var(--cm-space-2);
     margin-inline-start: auto;
 }
+
+/* Publish preview: the exact paths and front matter, before anything is committed. */
+.cm-publish__preview {
+    margin-block: var(--cm-space-4);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-publish__front {
+    margin: var(--cm-space-2) 0 0;
+    padding: var(--cm-space-2);
+    overflow-x: auto;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-on-surface-muted);
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-meta);
+}

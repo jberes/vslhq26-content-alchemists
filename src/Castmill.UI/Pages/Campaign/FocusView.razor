@@ -17,6 +17,7 @@
 @inject GenerationClient Generation
 @inject ImagesClient Images
 @inject ExportClient Exports
+@inject GitClient Git
 @inject IFileDownloader Downloader
 @inject IConfirmService Confirm
 @inject INotifier Notifier
@@ -138,6 +139,93 @@
                             OnImageFile="UploadDroppedImageAsync"
                             @ref="_editor" />
 
+                @if (_publishOpen)
+                {
+                    <div class="cm-modal" role="presentation" @onclick="ClosePublish">
+                        <div class="cm-modal__panel" role="dialog" aria-modal="true"
+                             aria-labelledby="cm-publish-title" tabindex="-1" @onclick:stopPropagation>
+                            <h2 id="cm-publish-title" class="cm-front__block-title">Publish to GitHub</h2>
+
+                            <label class="cm-field">
+                                <span class="cm-field__label">Repository</span>
+                                <select class="cm-input" @bind="_publishRepoId" @bind:after="LoadPreviewAsync"
+                                        aria-label="Repository to publish into">
+                                    @foreach (var repo in _repos)
+                                    {
+                                        <option value="@repo.Id">@repo.Name — @repo.Owner/@repo.Repo</option>
+                                    }
+                                </select>
+                            </label>
+
+                            <div class="cm-studio__row">
+                                <span class="cm-kicker">How</span>
+                                @* Both modes, chosen per publish. A draft PR is the safe default:
+                                   nothing reaches the site until someone merges it, and the
+                                   repository's own CI preview runs on the branch. *@
+                                <label class="cm-fanout__item">
+                                    <input type="radio" name="cm-publish-mode"
+                                           checked="@(_publishMode == "pull-request")"
+                                           @onchange="@(() => _publishMode = "pull-request")" />
+                                    <span>Open a pull request</span>
+                                </label>
+                                <label class="cm-fanout__item">
+                                    <input type="radio" name="cm-publish-mode"
+                                           checked="@(_publishMode == "direct-commit")"
+                                           @onchange="@(() => _publishMode = "direct-commit")" />
+                                    <span>Commit directly</span>
+                                </label>
+                            </div>
+
+                            <label class="cm-fanout__item">
+                                <input type="checkbox" @bind="_publishImages" @bind:after="LoadPreviewAsync" />
+                                <span>Include this artifact's images</span>
+                            </label>
+
+                            @if (_preview is { } preview)
+                            {
+                                @* Shown before anything is committed. Every tool in this space
+                                   that skipped this generates support tickets. *@
+                                <div class="cm-publish__preview">
+                                    <span class="cm-kicker">Will write</span>
+                                    <p class="cm-mono cm-meta">@preview.ContentPath</p>
+                                    @foreach (var image in preview.ImagePaths)
+                                    {
+                                        <p class="cm-mono cm-meta">@image</p>
+                                    }
+                                    <span class="cm-kicker">Front matter</span>
+                                    <pre class="cm-publish__front">@preview.FrontMatter</pre>
+                                    <p class="cm-meta">
+                                        Branch <span class="cm-mono">@preview.Branch</span> —
+                                        publishing again updates this branch rather than opening another.
+                                    </p>
+                                </div>
+                            }
+
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button" disabled="@_publishing"
+                                        @onclick="PublishAsync">
+                                    @(_publishing ? "Publishing…" : _publishMode == "direct-commit" ? "Commit" : "Open pull request")
+                                </button>
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="ClosePublish">
+                                    Cancel
+                                </button>
+                            </div>
+
+                            @if (_published is { } done)
+                            {
+                                <p class="cm-meta">
+                                    Committed <span class="cm-mono">@done.CommitSha[..Math.Min(7, done.CommitSha.Length)]</span>
+                                    to <span class="cm-mono">@done.Branch</span>.
+                                    @if (done.PullRequestUrl is { Length: > 0 } url)
+                                    {
+                                        <a href="@url" target="_blank" rel="noopener noreferrer">Open pull request #@done.PullRequestNumber</a>
+                                    }
+                                </p>
+                            }
+                        </div>
+                    </div>
+                }
+
                 @if (_mediaDialog is { } media)
                 {
                     <div class="cm-modal" role="presentation" @onclick="CloseMediaDialog">
@@ -234,6 +322,13 @@
                                 disabled="@_exporting" @onclick="ExportCampaignAsync">
                             Whole campaign (.zip)
                         </button>
+                        @if (_repos.Count > 0)
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="OpenPublishAsync">
+                                Publish to GitHub
+                            </button>
+                        }
                     </span>
                 </footer>
             }
@@ -484,6 +579,18 @@
         {
             _aiStatus = null;
         }
+
+        // No repo profiles means no publish button at all — an optional feature that has not
+        // been set up should be absent, not present-and-broken (G3).
+        try
+        {
+            _repos = await Git.ListReposAsync();
+        }
+        catch (ApiException)
+        {
+            _repos = [];
+        }
+
         StateHasChanged();
     }
 
@@ -881,6 +988,84 @@
         finally
         {
             _exporting = false;
+        }
+    }
+
+    // ---- Publish to GitHub (ADR-021) ------------------------------------------
+
+    private List<GitRepo> _repos = [];
+    private bool _publishOpen;
+    private bool _publishing;
+    private Guid _publishRepoId;
+    private string _publishMode = "pull-request";
+    private bool _publishImages = true;
+    private GitPublishPreview? _preview;
+    private GitPublishOutcome? _published;
+
+    private async Task OpenPublishAsync()
+    {
+        if (_repos.Count == 0 || _artifact is null)
+        {
+            return;
+        }
+
+        var repo = _repos.FirstOrDefault(r => r.IsDefault) ?? _repos[0];
+        _publishRepoId = repo.Id;
+        _publishMode = repo.Mode;
+        _published = null;
+        _publishOpen = true;
+        await LoadPreviewAsync();
+    }
+
+    private void ClosePublish()
+    {
+        _publishOpen = false;
+        _preview = null;
+    }
+
+    /// <summary>Costs no GitHub call — it is the "see it before you commit it" step.</summary>
+    private async Task LoadPreviewAsync()
+    {
+        if (!_publishOpen || _artifact is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _preview = await Git.PreviewAsync(CampaignId, _artifact.Id, _publishRepoId, _publishImages);
+        }
+        catch (ApiException ex)
+        {
+            _preview = null;
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private async Task PublishAsync()
+    {
+        if (_artifact is null)
+        {
+            return;
+        }
+
+        _publishing = true;
+        try
+        {
+            _published = await Git.PublishAsync(
+                CampaignId, _artifact.Id, _publishRepoId, _publishImages, _publishMode);
+
+            Notifier.ShowSuccess(_published.PullRequestNumber is { } number
+                ? $"Pull request #{number} opened."
+                : $"Committed to {_published.Branch}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _publishing = false;
         }
     }
 
