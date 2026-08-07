@@ -484,6 +484,7 @@
     /// steering, not pixel compositing.
     /// </summary>
     private List<string> _brandFaces = [];
+    private Guid? _facesLoadedFor;
 
     private IReadOnlyList<string> BrandFaces => _brandFaces;
 
@@ -571,7 +572,16 @@
     protected override async Task OnParametersSetAsync()
     {
         await SyncSelectionAsync();
-        _status ??= await LoadStatusAsync();
+        // Never let provider readiness escape a lifecycle method: an unhandled exception
+        // here blanks the studio rather than greying out a model.
+        try
+        {
+            _status ??= await LoadStatusAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _status = null;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -586,8 +596,11 @@
     private void OnChanged() => InvokeAsync(async () =>
     {
         await SyncSelectionAsync();
-        if (_brandFaces.Count == 0 && Campaign.Brand is not null)
+        // Keyed on the brand, not on the result: a brand with NO face assets would otherwise
+        // re-fetch on every Changed event forever.
+        if (Campaign.Brand?.Id is { } brandId && _facesLoadedFor != brandId)
         {
+            _facesLoadedFor = brandId;
             await LoadBrandFacesAsync();
         }
         StateHasChanged();

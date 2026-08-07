@@ -13,8 +13,11 @@
    Colour comes from currentColor and the accent token, so it inherits both theme families
    and both modes rather than carrying its own palette. *@
 
-<svg class="cm-mark @Class" viewBox="0 0 456 456" role="img" aria-label="@Label"
-     xmlns="http://www.w3.org/2000/svg" focusable="false">
+@* Intrinsic width/height are load-bearing, not decoration: an SVG with only a viewBox
+   falls back to filling its container, so if the stylesheet is missing or stale the mark
+   blows up and pushes the wordmark onto its own line. CSS overrides these freely. *@
+<svg class="cm-mark @Class" viewBox="0 0 456 456" width="24" height="24" role="img"
+     aria-label="@Label" xmlns="http://www.w3.org/2000/svg" focusable="false">
     @* The source master: one bar, spanning the full height of the fan beside it. *@
     <rect x="108" y="140" width="40" height="176" rx="20" fill="currentColor" />
 

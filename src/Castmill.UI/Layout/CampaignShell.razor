@@ -31,7 +31,24 @@
     }
     else
     {
-        @ChildContent
+        @* A component that throws must show a message, not a blank screen. Without a
+           boundary, ANY exception in a campaign view tears down the whole render tree and
+           leaves the user staring at nothing with no way back. @key resets the boundary on
+           navigation, so a failure on one campaign does not poison the next. *@
+        <ErrorBoundary @key="CampaignId" @ref="_boundary">
+            <ChildContent>@ChildContent</ChildContent>
+            <ErrorContent Context="error">
+                <div class="cm-page">
+                    <EmptyState Kicker="Campaign"
+                                Headline="This view hit an error."
+                                Detail="@($"{error.GetType().Name}: {error.Message}")">
+                        <Action>
+                            <button type="button" class="cm-button" @onclick="Recover">Try again</button>
+                        </Action>
+                    </EmptyState>
+                </div>
+            </ErrorContent>
+        </ErrorBoundary>
     }
 </div>
 
@@ -60,6 +77,15 @@
         }
 
         await Campaign.LoadAsync(CampaignId);
+    }
+
+    private ErrorBoundary? _boundary;
+
+    /// <summary>Clears the boundary and reloads, so "try again" is a real retry.</summary>
+    private async Task Recover()
+    {
+        _boundary?.Recover();
+        await Campaign.LoadAsync(CampaignId, force: true);
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);

@@ -571,11 +571,14 @@
         {
             return;
         }
+        // Broad on purpose: this runs from a lifecycle method, so anything that escapes
+        // becomes an unhandled render exception and blanks the page. Model readiness is a
+        // nicety — it must never be able to take the editor down.
         try
         {
             _aiStatus = await Images.GetAiStatusAsync();
         }
-        catch (ApiException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _aiStatus = null;
         }
@@ -586,7 +589,7 @@
         {
             _repos = await Git.ListReposAsync();
         }
-        catch (ApiException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _repos = [];
         }

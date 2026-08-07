@@ -108,7 +108,13 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
 
         // Theme-driven, not hardcoded — otherwise it would be wrong in one of the four
         // family x mode combinations.
-        var svg = brand.QuerySelector("svg.cm-mark")!.InnerHtml;
+        // Intrinsic size, so a missing or stale stylesheet cannot make the mark fill its
+        // container and shove the wordmark onto the next line.
+        var mark = brand.QuerySelector("svg.cm-mark")!;
+        Assert.False(string.IsNullOrEmpty(mark.GetAttribute("width")));
+        Assert.False(string.IsNullOrEmpty(mark.GetAttribute("height")));
+
+        var svg = mark.InnerHtml;
         Assert.Contains("currentColor", svg, StringComparison.Ordinal);
         Assert.Contains("var(--cm-accent)", svg, StringComparison.Ordinal);
         Assert.DoesNotContain("#", svg, StringComparison.Ordinal);
