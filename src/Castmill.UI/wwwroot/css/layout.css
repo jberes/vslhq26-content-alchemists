@@ -58,9 +58,17 @@
 /* The main area NEVER scrolls (owner: "I don't want to scroll the page"). It bounds its
    child, and each surface owns its scrollbar — .cm-page for document-style pages, the
    per-column regions for the campaign views. */
+/* NO z-index here, deliberately. `position: relative` alone does not create a stacking
+   context, but `position: relative` + `z-index: 1` does — and every modal in the app is
+   rendered by a page INSIDE this element. A stacking context traps its descendants, so the
+   Image Studio lightbox's `z-index: 70` was being resolved against its siblings here rather
+   than against the document, and the rail (z-index: 2, a sibling of this element) painted
+   straight over the dialog.
+   The layering is unchanged without it: the rail still wins over this element's auto-level
+   content because a positioned z-index:2 outranks it, while a position:fixed modal can now
+   reach the top of the document where it belongs. */
 .cm-app__main {
     position: relative;
-    z-index: 1;
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     min-block-size: 0;

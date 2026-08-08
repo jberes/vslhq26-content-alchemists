@@ -11,6 +11,7 @@
 @implements IDisposable
 @inject CampaignState Campaign
 @inject ImagesClient Images
+@using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient BrandsApi
 @inject StudioRunService StudioRun
 @inject Castmill.UI.Http.GenerationClient Generation
@@ -164,7 +165,7 @@
                                 }
                                 <button type="button" class="cm-button" disabled="@(IsGenerating || !CanGenerate)"
                                         @onclick="GenerateAsync">
-                                    @(IsGenerating ? "Generating…" : $"Generate {_variantCount} variants")
+                                    @(IsGenerating ? "Generating…" : $"Generate {_variantCount} {(_variantCount == 1 ? "variant" : "variants")}")
                                 </button>
                                 <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
                             </div>
@@ -219,7 +220,17 @@
                                     {
                                         @for (var i = 0; i < Math.Max(0, StudioRun.ExpectedVariants - (StudioRun.Progress?.Completed ?? 0)); i++)
                                         {
-                                            <div class="cm-skeleton cm-skeleton--tile"></div>
+                                            @* Generation runs for minutes. A faint skeleton read as
+                                               "nothing is happening", so each pending take gets a
+                                               spinner, a frame and a number it can be identified by. *@
+                                            <div class="cm-gallery__pending" role="status"
+                                                 aria-label="Take @((StudioRun.Progress?.Completed ?? 0) + i + 1) of @StudioRun.ExpectedVariants rendering">
+                                                <span class="cm-spinner" aria-hidden="true"></span>
+                                                <span class="cm-gallery__pending-label cm-mono">
+                                                    TAKE @((StudioRun.Progress?.Completed ?? 0) + i + 1)
+                                                </span>
+                                                <span class="cm-meta">rendering…</span>
+                                            </div>
                                         }
                                     }
                                     @foreach (var variant in OrderedGallery)
@@ -331,11 +342,11 @@
                                            placeholder="Up to 32 characters" />
 
                                     <span class="cm-kicker">Behind the text</span>
-                                    <div class="cm-swatches">
+                                    <div class="cm-rings">
                                         @foreach (var (label, value) in HeadlineBackgrounds)
                                         {
                                             <button type="button"
-                                                    class="cm-swatch @(value is null ? "cm-swatch--none" : null) @(_headlineBackground == value ? "cm-swatch--on" : null)"
+                                                    class="cm-ring @(value is null ? "cm-ring--none" : null) @(_headlineBackground == value ? "cm-ring--on" : null)"
                                                     style="@(value is null ? null : $"background:{value}")"
                                                     title="@label"
                                                     aria-label="@label"
@@ -370,19 +381,75 @@
                                     }
                                 </div>
 
-                                @if (BrandFaces.Any())
+                                @* The brand kit, usable from here rather than only from the
+                                   Brands page: pick an existing face or background, or add one
+                                   without leaving the studio.
+
+                                   Honest about what this does — the renderer takes TEXT only
+                                   (IImageRenderer.RenderExactAsync has no reference-image
+                                   parameter), so an asset contributes its DESCRIPTION to the
+                                   prompt. It is steering, not compositing, and the panel says
+                                   so rather than implying a likeness will be reproduced. *@
+                                <span class="cm-kicker">From @(Campaign.Brand?.Name ?? "the brand kit")</span>
+
+                                @if (Campaign.Brand is null)
                                 {
-                                    @* A face the brand already defines, appended as prompt
-                                       steering. The descriptor IS the prompt text — that is
-                                       what BrandAsset.Name is for. *@
-                                    <span class="cm-kicker">Add a face</span>
-                                    <div class="cm-studio__chips">
-                                        @foreach (var face in BrandFaces)
+                                    <p class="cm-meta">
+                                        This campaign has no brand, so there is no kit to draw on.
+                                        <a href="campaigns">Pick one on the campaign</a> to reuse faces
+                                        and backgrounds here.
+                                    </p>
+                                }
+                                else
+                                {
+                                    @foreach (var group in BrandKit)
+                                    {
+                                        <div class="cm-studio__kit">
+                                            <span class="cm-meta">@group.Key</span>
+                                            <div class="cm-studio__chips">
+                                                @foreach (var asset in group)
+                                                {
+                                                    <button type="button" class="cm-studio__chip"
+                                                            @onclick="() => AppendSteerChip(AssetPrompt(asset))">
+                                                        + @(asset.Label ?? asset.FileName)
+                                                    </button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @if (!BrandKit.Any())
+                                    {
+                                        <p class="cm-meta">Nothing in the kit yet — add a face or background below.</p>
+                                    }
+
+                                    <div class="cm-studio__upload">
+                                        <select class="cm-input" @bind="_uploadKind" aria-label="What this asset is">
+                                            <option value="face">Face</option>
+                                            <option value="background">Background</option>
+                                            <option value="logo">Logo</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                        @* The label is load-bearing: it becomes the prompt text,
+                                           so an unlabelled upload steers nothing useful. *@
+                                        <input class="cm-input" placeholder="Describe it — e.g. the host, short dark hair"
+                                               aria-label="Description used as prompt text"
+                                               @bind="_uploadLabel" @bind:event="oninput" />
+                                        <InputFile OnChange="UploadKitAssetAsync" accept="image/*"
+                                                   disabled="@(_uploading || string.IsNullOrWhiteSpace(_uploadLabel))" />
+                                        @if (_uploading)
                                         {
-                                            <button type="button" class="cm-studio__chip"
-                                                    @onclick="() => AppendSteerChip(FacePrompt(face))">+ @face</button>
+                                            <span class="cm-meta">Uploading…</span>
                                         }
                                     </div>
+                                    @if (_uploadError is { } kitError)
+                                    {
+                                        <p class="cm-form__error" role="alert">@kitError</p>
+                                    }
+                                    <p class="cm-meta">
+                                        Saved to @Campaign.Brand.Name, so it is available to every
+                                        campaign on this brand.
+                                    </p>
                                 }
 
                                 <button type="button" class="cm-button cm-button--quiet"
@@ -423,7 +490,7 @@
 </CampaignShell>
 
 @code {
-    private static readonly int[] VariantChoices = [2, 4, 6];
+    private static readonly int[] VariantChoices = [1, 2, 4, 6];
 
     // gpt-image-2 list price at 2026 rates for a single ~1-2 MP render; an estimate on the
     // surface beats a silent bill (the projected-vs-actual honesty rule, applied to money).
@@ -479,38 +546,101 @@
     ];
 
     /// <summary>
-    /// Faces the brand already defines. The label doubles as prompt text ("the host, short
-    /// dark hair"), which is what BrandAsset.Label is for — so adding a face is prompt
-    /// steering, not pixel compositing.
+    /// The brand's asset kit. A label doubles as prompt text ("the host, short dark hair"),
+    /// which is what BrandAsset.Label is for — so using one is prompt steering, not pixel
+    /// compositing. The renderer accepts text only.
     /// </summary>
-    private List<string> _brandFaces = [];
+    private List<BrandAssetResponse> _brandAssets = [];
     private Guid? _facesLoadedFor;
 
-    private IReadOnlyList<string> BrandFaces => _brandFaces;
+    private string _uploadKind = "face";
+    private string _uploadLabel = string.Empty;
+    private bool _uploading;
+    private string? _uploadError;
 
-    /// <summary>The steering line a brand face contributes. Its label IS the prompt text.</summary>
-    private static string FacePrompt(string face) => $"include {face}";
+    /// <summary>Faces first — they are what the panel is reached for most.</summary>
+    private static readonly string[] KitOrder = ["face", "background", "logo", "other"];
+
+    private IEnumerable<IGrouping<string, BrandAssetResponse>> BrandKit =>
+        _brandAssets
+            .GroupBy(a => a.Kind.ToLowerInvariant())
+            .OrderBy(g => Array.IndexOf(KitOrder, g.Key) is var i && i >= 0 ? i : KitOrder.Length);
+
+    /// <summary>The steering line an asset contributes. Its label IS the prompt text.</summary>
+    private static string AssetPrompt(BrandAssetResponse asset)
+    {
+        var text = asset.Label ?? asset.FileName;
+        return asset.Kind.Equals("background", StringComparison.OrdinalIgnoreCase)
+            ? $"set against {text}"
+            : $"include {text}";
+    }
 
     private async Task LoadBrandFacesAsync()
     {
         if (Campaign.Brand is not { } brand)
         {
-            _brandFaces = [];
+            _brandAssets = [];
             return;
         }
 
         try
         {
-            var assets = await BrandsApi.ListAssetsAsync(brand.Id);
-            _brandFaces = [.. assets
-                .Where(a => a.Kind.Equals("face", StringComparison.OrdinalIgnoreCase))
-                .Select(a => a.Label ?? a.FileName)
-                .Where(label => !string.IsNullOrWhiteSpace(label))];
+            _brandAssets = [.. (await BrandsApi.ListAssetsAsync(brand.Id))
+                .Where(a => !string.IsNullOrWhiteSpace(a.Label ?? a.FileName))];
         }
         catch (ApiException)
         {
-            // No faces offered rather than a broken panel; the steer box still works.
-            _brandFaces = [];
+            // An empty kit rather than a broken panel; the steer box still works.
+            _brandAssets = [];
+        }
+    }
+
+    /// <summary>
+    /// Uploads straight into the brand kit from the studio. Same three-step flow the Brands
+    /// page uses — create the library asset, PUT the bytes to the SAS URL, link it to the
+    /// brand — so there is one storage path, not a second one that drifts.
+    /// </summary>
+    private async Task UploadKitAssetAsync(InputFileChangeEventArgs e)
+    {
+        if (Campaign.Brand is not { } brand || e.File is null)
+        {
+            return;
+        }
+
+        _uploading = true;
+        _uploadError = null;
+        try
+        {
+            const long maxBytes = 20L * 1024 * 1024;
+            var file = e.File;
+            var asset = await BrandsApi.CreateLibraryAssetAsync(file.Name, file.ContentType, file.Size);
+            var sas = await BrandsApi.MintUploadSasAsync(asset.Id);
+
+            // A bare HttpClient on purpose: the SAS URL is pre-authorised storage, and sending
+            // our bearer token to it would leak the session to a third party.
+            using var http = new HttpClient();
+            using var content = new StreamContent(file.OpenReadStream(maxBytes));
+            content.Headers.TryAddWithoutValidation("Content-Type", file.ContentType);
+            using var request = new HttpRequestMessage(HttpMethod.Put, sas.UploadUrl) { Content = content };
+            request.Headers.TryAddWithoutValidation("x-ms-blob-type", "BlockBlob");
+            (await http.SendAsync(request)).EnsureSuccessStatusCode();
+
+            await BrandsApi.LinkAssetAsync(brand.Id, asset.Id, _uploadKind, _uploadLabel.Trim());
+            _uploadLabel = string.Empty;
+            await LoadBrandFacesAsync();
+            Notifier.ShowSuccess($"Added to {brand.Name}'s kit.");
+        }
+        catch (ApiException ex)
+        {
+            _uploadError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _uploadError = "The upload to storage failed. Is the storage account reachable?";
+        }
+        finally
+        {
+            _uploading = false;
         }
     }
     private List<ImageVariantResponse> _gallery = [];

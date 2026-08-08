@@ -96,9 +96,12 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
     [Fact]
     public void The_brand_lockup_renders_the_mark_next_to_the_wordmark()
     {
+        // .cm-lockup, NOT .cm-brand: that name belongs to the Brands page, and sharing it made
+        // the two rules merge so the lockup inherited flex-direction: column and stacked the
+        // mark above the wordmark.
         var view = Render<Castmill.UI.Layout.WorkspaceRail>();
 
-        var brand = view.Find(".cm-brand");
+        var brand = view.Find(".cm-lockup");
         Assert.NotNull(brand.QuerySelector("svg.cm-mark"));
         Assert.Contains("Castmill", brand.QuerySelector(".cm-wordmark")!.TextContent, StringComparison.Ordinal);
 

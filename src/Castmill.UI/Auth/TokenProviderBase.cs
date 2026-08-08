@@ -31,6 +31,15 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
 
     protected abstract Task DeleteRefreshTokenAsync();
 
+    /// <summary>
+    /// The single call to the refresh endpoint, as a seam. AuthClient is a concrete class with
+    /// non-virtual methods, so without this the token-custody rules below — which failure
+    /// modes clear the session and which keep it — cannot be tested at all.
+    /// </summary>
+    protected virtual Task<AuthResponse> RefreshAsync(string refreshToken) =>
+        // CancellationToken.None deliberately: see ExchangeAsync.
+        authClient().RefreshAsync(refreshToken, CancellationToken.None);
+
     public async Task<bool> TryRestoreAsync()
     {
         var stored = await ReadRefreshTokenAsync();
@@ -50,11 +59,20 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
         // Single-flight: several parallel calls can 401 at once, and refresh tokens are
         // single-use — a second exchange with the same token would look like token reuse
         // and get the whole family revoked server-side.
+        // Captured BEFORE the wait: the whole point is to detect a refresh that happened
+        // while this caller was queued on the lock.
+        var tokenOnEntry = _accessToken;
+
         await _refreshLock.WaitAsync();
         try
         {
-            // Another caller may have refreshed while this one waited.
-            if (_accessToken is not null && _accessExpiresAt > DateTimeOffset.UtcNow.AddSeconds(5))
+            // Another caller refreshed while this one waited — recognised by the access token
+            // having actually CHANGED, not by the local clock. Trusting _accessExpiresAt here
+            // was wrong: the caller only gets in because the SERVER returned 401, so when the
+            // two disagree the server is right. The old check returned "refreshed" without
+            // refreshing, the replay reused the same rejected token, and the user was told
+            // their session had expired while holding a token the client thought was fine.
+            if (_accessToken is not null && !ReferenceEquals(_accessToken, tokenOnEntry))
             {
                 return true;
             }
@@ -94,21 +112,36 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
     {
         try
         {
-            var response = await authClient().RefreshAsync(refreshToken);
+            // The seam above uses CancellationToken.None deliberately: this refresh is nested
+            // inside whatever request triggered it, and that request's deadline is not this
+            // one's. A refresh cancelled part-way is the worst possible outcome — the server
+            // may already have rotated (consumed) the token while we never stored its
+            // replacement, so the next attempt looks like REUSE and the server revokes the
+            // entire family.
+            var response = await RefreshAsync(refreshToken);
             await StoreAsync(response.AccessToken, response.AccessTokenExpiresAt, response.RefreshToken);
             return true;
         }
-        catch (Http.ApiException)
+        catch (Http.UnauthorizedApiException)
         {
-            // Revoked, expired, or reused: the stored token is worthless, so drop it
-            // rather than retrying with it on every subsequent request.
+            // The ONLY definitive answer: the server looked at this token and rejected it.
+            // Revoked, expired or reused — it is worthless, so drop it rather than retrying
+            // with it on every subsequent request.
             await ClearAsync();
             return false;
         }
-        catch (HttpRequestException)
+        catch (Http.ApiException)
         {
-            // Offline. Keep the stored token — it may still be valid once there is a
-            // network again — but report that we are not signed in.
+            // A 500, a 503, a proxy error. This says nothing about whether the token is
+            // still good, and clearing here signed people out over a transient blip — which
+            // is exactly what a long image generation could provoke. Keep it and retry later.
+            return false;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException)
+        {
+            // Offline, or the ambient request deadline fired. Keep the stored token — it may
+            // still be valid once there is a network again — but report that we are not
+            // signed in right now.
             return false;
         }
     }

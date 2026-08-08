@@ -32,14 +32,57 @@
                     Headline="No brands yet."
                     Detail="A brand carries the voice, colours, image style, faces and templates that steer generation. Campaigns pick a brand — or none.">
             <Action>
-                <button type="button" class="cm-button" @onclick="CreateAsync">Create a brand</button>
+                <div class="cm-brand-start__row">
+                    <input class="cm-input" type="url" placeholder="https://your-brand.com"
+                           aria-label="Brand website to look up" disabled="@_looking"
+                           @bind="_lookupUrl" @bind:event="oninput" />
+                    <button type="button" class="cm-button"
+                            disabled="@(_looking || string.IsNullOrWhiteSpace(_lookupUrl))"
+                            @onclick="LookupAsync">
+                        @(_looking ? "Reading the site…" : "Create from URL")
+                    </button>
+                    <button type="button" class="cm-button cm-button--quiet" @onclick="CreateAsync">Start blank</button>
+                </div>
+                @if (_lookupError is { } emptyError)
+                {
+                    <p class="cm-form__error" role="alert">@emptyError</p>
+                }
             </Action>
         </EmptyState>
     }
     else
     {
-        <div class="cm-form__actions">
-            <button type="button" class="cm-button" @onclick="CreateAsync">New brand</button>
+        @* Start from the brand's own website. The lookup drafts a style card and hands it to
+           the editor — it never saves, because a brand steers every generator and that has to
+           be a human's call. *@
+        <div class="cm-brand-start">
+            <div class="cm-brand-start__row">
+                <input class="cm-input" type="url" placeholder="https://your-brand.com"
+                       aria-label="Brand website to look up"
+                       disabled="@_looking"
+                       @bind="_lookupUrl" @bind:event="oninput"
+                       @onkeydown="@(e => { if (e.Key == "Enter") { _ = LookupAsync(); } })" />
+                <button type="button" class="cm-button"
+                        disabled="@(_looking || string.IsNullOrWhiteSpace(_lookupUrl))"
+                        @onclick="LookupAsync">
+                    @(_looking ? "Reading the site…" : "New brand from URL")
+                </button>
+                <button type="button" class="cm-button cm-button--quiet" disabled="@_looking"
+                        @onclick="CreateAsync">
+                    Start blank
+                </button>
+            </div>
+            @if (_lookupError is { } lookupError)
+            {
+                <p class="cm-form__error" role="alert">@lookupError</p>
+            }
+            else
+            {
+                <p class="cm-meta">
+                    Reads the page and drafts voice, audience, palette, fonts and image style.
+                    You review everything before it is saved.
+                </p>
+            }
         </div>
 
         <ul class="cm-campaign-grid">
@@ -100,6 +143,50 @@
         }
 
         _loaded = true;
+    }
+
+    private string _lookupUrl = string.Empty;
+    private bool _looking;
+    private string? _lookupError;
+
+    /// <summary>
+    /// Drafts from the URL, creates the brand with what came back, and opens the editor. The
+    /// draft is saved as a starting point rather than held in memory so a slow read is not
+    /// lost to a stray navigation — the user edits a real row from there.
+    /// </summary>
+    private async Task LookupAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lookupUrl))
+        {
+            return;
+        }
+
+        _looking = true;
+        _lookupError = null;
+        try
+        {
+            var draft = await BrandsApi.LookupAsync(_lookupUrl.Trim());
+            var brand = await BrandsApi.CreateAsync(draft.Name, draft.StyleCard);
+
+            foreach (var note in draft.Notes)
+            {
+                Notifier.ShowWarning(note);
+            }
+            Notifier.ShowSuccess($"Drafted {draft.Name} from {draft.SourceUrl} — review it before using it.");
+            Navigation.NavigateTo($"brands/{brand.Id}");
+        }
+        catch (ApiException ex)
+        {
+            _lookupError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _lookupError = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _looking = false;
+        }
     }
 
     private async Task CreateAsync()

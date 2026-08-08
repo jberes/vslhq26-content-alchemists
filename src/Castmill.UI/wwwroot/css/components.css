@@ -311,11 +311,6 @@
     }
 }
 
-.cm-app__main {
-    position: relative;
-    z-index: 1;
-}
-
 /* ---- Style guide (dev-only surface) -------------------------------------------- */
 
 .cm-guide__head,

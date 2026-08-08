@@ -19,8 +19,8 @@
     <div class="cm-rail__head">
         @* Mark + wordmark as one lockup. The mark is decorative here: the word beside it
            already names the product, so a second announcement is noise. *@
-        <span class="cm-brand">
-            <CastmillMark Class="cm-brand__mark" Label="" />
+        <span class="cm-lockup">
+            <CastmillMark Class="cm-lockup__mark" Label="" />
             <span class="cm-wordmark">Castmill</span>
         </span>
         <button type="button" class="cm-rail__collapse"
@@ -35,25 +35,45 @@
     <div class="cm-rail__group">
         <span class="cm-kicker" id="cm-rail-workspace">Workspace</span>
         <ul class="cm-rail__items" aria-labelledby="cm-rail-workspace">
+            @* Every item carries a glyph AND a title. The glyph is what survives the collapsed
+               rail, where the label is hidden and 56px leaves room for nothing else; the title
+               is the tooltip that makes an icon-only rail navigable at all. aria-hidden on the
+               glyph keeps screen readers on the real label, which stays in the DOM. *@
             <li>
-                <a class="cm-rail__item @Active("")" href="">
+                <a class="cm-rail__item @Active("")" href="" data-cm-tip="Front page">
+                    <span class="cm-rail__glyph" aria-hidden="true">&#9635;</span>
                     <span class="cm-rail__label">Front page</span>
                 </a>
             </li>
             <li>
-                <a class="cm-rail__item @Active("campaigns")" href="campaigns">
+                <a class="cm-rail__item @Active("campaigns")" href="campaigns" data-cm-tip="Campaigns">
+                    <span class="cm-rail__glyph" aria-hidden="true">&#9776;</span>
                     <span class="cm-rail__label">Campaigns</span>
                     <span class="cm-rail__count cm-mono">@Workspace.Campaigns.Count</span>
                 </a>
             </li>
             <li>
-                <a class="cm-rail__item @Active("brands")" href="brands">
+                <a class="cm-rail__item @Active("wire")" href="wire" data-cm-tip="The Wire">
+                    <span class="cm-rail__glyph" aria-hidden="true">&#9673;</span>
+                    <span class="cm-rail__label">The Wire</span>
+                </a>
+            </li>
+        </ul>
+
+        @* Separator: above it the work itself, below it only the things that configure it. *@
+        <hr class="cm-rail__sep" />
+
+        <ul class="cm-rail__items" aria-label="Configuration">
+            <li>
+                <a class="cm-rail__item @Active("brands")" href="brands" data-cm-tip="Brands">
+                    <span class="cm-rail__glyph" aria-hidden="true">&#9670;</span>
                     <span class="cm-rail__label">Brands</span>
                 </a>
             </li>
             <li>
-                <a class="cm-rail__item @Active("wire")" href="wire">
-                    <span class="cm-rail__label">The Wire</span>
+                <a class="cm-rail__item @Active("settings")" href="settings" data-cm-tip="Settings">
+                    <span class="cm-rail__glyph" aria-hidden="true">&#9881;</span>
+                    <span class="cm-rail__label">Settings</span>
                 </a>
             </li>
         </ul>
@@ -83,7 +103,11 @@
                     <button type="button"
                             class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
                             aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
+                            data-cm-tip="@campaign.Name"
                             @onclick="() => SwitchTo(campaign)">
+                        @* Collapsed, the name is hidden and this initial is all that is left,
+                           so it has to be enough to tell two campaigns apart at a glance. *@
+                        <span class="cm-rail__glyph cm-rail__glyph--initial" aria-hidden="true">@Initial(campaign.Name)</span>
                         <span class="cm-rail__label">@campaign.Name</span>
                     </button>
                     <button type="button" class="cm-rail__delete"
@@ -115,11 +139,15 @@
             <dt><kbd>&#8984;&#8679;I</kbd></dt><dd class="cm-meta">Image studio</dd>
         </dl>
 
-        <a class="cm-button cm-rail__run" href="campaigns/new">Start a run</a>
+        <a class="cm-button cm-rail__run" href="campaigns/new" data-cm-tip="Start a run">Start a run</a>
     </div>
 </nav>
 
 @code {
+    /// <summary>First letter of the campaign, for the collapsed rail where the name is hidden.</summary>
+    private static string Initial(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "?" : name.TrimStart()[..1].ToUpperInvariant();
+
     protected override void OnInitialized()
     {
         Workspace.Changed += OnChanged;

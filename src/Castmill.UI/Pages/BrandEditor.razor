@@ -177,15 +177,38 @@
                         }
                     </ul>
                 }
+                @* Nothing to copy from and a three-row box made this the least-used part of
+                   the brand. Every kind now ships a starter, and the editor is big enough to
+                   actually write in. *@
+                @if (MissingStarterKinds.Count > 0)
+                {
+                    <div class="cm-brand__starters">
+                        <span class="cm-meta">
+                            @MissingStarterKinds.Count of @TemplateKinds.Length content types have no
+                            template yet.
+                        </span>
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@_seedingTemplates"
+                                @onclick="AddStarterTemplatesAsync">
+                            @(_seedingTemplates ? "Adding…" : $"Add {MissingStarterKinds.Count} starter templates")
+                        </button>
+                    </div>
+                }
+
                 <div class="cm-brand__new-template">
-                    <select class="cm-input cm-brand__kind" @bind="_newTemplateKind">
-                        @foreach (var kind in TemplateKinds)
-                        {
-                            <option value="@kind">@ArtifactDisplay.KindLabel(kind)</option>
-                        }
-                    </select>
-                    <input class="cm-input" placeholder="Template name" maxlength="200" @bind="_newTemplateName" />
-                    <textarea class="cm-input cm-textarea" rows="3" maxlength="4000"
+                    <div class="cm-brand__template-row">
+                        <select class="cm-input cm-brand__kind" value="@_newTemplateKind"
+                                @onchange="OnTemplateKindChanged">
+                            @foreach (var kind in TemplateKinds)
+                            {
+                                <option value="@kind">@ArtifactDisplay.KindLabel(kind)</option>
+                            }
+                        </select>
+                        <input class="cm-input" placeholder="Template name" maxlength="200" @bind="_newTemplateName" />
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="LoadStarter">
+                            Load starter
+                        </button>
+                    </div>
+                    <textarea class="cm-input cm-textarea cm-brand__template-body" rows="14" maxlength="4000"
                               placeholder="Steering for this kind: structure, sections, calls to action, length…"
                               @bind="_newTemplatePrompt"></textarea>
                     <label class="cm-meta">
@@ -236,6 +259,84 @@
 
     private string _newAssetKind = "background";
     private string _newAssetLabel = string.Empty;
+    private bool _seedingTemplates;
+
+    /// <summary>
+    /// A usable first draft per content type, so a new brand is steering generation within a
+    /// minute instead of facing an empty box. These are starting points to edit, not rules —
+    /// the shape of each one mirrors what its generator already asks the model for.
+    /// </summary>
+    private static readonly Dictionary<string, string> Starters = new(StringComparer.Ordinal)
+    {
+        ["blog"] = "Open with the reader's problem in one sentence — no throat-clearing.\nUse H2s that are statements, not labels.\n900–1400 words. Short paragraphs.\nShow one concrete example with real numbers or real code.\nClose with the single next action, not a summary.",
+        ["newsletter"] = "One idea per issue. Lead with it in the first line.\nWrite to one person, not a list.\n250–400 words.\nOne link that matters; do not pad with a round-up.\nSign off in the brand's voice, not a template.",
+        ["email-sequence"] = "Each email earns the next open — end on an unresolved thread.\nOne job per email: teach, prove, or ask.\n120–200 words each. Subject lines under 45 characters.\nNo email repeats another's argument.",
+        ["landing-page"] = "Headline states the outcome, not the feature.\nSubhead names who it is for.\nThree proof blocks: what it does, what it replaces, what it costs.\nOne call to action, repeated — never two competing ones.",
+        ["show-notes"] = "Two-sentence summary, then timestamped sections.\nPull three quotable lines verbatim.\nList every tool, person and link mentioned.",
+        ["social-x"] = "First line is the whole argument; assume the rest is never read.\nNo hashtags. No emoji unless the brand already uses them.\nUnder 280 characters. One idea.",
+        ["social-linkedin"] = "Open with a specific claim, not a question.\nShort lines, generous line breaks.\n120–200 words. End with a real question.\nNo hustle-culture register, no 'thrilled to announce'.",
+        ["social-facebook"] = "Conversational, complete sentences.\n80–150 words. Lead with the human angle.\nOne link, placed last.",
+        ["social-instagram"] = "Write for a caption read after the image.\nFirst line hooks; the rest can be longer.\n5–10 relevant hashtags on their own line.",
+        ["social-threads"] = "Casual and direct. Under 300 characters.\nOne observation, stated plainly. No hashtags.",
+        ["social-bluesky"] = "Plain, technical, no marketing register.\nUnder 300 characters. Links are fine without ceremony.",
+        ["seo-brief"] = "State the primary keyword and the search intent behind it.\nList the questions the page must answer, in order.\nName the competing pages and what each one misses.\nGive the meta title (<60 chars) and description (<155 chars).",
+    };
+
+    /// <summary>Kinds with no template yet — what "add starters" would actually create.</summary>
+    private List<string> MissingStarterKinds =>
+        [.. TemplateKinds.Where(k =>
+            Starters.ContainsKey(k) && !_templates.Any(t => string.Equals(t.Kind, k, StringComparison.Ordinal)))];
+
+    private void OnTemplateKindChanged(ChangeEventArgs e)
+    {
+        _newTemplateKind = e.Value?.ToString() ?? "blog";
+
+        // Only when the author has not started writing — never clobber their text.
+        if (string.IsNullOrWhiteSpace(_newTemplatePrompt))
+        {
+            LoadStarter();
+        }
+    }
+
+    private void LoadStarter()
+    {
+        if (Starters.TryGetValue(_newTemplateKind, out var starter))
+        {
+            _newTemplatePrompt = starter;
+            if (string.IsNullOrWhiteSpace(_newTemplateName))
+            {
+                _newTemplateName = $"{ArtifactDisplay.KindLabel(_newTemplateKind)} starter";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates a starter for every kind that has none. Sequential rather than parallel: these
+    /// are writes behind a per-user rate limiter, and a burst would trip it.
+    /// </summary>
+    private async Task AddStarterTemplatesAsync()
+    {
+        _seedingTemplates = true;
+        try
+        {
+            foreach (var kind in MissingStarterKinds)
+            {
+                await Brands.CreateTemplateAsync(BrandId, new BrandTemplateRequest(
+                    kind, $"{ArtifactDisplay.KindLabel(kind)} starter", Starters[kind], IsDefault: true));
+            }
+            await ReloadKitAsync();
+            Notifier.ShowSuccess("Starter templates added — edit them to match the brand.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _seedingTemplates = false;
+        }
+    }
+
     private string _newTemplateKind = "blog";
     private string _newTemplateName = string.Empty;
     private string _newTemplatePrompt = string.Empty;

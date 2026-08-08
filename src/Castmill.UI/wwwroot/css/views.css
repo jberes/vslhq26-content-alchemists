@@ -231,8 +231,15 @@
 
 /* ---- Front page ---------------------------------------------------------------- */
 
+/* The header carries the quick actions now, so it has to survive a narrow window without
+   them wrapping under the title and pushing the content down again. */
 .cm-front__head {
     margin-block-end: var(--cm-space-6);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
 }
 
 /* The front page fills the frame and scrolls INSIDE its columns rather than growing the
@@ -688,9 +695,13 @@
     inset-inline-end: var(--cm-space-1);
     display: flex;
     gap: var(--cm-space-1);
-    padding: 2px;
-    border-radius: var(--cm-radius-sm);
-    background: var(--cm-surface-raised);
+    padding: var(--cm-space-1);
+    border-radius: var(--cm-radius-md);
+    /* A solid accent-wash slab rather than the card's own surface: at 24px on a busy card the
+       tools were reading as part of the content. The toolbar has to announce itself as chrome
+       the moment it appears. */
+    background: var(--cm-accent-wash);
+    border: 1px solid var(--cm-accent);
     box-shadow: var(--cm-shadow-lg);
     opacity: 0;
     /* An opacity:0 element still receives clicks, so without this the invisible toolbar
@@ -713,21 +724,28 @@
 }
 
 .cm-card__tool {
-    inline-size: 24px;
-    block-size: 24px;
+    /* 32px: a comfortable pointer target, and large enough that the glyph reads at a glance.
+       24px was both hard to hit and hard to see. */
+    inline-size: 32px;
+    block-size: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 0;
     border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-sm);
     background: var(--cm-surface);
-    color: var(--cm-on-surface-muted);
-    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface);
+    font-size: var(--cm-text-body);
     line-height: 1;
     cursor: pointer;
-    transition: color var(--cm-motion), border-color var(--cm-motion);
+    transition: color var(--cm-motion), border-color var(--cm-motion),
+                background var(--cm-motion);
 }
 
 .cm-card__tool:hover {
-    color: var(--cm-accent);
+    background: var(--cm-accent);
+    color: var(--cm-on-accent);
     border-color: var(--cm-accent);
 }
 
@@ -2150,6 +2168,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--cm-space-1);
+    /* The chips sat flush against the "Seed all prompts" button directly above them. */
+    margin-block-start: var(--cm-space-3);
 }
 
 .cm-studio__chip {
@@ -2535,13 +2555,16 @@
 
 /* Band colours behind overlay text. A short opinionated set, because the job is
    legibility over an unpredictable generated background. */
-.cm-swatches {
+/* Renamed from .cm-swatch*: the style guide already owns that name in components.css, and
+   because views.css is imported later this rule was quietly overriding the style guide's
+   swatch cards while inheriting stray properties from them in return. */
+.cm-rings {
     display: flex;
     flex-wrap: wrap;
     gap: var(--cm-space-2);
 }
 
-.cm-swatch {
+.cm-ring {
     position: relative;
     inline-size: 2rem;
     block-size: 2rem;
@@ -2557,18 +2580,18 @@
     transition: transform var(--cm-motion), box-shadow var(--cm-motion);
 }
 
-.cm-swatch:hover {
+.cm-ring:hover {
     transform: scale(1.08);
 }
 
 /* A ring rather than a border swap, so the swatch's own colour is never altered by
    selection — the point of the control is judging that colour. */
-.cm-swatch--on {
+.cm-ring--on {
     box-shadow: 0 0 0 2px var(--cm-surface), 0 0 0 4px var(--cm-accent);
 }
 
 /* "No band" reads as an empty state, not as a white swatch. */
-.cm-swatch--none::after {
+.cm-ring--none::after {
     position: absolute;
     inset: 0;
     display: block;
@@ -2808,18 +2831,24 @@
 
 /* ---- Brand lockup ------------------------------------------------------------------ */
 
-.cm-brand {
+/* NOT .cm-brand: that name already belongs to the Brands PAGE container a few thousand
+   lines up, which sets `flex-direction: column`. Two rules with the same selector do not
+   replace one another — they merge — so the lockup silently inherited `column` and stacked
+   the mark on top of the wordmark instead of beside it. Its own name is the fix. */
+.cm-lockup {
     display: inline-flex;
+    flex-direction: row;
     align-items: center;
     gap: var(--cm-space-2);
     min-inline-size: 0;
 }
 
 /* Optically matched to the wordmark's cap height rather than its line box, which is why
-   this is not simply 1em. */
-.cm-brand__mark {
-    inline-size: 1.35em;
-    block-size: 1.35em;
+   this is not simply 1em. The accent bar carries through from the app icon, so the rail
+   lockup and the dock icon read as the same drawing. */
+.cm-lockup__mark {
+    inline-size: 1.6em;
+    block-size: 1.6em;
     flex: 0 0 auto;
     color: var(--cm-on-surface);
 }
@@ -2836,4 +2865,422 @@
     :root[data-cm-rail="icons"] .cm-wordmark {
         display: none;
     }
+}
+
+/* ---- Image studio: pending takes -------------------------------------------------- */
+
+/* ADR-F13 bans INDETERMINATE progress, and this stays on the right side of it: the run
+   reports "6 expected, 2 done", each tile is numbered, and the tiles disappear one by one as
+   real takes land. The spinner marks a single known unit of work in flight — it is not
+   standing in for unknown progress. A skeleton shimmer was too quiet to read as activity
+   across a two-minute render, which is what "nothing is happening" felt like. */
+.cm-gallery__pending {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--cm-space-2);
+    aspect-ratio: 1 / 1;
+    padding: var(--cm-space-3);
+    border: 2px dashed var(--cm-accent);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-accent-wash);
+    text-align: center;
+}
+
+.cm-gallery__pending-label {
+    font-size: var(--cm-text-meta);
+    letter-spacing: var(--cm-tracking-kicker);
+    color: var(--cm-accent);
+}
+
+.cm-spinner {
+    inline-size: 28px;
+    block-size: 28px;
+    border: 3px solid var(--cm-rule);
+    border-block-start-color: var(--cm-accent);
+    border-radius: 50%;
+    animation: cm-spin 900ms linear infinite;
+}
+
+@keyframes cm-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Respecting the OS setting is not optional; the frame and label still carry the meaning. */
+@media (prefers-reduced-motion: reduce) {
+    .cm-spinner {
+        animation: none;
+        border-block-start-color: var(--cm-accent);
+    }
+}
+
+/* ---- Rail: glyphs, separator, and the collapsed (icon) state ---------------------- */
+
+.cm-rail__glyph {
+    flex: 0 0 auto;
+    inline-size: 1.5rem;
+    text-align: center;
+    font-size: var(--cm-text-body);
+    line-height: 1;
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-rail__item--active .cm-rail__glyph,
+.cm-rail__item:hover .cm-rail__glyph {
+    color: var(--cm-accent);
+}
+
+.cm-rail__glyph--initial {
+    font-family: var(--cm-font-display);
+    font-weight: var(--cm-font-display-weight);
+}
+
+.cm-rail__sep {
+    border: 0;
+    border-block-start: 1px solid var(--cm-rule);
+    margin-block: var(--cm-space-3);
+    margin-inline: var(--cm-space-2);
+}
+
+/* Collapsed rail: 56px of width, so the labels, counts, kicker headings, the campaign card
+   and the keyboard-hint list all yield and the glyph becomes the whole control. The labels
+   stay in the DOM rather than being removed — a screen reader still reads "Campaigns", and
+   the title attribute gives pointer users the same word as a tooltip. */
+:root[data-cm-rail="icons"] .cm-rail__label,
+:root[data-cm-rail="icons"] .cm-rail__count,
+:root[data-cm-rail="icons"] .cm-rail__kicker,
+:root[data-cm-rail="icons"] .cm-rail__card,
+:root[data-cm-rail="icons"] .cm-rail__empty,
+:root[data-cm-rail="icons"] .cm-rail__hints,
+:root[data-cm-rail="icons"] .cm-rail__delete,
+:root[data-cm-rail="icons"] .cm-rail .cm-kicker {
+    /* clip, not display:none, so the accessible name survives for assistive tech. */
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+:root[data-cm-rail="icons"] .cm-rail__item {
+    justify-content: center;
+    padding-inline: 0;
+}
+
+:root[data-cm-rail="icons"] .cm-rail__group,
+:root[data-cm-rail="icons"] .cm-rail__foot {
+    padding-inline: var(--cm-space-1);
+}
+
+:root[data-cm-rail="icons"] .cm-rail__glyph {
+    inline-size: 100%;
+    font-size: var(--cm-text-h4);
+}
+
+/* "Start a run" keeps a target but loses its words. */
+:root[data-cm-rail="icons"] .cm-rail__run {
+    padding-inline: 0;
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+/* ---- Settings --------------------------------------------------------------------- */
+
+.cm-settings__list {
+    list-style: none;
+    margin: 0 0 var(--cm-space-8);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+.cm-settings__row {
+    display: grid;
+    grid-template-columns: minmax(12rem, 18rem) auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-settings__name {
+    font-weight: 600;
+}
+
+.cm-settings__secret {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding-block-end: var(--cm-space-3);
+}
+
+.cm-settings__edit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding-inline-start: var(--cm-space-3);
+}
+
+.cm-settings__edit .cm-input {
+    flex: 1 1 22rem;
+    min-inline-size: 0;
+}
+
+@media (max-width: 60rem) {
+    .cm-settings__row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--cm-space-1);
+    }
+}
+
+/* ---- Settings: tabbed layout ------------------------------------------------------ */
+
+.cm-settings__head {
+    display: flex;
+    margin-block-end: var(--cm-space-2);
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-settings__lede {
+    max-inline-size: 46ch;
+}
+
+.cm-tabs__badge {
+    margin-inline-start: var(--cm-space-1);
+}
+
+/* Cards in a responsive grid rather than one long column: seven credentials stacked was the
+   whole reason this page scrolled. 19rem lands three-up on a desktop window, which is what
+   makes all seven fit in one screen. */
+.cm-settings__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-3);
+    align-content: start;
+}
+
+.cm-settings__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+}
+
+/* The hint is orientation, not documentation — one line keeps every card the same height and
+   the grid honest. */
+.cm-settings__card .cm-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cm-settings__card .cm-settings__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-settings__card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+}
+
+.cm-settings__card .cm-settings__edit {
+    margin-block-start: var(--cm-space-2);
+    padding-inline-start: 0;
+    gap: var(--cm-space-1);
+}
+
+/* A 22rem basis inside a ~19rem card forced the Save button onto its own line, costing a row
+   of height per credential — which was most of the leftover scroll. */
+.cm-settings__card .cm-settings__edit .cm-input {
+    flex: 1 1 6rem;
+}
+
+.cm-settings__row--pair {
+    grid-template-columns: minmax(10rem, 20rem) minmax(0, 1fr);
+}
+
+/* ---- Front page: pinned actions and per-item controls ----------------------------- */
+
+.cm-front__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+}
+
+/* A row with explicit controls rather than one big button. The card used to BE the click
+   target, so what a click did was guesswork and there was no way to reach the campaign. */
+.cm-front__item {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    inline-size: 100%;
+    text-align: start;
+}
+
+.cm-front__item-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: var(--cm-space-1);
+    margin-inline-start: auto;
+}
+
+@media (max-width: 60rem) {
+    .cm-front__item {
+        flex-wrap: wrap;
+    }
+
+    .cm-front__item-actions {
+        margin-inline-start: 0;
+    }
+}
+
+/* ---- Rail tooltips ---------------------------------------------------------------- */
+
+/* Only in the collapsed rail, where the label is hidden and the glyph alone cannot say what
+   a control does. Expanded, the label is right there and a tooltip would be noise.
+
+   Built from data-cm-tip rather than the native title attribute: title waits about a second,
+   cannot be styled to match the product, and never appears on touch. The accessible name
+   still comes from the visually-hidden .cm-rail__label, so this is presentation only —
+   which is why the pseudo-element content is safe to leave out of the accessibility tree. */
+:root[data-cm-rail="icons"] .cm-rail [data-cm-tip] {
+    position: relative;
+}
+
+:root[data-cm-rail="icons"] .cm-rail [data-cm-tip]::after {
+    content: attr(data-cm-tip);
+    position: absolute;
+    inset-inline-start: calc(100% + var(--cm-space-2));
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+    z-index: 90;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-on-surface);
+    color: var(--cm-surface);
+    font-size: var(--cm-text-meta);
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    /* The delay keeps a sweep across the rail from flashing five tooltips in a row. */
+    transition: opacity var(--cm-motion) 120ms;
+}
+
+/* Focus as well as hover: the rail is fully keyboard-navigable and a keyboard user needs the
+   same label a pointer user gets. */
+:root[data-cm-rail="icons"] .cm-rail [data-cm-tip]:hover::after,
+:root[data-cm-rail="icons"] .cm-rail [data-cm-tip]:focus-visible::after {
+    opacity: 1;
+}
+
+/* The rail clips its own overflow for scrolling, so a tooltip drawn beyond its edge would be
+   cut off. Letting the x-axis overflow keeps them whole while the y-axis still scrolls. */
+:root[data-cm-rail="icons"] .cm-app__rail {
+    overflow: visible auto;
+}
+
+/* ---- Image studio: the brand kit picker ------------------------------------------- */
+
+.cm-studio__kit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    margin-block-start: var(--cm-space-2);
+}
+
+.cm-studio__upload {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-3);
+    padding-block-start: var(--cm-space-3);
+    border-block-start: 1px dashed var(--cm-rule);
+}
+
+.cm-studio__upload .cm-input {
+    flex: 1 1 12rem;
+    min-inline-size: 0;
+}
+
+/* ---- Brands: the start row -------------------------------------------------------- */
+
+/* The create control used to sit flush against the card grid below it, so the button read as
+   part of the first card rather than as the page's action. */
+.cm-brand-start {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block: var(--cm-space-4) var(--cm-space-8);
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-brand-start__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-brand-start__row .cm-input {
+    flex: 1 1 22rem;
+    min-inline-size: 0;
+}
+
+/* ---- Brand templates: room to actually write -------------------------------------- */
+
+.cm-brand__starters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-3);
+    padding: var(--cm-space-3);
+    border: 1px dashed var(--cm-accent);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-accent-wash);
+}
+
+.cm-brand__template-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-brand__template-row .cm-input:not(.cm-brand__kind) {
+    flex: 1 1 16rem;
+    min-inline-size: 0;
+}
+
+/* A three-row box made this the least-used field on the page. Templates are the thing that
+   actually steers a generator, so the editor gets the room a prompt needs. */
+.cm-brand__template-body {
+    min-block-size: 18rem;
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-meta);
+    line-height: var(--cm-leading-body);
+    resize: vertical;
 }

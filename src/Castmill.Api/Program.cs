@@ -81,6 +81,14 @@ builder.Services.AddImageProviders(builder.Configuration);
 builder.Services.AddSingleton<IImageComposer, ImageComposer>();
 builder.Services.AddScoped<IImagePlanService, ImagePlanService>();
 builder.Services.AddScoped<IImageRenderer, ImageRenderer>();
+builder.Services.AddScoped<IBrandLookup, BrandLookup>();
+// Its own client: a short timeout and no resilience retries, because re-fetching a slow
+// third-party site would only make the user wait longer for the same answer.
+builder.Services.AddHttpClient("brandlookup", c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(20);
+    c.MaxResponseContentBufferSize = 1024 * 1024;
+});
 builder.Services.AddSingleton<IPublicContentStore, PublicContentStore>();
 builder.Services.AddSingleton<IClipJobDispatcher, ClipJobDispatcher>();
 builder.Services.Configure<PublishOptions>(builder.Configuration.GetSection(PublishOptions.SectionName));

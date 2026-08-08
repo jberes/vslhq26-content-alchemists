@@ -52,7 +52,7 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
 
         view.Find(".cm-lightbox__rail input.cm-input").Change("Deploy time, halved");
 
-        var swatches = view.FindAll(".cm-swatch");
+        var swatches = view.FindAll(".cm-ring");
         Assert.True(swatches.Count >= 2, "expected a choice of band colours");
         await swatches[1].ClickAsync(); // the first non-null colour
 
@@ -79,7 +79,7 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         var view = await OpenAsync();
         view.Find(".cm-lightbox__rail input.cm-input").Change("Headline");
 
-        await view.FindAll(".cm-swatch")[0].ClickAsync(); // "No band"
+        await view.FindAll(".cm-ring")[0].ClickAsync(); // "No band"
 
         Http.OnPost("api/v1/images/composite", new PlaceResult(Slot("Filled"), null, false));
         await view.FindAll(".cm-lightbox__rail button")

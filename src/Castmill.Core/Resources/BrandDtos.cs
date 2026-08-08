@@ -23,6 +23,14 @@ public sealed record BrandStyleCard(
     [property: MaxLength(4000)] string? ImageStyle = null,
     IReadOnlyList<string>? BannedPhrases = null);
 
+/// <summary>Draft a brand from its public website. The result is never saved automatically —
+/// it populates the editor for the user to accept or change.</summary>
+public sealed record BrandLookupRequest(
+    [property: Required, MinLength(4), MaxLength(2000)] string Url);
+
+public sealed record BrandLookupResponse(
+    string Name, BrandStyleCard StyleCard, string SourceUrl, IReadOnlyList<string> Notes);
+
 public sealed record BrandProfileUpsertRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
     BrandStyleCard? StyleCard);

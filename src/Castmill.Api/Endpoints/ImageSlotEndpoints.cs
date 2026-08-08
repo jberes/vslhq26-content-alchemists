@@ -376,6 +376,32 @@ public static class ImageSlotEndpoints
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Typography safety, appended to EVERY image prompt.
+    ///
+    /// This is not stylistic advice — it compensates for something the pipeline actually does.
+    /// Image models emit their own fixed sizes (1024x1024, 1024x1536, 1536x1024), and the
+    /// renderer then crops that output to the slot's exact dimensions, which are a different
+    /// aspect ratio. Anything the model placed near an edge is inside the strip that gets cut,
+    /// which is why generated text kept arriving clipped along the top or the left.
+    ///
+    /// The margin is expressed as a fraction rather than pixels because the model does not
+    /// know the slot size and never sees the crop.
+    /// </summary>
+    internal const string TypographyGuardrails = """
+        Text rendering rules (follow exactly):
+        - This image will be CROPPED to a different aspect ratio after generation. Keep every
+          word, letter and logo inside the middle 80% of the frame, well clear of all four
+          edges. Nothing readable may touch or run off an edge.
+        - Leave generous empty margin around any text. Do not fill the frame edge to edge with
+          type.
+        - Render each word complete and correctly spelled. No cut-off glyphs, no clipped
+          descenders, no words continuing past the border.
+        - Use few words at a large size rather than many words small; if the text will not fit
+          comfortably inside the safe area, use fewer words.
+        - Keep text on an area of flat, contrasting tone so it stays legible.
+        """;
+
     /// <summary>slot prompt/base prompt + brand image style + the user's adjustment.</summary>
     internal static string ComposeEffectivePrompt(string basePrompt, string? imageStyleBlock, string? steeringNote)
     {
@@ -388,7 +414,10 @@ public static class ImageSlotEndpoints
         {
             prompt = $"{prompt}\nAdjustment: {steeringNote.Trim()}";
         }
-        return prompt;
+
+        // Last, so it is the most recent instruction the model reads and a brand style block
+        // or an adjustment cannot silently override it.
+        return $"{prompt}\n{TypographyGuardrails}";
     }
 
     internal static ImageVariantResponse ToResponse(ImageVariant v) =>

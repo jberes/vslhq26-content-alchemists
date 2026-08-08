@@ -26,6 +26,11 @@ public sealed class BrandsClient(ApiClient api)
         api.PutAsync<BrandProfileUpsertRequest, BrandProfileDetailResponse>(
             $"api/v1/brands/{id}", new BrandProfileUpsertRequest(name, styleCard), etag: null, ct);
 
+    /// <summary>Drafts a style card from a public URL. Returns a draft — nothing is saved.</summary>
+    public Task<BrandLookupResponse> LookupAsync(string url, CancellationToken ct = default) =>
+        api.PostAsync<BrandLookupRequest, BrandLookupResponse>(
+            "api/v1/brands/lookup", new BrandLookupRequest(url), anonymous: false, ct);
+
     public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{id}", ct);
 

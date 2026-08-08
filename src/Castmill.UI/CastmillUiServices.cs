@@ -54,6 +54,18 @@ public static class CastmillUiServices
             })
         {
             BaseAddress = apiBaseAddress,
+
+            // MEASURED, not guessed: generating two image variants takes ~123s server-side,
+            // and six takes proportionally longer. HttpClient's DEFAULT is 100 seconds, so
+            // image generation and the SEO keyword plan were being aborted by the client
+            // mid-flight — and an abort that lands during the silent refresh consumes the
+            // single-use refresh token without storing its replacement, which the server then
+            // reads as token reuse and revokes the whole family. That is how a slow image
+            // generation turned into "your session has expired".
+            //
+            // Synchronous AI work is legitimately minutes long; the server, not the client,
+            // is the place that bounds it.
+            Timeout = TimeSpan.FromMinutes(10),
         });
 
         services.AddScoped<ApiClient>();
@@ -61,6 +73,7 @@ public static class CastmillUiServices
         services.AddScoped<CampaignsClient>();
         services.AddScoped<GenerationClient>();
         services.AddScoped<SeoClient>();
+        services.AddScoped<SettingsClient>();
         services.AddScoped<ImagesClient>();
         services.AddScoped<ExportClient>();
         services.AddScoped<GitClient>();

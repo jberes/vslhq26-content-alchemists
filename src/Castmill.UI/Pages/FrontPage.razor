@@ -11,14 +11,32 @@
 @implements IDisposable
 @inject WorkspaceState Workspace
 @inject CampaignsClient Campaigns
+@inject ScheduleClient Schedule
 @inject NavigationManager Navigation
 
 <PageTitle>Front page — Castmill</PageTitle>
 
 <div class="cm-page cm-page--fill"><div class="cm-measure--dashboard cm-front__frame">
+    @* The actions live in the header, pinned above both columns. They used to sit at the
+       bottom of whichever block owned them, so reaching "open image studio" meant scrolling
+       past everything else first. *@
     <header class="cm-front__head">
-        <span class="cm-kicker">Front page</span>
-        <h1>What needs you today.</h1>
+        <div>
+            <span class="cm-kicker">Front page</span>
+            <h1>What needs you today.</h1>
+        </div>
+        <nav class="cm-front__actions" aria-label="Quick actions">
+            <a class="cm-button" href="campaigns/new">Start a run</a>
+            @if (_firstSlotCampaign is { } slotTarget)
+            {
+                <a class="cm-button cm-button--quiet"
+                   href="@CampaignViews.PathFor(slotTarget, CampaignView.ImageStudio)">
+                    Image studio@(_emptySlots > 0 ? $" · {_emptySlots} empty" : "")
+                </a>
+            }
+            <a class="cm-button cm-button--quiet" href="wire">The Wire</a>
+            <a class="cm-button cm-button--quiet" href="campaigns">All campaigns</a>
+        </nav>
     </header>
 
     @if (!Workspace.IsLoaded)
@@ -43,31 +61,50 @@
     {
         <div class="cm-front">
             <section class="cm-front__primary">
-                <h2 class="cm-front__block-title">Ready for review</h2>
-                @if (_review.Count == 0)
+                <h2 class="cm-front__block-title">
+                    Not approved yet
+                    @if (Unapproved.Count > 0)
+                    {
+                        <span class="cm-mono cm-meta">(@Unapproved.Count)</span>
+                    }
+                </h2>
+                <p class="cm-meta">
+                    Everything still in draft or review, newest first — not just what is formally
+                    queued, so nothing sits here invisible.
+                </p>
+
+                @if (Unapproved.Count == 0)
                 {
-                    <p class="cm-meta">Nothing is waiting on you. @(_loaded ? "" : "Still checking…")</p>
+                    <p class="cm-meta">
+                        Nothing is waiting on you. @(_loaded ? "" : "Still checking…")
+                    </p>
                 }
                 else
                 {
                     <ul class="cm-cards">
-                        @foreach (var item in _review)
+                        @foreach (var item in Unapproved)
                         {
                             <li>
-                                <button type="button" class="cm-card cm-card--artifact"
-                                        @onclick="() => OpenFocus(item)">
+                                @* A row, not a giant click target: the actions are explicit
+                                   buttons because "what happens if I click this card" was
+                                   previously guesswork. *@
+                                <div class="cm-card cm-card--artifact cm-front__item">
                                     <span class="cm-card__bar cm-card__bar--review" aria-hidden="true"></span>
                                     <span class="cm-card__body">
                                         <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)</span>
                                         <span class="cm-card__title">@item.Title</span>
-                                        <span class="cm-meta">
-                                            Updated @ArtifactDisplay.Ago(item.UpdatedAt, Now)
-                                        </span>
+                                        <span class="cm-meta">Updated @ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
                                     </span>
                                     <span class="@ArtifactDisplay.StatusModifier(item.Status)">
                                         @ArtifactDisplay.StatusLabel(item.Status)
                                     </span>
-                                </button>
+                                    <span class="cm-front__item-actions">
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                @onclick="() => OpenFocus(item)">Edit</button>
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                @onclick="() => OpenCampaign(item)">Campaign</button>
+                                    </span>
+                                </div>
                             </li>
                         }
                     </ul>
@@ -76,10 +113,42 @@
 
             <aside class="cm-front__secondary">
                 <section>
-                    <h2 class="cm-front__block-title">On the wire this week</h2>
-                    @* The Wire's own data source arrives with F8; until then this block says
-                       so rather than inventing rows. *@
-                    <p class="cm-meta">Scheduling arrives with the Wire (Phase F8).</p>
+                    <h2 class="cm-front__block-title">
+                        Slated for socials
+                        @if (_wire.Count > 0)
+                        {
+                            <span class="cm-mono cm-meta">(@_wire.Count)</span>
+                        }
+                    </h2>
+                    @* Reads the schedule mirror we already own (ADR-016), not a broker
+                       round-trip — the same source the Wire draws from. *@
+                    @if (!_wireLoaded)
+                    {
+                        <p class="cm-meta">Checking the schedule…</p>
+                    }
+                    else if (_wire.Count == 0)
+                    {
+                        <p class="cm-meta">
+                            Nothing is scheduled for the next seven days.
+                            <a href="wire">Open the Wire &rarr;</a>
+                        </p>
+                    }
+                    else
+                    {
+                        <ul class="cm-rows">
+                            @foreach (var post in _wire)
+                            {
+                                <li class="cm-row">
+                                    <span class="cm-row__label">
+                                        <span class="cm-mono cm-meta">@post.ChannelId</span>
+                                        @Excerpt(post.Text)
+                                    </span>
+                                    <span class="cm-meta">@post.ScheduledAt.ToLocalTime().ToString("ddd HH:mm")</span>
+                                </li>
+                            }
+                        </ul>
+                        <a class="cm-meta" href="wire">Open the Wire &rarr;</a>
+                    }
                 </section>
 
                 <section>
@@ -141,6 +210,18 @@
     private readonly List<DashboardArtifact> _review = [];
     private readonly List<DashboardArtifact> _aging = [];
     private readonly List<string> _slotModels = [];
+    private readonly List<ScheduleEntryResponse> _wire = [];
+    private bool _wireLoaded;
+
+    /// <summary>
+    /// Both dashboard lists, deduplicated and newest first. The review queue alone hid drafts
+    /// that had never been submitted, which is most of what is actually outstanding.
+    /// </summary>
+    private List<DashboardArtifact> Unapproved =>
+        [.. _review.Concat(_aging)
+            .GroupBy(a => a.ArtifactId)
+            .Select(g => g.First())
+            .OrderByDescending(a => a.UpdatedAt)];
 
     private int _emptySlots;
     private int _campaignsWithSlots;
@@ -155,6 +236,7 @@
     {
         await Workspace.LoadAsync();
         await LoadDashboardAsync();
+        await LoadWireAsync();
     }
 
     /// <summary>One server-side projection instead of a preview fetch per campaign —
@@ -185,6 +267,35 @@
 
         _loaded = true;
         StateHasChanged();
+    }
+
+    private async Task LoadWireAsync()
+    {
+        try
+        {
+            var now = DateTimeOffset.Now;
+            _wire.Clear();
+            _wire.AddRange((await Schedule.ListAsync(now, now.AddDays(7)))
+                .Where(e => !string.Equals(e.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(e => e.ScheduledAt)
+                .Take(6));
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // The block renders its empty state; a missing broker must not blank the page.
+        }
+
+        _wireLoaded = true;
+        StateHasChanged();
+    }
+
+    private static string Excerpt(string text) =>
+        text.Length <= 60 ? text : string.Concat(text.AsSpan(0, 59), "…");
+
+    private void OpenCampaign(DashboardArtifact item)
+    {
+        Workspace.SetActive(item.CampaignId);
+        Navigation.NavigateTo(CampaignViews.PathFor(item.CampaignId, CampaignView.MillFloor));
     }
 
     private void OpenFocus(DashboardArtifact item)

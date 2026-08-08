@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Tenancy;
@@ -34,6 +36,9 @@ public static partial class BrandEndpoints
         group.MapPost("/", CreateAsync).Validate<BrandProfileUpsertRequest>().RequireRateLimiting("writes");
         group.MapPut("/{id:guid}", UpdateAsync).Validate<BrandProfileUpsertRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
+
+        // "ai" limiter, not "writes": this spends a model call and fetches a third-party URL.
+        group.MapPost("/lookup", LookupAsync).Validate<BrandLookupRequest>().RequireRateLimiting("ai");
 
         group.MapGet("/{id:guid}/assets", ListAssetsAsync);
         group.MapPost("/{id:guid}/assets", LinkAssetAsync)
@@ -101,6 +106,33 @@ public static partial class BrandEndpoints
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Drafts a style card from a public URL. Returns a DRAFT — nothing is persisted, because
+    /// a brand is the thing that steers every generator and must be a human's decision.
+    /// </summary>
+    private static async Task<IResult> LookupAsync(
+        BrandLookupRequest request,
+        ClaimsPrincipal principal,
+        IBrandLookup lookup,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await lookup.LookupAsync(AuthEndpoints.GetUserId(principal), request.Url, ct);
+            return Results.Ok(new BrandLookupResponse(
+                result.Name, result.StyleCard, result.SourceUrl, result.Notes));
+        }
+        catch (BrandLookupException ex)
+        {
+            // A blocked host or an unreachable site is the caller's problem to fix, not a 500.
+            return Results.Problem(ex.Message, statusCode: 400);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return Results.Problem("Couldn't reach that site.", statusCode: 400);
+        }
     }
 
     private static async Task<IResult> ListAsync(CastmillDbContext db, CancellationToken ct)

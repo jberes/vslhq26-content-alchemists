@@ -1,0 +1,293 @@
+@* Settings (workspace scope): the AI credentials and the readiness they produce, in one
+   place. Previously the only way to see whether a provider was usable was to try to generate
+   and read the failure, and the only way to store a key was to call the API by hand.
+
+   Two panels, deliberately in this order — readiness first, because "can I generate?" is the
+   question people actually arrive with; credentials second, because that is the lever that
+   answers it. *@
+@page "/settings"
+@using Castmill.Core.Ai
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@inject SettingsClient SettingsApi
+@inject ImagesClient Images
+@inject INotifier Notifier
+
+<PageTitle>Settings · Castmill</PageTitle>
+
+<section class="cm-page cm-settings">
+    @* Tabs, not a stack. All three panels stacked meant scrolling past readiness to reach the
+       key you came to paste, and the credential list alone is seven rows deep. Each panel now
+       fits without the page scrolling. *@
+    <header class="cm-settings__head">
+        <div>
+            <span class="cm-kicker">Workspace</span>
+            <h1 class="cm-page__title">Settings</h1>
+        </div>
+        <p class="cm-meta cm-settings__lede">
+            Keys are encrypted at rest and never sent back to this page — you can replace or
+            remove one, but not read it.
+        </p>
+    </header>
+
+    <div class="cm-tabs" role="tablist" aria-label="Settings sections">
+        @foreach (var (id, label) in Tabs)
+        {
+            <button type="button" role="tab" class="cm-tabs__tab"
+                    aria-selected="@(_tab == id ? "true" : "false")"
+                    @onclick="() => _tab = id">
+                @label@TabBadge(id)
+            </button>
+        }
+    </div>
+
+    @if (_loadError is { } loadError)
+    {
+        <p class="cm-form__error" role="alert">
+            @loadError
+            <button type="button" class="cm-button cm-button--quiet" @onclick="LoadAsync">Try again</button>
+        </p>
+    }
+
+    @* ---- Credentials: first, because it is the panel people arrive to change. ---- *@
+    @if (_tab == "credentials")
+    {
+        @if (_secrets is null && _loadError is null)
+        {
+            <p class="cm-meta">Loading…</p>
+        }
+        else if (_secrets is { } secrets)
+        {
+            <div class="cm-settings__grid">
+                @foreach (var secret in secrets)
+                {
+                    <article class="cm-settings__card">
+                        <header class="cm-settings__card-head">
+                            <span class="cm-settings__name">@Label(secret.Kind)</span>
+                            @if (secret.Configured)
+                            {
+                                <span class="cm-badge cm-badge--done">STORED</span>
+                            }
+                            else
+                            {
+                                <span class="cm-badge">NOT SET</span>
+                            }
+                        </header>
+
+                        <p class="cm-meta">@Hint(secret.Kind)</p>
+                        @if (secret.Configured && secret.UpdatedAt is { } at)
+                        {
+                            <p class="cm-meta">Updated @ArtifactDisplay.Ago(at, DateTimeOffset.Now)</p>
+                        }
+
+                        <div class="cm-settings__edit">
+                            @* type=password so a key is not readable over a shoulder or in a
+                               screen-share; autocomplete off so no browser stores it. *@
+                            <input class="cm-input" type="password" autocomplete="off"
+                                   placeholder="@(secret.Configured ? "Replace…" : "Paste the key…")"
+                                   aria-label="@Label(secret.Kind) value"
+                                   value="@Draft(secret.Kind)"
+                                   @oninput="e => _drafts[secret.Kind] = e.Value?.ToString() ?? string.Empty" />
+                            <button type="button" class="cm-button"
+                                    disabled="@(_busy is not null || string.IsNullOrWhiteSpace(Draft(secret.Kind)))"
+                                    @onclick="() => SaveAsync(secret.Kind)">
+                                @(_busy == secret.Kind ? "Saving…" : "Save")
+                            </button>
+                            @if (secret.Configured)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        disabled="@(_busy is not null)"
+                                        @onclick="() => RemoveAsync(secret.Kind)">Remove</button>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    }
+
+    @* ---- Readiness ---- *@
+    @if (_tab == "readiness")
+    {
+        @if (_status is null && _loadError is null)
+        {
+            <p class="cm-meta">Checking providers…</p>
+        }
+        else if (_status is { } status)
+        {
+            <ul class="cm-settings__list">
+                <li class="cm-settings__row">
+                    <span class="cm-settings__name">Text generation</span>
+                    <span>@ReadinessBadge(status.EndpointConfigured)</span>
+                    <span class="cm-meta">@(status.EndpointConfigured ? status.CredentialSource : "no endpoint or key stored")</span>
+                </li>
+                <li class="cm-settings__row">
+                    <span class="cm-settings__name">Transcription</span>
+                    <span>@ReadinessBadge(status.SpeechConfigured)</span>
+                    <span class="cm-meta">@(status.SpeechConfigured ? "speech service configured" : "not configured")</span>
+                </li>
+                @foreach (var provider in status.ImageProviders)
+                {
+                    <li class="cm-settings__row">
+                        <span class="cm-settings__name">Image · @provider.Name</span>
+                        <span>@ReadinessBadge(provider.Ready)</span>
+                        <span class="cm-meta">@(provider.Reason ?? "ready")</span>
+                    </li>
+                }
+                @foreach (var provider in status.TextProviders ?? [])
+                {
+                    <li class="cm-settings__row">
+                        <span class="cm-settings__name">Tech edit · @provider.Name</span>
+                        <span>@ReadinessBadge(provider.Ready)</span>
+                        <span class="cm-meta">@(provider.Reason ?? "ready")</span>
+                    </li>
+                }
+            </ul>
+        }
+    }
+
+    @* ---- Model aliases ---- *@
+    @if (_tab == "models")
+    {
+        <p class="cm-meta">
+            Set on the server, not here — generation asks for an alias and the server maps it to
+            a deployment, so a model can be swapped without touching the client.
+        </p>
+        @if (_status is { } modelStatus && modelStatus.Models.Count > 0)
+        {
+            <ul class="cm-settings__list">
+                @foreach (var (alias, model) in modelStatus.Models)
+                {
+                    <li class="cm-settings__row cm-settings__row--pair">
+                        <span class="cm-settings__name cm-mono">@alias</span>
+                        <span class="cm-mono cm-meta">@model</span>
+                    </li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p class="cm-meta">No aliases are mapped yet.</p>
+        }
+    }
+</section>
+
+@code {
+    private AiStatusResponse? _status;
+    private IReadOnlyList<SecretStatus>? _secrets;
+    private readonly Dictionary<string, string> _drafts = [];
+    private string? _busy;
+    private string? _loadError;
+
+    /// <summary>Credentials first: it is the panel people navigate here to change.</summary>
+    private static readonly (string Id, string Label)[] Tabs =
+        [("credentials", "Credentials"), ("readiness", "Readiness"), ("models", "Model aliases")];
+
+    private string _tab = "credentials";
+
+    /// <summary>"4/7 stored" on the tab itself, so the state is visible without opening it.</summary>
+    private RenderFragment? TabBadge(string id) => id == "credentials" && _secrets is { } secrets
+        ? builder =>
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "cm-mono cm-meta cm-tabs__badge");
+            builder.AddContent(2, $"{secrets.Count(x => x.Configured)}/{secrets.Count}");
+            builder.CloseElement();
+        }
+    : null;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+        try
+        {
+            // Readiness and credentials are independent reads; one failing should not blank
+            // the other, but a first-load failure needs to be visible rather than silent.
+            _secrets = await SettingsApi.SecretsAsync();
+            _status = await Images.GetAiStatusAsync();
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Message;
+        }
+    }
+
+    private string Draft(string kind) => _drafts.TryGetValue(kind, out var v) ? v : string.Empty;
+
+    private async Task SaveAsync(string kind)
+    {
+        _busy = kind;
+        try
+        {
+            await SettingsApi.SetSecretAsync(kind, Draft(kind).Trim());
+            // Cleared immediately: the value has served its purpose and must not linger in
+            // component state where a later render could put it back on screen.
+            _drafts.Remove(kind);
+            Notifier.ShowSuccess($"{Label(kind)} saved.");
+            await LoadAsync();
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't save {Label(kind)} — {ex.Message}");
+        }
+        finally
+        {
+            _busy = null;
+        }
+    }
+
+    private async Task RemoveAsync(string kind)
+    {
+        _busy = kind;
+        try
+        {
+            await SettingsApi.RemoveSecretAsync(kind);
+            Notifier.ShowSuccess($"{Label(kind)} removed.");
+            await LoadAsync();
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't remove {Label(kind)} — {ex.Message}");
+        }
+        finally
+        {
+            _busy = null;
+        }
+    }
+
+    private static RenderFragment ReadinessBadge(bool ready) => builder =>
+    {
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", ready ? "cm-badge cm-badge--done" : "cm-badge");
+        builder.AddContent(2, ready ? "READY" : "NOT READY");
+        builder.CloseElement();
+    };
+
+    /// <summary>The enum names are the API's contract; these are what a person calls them.</summary>
+    private static string Label(string kind) => kind switch
+    {
+        "FoundryEndpoint" => "Azure Foundry endpoint",
+        "FoundryKey" => "Azure Foundry key",
+        "BrokerToken" => "Publishing broker token",
+        "ImageProviderKey" => "Image provider key",
+        "TechEditKey" => "Tech Edit provider key (Anthropic)",
+        "KnowledgeBaseToken" => "Knowledge base token",
+        "GitHubToken" => "GitHub token",
+        _ => kind,
+    };
+
+    private static string Hint(string kind) => kind switch
+    {
+        "FoundryEndpoint" => "https://<resource>.openai.azure.com",
+        "FoundryKey" => "powers every text generation and the transcript",
+        "BrokerToken" => "needed only to schedule social posts",
+        "ImageProviderKey" => "optional second image provider (ADR-015)",
+        "TechEditKey" => "enables the second-pass Tech Edit (ADR-020)",
+        "KnowledgeBaseToken" => "lets the Tech Edit consult your knowledge base",
+        "GitHubToken" => "fine-grained PAT: Contents + Pull requests, read and write",
+        _ => string.Empty,
+    };
+}
