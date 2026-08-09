@@ -84,8 +84,8 @@ flowchart TB
     RCL --> Platform
     MAUI -.->|"SecureStorage token store · ffmpeg sidecar · Whisper.net · native dialogs"| Platform
     WASM -.->|"browser token store · server media endpoints · browser download"| Platform
-    HTTP -->|"/api/v1 JWT bearer"| API[(Castmill.Api)]
-    HTTP -.->|SAS PUT/GET| BLOB[(Azure Blob)]
+    HTTP -->|"/api/v1 JWT bearer<br/>(uploads proxied — ADR-F26)"| API[(Castmill.Api)]
+    HTTP -.->|SAS GET only| BLOB[(Azure Blob)]
 ```
 
 ### Dataflow (canonical interaction: review a generated blog)
@@ -143,10 +143,13 @@ flowchart TB
 | ADR-F22 | **Artifacts carry a server-side `Status`** — Draft → InReview → Queued → Published — changed through a dedicated ETag-guarded `PATCH /status`, not as part of a content save | ADR-F12's double encoding, the Front Page's review queue, the review gate and the Wire's queue are all built on artifact state, and the entity had no such column: F3's central surface would have been fiction. Keeping the transition off the content save matters because "mark reviewed" and "edit the copy" are different intents with different guards (roadmap E6.9). Stored as a string so the set can grow without a migration | A fifth state appears, or transitions need to be role-gated |
 | ADR-F23 | **Images are an inline node in the editor schema**, not a block node | As a block node, an image serializes with no trailing blank line, so `![hero](…)` immediately followed by a list came back out as one joined line — and the next round trip escaped the `-`, silently corrupting the list. As an inline node the image sits in a paragraph and the paragraph serializer handles separation, which is also how CommonMark represents a standalone figure. Caught by the round-trip corpus on its first run, which is the argument for the corpus existing | The schema needs figure/caption as a real block structure |
 | ADR-F24 | **Charts are Blazor-ApexCharts** (the official ApexCharts Blazor wrapper, free for Blazor use — <https://apexcharts.com/docs/blazor-charts/>), not `IgbCategoryChart` | Supersedes the chart clause of ADR-F15: the SEO desk's share-of-voice bars were the one surface that required the commercial Ignite UI package, and ApexCharts' Blazor exception removes that need entirely — the whole client now ships on free, licence-clean dependencies with no private feed, ever. The MIT Ignite UI tier remains the component library for everything §2.6 lists; ApexCharts is charts only. Owner's decision, 2026-07-30 | ApexCharts' Blazor licensing changes, or a chart need it cannot cover |
+| ADR-F25 | **Store `Changed` handlers must dispatch through `StoreEvents.GuardedAsync`** (or `DetachedAsync` for fire-and-forget); enforced by a source-scan test, not review | A throw inside `InvokeAsync(async () => …)` from a store event is a dispatcher fault, which **bypasses every ErrorBoundary** and lands on Blazor's global error UI — the whole app dies for one component's exception. bUnit cannot cover it (its renderer rethrows into the test), so `StoreEventGuardTests` scans the Razor source and fails the build on the next unguarded handler. Two sibling source-scan gates were added for the same reason — browser-fatal, test-framework-invisible: `RazorMarkupSanityTests` (a Razor `@* *@` comment inside an attribute list emits as an attribute name → `InvalidCharacterError`, blank app) and `CssSelectorCollisionTests` (same-selector rules merge across files via the import cascade; a duplicate silently rewrites another feature's layout) | The renderer surfaces dispatcher faults to ErrorBoundary upstream |
+| ADR-F26 | **Client uploads are proxied through the API** (`POST /api/v1/blob/assets/{id}/content`, `ByteArrayContent`); SAS is read-only from the client's perspective | Direct browser→blob SAS PUT failed twice over: the storage account needs a CORS rule per origin (an Azure-side action per environment), and Mac Catalyst's `NSUrlSessionHandler` fails chunked `StreamContent` bodies outright. One proxy endpoint works identically in both shells and keeps G2's no-key-material posture (the API already held the write path). Buffered `ByteArrayContent` because the transfers are asset-sized, not media-sized — large media still goes through B6's resumable path | Web upload volume makes proxying a measurable API cost — then revisit SAS PUT with per-environment CORS baked into Bicep |
+| ADR-F27 | **Token custody is memory-authoritative**: `TokenProviderBase` holds the refresh token in memory as the first-class copy; persistent storage exists only so a session survives an app restart. On desktop, persistence is SecureStorage **with a user-only (0600) file fallback** — dev builds cannot use the Keychain at all. Only a definitive 401 from the refresh endpoint clears the session; the client `HttpClient` timeout is 10 minutes | The Mac Catalyst build shipped with an empty `Entitlements.plist` — MAUI SecureStorage **requires** `keychain-access-groups` there and throws on every write without it. The desktop provider swallowed the throw, refresh depended entirely on storage, and every desktop session died exactly 15 minutes after sign-in (DB evidence: zero server-side revocations, endless fresh logins). Adding the entitlement is not the dev-build fix: it is a *restricted* entitlement, and an ad-hoc-signed Debug build carrying it is **killed by launchd at spawn** (no codesigning identity exists on the dev machine). So: live sessions never depend on storage (memory-authoritative); restart survival on dev builds comes from a 0600 file holding only the rotating single-use refresh token (the az/gh CLI posture); and a properly signed build (E10.4 packaging) carries the entitlement, at which point SecureStorage validates and the provider prefers it automatically. `ShellLayout` turns a session that does end mid-flight into one redirect + one message instead of app-wide error soup. The 10-minute timeout exists because .NET's 100 s default aborted 123 s image generations mid-silent-refresh, orphaning the just-rotated single-use token. Pinned by `TokenRefreshResilienceTests`, including a verbatim replay of the keychain outage | E10.4 ships the signed pkg — then verify SecureStorage takes over and consider deleting the fallback path |
 
 ## 6. Considerations — Well-Architected pillars (client lens)
 
-- **Security.** Email/password sign-in against `/api/v1/auth` (ADR-010 in the backend doc); access JWT held in memory by the chokepoint handler; rotating refresh token in OS-protected `SecureStorage` on desktop and browser storage on web; passwords never persisted client-side; no secrets in client config; CSP on SWA (no `unsafe-*` beyond wasm-eval); external links open via `IExternalLinkOpener` only; pasted/AI content rendered through the sanitizing Markdig path.
+- **Security.** Email/password sign-in against `/api/v1/auth` (ADR-010 in the backend doc); access JWT held in memory by the chokepoint handler; rotating refresh token held **in memory as the authoritative copy** (ADR-F27) and persisted to OS-protected `SecureStorage` on desktop (requires the `keychain-access-groups` entitlement on Mac Catalyst) / browser storage on web for restart survival; passwords never persisted client-side; no secrets in client config; CSP on SWA (no `unsafe-*` beyond wasm-eval); external links open via `IExternalLinkOpener` only; pasted/AI content rendered through the sanitizing Markdig path.
 - **Reliability.** Typed error envelope with actionable messages; 412 conflict UX (reload/merge prompt); blur-commit means at most one keystroke-burst of unsaved work; web upload resumable.
 - **Performance efficiency.** Preview projections for lists — one payload carries artifacts *and* image-slot state (G9); canvas virtualization + transform-only pan/zoom; provenance overlay measures on `ResizeObserver`/scroll rather than per frame; lazy-load heavy views (charts, editor bundle, Image Studio); AOT (ADR-F08); target budgets in G4 measured in CI Playwright runs.
 - **Cost optimization.** SWA free/standard tier; no client-side AI spend; image previews served as cached WebP from the public container; the Image Studio shows a live cost estimate (variants × model) *before* generating, and headline edits re-composite server-side instead of re-generating (backend ADR-013).
@@ -259,6 +262,38 @@ flowchart TB
 - **Check-in gate:** empty campaign → 6 slots reserved → thumbnail generated with a composited headline at exactly 1280×720 → Focus Mode's stub is replaced by the rendered figure and the header counter reads 1/6 — without a page reload; every empty-slot surface agrees.
 
 **Dependency order:** F0 → F1 → F2 → F3 → {F4 ∥ early F5.1} → F5 → F10 → F6 → {F7 ∥ F8} → F9. F10 sits after F5 because it writes into Focus Mode's manuscript stubs; it can start as soon as B9.1/B9.2 land.
+
+### Post-F10 increments (2026-08, shipped)
+
+Product deltas landed after the phase plan above, recorded here so the phase entries stay
+historical (per doc conventions):
+
+- **The wizard is four steps** — Source → Transcribing → Brief → **Targets** — superseding
+  F3's three-step flow. The Brief is AI-drafted from the transcript on entry (summary + key
+  points, every field editable, multi-line); the Targets step runs live keyword research
+  (volume, suggestions, People-Also-Ask) *before* the fan-out, pre-selects the top three,
+  and saves them to the campaign so every generator writes to a target (backend ADR-023).
+- **YouTube is a first-class artifact kind** — first in the fan-out (on by default), its own
+  board lane, exactly 3 A/B title variants, chapters, `{{LINKS}}` substitution from the
+  workspace's social URLs. The founding use case, restored to the front of the product.
+- **Content cluster map** on the SEO desk — deterministic radial SVG: pillar blog centred,
+  supporting pieces ringed, missing channels as dashed "+ add" nodes that draft that kind
+  against the saved targets.
+- **Press-run survival UX** — per-item progress with completion marks, roll-up + Done state;
+  the run itself survives severed requests and process death (backend ADR-022) and the
+  client reattaches to the live run row after a transport fault.
+- **Brand editor** — four tabs (identity / style / assets / templates), multi-asset kit with
+  per-kind selection and square renameable cards, per-kind default templates with
+  save-on-blur, brand-from-URL and paste-context AI fill; brand delete is a hover action on
+  the index card behind the standard destructive confirm.
+- **Session custody hardening** (ADR-F27) and the **app-wide density pass**
+  (`--cm-space-unit` 4 px, body 1 rem; compact keeps 3.4 px).
+- **Interaction polish:** the rail re-renders on `Navigation.LocationChanged` so the active
+  item tracks navigation; selects are restyled `appearance: none` so the full styled box is
+  the click target (the native macOS control ignores padding and rendered a tiny target);
+  wizard steps focus their first field on entry so Tab starts in the form, not the rail;
+  image generation shows a live elapsed-time label (`42s`, then `2m 08s`) on the button,
+  status line and pending tiles.
 
 ### Combined delivery view (backend × frontend interleave)
 

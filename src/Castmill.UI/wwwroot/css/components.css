@@ -457,6 +457,26 @@
     border-color: var(--cm-danger);
 }
 
+/* Selects opt OUT of the native macOS control: it ignores the padding above and renders
+   its own tiny hit target, which made every dropdown in the app feel broken. With
+   appearance:none the whole styled box is the control; the chevron is drawn from two
+   gradient triangles so it inherits the text colour in both theme families. */
+select.cm-input {
+    -webkit-appearance: none;
+    appearance: none;
+    min-block-size: 2.5rem;
+    padding-inline-end: calc(var(--cm-space-3) + 20px);
+    background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+        calc(100% - 18px) 50%,
+        calc(100% - 12px) 50%;
+    background-size: 6px 6px;
+    background-repeat: no-repeat;
+    cursor: pointer;
+}
+
 .cm-form__error {
     margin: 0;
     padding: var(--cm-space-2) var(--cm-space-3);

@@ -7,6 +7,18 @@
          Desktop distributes as a notarized pkg outside the Mac App Store (roadmap E10.4),
          which does not require the sandbox. Revisit ONLY if MAS distribution is wanted,
          which would mean bundling ffmpeg as a signed helper or linking libav in-process. -->
+    <!-- NO keychain-access-groups here, on purpose — twice burned:
+         1. Without it, MAUI SecureStorage throws on every call on Mac Catalyst, so the
+            refresh token was never persisted and sessions died 15 minutes after sign-in.
+         2. WITH it, an ad-hoc-signed Debug build (this machine has zero codesigning
+            identities) is killed by launchd at spawn — keychain-access-groups is a
+            RESTRICTED entitlement that requires a provisioning profile to validate
+            (RBSRequestErrorDomain Code=5, "Launchd job spawn failed").
+         So dev builds run without the Keychain and DesktopTokenProvider falls back to a
+         user-only (0600) file for restart survival; live sessions never depend on storage
+         at all (memory-authoritative, frontend ADR-F27). Add the entitlement back ONLY
+         together with real signing — i.e. in the notarized-pkg packaging step (E10.4),
+         where SecureStorage then takes over from the file automatically. -->
     <dict>
     </dict>
 </plist>

@@ -4,10 +4,12 @@
    IN THIS CAMPAIGN navigation model (ADR-F11). *@
 @using Castmill.UI.Auth
 @using Castmill.UI.Design
+@using Castmill.UI.State
 @implements IDisposable
 @inherits LayoutComponentBase
 @inject ThemeService Theme
 @inject AuthState Auth
+@inject INotifier Notifier
 @inject NavigationManager Navigation
 
 @if (!Auth.IsReady)
@@ -73,6 +75,7 @@ else
         // Cold-start silent restore: exchanges a stored refresh token for a live session so
         // a returning user is never shown the sign-in form unnecessarily.
         await Auth.InitializeAsync();
+        _wasSignedIn = Auth.IsSignedIn;
 
         RedirectIfSignedOut();
     }
@@ -98,7 +101,27 @@ else
         Navigation.NavigateTo("sign-in", replace: true);
     }
 
-    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+    private bool _wasSignedIn;
+
+    /// <summary>
+    /// A session that ends MID-FLIGHT redirects to sign-in once, with one message. Without
+    /// this, nothing reacted to the sign-out: every mounted view kept firing requests, each
+    /// got its own 401, and the user watched the entire app "crash" into a wall of
+    /// per-panel "session expired" errors instead of being taken to the one screen that
+    /// can fix it.
+    /// </summary>
+    private void OnAuthChanged() => InvokeAsync(() => StoreEvents.GuardedAsync(() =>
+    {
+        var signedIn = Auth.IsSignedIn;
+        if (_wasSignedIn && !signedIn)
+        {
+            Notifier.ShowError("Your session ended — sign in to pick up where you left off.");
+            RedirectIfSignedOut();
+        }
+
+        _wasSignedIn = signedIn;
+        return Task.CompletedTask;
+    }, Notifier, StateHasChanged, "Updating the session"));
 
     public void Dispose() => Auth.Changed -= OnAuthChanged;
 }

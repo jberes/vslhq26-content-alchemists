@@ -561,16 +561,12 @@
     gap: 2px;
 }
 
+/* One full-width column: the AI drafts sentences into these fields, and two half-width
+   single-line inputs showed forty characters of them. */
 .cm-brief {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--cm-space-4);
-}
-
-@media (max-width: 899.98px) {
-    .cm-brief {
-        grid-template-columns: minmax(0, 1fr);
-    }
 }
 
 .cm-fanout {
@@ -1757,11 +1753,12 @@
 
 /* ---- Press panel (the run, narrated in full) ------------------------------------ */
 
+/* Full remaining page width — no max: at 72ch the per-item status line wrapped to two
+   lines the moment an item's progress track appeared beside its kind label. */
 .cm-press {
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-3);
-    max-inline-size: 72ch;
     margin: var(--cm-space-4);
     padding: var(--cm-space-6);
     border: 1px solid var(--cm-rule-strong);
@@ -2429,6 +2426,13 @@
 .cm-brand-card .cm-tree__delete {
     inset-block-start: var(--cm-space-2);
     inset-inline-end: var(--cm-space-2);
+}
+
+/* The reveal rule above is scoped to .cm-tree__row; without this the card's delete
+   button is opacity:0 forever — present, clickable, and invisible. */
+.cm-brand-card:hover .cm-tree__delete,
+.cm-brand-card:focus-within .cm-tree__delete {
+    opacity: 1;
 }
 
 .cm-brand-card__voice {
@@ -3733,20 +3737,6 @@
     align-items: center;
     gap: var(--cm-space-2);
     margin-block-end: var(--cm-space-2);
-}
-
-/* The one control that answers "how do I get rid of this brand" — quiet until read, loud
-   when acted on. Outside the tabs so it is findable from any of them. */
-.cm-brand__danger {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--cm-space-3);
-    margin-block-start: var(--cm-space-8);
-    padding: var(--cm-space-4);
-    border: 1px solid var(--cm-danger);
-    border-radius: var(--cm-radius-md);
 }
 
 /* ---- Transcript modal --------------------------------------------------------------- */

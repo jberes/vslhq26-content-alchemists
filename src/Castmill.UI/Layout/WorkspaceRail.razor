@@ -152,7 +152,13 @@
     {
         Workspace.Changed += OnChanged;
         Theme.Changed += OnChanged; // the collapse toggle re-renders the chevron
+        // Without this the rail renders once and the active highlight freezes on whatever
+        // was open at first paint — navigation never re-renders a persistent layout child.
+        Navigation.LocationChanged += OnLocationChanged;
     }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        OnChanged();
 
     /// <summary>
     /// Marks the current workspace destination. Compared on the whole relative path so
@@ -224,5 +230,6 @@
     {
         Workspace.Changed -= OnChanged;
         Theme.Changed -= OnChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 }

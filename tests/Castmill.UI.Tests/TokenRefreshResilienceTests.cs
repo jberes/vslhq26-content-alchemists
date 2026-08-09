@@ -108,6 +108,50 @@ public sealed class TokenRefreshResilienceTests
         Assert.All(results, Assert.True);
     }
 
+    /// <summary>
+    /// The Mac Catalyst Keychain outage, verbatim: the app shipped without the
+    /// keychain-access-groups entitlement, so every SecureStorage write threw (swallowed, per
+    /// the desktop provider's contract) and every read came back empty. Refresh used to read
+    /// the token back FROM STORAGE, so exactly 15 minutes after sign-in the access token
+    /// expired with nothing to renew it and the whole app collapsed into "session expired".
+    /// Memory is authoritative now — a live session must never depend on persistence working.
+    /// </summary>
+    [Fact]
+    public async Task A_session_survives_storage_that_silently_loses_every_write()
+    {
+        var provider = new BrokenStorageProvider(_ => Task.FromResult(new AuthResponse(
+            "fresh-access", DateTimeOffset.UtcNow.AddMinutes(15),
+            "next-refresh", DateTimeOffset.UtcNow.AddDays(30))));
+
+        // Sign-in: storage loses the refresh token, exactly as the entitlement-less build did.
+        await provider.StoreAsync("access", DateTimeOffset.UtcNow.AddMinutes(15), "login-refresh");
+
+        // Minute 15: the access token has expired, a request 401s, refresh runs.
+        Assert.True(await provider.TryRefreshAsync());
+        Assert.Equal("fresh-access", provider.AccessToken);
+        Assert.Equal("login-refresh", provider.Exchanged);
+    }
+
+    /// <summary>Storage that behaves like SecureStorage without the Keychain entitlement:
+    /// writes vanish (the desktop provider swallows the throw), reads find nothing.</summary>
+    private sealed class BrokenStorageProvider(Func<string, Task<AuthResponse>> exchange) : TokenProviderBase(
+        () => throw new InvalidOperationException("AuthClient must not be resolved."))
+    {
+        public string? Exchanged { get; private set; }
+
+        protected override Task<string?> ReadRefreshTokenAsync() => Task.FromResult<string?>(null);
+
+        protected override Task WriteRefreshTokenAsync(string refreshToken) => Task.CompletedTask;
+
+        protected override Task DeleteRefreshTokenAsync() => Task.CompletedTask;
+
+        protected override Task<AuthResponse> RefreshAsync(string refreshToken)
+        {
+            Exchanged = refreshToken;
+            return exchange(refreshToken);
+        }
+    }
+
     private sealed class FakeProvider : TokenProviderBase
     {
         private readonly Func<string, Task<AuthResponse>> _exchange;

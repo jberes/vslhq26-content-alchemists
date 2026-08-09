@@ -166,7 +166,7 @@
                                 }
                                 <button type="button" class="cm-button" disabled="@(IsGenerating || !CanGenerate)"
                                         @onclick="GenerateAsync">
-                                    @(IsGenerating ? "Generating…" : $"Generate {_variantCount} {(_variantCount == 1 ? "variant" : "variants")}")
+                                    @(IsGenerating ? $"Generating… {ElapsedLabel(StudioRun.Elapsed)}" : $"Generate {_variantCount} {(_variantCount == 1 ? "variant" : "variants")}")
                                 </button>
                                 <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
                             </div>
@@ -201,7 +201,7 @@
                                 {
                                     <p class="cm-meta">
                                         <span class="cm-ai-dot" aria-hidden="true"></span>
-                                        Generating @StudioRun.ExpectedVariants — @(StudioRun.Progress?.Completed ?? 0) done…
+                                        Generating @StudioRun.ExpectedVariants — @(StudioRun.Progress?.Completed ?? 0) done · <span class="cm-mono">@ElapsedLabel(StudioRun.Elapsed)</span>
                                     </p>
                                 }
                                 else if (_galleryError is { } galleryError)
@@ -230,7 +230,7 @@
                                                 <span class="cm-gallery__pending-label cm-mono">
                                                     TAKE @((StudioRun.Progress?.Completed ?? 0) + i + 1)
                                                 </span>
-                                                <span class="cm-meta">rendering…</span>
+                                                <span class="cm-meta">rendering… @ElapsedLabel(StudioRun.Elapsed)</span>
                                             </div>
                                         }
                                     }
@@ -792,6 +792,13 @@
     private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
 
     private bool IsGenerating => _selectedId is { } id && StudioRun.IsActiveFor(id);
+
+    /// <summary>"42s" under a minute, "2m 08s" after — renders run for minutes and a bare
+    /// spinner gave no sense of whether anything was still moving.</summary>
+    private static string ElapsedLabel(TimeSpan elapsed) =>
+        elapsed.TotalSeconds < 60
+            ? $"{(int)elapsed.TotalSeconds}s"
+            : $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s";
 
     private bool CanGenerate => !string.IsNullOrWhiteSpace(_prompt) &&
         _status?.ImageProviders.Any(p => p.Ready) == true;

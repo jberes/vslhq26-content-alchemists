@@ -1,7 +1,9 @@
-@* New campaign — three steps, and the only path that creates one (handoff §3).
+@* New campaign — four steps, and the only path that creates one (handoff §3).
      1. pick a source            drop zone + paste URL / paste transcript / pick from assets
      2. transcription progress   determinate bar + narrated log (ADR-F13: never a spinner)
-     3. the brief                2x2 fields + fan-out checklist, then Press Run
+     3. the brief                AI-drafted full-width fields + fan-out checklist
+     4. search targets           live keyword research, saved to the campaign (ADR-023),
+                                 then Press Run
 
    Desktop (F7): pick an MP3/MP4 → ffmpeg extracts → Whisper transcribes on-device → the
    TIMED segments go to the server. Web: capability flagged off with a stated reason (G3);
@@ -74,7 +76,7 @@
             <div class="cm-run__sources">
                 <label class="cm-field">
                     <span class="cm-field__label">Campaign name</span>
-                    <input class="cm-input" @bind="_name" @bind:event="oninput"
+                    <input class="cm-input" @ref="_sourceFirstField" @bind="_name" @bind:event="oninput"
                            placeholder="Q3 product webinar" />
                 </label>
 
@@ -180,22 +182,27 @@
                 </p>
             }
 
+            @* Full-width, multi-line fields: the AI drafts a sentence or two into each of
+               these, and a single-line half-column input showed forty characters of it. *@
             <div class="cm-brief">
                 <label class="cm-field">
                     <span class="cm-field__label">Title</span>
-                    <input class="cm-input" @bind="_name" />
+                    <input class="cm-input" @ref="_briefFirstField" @bind="_name" />
                 </label>
                 <label class="cm-field">
                     <span class="cm-field__label">Audience</span>
-                    <input class="cm-input" @bind="_audience" placeholder="Platform engineers evaluating tooling" />
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_audience"
+                              placeholder="Platform engineers evaluating tooling"></textarea>
                 </label>
                 <label class="cm-field">
                     <span class="cm-field__label">Brand voice</span>
-                    <input class="cm-input" @bind="_voice" placeholder="Direct, specific, no hype" />
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_voice"
+                              placeholder="Direct, specific, no hype"></textarea>
                 </label>
                 <label class="cm-field">
                     <span class="cm-field__label">Angle</span>
-                    <input class="cm-input" @bind="_angle" placeholder="What changed and why it matters" />
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_angle"
+                              placeholder="What changed and why it matters"></textarea>
                 </label>
             </div>
 
@@ -466,6 +473,44 @@
     private string _brandId = string.Empty;
 
     private Step _step = Step.Source;
+
+    // Focus the first field when a step opens: without it, keyboard focus sits at the
+    // document top and Tab walks the whole rail before ever reaching the form.
+    private ElementReference _sourceFirstField;
+    private ElementReference _briefFirstField;
+    private Step? _focusedStep;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusedStep == _step)
+        {
+            return;
+        }
+
+        try
+        {
+            switch (_step)
+            {
+                case Step.Source:
+                    await _sourceFirstField.FocusAsync();
+                    _focusedStep = _step;
+                    break;
+                case Step.Brief when !_briefing:
+                    await _briefFirstField.FocusAsync();
+                    _focusedStep = _step;
+                    break;
+                default:
+                    // Steps without a first field (Transcribing, Targets) claim no focus.
+                    _focusedStep = _step;
+                    break;
+            }
+        }
+        catch (Exception)
+        {
+            // Focus is a nicety; a torn-down or not-yet-rendered element must not fault the render.
+        }
+    }
+
     private string _name = string.Empty;
     private string _transcript = string.Empty;
     private string _audience = string.Empty;

@@ -19,6 +19,17 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
     private string? _accessToken;
     private DateTimeOffset _accessExpiresAt;
 
+    /// <summary>
+    /// The CURRENT refresh token, held in memory as a first-class copy — not a cache of
+    /// storage, the other way round: memory is authoritative for this process, storage exists
+    /// so the session survives a restart. This distinction is the fix for a real outage: the
+    /// Mac Catalyst build shipped without the Keychain entitlement, SecureStorage threw on
+    /// every write, the provider swallowed it — and because refresh then depended entirely on
+    /// storage, every desktop session died mid-operation exactly 15 minutes after sign-in,
+    /// when the access token expired with nothing to renew it.
+    /// </summary>
+    private string? _refreshToken;
+
     public string? AccessToken => _accessToken;
 
     public bool IsSignedIn => _accessToken is not null;
@@ -50,6 +61,8 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
     {
         _accessToken = accessToken;
         _accessExpiresAt = accessExpiresAt;
+        // Memory FIRST: the live session must never depend on the persistence layer working.
+        _refreshToken = refreshToken;
         await WriteRefreshTokenAsync(refreshToken);
         Changed?.Invoke();
     }
@@ -77,8 +90,11 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
                 return true;
             }
 
-            var stored = await ReadRefreshTokenAsync();
-            return !string.IsNullOrEmpty(stored) && await ExchangeAsync(stored!);
+            // Memory first, storage as the cold-start fallback. A broken keychain must cost
+            // at most "sign in again after a restart" — never a session that dies while the
+            // app is open.
+            var current = _refreshToken ?? await ReadRefreshTokenAsync();
+            return !string.IsNullOrEmpty(current) && await ExchangeAsync(current!);
         }
         finally
         {
@@ -90,6 +106,7 @@ public abstract class TokenProviderBase(Func<AuthClient> authClient) : IAuthToke
     {
         _accessToken = null;
         _accessExpiresAt = default;
+        _refreshToken = null;
         await DeleteRefreshTokenAsync();
         Changed?.Invoke();
     }

@@ -10,7 +10,6 @@
 @using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient Brands
 @inject HttpClient Http
-@inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 
@@ -277,20 +276,6 @@
             </section>
         }
 
-            @* Deleting lives on the page that shows what will be lost, behind the same strong
-               confirm every other destructive action uses — not only as a ✕ on an index card. *@
-            <section class="cm-brand__danger">
-                <div>
-                    <strong>Delete this brand</strong>
-                    <p class="cm-meta">
-                        The asset kit and every template go with it. Campaigns that use it keep
-                        working, brandless. This cannot be undone.
-                    </p>
-                </div>
-                <button type="button" class="cm-button cm-button--danger" @onclick="DeleteBrandAsync">
-                    Delete brand…
-                </button>
-            </section>
         </div>
     }
 </div></div>
@@ -441,32 +426,6 @@
         }
     }
 
-    // ---- Danger zone --------------------------------------------------------------
-
-    private async Task DeleteBrandAsync()
-    {
-        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
-            $"Delete {_name}?",
-            "This deletes the brand, its asset kit and every template. Campaigns that use it "
-            + "keep working, brandless. This cannot be undone.",
-            AcceptLabel: "Delete brand",
-            Destructive: true));
-        if (!accepted)
-        {
-            return;
-        }
-
-        try
-        {
-            await Brands.DeleteAsync(BrandId);
-            Notifier.ShowSuccess($"{_name} deleted.");
-            Navigation.NavigateTo("brands");
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-    }
     private sealed class ColorRow
     {
         public string Role { get; set; } = string.Empty;

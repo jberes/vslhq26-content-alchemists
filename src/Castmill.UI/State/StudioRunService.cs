@@ -15,6 +15,13 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
 
     private CancellationTokenSource? _cts;
 
+    // Wall-clock of the run, for the "how long has this been going" label. A Stopwatch, not
+    // dates: image renders run for minutes and the label must not jump if the clock adjusts.
+    private readonly System.Diagnostics.Stopwatch _clock = new();
+
+    /// <summary>How long the current (or just-finished) run has been going.</summary>
+    public TimeSpan Elapsed => _clock.Elapsed;
+
     public Guid? CampaignId { get; private set; }
 
     public Guid? SlotId { get; private set; }
@@ -57,6 +64,7 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
         Result = null;
         Error = null;
         IsRunning = true;
+        _clock.Restart();
         Changed?.Invoke();
 
         _ = RunAsync(campaignId, call, _cts.Token);
@@ -82,13 +90,16 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
                     if (latest.StartedAt >= startedAfter)
                     {
                         Progress = latest;
-                        Changed?.Invoke();
                     }
                 }
                 catch (ApiException)
                 {
                     // 404 until the run row exists: keep polling.
                 }
+
+                // Every tick, not only on progress: the elapsed-time label advances with the
+                // poll even while the run row has nothing new to say.
+                Changed?.Invoke();
             }
 
             Result = await request;
@@ -109,6 +120,7 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
         {
             if (!ct.IsCancellationRequested)
             {
+                _clock.Stop();
                 IsRunning = false;
                 Changed?.Invoke();
             }
