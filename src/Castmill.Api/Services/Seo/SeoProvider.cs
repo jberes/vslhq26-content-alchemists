@@ -485,22 +485,42 @@ public sealed class DataForSeoProvider(
     public async Task<SeoAeoEngineResult> QueryAnswerEngineAsync(
         string provider, string question, string? siteDomain, CancellationToken ct)
     {
-        var (label, model) = provider switch
+        var label = provider switch
         {
-            "chat_gpt" => ("ChatGPT", "gpt-4.1-mini"),
-            "gemini" => ("Gemini", "gemini-2.5-flash"),
-            "claude" => ("Claude", "claude-sonnet-4-0"),
-            "perplexity" => ("Perplexity", "sonar"),
-            _ => (provider, string.Empty),
+            "chat_gpt" => "ChatGPT",
+            "gemini" => "Gemini",
+            "claude" => "Claude",
+            "perplexity" => "Perplexity",
+            _ => provider,
         };
-        if (model.Length == 0)
+        if (provider is not ("chat_gpt" or "gemini" or "claude" or "perplexity"))
         {
             return new SeoAeoEngineResult(provider, label, false, false, null, [], "Unknown answer engine.");
         }
 
-        object task = provider == "perplexity"
-            ? new { user_prompt = question[..Math.Min(question.Length, 500)], model_name = model, max_output_tokens = 1024 }
-            : new { user_prompt = question[..Math.Min(question.Length, 500)], model_name = model, max_output_tokens = 1024, web_search = true };
+        var selectedModel = await SelectAnswerEngineModelAsync(provider, ct);
+        if (selectedModel is null)
+        {
+            return new SeoAeoEngineResult(
+                provider, label, false, false, null, [],
+                $"DataForSEO returned no available {label} model.");
+        }
+
+        var prompt = question[..Math.Min(question.Length, 500)];
+        object task = selectedModel.Value.SupportsWebSearch
+            ? new
+            {
+                user_prompt = prompt,
+                model_name = selectedModel.Value.Name,
+                max_output_tokens = 1024,
+                web_search = true,
+            }
+            : new
+            {
+                user_prompt = prompt,
+                model_name = selectedModel.Value.Name,
+                max_output_tokens = 1024,
+            };
 
         using var doc = await PostAsync($"v3/ai_optimization/{provider}/llm_responses/live", new[] { task }, ct);
         var result = TaskResults(doc).FirstOrDefault();
@@ -528,6 +548,45 @@ public sealed class DataForSeoProvider(
         var answer = FindFirstAnswer(result);
         return new SeoAeoEngineResult(
             provider, label, true, citations.Any(c => c.IsOwnDomain), answer, citations);
+    }
+
+    private async Task<(string Name, bool SupportsWebSearch)?> SelectAnswerEngineModelAsync(
+        string provider, CancellationToken ct)
+    {
+        using var doc = await GetAsync(
+            $"v3/ai_optimization/{provider}/llm_responses/models", ct);
+        var models = TaskResults(doc)
+            .Select(item => (
+                Name: Str(item, "model_name"),
+                SupportsWebSearch: Bool(item, "web_search_supported")))
+            .Where(item => item.Name.Length > 0)
+            .ToArray();
+        if (models.Length == 0)
+        {
+            return null;
+        }
+
+        // Prefer a fast, current general-purpose model. The live catalog remains the
+        // source of truth, so provider model retirements cannot break report creation.
+        var preferred = provider switch
+        {
+            "chat_gpt" => new[] { "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o" },
+            "gemini" => new[] { "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash" },
+            "claude" => new[] { "claude-sonnet-4-0", "claude-sonnet-4-20250514", "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest" },
+            "perplexity" => new[] { "sonar", "sonar-pro" },
+            _ => [],
+        };
+        foreach (var name in preferred)
+        {
+            var match = models.FirstOrDefault(model =>
+                model.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (match.Name is { Length: > 0 })
+            {
+                return match;
+            }
+        }
+
+        return models[0];
     }
 
     /// <summary>
@@ -569,12 +628,31 @@ public sealed class DataForSeoProvider(
 
     private async Task<JsonDocument> PostAsync(string path, object body, CancellationToken ct)
     {
-        var client = httpClientFactory.CreateClient("seo");
-        client.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", _options.ApiKey);
+        var client = CreateClient();
 
         using var content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(path, content, ct);
+        return await ReadEnvelopeAsync(response, ct);
+    }
+
+    private async Task<JsonDocument> GetAsync(string path, CancellationToken ct)
+    {
+        var client = CreateClient();
+        using var response = await client.GetAsync(path, ct);
+        return await ReadEnvelopeAsync(response, ct);
+    }
+
+    private HttpClient CreateClient()
+    {
+        var client = httpClientFactory.CreateClient("seo");
+        client.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", _options.ApiKey);
+        return client;
+    }
+
+    private static async Task<JsonDocument> ReadEnvelopeAsync(
+        HttpResponseMessage response, CancellationToken ct)
+    {
         response.EnsureSuccessStatusCode();
         var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
 
@@ -753,6 +831,9 @@ public sealed class DataForSeoProvider(
 
     private static string Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+
+    private static bool Bool(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False && v.GetBoolean();
 
     private static long Num(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;

@@ -1,8 +1,10 @@
 using Bunit;
+using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
 using Castmill.UI.State;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -42,6 +44,8 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
 
         Assert.All(tabs.Where(t => t != only),
             t => Assert.Equal("false", t.GetAttribute("aria-selected")));
+        Assert.Contains(view.FindAll(".cm-campaign-header .cm-chip"),
+            chip => chip.TextContent.Contains("Webinar", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -123,6 +127,26 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
         Assert.DoesNotContain("#", svg, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task The_campaign_rail_is_one_complete_self_describing_list()
+    {
+        var workspace = Services.GetRequiredService<WorkspaceState>();
+        await workspace.LoadAsync();
+
+        var rail = Render<Castmill.UI.Layout.WorkspaceRail>();
+
+        Assert.DoesNotContain("In this campaign", rail.Markup, StringComparison.Ordinal);
+        Assert.Empty(rail.FindAll(".cm-rail__card"));
+        Assert.Equal("Campaigns", rail.Find("#cm-rail-campaigns").TextContent.Trim());
+
+        var row = Assert.Single(rail.FindAll(".cm-rail__row"));
+        Assert.Contains("Webinar campaign", row.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Added ", row.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Updated ", row.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Webinar", row.TextContent, StringComparison.Ordinal);
+        Assert.Equal("🗑", row.QuerySelector(".cm-rail__delete span")!.TextContent.Trim());
+    }
+
     private static string Css()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -141,5 +165,6 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
 
     private static CampaignResponse Campaign() =>
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
-            DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow,
+            ContentType: CampaignContentType.Webinar);
 }

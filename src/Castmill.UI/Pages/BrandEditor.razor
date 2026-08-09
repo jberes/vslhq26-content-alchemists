@@ -15,7 +15,7 @@
 
 <PageTitle>@(_name.Length > 0 ? _name : "Brand") — Castmill</PageTitle>
 
-<div class="cm-page"><div class="cm-measure--dashboard">
+<div class="cm-page @(_brandTab == "templates" ? "cm-page--brand-template" : "")"><div class="cm-measure--dashboard cm-brand-editor">
     <header class="cm-front__head">
         <a class="cm-meta" href="brands">Brands /</a>
         <h1>@(_name.Length > 0 ? _name : "Brand")</h1>
@@ -45,7 +45,7 @@
             }
         </div>
 
-        <div class="cm-brand">
+        <div class="cm-brand @(_brandTab == "templates" ? "cm-brand--template" : "")">
         @if (_brandTab == "identity")
         {
             @* Paste whatever the brand team actually gave you — a voice doc, a palette, an
@@ -186,12 +186,12 @@
                    and "20210920 Infragistics 005" steers an image model toward nothing. *@
                 @foreach (var group in GroupedAssets)
                 {
-                    <div class="cm-brand__asset-group">
+                    <div class="cm-brand__asset-group" @key="group.Key">
                         <span class="cm-kicker">@KindLabel(group.Key) · @group.Count()</span>
                         <div class="cm-asset-grid">
                             @foreach (var asset in group)
                             {
-                                <figure class="cm-asset-card">
+                                <figure class="cm-asset-card" @key="asset.Id">
                                     @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
                                     {
                                         <img src="@url" alt="@(asset.Label ?? asset.FileName)" loading="lazy" />
@@ -203,6 +203,18 @@
                                     <button type="button" class="cm-tree__delete cm-asset-card__delete"
                                             aria-label="Remove @(asset.Label ?? asset.FileName) from the kit"
                                             @onclick="() => UnlinkAssetAsync(asset)">✕</button>
+                                    <label class="cm-asset-card__type">
+                                        <span>Type</span>
+                                        <select value="@asset.Kind"
+                                                disabled="@(_retypingAsset == asset.Id)"
+                                                aria-label="Type for @(asset.Label ?? asset.FileName)"
+                                                @onchange="e => ChangeAssetKindAsync(asset, e)">
+                                            @foreach (var kind in AssetKinds)
+                                            {
+                                                <option value="@kind">@KindLabel(kind)</option>
+                                            }
+                                        </select>
+                                    </label>
                                     <input class="cm-input cm-asset-card__label"
                                            value="@(asset.Label ?? asset.FileName)"
                                            aria-label="Label — used as prompt text"
@@ -242,19 +254,21 @@
         }
         @if (_brandTab == "templates")
         {
-            <section class="cm-brand__section">
+            <section class="cm-brand__section cm-brand__section--template">
                 <h2 class="cm-front__block-title">Content templates</h2>
                 <p class="cm-meta">
-                    One default template per content type, applied to every run for campaigns on
-                    this brand. Pick a type, edit — it saves when you click away.
+                    This is the primary content brief sent to AI for this Brand and content type.
+                    It overrides Castmill's generic writing guidance on every generation pass;
+                    the required JSON shape, transcript grounding and safety rules still apply.
+                    Pick a type and edit — it saves when you click away.
                 </p>
 
                 <div class="cm-brand__tpl-bar">
                     <select class="cm-input cm-brand__kind" value="@_tplKind"
                             @onchange="OnTemplateKindPicked">
-                        @foreach (var kind in TemplateKinds)
+                        @foreach (var kind in ArtifactDisplay.BrandTemplateKinds)
                         {
-                            <option value="@kind">@ArtifactDisplay.KindLabel(kind)</option>
+                            <option value="@kind.Kind">@kind.Label</option>
                         }
                     </select>
                     <button type="button" class="cm-button cm-button--quiet" disabled="@_tplBusy"
@@ -270,7 +284,7 @@
                    deliberately never changed under your typing. *@
                 <textarea class="cm-input cm-textarea cm-brand__template-body"
                           aria-label="Template for @ArtifactDisplay.KindLabel(_tplKind)"
-                          maxlength="4000" disabled="@_tplBusy"
+                          maxlength="20000" disabled="@_tplBusy"
                           @bind="_tplPrompt" @bind:event="oninput"
                           @onblur="SaveTemplateAsync"></textarea>
             </section>
@@ -311,7 +325,7 @@
 
     // ---- Template editor ------------------------------------------------------------
 
-    private string _tplKind = "blog";
+    private string _tplKind = "youtube";
     private string _tplPrompt = string.Empty;
     private string _tplLoadedPrompt = string.Empty;
     private Guid? _tplTemplateId;
@@ -426,16 +440,44 @@
         }
     }
 
+    private async Task ChangeAssetKindAsync(BrandAssetResponse asset, ChangeEventArgs e)
+    {
+        var kind = e.Value?.ToString()?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(kind)
+            || string.Equals(kind, asset.Kind, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _retypingAsset = asset.Id;
+        try
+        {
+            var updated = await Brands.ChangeAssetKindAsync(BrandId, asset.Id, kind);
+            var index = _assets.FindIndex(item => item.Id == asset.Id);
+            if (index >= 0)
+            {
+                // Use the server's canonical value, not the selection event's transient DOM
+                // value. Combined with @key on the card this prevents a moved card inheriting
+                // the select state of the card that previously occupied its DOM position.
+                _assets[index] = updated;
+            }
+            Notifier.ShowSuccess($"Moved to {KindLabel(updated.Kind)}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't change that asset type — {ex.Message}");
+        }
+        finally
+        {
+            _retypingAsset = null;
+        }
+    }
+
     private sealed class ColorRow
     {
         public string Role { get; set; } = string.Empty;
         public string Hex { get; set; } = "#5980a6";
     }
-
-    private static readonly string[] TemplateKinds =
-        ["blog", "newsletter", "email-sequence", "landing-page", "show-notes",
-         "social-x", "social-linkedin", "social-facebook", "social-instagram",
-         "social-threads", "social-bluesky", "seo-brief"];
 
     private readonly List<ColorRow> _colors = [];
     private readonly List<BrandAssetResponse> _assets = [];
@@ -445,6 +487,7 @@
     private bool _loaded;
     private bool _saving;
     private bool _uploading;
+    private Guid? _retypingAsset;
     private string? _loadError;
     private string? _uploadError;
     private string _saveState = string.Empty;
@@ -468,6 +511,49 @@
     /// </summary>
     private static readonly Dictionary<string, string> Starters = new(StringComparer.Ordinal)
     {
+        ["youtube"] = """
+            Act as an expert YouTube content strategist specializing in SEO, answer-engine
+            optimization, generative-search visibility and accurate technical content.
+
+            Priority order:
+            1. Accurately represent what is actually shown or discussed in the transcript.
+            2. Satisfy the search intent behind the approved primary keyword.
+            3. Make the title and first 1–2 description sentences compelling to a human.
+            4. Make the package easy for search engines and answer engines to understand.
+            5. Cover related entities, capabilities, problems and terminology only when the
+               transcript supports them.
+            6. Never use keyword stuffing, unsupported claims, generic hype or clickbait.
+
+            Before writing, determine the video's subject, problem, audience, learning outcome,
+            demonstrated products/features, supported claims and questions it answers. Silently
+            correct obvious transcription errors, but do not invent facts. Build a semantic topic
+            cluster around the approved primary keyword: close variants, category terms,
+            problem/feature/implementation searches, named technologies and natural questions.
+
+            Produce three genuinely different A/B/C title strategies using distinct supported
+            angles. Keep titles accurate and preferably 45–65 characters, front-load the important
+            concept where natural, and avoid minor rewrites of one title.
+
+            The first 200 description characters must explain exactly what the viewer will learn,
+            naturally use the primary phrase or strongest semantic variation, and name a concrete
+            capability or outcome. Follow with 2–4 short paragraphs covering the problem, major
+            capabilities, learning outcome, technologies and differentiators actually shown.
+            Where useful, add an "In this video, you'll learn" list with 4–8 concise bullets.
+
+            Write explicit, self-contained answer sentences that can be quoted by an AI system.
+            Prefer named entities and concrete nouns over vague pronouns. Answer what the subject
+            is, what it does, how it works and what problem it solves only when grounded in the
+            transcript.
+
+            Generate chapters only from reliable transcript timing. Start at 00:00, use concise
+            search-friendly titles, and never invent timestamps. End with one relevant CTA; use
+            the supplied product URL naturally when available. Generate 12–20 directly relevant
+            tags mixing the primary phrase, close variants, product/platform names, demonstrated
+            features and high-intent long-tail concepts.
+
+            The result must sound natural aloud, preserve important technical detail, avoid
+            repetitive AI phrasing and prioritize useful information over keyword density.
+            """,
         ["blog"] = "Open with the reader's problem in one sentence — no throat-clearing.\nUse H2s that are statements, not labels.\n900–1400 words. Short paragraphs.\nShow one concrete example with real numbers or real code.\nClose with the single next action, not a summary.",
         ["newsletter"] = "One idea per issue. Lead with it in the first line.\nWrite to one person, not a list.\n250–400 words.\nOne link that matters; do not pad with a round-up.\nSign off in the brand's voice, not a template.",
         ["email-sequence"] = "Each email earns the next open — end on an unresolved thread.\nOne job per email: teach, prove, or ask.\n120–200 words each. Subject lines under 45 characters.\nNo email repeats another's argument.",
@@ -479,7 +565,6 @@
         ["social-instagram"] = "Write for a caption read after the image.\nFirst line hooks; the rest can be longer.\n5–10 relevant hashtags on their own line.",
         ["social-threads"] = "Casual and direct. Under 300 characters.\nOne observation, stated plainly. No hashtags.",
         ["social-bluesky"] = "Plain, technical, no marketing register.\nUnder 300 characters. Links are fine without ceremony.",
-        ["seo-brief"] = "State the primary keyword and the search intent behind it.\nList the questions the page must answer, in order.\nName the competing pages and what each one misses.\nGive the meta title (<60 chars) and description (<155 chars).",
     };
 
 

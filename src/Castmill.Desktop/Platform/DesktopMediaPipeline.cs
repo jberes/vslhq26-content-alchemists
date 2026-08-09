@@ -50,6 +50,28 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
         return LastPicked;
     }
 
+    public async Task<IReadOnlyList<PickedMedia>> PickMediaFilesAsync()
+    {
+        var results = await MainThread.InvokeOnMainThreadAsync(() =>
+            FilePicker.Default.PickMultipleAsync(new PickOptions
+            {
+                PickerTitle = "Pick one or more video or audio files",
+                FileTypes = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+                {
+                    [DevicePlatform.MacCatalyst] = ["public.movie", "public.audio"],
+                    [DevicePlatform.WinUI] = [".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav", ".aac"],
+                }),
+            }));
+        var picked = results.Where(result => result is not null).Select(result =>
+        {
+            ArgumentNullException.ThrowIfNull(result);
+            var info = new FileInfo(result.FullPath);
+            return new PickedMedia(result.FullPath, result.FileName, info.Exists ? info.Length : 0);
+        }).ToList();
+        LastPicked = picked.FirstOrDefault();
+        return picked;
+    }
+
     public async Task<LocalTranscription> TranscribeAsync(
         PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default)
     {

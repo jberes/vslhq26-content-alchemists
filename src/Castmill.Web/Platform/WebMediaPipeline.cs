@@ -20,6 +20,8 @@ internal sealed class WebMediaPipeline : IMediaPipeline
     public PickedMedia? LastPicked => null;
 
     public Task<PickedMedia?> PickMediaAsync() => Task.FromResult<PickedMedia?>(null);
+    public Task<IReadOnlyList<PickedMedia>> PickMediaFilesAsync() =>
+        Task.FromResult<IReadOnlyList<PickedMedia>>([]);
 
     public Task<LocalTranscription> TranscribeAsync(
         PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default) =>

@@ -15,6 +15,7 @@
             data-seg="@segment.Id">
             <span class="cm-seg__label cm-mono">
                 @Clock(segment.StartSeconds)@(segment.Speaker is null ? "" : $" · {segment.Speaker}")
+                @(segment.SourceLabel is null ? "" : $" · {segment.SourceLabel}")
             </span>
             <span class="cm-seg__text">@segment.Text</span>
         </li>

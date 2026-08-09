@@ -9,15 +9,15 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Castmill.UI.Tests;
 
 /// <summary>
-/// Focus mode's left rail is a type-grouped tree: one collapsible group per lane category,
-/// items labelled with their kind, each with a delete affordance. Grouping reads the same
-/// registry as the Mill Floor, so the two surfaces can never disagree about categories.
+/// Focus mode's left rail is a vertical projection of the Mill Floor: the same lane names in
+/// the same order, with non-interactive category bands and interactive content rows.
 /// </summary>
 public sealed class ArtifactTreeTests : CastmillUiTestContext
 {
     private static readonly Guid CampaignId = Guid.Parse("41111111-1111-1111-1111-111111111111");
     private static readonly Guid BlogId = Guid.Parse("41111111-1111-1111-1111-222222222222");
     private static readonly Guid SocialId = Guid.Parse("41111111-1111-1111-1111-333333333333");
+    private static readonly Guid YouTubeId = Guid.Parse("41111111-1111-1111-1111-444444444444");
 
     public ArtifactTreeTests()
     {
@@ -28,50 +28,69 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
             Campaign(),
             [
                 Artifact(BlogId, "blog", "Launch-day blog post"),
-                Artifact(SocialId, "social-x", "Launch thread"),
+                Artifact(SocialId, "social-x", "Launch thread", BlogId),
+                Artifact(YouTubeId, "youtube", "Launch video package"),
+                Artifact(Guid.NewGuid(), "seo-brief", "Legacy SEO brief"),
+                Artifact(Guid.NewGuid(), "seo-keyword-plan", "Keyword plan"),
+                Artifact(Guid.NewGuid(), "seo-report", "Deep SEO analysis"),
             ],
             [], 0, 0));
 
         // Focus auto-opens the first editable artifact, so its full fetch must answer.
         StubFullArtifact(BlogId, "blog", "Launch-day blog post");
-        StubFullArtifact(SocialId, "social-x", "Launch thread");
+        StubFullArtifact(SocialId, "social-x", "Launch thread", BlogId);
+        StubFullArtifact(YouTubeId, "youtube", "Launch video package");
     }
 
     [Fact]
-    public async Task The_tree_groups_artifacts_by_lane_with_counts()
+    public async Task The_rail_mirrors_mill_floor_lanes_with_clean_noninteractive_headers()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
         await WaitForTextAsync(view, "Launch thread");
 
-        var heads = view.FindAll(".cm-tree__head").Select(h => h.TextContent).ToList();
-        Assert.Contains(heads, h => h.Contains("Blog", StringComparison.Ordinal) && h.Contains('1'));
-        Assert.Contains(heads, h => h.Contains("Social", StringComparison.Ordinal) && h.Contains('1'));
+        var categories = view.FindAll(".cm-focus__category").Select(header => header.TextContent).ToList();
+        Assert.Collection(categories,
+            category => Assert.Contains("YouTube", category, StringComparison.Ordinal),
+            category => Assert.Contains("Blog", category, StringComparison.Ordinal),
+            category => Assert.Contains("Social", category, StringComparison.Ordinal));
+        Assert.DoesNotContain("Social set availability", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Legacy SEO brief", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Keyword plan", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deep SEO analysis", view.Markup, StringComparison.Ordinal);
+        Assert.Empty(view.FindAll(".cm-focus__category button"));
 
-        // Parenthesised, so the number reads as a count of the section rather than as part
-        // of the name — "BLOG 2" scans as a title, "BLOG (2)" as a header with a count.
+        // Parenthesised, so the number reads as a category count, not part of its title.
         Assert.All(view.FindAll(".cm-tree__count"), c => Assert.Matches(@"^\(\d+\)$", c.TextContent.Trim()));
     }
 
     [Fact]
-    public async Task Collapsing_a_group_hides_its_artifacts_and_flips_aria_expanded()
+    public async Task Entering_focus_without_a_deep_link_selects_the_first_displayed_item()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch video package", view.Find(".cm-focus__manuscript h1").TextContent));
+
+        var firstRow = view.FindAll(".cm-focus__list-item")[0];
+        Assert.Contains("Launch video package", firstRow.TextContent, StringComparison.Ordinal);
+        Assert.Equal("true", firstRow.GetAttribute("aria-current"));
+    }
+
+    [Fact]
+    public async Task Clicking_a_content_row_changes_the_main_manuscript()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
         await WaitForTextAsync(view, "Launch thread");
 
-        var socialHead = view.FindAll(".cm-tree__head")
-            .First(h => h.TextContent.Contains("Social", StringComparison.Ordinal));
-        Assert.Equal("true", socialHead.GetAttribute("aria-expanded"));
+        var social = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        await social.ClickAsync();
 
-        await socialHead.ClickAsync();
-
-        var collapsed = view.FindAll(".cm-tree__head")
-            .First(h => h.TextContent.Contains("Social", StringComparison.Ordinal));
-        Assert.Equal("false", collapsed.GetAttribute("aria-expanded"));
-
-        // The Social item is gone from the tree; the Blog group is untouched.
-        var treeItems = view.FindAll(".cm-focus__list-item").Select(i => i.TextContent).ToList();
-        Assert.DoesNotContain(treeItems, i => i.Contains("Launch thread", StringComparison.Ordinal));
-        Assert.Contains(treeItems, i => i.Contains("Launch-day blog post", StringComparison.Ordinal));
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
+        Assert.Equal("true", view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+            .GetAttribute("aria-current"));
     }
 
     [Fact]
@@ -88,6 +107,7 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
 
         var socialRow = view.FindAll(".cm-tree__row")
             .First(r => r.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        Assert.Contains("🗑", socialRow.QuerySelector(".cm-tree__delete")!.TextContent, StringComparison.Ordinal);
         await socialRow.QuerySelector(".cm-tree__delete")!.ClickAsync();
 
         Assert.Single(confirm.Requests);
@@ -117,7 +137,7 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     {
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
             Campaign(),
-            [Artifact(BlogId, "blog", "Launch-day blog post"), Artifact(SocialId, "social-x", "Launch thread")],
+            [Artifact(BlogId, "blog", "Launch-day blog post"), Artifact(SocialId, "social-x", "Launch thread", BlogId)],
             [Slot("blog-hero", BlogId), Slot("social-card", SocialId)], 0, 2));
 
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
@@ -141,11 +161,12 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         }
     }
 
-    private void StubFullArtifact(Guid id, string kind, string title)
+    private void StubFullArtifact(Guid id, string kind, string title, Guid? parentArtifactId = null)
     {
         Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{id}", new ArtifactResponse(
             id, CampaignId, kind, title, """{"content":{"markdown":"Hello."}}""",
-            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow));
+            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
+            ParentArtifactId: parentArtifactId));
         Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{id}/revisions",
             new List<ArtifactRevisionResponse>());
     }
@@ -167,9 +188,10 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
 
-    private static ArtifactPreviewResponse Artifact(Guid id, string kind, string title) =>
+    private static ArtifactPreviewResponse Artifact(Guid id, string kind, string title, Guid? parentArtifactId = null) =>
         new(id, CampaignId, kind, title, ArtifactStatus.Draft, 1,
-            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
+            ParentArtifactId: parentArtifactId);
 
     private static ImageSlotResponse Slot(string kind, Guid artifactId) => new(
         Guid.NewGuid(), CampaignId, kind, 1200, 675, null, "foundry", null, null, true,

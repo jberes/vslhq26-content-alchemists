@@ -29,6 +29,7 @@ public abstract class CastmillUiTestContext : BunitContext
         Services.AddSingleton<IShellInfo>(Shell);
         Services.AddSingleton<IAuthTokenProvider>(Tokens);
         Services.AddSingleton<IMediaPipeline>(Media);
+        Services.AddSingleton<IClipboardService>(Clipboard);
 
         // Replace the real HttpClient with one that answers from Http's route table, so
         // AuthState can load /me without a network.
@@ -45,11 +46,25 @@ public abstract class CastmillUiTestContext : BunitContext
 
     protected TestMediaPipeline Media { get; } = new();
 
+    protected TestClipboardService Clipboard { get; } = new();
+
     /// <summary>Signs the fake user in and stubs /me, which is what most tests want.</summary>
     protected void SignInTestUser(string email = "demo@castmill.local")
     {
         Tokens.SignIn();
         Http.OnGet("api/v1/me", new MeResponse(Guid.NewGuid(), Guid.NewGuid(), email, "Demo user"));
+    }
+}
+
+public sealed class TestClipboardService : IClipboardService
+{
+    public List<string> Copies { get; } = [];
+    public bool Succeeds { get; set; } = true;
+
+    public Task<bool> CopyTextAsync(string text)
+    {
+        Copies.Add(text);
+        return Task.FromResult(Succeeds);
     }
 }
 
@@ -247,6 +262,8 @@ public sealed class TestMediaPipeline : IMediaPipeline
     }
 
     public Task<PickedMedia?> PickMediaAsync() => Task.FromResult(LastPicked);
+    public Task<IReadOnlyList<PickedMedia>> PickMediaFilesAsync() =>
+        Task.FromResult<IReadOnlyList<PickedMedia>>(LastPicked is null ? [] : [LastPicked]);
 
     public Task<LocalTranscription> TranscribeAsync(
         PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default) =>

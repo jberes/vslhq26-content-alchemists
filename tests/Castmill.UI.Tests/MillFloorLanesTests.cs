@@ -27,19 +27,21 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Seo_kinds_render_in_the_page_seo_lane_never_social()
+    public async Task Seo_analysis_artifacts_never_render_on_the_mill_floor()
     {
         StubPreview(
             Artifact("seo-keyword-plan", "Keyword plan for launch"),
-            Artifact("show-notes", "Episode show notes"),
-            Artifact("social-x", "Launch thread"));
+            Artifact("seo-brief", "Legacy SEO brief"),
+            Artifact("seo-report", "Deep SEO analysis"),
+            Artifact("landing-page", "Launch landing page"));
 
         var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Keyword plan for launch");
+        await WaitForTextAsync(view, "Launch landing page");
 
-        Assert.Equal("Page/SEO", LaneOf(view, "Keyword plan for launch"));
-        Assert.Equal("Blog", LaneOf(view, "Episode show notes"));
-        Assert.Equal("Social", LaneOf(view, "Launch thread"));
+        Assert.Equal("Page", LaneOf(view, "Launch landing page"));
+        Assert.DoesNotContain("Keyword plan for launch", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Legacy SEO brief", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deep SEO analysis", view.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -98,6 +100,7 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         await WaitForTextAsync(view, "Blog draft");
 
         Assert.DoesNotContain("Image prompts", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("SEO brief", view.Markup, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -119,12 +122,14 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         // Derived from the registry, not a literal. A hard-coded count is what let "youtube"
         // ship as a generator AND a lane while still being unrequestable from the board — the
         // board's kind list had drifted from the registry and nothing said so.
-        var expected = 2 + ArtifactDisplay.Known.Count(k =>
-            k.OnBoard && k.Lane != "Social" && k.Kind != "blog" && k.Kind != "seo-keyword-plan");
+        var expected = 2 + ArtifactDisplay.UserGeneratableKinds.Count(k =>
+            k.Lane != "Social" && k.Kind != "blog");
         Assert.Equal(expected, chips.Length);
 
         // The one that was missing, named explicitly so this cannot pass vacuously.
         Assert.Contains(chips, c => c.TextContent.Contains("YouTube package", StringComparison.Ordinal));
+        Assert.Contains(chips, c => c.TextContent.Contains("Clip suggestions", StringComparison.Ordinal));
+        Assert.DoesNotContain(chips, c => c.TextContent.Contains("Campaign summary", StringComparison.Ordinal));
         Assert.All(chips, chip =>
         {
             Assert.NotNull(chip.QuerySelector(".cm-print-chip__plus"));

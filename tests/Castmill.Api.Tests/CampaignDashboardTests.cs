@@ -79,4 +79,66 @@ public sealed class CampaignDashboardTests(CastmillApiFactory factory)
         Assert.DoesNotContain(dashboard!.Campaigns, c => c.CampaignId == campaign.Id);
         Assert.DoesNotContain(dashboard.ReviewQueue, r => r.CampaignId == campaign.Id);
     }
+
+    [Fact]
+    public async Task Dashboard_excludes_operational_seo_reports_from_edit_work()
+    {
+        var client = await AuthedClientAsync();
+        var create = await client.PostAsJsonAsync(
+            "/api/v1/campaigns", new CampaignCreateRequest("Report campaign", null));
+        create.EnsureSuccessStatusCode();
+        var campaign = (await create.Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var artifactsUrl = $"/api/v1/campaigns/{campaign.Id}/artifacts";
+        var report = await (await client.PostAsJsonAsync(artifactsUrl,
+            new ArtifactCreateRequest("seo-report", "Deep SEO/AEO report", """{"status":"Draft"}""")))
+            .Content.ReadFromJsonAsync<ArtifactResponse>();
+
+        using var patch = new HttpRequestMessage(HttpMethod.Patch, $"{artifactsUrl}/{report!.Id}/status")
+        {
+            Content = JsonContent.Create(new ArtifactStatusRequest(ArtifactStatus.InReview)),
+        };
+        patch.Headers.TryAddWithoutValidation("If-Match", $"\"{report.Version}\"");
+        (await client.SendAsync(patch)).EnsureSuccessStatusCode();
+
+        var dashboard = await client.GetFromJsonAsync<DashboardResponse>("/api/v1/campaigns/dashboard");
+
+        Assert.DoesNotContain(dashboard!.ReviewQueue, item => item.ArtifactId == report.Id);
+        Assert.DoesNotContain(dashboard.AgingDrafts, item => item.ArtifactId == report.Id);
+    }
+
+    [Fact]
+    public async Task Wire_queue_contains_distribution_content_not_strategy_documents()
+    {
+        var client = await AuthedClientAsync();
+        var create = await client.PostAsJsonAsync(
+            "/api/v1/campaigns", new CampaignCreateRequest("Distribution campaign", null));
+        var campaign = (await create.Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var artifactsUrl = $"/api/v1/campaigns/{campaign.Id}/artifacts";
+
+        var blog = await CreateAndQueueAsync("blog", "Publishable blog");
+        var summary = await CreateAndQueueAsync("campaign-summary", "Internal summary");
+        var brief = await CreateAndQueueAsync("seo-brief", "Internal SEO brief");
+
+        var dashboard = await client.GetFromJsonAsync<DashboardResponse>("/api/v1/campaigns/dashboard");
+
+        Assert.Contains(dashboard!.ReadyToSchedule!, item => item.ArtifactId == blog.Id);
+        Assert.DoesNotContain(dashboard.ReadyToSchedule!, item => item.ArtifactId == summary.Id);
+        Assert.DoesNotContain(dashboard.ReadyToSchedule!, item => item.ArtifactId == brief.Id);
+
+        async Task<ArtifactResponse> CreateAndQueueAsync(string kind, string title)
+        {
+            var artifact = await (await client.PostAsJsonAsync(artifactsUrl,
+                new ArtifactCreateRequest(kind, title, """{"body":"x"}""")))
+                .Content.ReadFromJsonAsync<ArtifactResponse>();
+
+            using var patch = new HttpRequestMessage(
+                HttpMethod.Patch, $"{artifactsUrl}/{artifact!.Id}/status")
+            {
+                Content = JsonContent.Create(new ArtifactStatusRequest(ArtifactStatus.Queued)),
+            };
+            patch.Headers.TryAddWithoutValidation("If-Match", $"\"{artifact.Version}\"");
+            (await client.SendAsync(patch)).EnsureSuccessStatusCode();
+            return artifact;
+        }
+    }
 }

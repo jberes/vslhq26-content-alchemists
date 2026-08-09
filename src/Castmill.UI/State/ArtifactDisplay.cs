@@ -36,38 +36,66 @@ public static class ArtifactDisplay
     /// filter all read it, because three hand-maintained lists drifted (show-notes fell
     /// through a lane switch's default arm and rendered inside the Social lane).
     /// </summary>
-    public sealed record KindInfo(string Kind, string Label, string Lane, bool Editable, bool OnBoard);
+    public sealed record KindInfo(
+        string Kind,
+        string Label,
+        string Lane,
+        bool Editable,
+        bool OnBoard,
+        /// <summary>Shown in initial fan-out and Mill Floor's on-demand content menu.</summary>
+        bool UserGeneratable = false,
+        /// <summary>Shown in Brand Templates and injected into this generator.</summary>
+        bool BrandTemplatable = false);
 
     /// <summary>Board lanes in display order. "Other" catches kinds this build doesn't know.</summary>
     // YouTube on top: the package this app exists to produce reads first on the board.
     public static readonly string[] LaneOrder =
-        ["YouTube", "Blog", "Social", "Email", "Clips", "Page/SEO", "Other"];
+        ["YouTube", "Blog", "Social", "Email", "Clips", "Page", "Other"];
 
     /// <summary>
     /// The registry, in display order (in-lane sub-groups follow this order). Images are
     /// deliberately absent from the board: image work lives in the Image Studio and inside
-    /// the content itself, so <c>image-prompts</c> and <c>transcript</c> carry
-    /// <c>OnBoard: false</c>.
+    /// the content itself, so image machinery and transcripts carry <c>OnBoard: false</c>.
+    /// SEO research artifacts also stay off the board because the SEO Analysis tab owns them.
     /// </summary>
     public static readonly KindInfo[] Known =
     [
-        new("blog", "Blog post", "Blog", Editable: true, OnBoard: true),
-        // Directly after blog so derived choice lists (fan-out, print-more chips) offer it
-        // second; its lane position comes from LaneOrder, not from this row's position.
-        new("youtube", "YouTube package", "YouTube", Editable: true, OnBoard: true),
-        new("show-notes", "Show notes", "Blog", Editable: true, OnBoard: true),
-        new("social-x", "X post", "Social", Editable: true, OnBoard: true),
-        new("social-linkedin", "LinkedIn post", "Social", Editable: true, OnBoard: true),
-        new("social-facebook", "Facebook post", "Social", Editable: true, OnBoard: true),
-        new("social-instagram", "Instagram post", "Social", Editable: true, OnBoard: true),
-        new("social-threads", "Threads post", "Social", Editable: true, OnBoard: true),
-        new("social-bluesky", "Bluesky post", "Social", Editable: true, OnBoard: true),
-        new("email-sequence", "Email sequence", "Email", Editable: true, OnBoard: true),
-        new("newsletter", "Newsletter", "Email", Editable: true, OnBoard: true),
-        new("clip-suggestions", "Clip suggestions", "Clips", Editable: true, OnBoard: true),
-        new("landing-page", "Landing page", "Page/SEO", Editable: true, OnBoard: true),
-        new("seo-brief", "SEO brief", "Page/SEO", Editable: true, OnBoard: true),
-        new("seo-keyword-plan", "Keyword plan", "Page/SEO", Editable: true, OnBoard: true),
+        new("blog", "Blog post", "Blog", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("campaign-summary", "Campaign summary", "Blog", Editable: true, OnBoard: true),
+        // Directly after blog so the system-authored production summary stays near its pillar
+        // on the board. It is deliberately not a generation or template choice.
+        new("youtube", "YouTube package", "YouTube", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("show-notes", "Show notes", "Blog", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-x", "X post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-linkedin", "LinkedIn post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-facebook", "Facebook post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-instagram", "Instagram post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-threads", "Threads post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("social-bluesky", "Bluesky post", "Social", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("email-sequence", "Email sequence", "Email", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("newsletter", "Newsletter", "Email", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("clip-suggestions", "Clip suggestions", "Clips", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        new("landing-page", "Landing page", "Page", Editable: true, OnBoard: true,
+            UserGeneratable: true, BrandTemplatable: true),
+        // Legacy SEO research artifacts are retained for compatibility, but their only
+        // product surface is the SEO Analysis tab. They are not Mill deliverables.
+        new("seo-brief", "SEO research pass", "SEO Analysis", Editable: false, OnBoard: false),
+        new("seo-keyword-plan", "Keyword plan", "SEO Analysis", Editable: false, OnBoard: false),
+        // The deep report has its own rich SEO surface. Opening the persisted JSON in Focus
+        // produces a malformed manuscript and exposes internal report structure as content.
+        new("seo-report", "SEO/AEO report", "SEO Analysis", Editable: false, OnBoard: false),
         new("image-prompts", "Image prompts", "Images", Editable: false, OnBoard: false),
         new("thumbnail-concepts", "Thumbnail concepts", "Images", Editable: false, OnBoard: false),
         new("transcript", "Transcript", "Source", Editable: false, OnBoard: false),
@@ -94,6 +122,22 @@ public static class ArtifactDisplay
     /// <summary>The six per-platform social generator kinds — "social" alone matches nothing.</summary>
     public static readonly string[] SocialKinds =
         [.. Known.Where(k => k.Lane == "Social").Select(k => k.Kind)];
+
+    /// <summary>
+    /// User-facing generators in one canonical inventory. Operational generators such as
+    /// image prompt planning are intentionally absent, as are system-authored artifacts such
+    /// as the approved campaign summary.
+    /// </summary>
+    public static IEnumerable<KindInfo> UserGeneratableKinds =>
+        Known.Where(kind => kind.UserGeneratable);
+
+    /// <summary>Brand Template choices, ordered by the same lane grammar as campaign work.</summary>
+    public static IEnumerable<KindInfo> BrandTemplateKinds =>
+        Known.Where(kind => kind.BrandTemplatable)
+            .OrderBy(kind => Array.IndexOf(LaneOrder, kind.Lane) is var lane && lane >= 0
+                ? lane
+                : LaneOrder.Length)
+            .ThenBy(kind => KindOrder(kind.Kind));
 
     /// <summary>Human label for an artifact kind, keyed to the generator names the API uses.</summary>
     public static string KindLabel(string kind) => Resolve(kind).Label;

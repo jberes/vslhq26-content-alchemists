@@ -99,6 +99,27 @@ public sealed class AddContentTests : CastmillUiTestContext
             r.Method == HttpMethod.Post && r.RequestUri!.AbsolutePath.EndsWith("/generate", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Copy_and_view_copy_all_put_the_complete_transcript_on_the_clipboard()
+    {
+        var view = await OpenAsync();
+
+        await view.FindAll("button")
+            .Single(button => button.TextContent.Trim() == "Copy")
+            .ClickAsync();
+
+        Assert.Equal(["Hi."], Clipboard.Copies);
+
+        await view.FindAll("button")
+            .Single(button => button.TextContent.Trim() == "View")
+            .ClickAsync();
+        await view.FindAll("button")
+            .Single(button => button.TextContent.Trim() == "Copy all")
+            .ClickAsync();
+
+        Assert.Equal(["Hi.", "Hi."], Clipboard.Copies);
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private async Task<IRenderedComponent<MillFloorView>> OpenAsync()

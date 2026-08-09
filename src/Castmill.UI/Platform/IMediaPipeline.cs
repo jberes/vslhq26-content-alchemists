@@ -57,6 +57,9 @@ public interface IMediaPipeline
     /// <summary>Native file picker for audio/video. Null when the user cancels.</summary>
     Task<PickedMedia?> PickMediaAsync();
 
+    /// <summary>Native multi-file picker for campaigns assembled from several recordings.</summary>
+    Task<IReadOnlyList<PickedMedia>> PickMediaFilesAsync();
+
     /// <summary>MP3/MP4 (anything ffmpeg reads) → timed segments, entirely on-device.</summary>
     Task<LocalTranscription> TranscribeAsync(
         PickedMedia media, IProgress<PipelineProgress> progress, CancellationToken ct = default);

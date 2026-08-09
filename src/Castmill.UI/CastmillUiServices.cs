@@ -43,6 +43,7 @@ public static class CastmillUiServices
         services.AddScoped<INotifier>(sp => sp.GetRequiredService<Notifier>());
         services.AddScoped<ConfirmService>();
         services.AddScoped<IConfirmService>(sp => sp.GetRequiredService<ConfirmService>());
+        services.AddScoped<IClipboardService, ClipboardService>();
 
         // ---- HTTP --------------------------------------------------------------
         // Every call goes through CastmillHttpHandler — the one chokepoint for the bearer

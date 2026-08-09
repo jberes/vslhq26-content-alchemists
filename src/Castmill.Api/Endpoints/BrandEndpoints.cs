@@ -46,6 +46,8 @@ public static partial class BrandEndpoints
         group.MapDelete("/{id:guid}/assets/{brandAssetId:guid}", UnlinkAssetAsync).RequireRateLimiting("writes");
         group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}", RenameAssetAsync)
             .Validate<BrandAssetLabelRequest>().RequireRateLimiting("writes");
+        group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}/kind", ChangeAssetKindAsync)
+            .Validate<BrandAssetKindRequest>().RequireRateLimiting("writes");
 
         group.MapGet("/{id:guid}/templates", ListTemplatesAsync);
         group.MapPost("/{id:guid}/templates", CreateTemplateAsync)
@@ -307,6 +309,34 @@ public static partial class BrandEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>The file stays put; only its role in the Brand kit changes.</summary>
+    private static async Task<IResult> ChangeAssetKindAsync(
+        Guid id, Guid brandAssetId, BrandAssetKindRequest request,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var kind = request.Kind.Trim().ToLowerInvariant();
+        if (!AssetKinds.Contains(kind, StringComparer.Ordinal))
+        {
+            return Results.Problem(
+                $"Kind must be one of: {string.Join(", ", AssetKinds)}.", statusCode: 400);
+        }
+
+        var link = await db.BrandAssets.SingleOrDefaultAsync(
+            asset => asset.Id == brandAssetId && asset.BrandId == id, ct);
+        if (link is null)
+        {
+            return Results.NotFound();
+        }
+
+        link.Kind = kind;
+        await db.SaveChangesAsync(ct);
+
+        var asset = await db.Assets.SingleAsync(item => item.Id == link.AssetId, ct);
+        return Results.Ok(new BrandAssetResponse(
+            link.Id, link.BrandId, link.AssetId, link.Kind, link.Label,
+            asset.FileName, asset.ContentType, link.CreatedAt));
+    }
+
     private static async Task<IResult> UnlinkAssetAsync(
         Guid id, Guid brandAssetId, CastmillDbContext db, CancellationToken ct)
     {
@@ -329,7 +359,8 @@ public static partial class BrandEndpoints
         new(t.Id, t.BrandId, t.Kind, t.Name, t.SteeringPrompt, t.IsDefault, t.UpdatedAt);
 
     private static bool IsKnownGeneratorKind(string kind) =>
-        Generators.Find(kind) is not null || Generators.Normalize(kind) == "blog";
+        ArtifactKinds.IsUserContent(Generators.Normalize(kind))
+        && (Generators.Find(kind) is not null || Generators.Normalize(kind) == "blog");
 
     private static async Task<IResult> ListTemplatesAsync(Guid id, CastmillDbContext db, CancellationToken ct)
     {

@@ -3,10 +3,12 @@
    generates without an explicit click — variants are live model calls that cost money,
    which is why generation is a button, never a side effect (the user's rule). *@
 @page "/campaigns/{CampaignId:guid}/images"
+@using Castmill.Core
 @using System.Text.Json
 @using Castmill.Core.Ai
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
+@using Castmill.UI.Editor
 @using Castmill.UI.Http
 @using Castmill.UI.State
 @implements IDisposable
@@ -35,17 +37,22 @@
             else
             {
                 <div class="cm-studio">
-                    <section>
-                        <span class="cm-kicker">Content · @Campaign.ImagesFilled/@Campaign.ImagesTotal images filled</span>
+                    <aside class="cm-studio__nav" aria-label="Content image cards">
+                        <header class="cm-studio__nav-head">
+                            <span class="cm-kicker">Content</span>
+                            <span class="cm-meta">@Campaign.ImagesFilled/@Campaign.ImagesTotal images filled</span>
+                        </header>
                         @foreach (var item in ImageContentItems)
                         {
                             var slots = SlotsFor(item.Id).ToList();
-                            <div class="cm-tree__group">
-                                <div class="cm-tree__head">
-                                    <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
-                                    <span class="cm-tree__count cm-mono">@slots.Count</span>
-                                </div>
-                                <p class="cm-meta">@item.Title</p>
+                            <section class="cm-studio__content-group">
+                                <header class="cm-studio__content-head">
+                                    <div>
+                                        <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                        <p class="cm-studio__content-title">@item.Title</p>
+                                    </div>
+                                    <span class="cm-studio__count cm-mono">@slots.Count</span>
+                                </header>
                                 <ul class="cm-studio__slots">
                             @foreach (var slot in slots)
                             {
@@ -61,18 +68,20 @@
                                         <span class="cm-studio__slot-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
                                     </button>
                                 </li>
-                            }
+                                }
                                 </ul>
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
-                                    @(_addingFor == item.Id ? "Adding…" : "+ Add image")
-                                </button>
-                            </div>
+                                <footer class="cm-studio__content-actions">
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
+                                        @(_addingFor == item.Id ? "Adding…" : "+ Add image")
+                                    </button>
+                                </footer>
+                            </section>
                         }
                         @if (LegacySlots.Any())
                         {
-                            <div class="cm-tree__group">
-                                <div class="cm-tree__head"><span class="cm-kicker">Legacy campaign images</span></div>
+                            <section class="cm-studio__content-group">
+                                <header class="cm-studio__content-head"><span class="cm-kicker">Legacy campaign images</span></header>
                                 <ul class="cm-studio__slots">
                                     @foreach (var slot in LegacySlots)
                                     {
@@ -86,9 +95,9 @@
                                         </li>
                                     }
                                 </ul>
-                            </div>
+                            </section>
                         }
-                    </section>
+                    </aside>
 
                     @if (Selected is { } slot2)
                     {
@@ -106,6 +115,22 @@
                                 </p>
                             </div>
 
+                            @if (_supportingContextLoading)
+                            {
+                                <p class="cm-meta">Loading the content this image supports…</p>
+                            }
+                            else if (_supportingContext is { } context)
+                            {
+                                <section class="cm-studio__context" aria-label="Content this image supports">
+                                    <span class="cm-kicker">What this image supports</span>
+                                    <p class="cm-studio__context-source">
+                                        <strong>@context.Title</strong>
+                                        <span class="cm-meta"> · @ArtifactDisplay.KindLabel(context.Kind)</span>
+                                    </p>
+                                    <blockquote>@context.Excerpt</blockquote>
+                                </section>
+                            }
+
                             <div>
                                 @if (IsThumbnail(slot2) && _thumbnailConcepts.Count > 0)
                                 {
@@ -114,7 +139,9 @@
                                     <div class="cm-studio__chips">
                                         @foreach (var concept in _thumbnailConcepts)
                                         {
-                                            <button type="button" class="cm-studio__chip" title="@concept.Reason"
+                                            var selected = string.Equals(_activeConceptName, concept.Name, StringComparison.Ordinal);
+                                            <button type="button" class="cm-studio__chip @(selected ? "cm-studio__chip--on" : null)"
+                                                    aria-pressed="@(selected ? "true" : "false")" title="@concept.Reason"
                                                     @onclick="() => ApplyConceptAsync(concept)">
                                                 @concept.Name · @concept.OverlayText
                                             </button>
@@ -123,17 +150,23 @@
                                 }
 
                                 <span class="cm-kicker">Prompt mode</span>
-                                <div class="cm-studio__row">
-                                    <label class="cm-studio__model">
-                                        <input type="radio" name="cm-prompt-mode" checked="@IsAutoPrompt"
-                                               @onchange='() => ChangePromptModeAsync("Auto")' />
-                                        <span>Auto from this item</span>
-                                    </label>
-                                    <label class="cm-studio__model">
-                                        <input type="radio" name="cm-prompt-mode" checked="@(!IsAutoPrompt)"
-                                               @onchange='() => ChangePromptModeAsync("Manual")' />
-                                        <span>Manual</span>
-                                    </label>
+                                <div class="cm-studio__mode-switch" role="group" aria-label="Prompt mode">
+                                    <button type="button"
+                                            class="cm-studio__mode @(IsAutoPrompt ? "cm-studio__mode--on" : null)"
+                                            aria-pressed="@(IsAutoPrompt ? "true" : "false")"
+                                            disabled="@_changingPromptMode"
+                                            @onclick='() => ChangePromptModeAsync("Auto")'>
+                                        <strong>Auto</strong>
+                                        <span>Rebuild from this item</span>
+                                    </button>
+                                    <button type="button"
+                                            class="cm-studio__mode @(!IsAutoPrompt ? "cm-studio__mode--on" : null)"
+                                            aria-pressed="@(!IsAutoPrompt ? "true" : "false")"
+                                            disabled="@_changingPromptMode"
+                                            @onclick='() => ChangePromptModeAsync("Manual")'>
+                                        <strong>Manual</strong>
+                                        <span>Use this prompt verbatim</span>
+                                    </button>
                                 </div>
                                 <span class="cm-kicker">Prompt</span>
                                 @* oninput, not onchange: the Generate button must enable while
@@ -160,7 +193,13 @@
                                 <div class="cm-studio__chips">
                                     @foreach (var chip in ConstraintChips)
                                     {
-                                        <button type="button" class="cm-studio__chip" @onclick="() => AppendChipAsync(chip)">+ @chip</button>
+                                        var selected = ConstraintSelected(chip);
+                                        <button type="button"
+                                                class="cm-studio__chip @(selected ? "cm-studio__chip--on" : null)"
+                                                aria-pressed="@(selected ? "true" : "false")"
+                                                @onclick="() => ToggleConstraintChipAsync(chip)">
+                                            @(selected ? "Applied · " : "Add · ")@chip
+                                        </button>
                                     }
                                 </div>
                             </div>
@@ -448,6 +487,16 @@
                                 }
                             </header>
 
+                            @if (_supportingContext is { } dialogContext)
+                            {
+                                <section class="cm-lightbox__group cm-lightbox__context"
+                                         aria-label="Content this image supports">
+                                    <span class="cm-kicker">What this image supports</span>
+                                    <strong>@dialogContext.Title</strong>
+                                    <blockquote>@dialogContext.Excerpt</blockquote>
+                                </section>
+                            }
+
                             @if (Selected is { } headlineSlot && headlineSlot.SafeArea)
                             {
                                 @* Overlay controls live here because this is where you can SEE
@@ -494,7 +543,13 @@
                                 <div class="cm-studio__chips">
                                     @foreach (var chip in SteerChips)
                                     {
-                                        <button type="button" class="cm-studio__chip" @onclick="() => AppendSteerChip(chip)">+ @chip</button>
+                                        var selected = SteerConstraintSelected(chip);
+                                        <button type="button"
+                                                class="cm-studio__chip @(selected ? "cm-studio__chip--on" : null)"
+                                                    aria-pressed="@(selected ? "true" : "false")"
+                                                @onclick="() => ToggleSteerChip(chip)">
+                                            @(selected ? "Applied · " : "Add · ")@chip
+                                        </button>
                                     }
                                 </div>
 
@@ -657,6 +712,9 @@
     private Guid? _selectedId;
     private string _prompt = string.Empty;
     private string? _savedPrompt;
+    private string _promptMode = "Auto";
+    private bool _changingPromptMode;
+    private string? _activeConceptName;
     private AiStatusResponse? _status;
     private string? _pickedAlias;
     private int _variantCount = 2;
@@ -668,6 +726,10 @@
     private string? _generateError;
     private string? _galleryError;
     private string? _headlineBackground;
+    private SupportingContentContext? _supportingContext;
+    private bool _supportingContextLoading;
+
+    private sealed record SupportingContentContext(string Title, string Kind, string Excerpt);
 
     /// <summary>
     /// Band colours behind overlay text. A short, opinionated set beats a colour wheel here:
@@ -908,8 +970,7 @@
     private Guid? RequestedSlot { get; set; }
 
     private IEnumerable<ArtifactPreviewResponse> ImageContentItems => Campaign.Artifacts
-        .Where(a => ArtifactDisplay.Editable(a.Kind)
-                    && a.Kind is not ("seo-brief" or "seo-keyword-plan"))
+        .Where(a => ArtifactKinds.IsDistributionContent(a.Kind))
         .OrderBy(a => ArtifactDisplay.KindOrder(a.Kind))
         .ThenBy(a => a.CreatedAt);
 
@@ -926,7 +987,7 @@
         ? Campaign.Artifacts.FirstOrDefault(a => a.Id == owner)
         : null;
 
-    private bool IsAutoPrompt => !string.Equals(Selected?.PromptMode, "Manual", StringComparison.OrdinalIgnoreCase);
+    private bool IsAutoPrompt => !string.Equals(_promptMode, "Manual", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsThumbnail(ImageSlotResponse slot) =>
         slot.Kind.Equals("youtube-thumbnail", StringComparison.OrdinalIgnoreCase);
@@ -1134,10 +1195,11 @@
         }
     }
 
-    private void AppendSteerChip(string chip) =>
-        _steerNote = string.IsNullOrWhiteSpace(_steerNote)
-            ? chip
-            : $"{_steerNote.TrimEnd().TrimEnd(',', '.')}, {chip}";
+    private bool SteerConstraintSelected(string chip) =>
+        ContainsConstraint(_steerNote, chip);
+
+    private void ToggleSteerChip(string chip) =>
+        _steerNote = ToggleConstraint(_steerNote, chip);
 
     private async Task SetStateAsync(ImageVariantResponse variant, string state)
     {
@@ -1190,6 +1252,8 @@
         _selectedId = slot.Id;
         _prompt = slot.Prompt ?? string.Empty;
         _savedPrompt = slot.Prompt;
+        _promptMode = slot.PromptMode;
+        _activeConceptName = null;
         _pickedAlias = null;
         _gallery = [];
         _failures = [];
@@ -1206,7 +1270,90 @@
                 _picked[asset.Kind.ToLowerInvariant()] = asset;
             }
         }
-        await ReloadGalleryAsync();
+        await Task.WhenAll(ReloadGalleryAsync(), LoadSupportingContextAsync(slot));
+    }
+
+    /// <summary>
+    /// Loads only the selected owner, so the Studio can show the real copy that the image is
+    /// meant to support without bloating every campaign preview with every manuscript. The
+    /// slot id guard prevents a slower earlier request from overwriting a newer selection.
+    /// </summary>
+    private async Task LoadSupportingContextAsync(ImageSlotResponse slot)
+    {
+        var selectedSlotId = slot.Id;
+        _supportingContext = null;
+        _supportingContextLoading = slot.ArtifactId is not null;
+
+        if (slot.ArtifactId is not { } artifactId)
+        {
+            return;
+        }
+
+        try
+        {
+            var (artifact, _) = await Campaigns.GetArtifactAsync(CampaignId, artifactId);
+            var excerpt = SupportingExcerpt(artifact, slot.Kind);
+            if (_selectedId == selectedSlotId && !string.IsNullOrWhiteSpace(excerpt))
+            {
+                _supportingContext = new SupportingContentContext(
+                    artifact.Title, artifact.Kind, excerpt);
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // The image workbench remains usable if a deleted/stale owner cannot be read.
+            // SelectedOwner already communicates that ownership problem beside placement.
+        }
+        finally
+        {
+            if (_selectedId == selectedSlotId)
+            {
+                _supportingContextLoading = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// For an inline blog image, prefer the prose immediately surrounding its stub marker;
+    /// otherwise use the opening substantive copy. This is orientation for the producer,
+    /// not another AI summary, so the words remain the artifact's actual text.
+    /// </summary>
+    private static string SupportingExcerpt(ArtifactResponse artifact, string slotKind)
+    {
+        var markdown = StructuredContent.IsStructured(artifact.Kind)
+            ? StructuredContent.ToDisplayMarkdown(artifact.Kind, artifact.ContentJson)
+            : ArtifactContent.ToMarkdown(artifact.ContentJson);
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return string.Empty;
+        }
+
+        var lines = markdown.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n');
+        var marker = $"stub:{slotKind}";
+        var markerIndex = Array.FindIndex(lines,
+            line => line.Contains(marker, StringComparison.OrdinalIgnoreCase));
+        var candidates = markerIndex >= 0
+            ? lines.Skip(Math.Max(0, markerIndex - 5)).Take(11)
+            : lines.AsEnumerable();
+
+        var substantive = candidates
+            .Select(CleanContextLine)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Where(line => !string.Equals(line, artifact.Title, StringComparison.OrdinalIgnoreCase))
+            .Take(5);
+        return Truncate(string.Join(" ", substantive), 700);
+    }
+
+    private static string CleanContextLine(string line)
+    {
+        var cleaned = line.Trim();
+        if (cleaned.Contains("![stub:", StringComparison.OrdinalIgnoreCase)
+            || (cleaned.StartsWith("![", StringComparison.Ordinal) && cleaned.EndsWith(')')))
+        {
+            return string.Empty;
+        }
+
+        return cleaned.TrimStart('#', '>', '-', '*', ' ');
     }
 
     private async Task AddImageAsync(Guid artifactId)
@@ -1269,14 +1416,26 @@
         {
             return;
         }
+        if (string.Equals(_promptMode, mode, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var previous = _promptMode;
+        _promptMode = mode;
+        _changingPromptMode = true;
         try
         {
             await Images.PatchAsync(CampaignId, slot.Id, promptMode: mode);
-            await Campaign.LoadAsync(CampaignId, force: true);
         }
         catch (ApiException ex)
         {
+            _promptMode = previous;
             Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _changingPromptMode = false;
         }
     }
 
@@ -1291,10 +1450,11 @@
         {
             _prompt = concept.Prompt;
             _savedPrompt = concept.Prompt;
+            _promptMode = "Manual";
+            _activeConceptName = concept.Name;
             _headline = concept.OverlayText;
             await Images.PatchAsync(CampaignId, slot.Id, prompt: concept.Prompt,
                 promptMode: "Manual", headlineText: concept.OverlayText);
-            await Campaign.LoadAsync(CampaignId, force: true);
             Notifier.ShowSuccess($"Applied the {concept.Name} concept. Review the prompt, then generate takes.");
         }
         catch (ApiException ex)
@@ -1361,10 +1521,47 @@
         }
     }
 
-    private Task AppendChipAsync(string chip)
+    private bool ConstraintSelected(string chip) => ContainsConstraint(_prompt, chip);
+
+    private async Task ToggleConstraintChipAsync(string chip)
     {
-        _prompt = string.IsNullOrWhiteSpace(_prompt) ? chip : $"{_prompt.TrimEnd().TrimEnd(',', '.')}, {chip}";
-        return SavePromptAsync();
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+
+        var previous = _prompt;
+        _prompt = ToggleConstraint(_prompt, chip);
+        try
+        {
+            await Images.PatchAsync(CampaignId, slot.Id, prompt: _prompt);
+            _savedPrompt = _prompt;
+        }
+        catch (ApiException ex)
+        {
+            _prompt = previous;
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private static bool ContainsConstraint(string? text, string chip) =>
+        !string.IsNullOrWhiteSpace(text)
+        && text.Contains(chip, StringComparison.OrdinalIgnoreCase);
+
+    private static string ToggleConstraint(string? text, string chip)
+    {
+        var value = text?.Trim() ?? string.Empty;
+        if (!ContainsConstraint(value, chip))
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? chip
+                : $"{value.TrimEnd().TrimEnd(',', '.')}, {chip}";
+        }
+
+        var index = value.IndexOf(chip, StringComparison.OrdinalIgnoreCase);
+        var before = value[..index].TrimEnd().TrimEnd(',', '.').TrimEnd();
+        var after = value[(index + chip.Length)..].TrimStart().TrimStart(',', '.').TrimStart();
+        return string.Join(", ", new[] { before, after }.Where(part => part.Length > 0));
     }
 
     private async Task PickModelAsync(string alias)

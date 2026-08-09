@@ -36,41 +36,38 @@
             }
             else
             {
-                @* Grouped by type: one collapsible group per lane category, items labelled
-                   with their kind. Each item carries a delete affordance with a confirm. *@
+                @* A vertical projection of the Mill Floor: the SAME lane names, in the SAME
+                   order, with every editable card beneath its category. Category bands label
+                   navigation; only content rows are interactive. *@
                 <div class="cm-tree">
                     @foreach (var group in ArtifactGroups)
                     {
-                        var collapsed = _collapsedGroups.Contains(group.Key);
-                        <div class="cm-tree__group">
-                            <button type="button" class="cm-tree__head"
-                                    aria-expanded="@(collapsed ? "false" : "true")"
-                                    @onclick="() => ToggleGroup(group.Key)">
-                                <span class="cm-tree__chevron" aria-hidden="true">@(collapsed ? "▸" : "▾")</span>
+                        <section class="cm-focus__category-group" aria-labelledby="cm-focus-category-@CategoryId(group.Key)">
+                            <header class="cm-focus__category" id="cm-focus-category-@CategoryId(group.Key)">
                                 <span class="cm-kicker">@group.Key</span>
                                 <span class="cm-tree__count cm-mono">(@group.Count())</span>
-                            </button>
-                            @if (!collapsed)
-                            {
-                                <ul class="cm-focus__list">
-                                    @foreach (var item in group)
-                                    {
-                                        <li class="cm-tree__row">
-                                            <button type="button"
-                                                    class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
-                                                    @onclick="() => SelectAsync(item.Id)">
-                                                <span class="cm-focus__list-title">@item.Title</span>
-                                                <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
-                                            </button>
-                                            <button type="button" class="cm-tree__delete"
-                                                    title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
-                                                    aria-label="Delete @item.Title"
-                                                    @onclick="() => DeleteArtifactAsync(item)">✕</button>
-                                        </li>
-                                    }
-                                </ul>
-                            }
-                        </div>
+                            </header>
+                            <ul class="cm-focus__list">
+                                @foreach (var item in group)
+                                {
+                                    <li class="cm-tree__row">
+                                        <button type="button"
+                                                class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
+                                                aria-current="@(item.Id == _artifactId ? "true" : "false")"
+                                                @onclick="() => SelectAsync(item.Id)">
+                                            <span class="cm-focus__list-title">@item.Title</span>
+                                            <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                        </button>
+                                        <button type="button" class="cm-tree__delete"
+                                                title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
+                                                aria-label="Delete @item.Title"
+                                                @onclick="() => DeleteArtifactAsync(item)">
+                                            <span aria-hidden="true">🗑</span>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                        </section>
                     }
                 </div>
             }
@@ -349,7 +346,7 @@
                     <div class="cm-form__actions">
                         <button type="button" class="cm-button cm-button--quiet" disabled="@_regenerating"
                                 @onclick="RegenerateAsync">
-                            @(_regenerating ? "Regenerating…" : "Regenerate whole")
+                            @(_regenerating ? "Generating…" : SelectedIsPlaceholder ? "Generate draft" : "Regenerate whole")
                         </button>
                         @* Second pass, deliberately a different model family (ADR-020).
                            Disabled with the reason rather than hidden, so an unconfigured
@@ -361,6 +358,18 @@
                             @(_regenerating ? "Working…" : $"Tech Edit · {TechEditProvider}")
                         </button>
                     </div>
+                    @if (_artifact.Kind == "youtube")
+                    {
+                        <div class="cm-form__actions" aria-label="YouTube title experiment controls">
+                            @foreach (var slot in new[] { "A", "B", "C" })
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        disabled="@_regenerating" @onclick="() => RegenerateYoutubeTitleAsync(slot)">
+                                    Regenerate title @slot
+                                </button>
+                            }
+                        </div>
+                    }
                     @if (KnowledgeBaseReady)
                     {
                         <label class="cm-fanout__item">
@@ -393,6 +402,14 @@
 
                 @if (_artifact.Kind == "blog")
                 {
+                    <div class="cm-producer__group">
+                        <span class="cm-kicker">Owned content set</span>
+                        <p class="cm-meta">Generate one post for every social channel under this blog.</p>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_generatingSocialSet" @onclick="GenerateSocialSetAsync">
+                            @(_generatingSocialSet ? "Generating social set…" : "Generate social set")
+                        </button>
+                    </div>
                     <div class="cm-producer__group">
                         <span class="cm-kicker">Blog publishing metadata</span>
                         <p class="cm-meta">This belongs to this blog—not the campaign SEO report.</p>
@@ -436,6 +453,51 @@
                             }
                         </div>
                         <pre class="cm-seo__meta-pre cm-mono">@BlogMetadataOutput(_blogMetaTab)</pre>
+                    </div>
+                }
+
+                @if (_artifact.Kind is "blog" or "youtube")
+                {
+                    <div class="cm-producer__group">
+                        <span class="cm-kicker">Real search data informing this content</span>
+                        @if (_seoReport is null)
+                        {
+                            <p class="cm-meta">No SEO/AEO evidence is attached yet. Run the deep analysis before treating this artifact as search-informed.</p>
+                        }
+                        else
+                        {
+                            <div class="cm-chips">
+                                @foreach (var keyword in _seoReport.Research.Keywords.Take(8))
+                                {
+                                    <span class="cm-chip">@keyword.Term @(keyword.Volume is { } volume ? $"· {volume:N0}" : "· volume unavailable")</span>
+                                }
+                            </div>
+                            <p class="cm-meta">
+                                @(_seoReport.Serp.AiOverview is null ? "No AI Overview was detected." : "AI Overview detected for the primary query.")
+                                @(_seoReport.Serp.FeaturedSnippet is null ? " No featured snippet was detected." : " Featured snippet detected.")
+                            </p>
+                            @if (_seoReport.Serp.OrganicResults.Count > 0)
+                            {
+                                <ol class="cm-meta">
+                                    @foreach (var result in _seoReport.Serp.OrganicResults.Take(3))
+                                    {
+                                        <li>#@result.Rank @result.Domain — @result.Title</li>
+                                    }
+                                </ol>
+                            }
+                            else
+                            {
+                                <p class="cm-meta">No live organic rows were returned; Castmill will not invent competitor evidence.</p>
+                            }
+                            @if (_seoReport.Research.Questions.Count > 0)
+                            {
+                                <p class="cm-meta"><strong>People also ask:</strong> @string.Join(" · ", _seoReport.Research.Questions.Take(3).Select(question => question.Question))</p>
+                            }
+                            else
+                            {
+                                <p class="cm-meta">No People Also Ask questions were available for this snapshot.</p>
+                            }
+                        }
                     </div>
                 }
 
@@ -529,6 +591,7 @@
     private ArtifactRevisionDetailResponse? _previewRevision;
     private string _steering = string.Empty;
     private bool _regenerating;
+    private bool _generatingSocialSet;
     private bool _addingImage;
     private bool _savingMetadata;
     private BlogPublishingMetadata _blogMetadata = new();
@@ -541,8 +604,12 @@
     private string _saveState = "Saved on blur";
     private string? _loadError;
     private bool _selecting;
+    private Guid? _selectionCampaignId;
     private bool _useKnowledgeBase;
     private AiStatusResponse? _aiStatus;
+    private SeoAnalysisReportResponse? _seoReport;
+    private bool SelectedIsPlaceholder => Campaign.Artifacts.Any(
+        item => item.Id == _artifactId && item.IsPlaceholder);
 
     /// <summary>
     /// The provider that would serve a Tech Edit. Foundry always can (the alias falls back to
@@ -573,28 +640,30 @@
     [SupplyParameterFromQuery(Name = "artifact")]
     private Guid? RequestedArtifact { get; set; }
 
-    private readonly HashSet<string> _collapsedGroups = [];
-
     private IEnumerable<ArtifactPreviewResponse> Editable =>
         Campaign.Artifacts.Where(a => ArtifactDisplay.Editable(a.Kind));
 
+    /// <summary>
+    /// The selectable sequence is exactly the sequence the rail teaches: lane order first,
+    /// then kind and creation order. API/EF ordering is deliberately irrelevant here.
+    /// </summary>
+    private IEnumerable<ArtifactPreviewResponse> OrderedEditable =>
+        Editable
+            .OrderBy(a => Array.IndexOf(ArtifactDisplay.LaneOrder, ArtifactDisplay.Lane(a.Kind))
+                is var lane && lane >= 0 ? lane : ArtifactDisplay.LaneOrder.Length)
+            .ThenBy(a => ArtifactDisplay.KindOrder(a.Kind))
+            .ThenBy(a => a.CreatedAt);
+
     /// <summary>The tree's groups: lane categories in board order, kinds in registry order.</summary>
     private IEnumerable<IGrouping<string, ArtifactPreviewResponse>> ArtifactGroups =>
-        Editable
-            .OrderBy(a => ArtifactDisplay.KindOrder(a.Kind))
-            .ThenBy(a => a.CreatedAt)
+        OrderedEditable
             .GroupBy(a => ArtifactDisplay.Lane(a.Kind))
             .OrderBy(g => Array.IndexOf(ArtifactDisplay.LaneOrder, g.Key) is var i && i >= 0
                 ? i
                 : ArtifactDisplay.LaneOrder.Length);
 
-    private void ToggleGroup(string lane)
-    {
-        if (!_collapsedGroups.Remove(lane))
-        {
-            _collapsedGroups.Add(lane);
-        }
-    }
+    private static string CategoryId(string lane) =>
+        new(lane.ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray());
 
     /// <summary>
     /// Deletes an artifact from the tree after a confirm. If the open artifact is the one
@@ -672,7 +741,21 @@
         StateHasChanged();
     }
 
-    protected override Task OnParametersSetAsync() => SyncSelectionAsync();
+    protected override Task OnParametersSetAsync()
+    {
+        // Blazor may reuse this page instance when only the campaign route value changes.
+        // Never carry the previous campaign's selected id into the next campaign.
+        if (_selectionCampaignId != CampaignId)
+        {
+            _selectionCampaignId = CampaignId;
+            _artifact = null;
+            _artifactId = null;
+            _etag = null;
+            _loadError = null;
+        }
+
+        return SyncSelectionAsync();
+    }
 
     /// <summary>
     /// Chooses which artifact to edit. Called from OnParametersSetAsync AND from the store's
@@ -687,7 +770,17 @@
             return;
         }
 
-        var target = RequestedArtifact ?? _artifactId ?? Editable.FirstOrDefault()?.Id;
+        // Operational artifacts (SEO reports, transcripts, image plans) have dedicated
+        // surfaces. Reject a stale/deep link to one rather than rendering its JSON as copy.
+        var ordered = OrderedEditable.ToList();
+        var requested = RequestedArtifact is { } requestedId
+            && ordered.Any(item => item.Id == requestedId)
+                ? requestedId
+                : (Guid?)null;
+        var current = _artifactId is { } currentId && ordered.Any(item => item.Id == currentId)
+            ? currentId
+            : (Guid?)null;
+        var target = requested ?? current ?? ordered.FirstOrDefault()?.Id;
 
         if (target is { } id && id != _artifactId)
         {
@@ -736,6 +829,7 @@
             _saveState = "Saved on blur";
             _previewRevision = null;
             await LoadRevisionsAsync(id);
+            await LoadSeoReportAsync();
         }
         catch (ApiException ex)
         {
@@ -938,9 +1032,16 @@
 
         try
         {
+            var preview = Campaign.Artifacts.FirstOrDefault(item => item.Id == _artifact.Id);
             var result = await Generation.GenerateOneAsync(
                 CampaignId, _artifact.Kind, transcriptId,
-                string.IsNullOrWhiteSpace(_steering) ? null : _steering);
+                string.IsNullOrWhiteSpace(_steering)
+                    ? ArtifactContent.PlaceholderSeed(_artifact.ContentJson) is { } seed
+                        ? $"Generate the pillar from the approved SEO/AEO angle: {seed}"
+                        : null
+                    : _steering,
+                parentArtifactId: _artifact.ParentArtifactId,
+                replaceArtifactId: preview?.IsPlaceholder == true ? _artifact.Id : null);
 
             if (result.Success)
             {
@@ -951,6 +1052,11 @@
 
                 // 🔶 5.7: the new take is a NEW artifact row. Reload and jump to it.
                 await Campaign.LoadAsync(CampaignId, force: true);
+                if (preview?.IsPlaceholder == true)
+                {
+                    await LoadArtifactAsync(_artifact.Id);
+                    return;
+                }
                 var newest = Campaign.Artifacts
                     .Where(a => a.Kind == _artifact.Kind)
                     .OrderByDescending(a => a.CreatedAt)
@@ -975,6 +1081,68 @@
         {
             _regenerating = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task RegenerateYoutubeTitleAsync(string slot)
+    {
+        if (_artifact is null) return;
+        _regenerating = true;
+        try
+        {
+            var result = await Generation.RegenerateYoutubeTitleAsync(
+                CampaignId, _artifact.Id, slot,
+                string.IsNullOrWhiteSpace(_steering) ? null : _steering);
+            await LoadArtifactAsync(result.ArtifactId);
+            await Campaign.RefreshAsync(CampaignId);
+            Notifier.ShowSuccess($"Title {slot} regenerated · {result.Option.Score:0}/100.");
+        }
+        catch (ApiException ex) { Notifier.ShowError(ex.Message); }
+        finally { _regenerating = false; }
+    }
+
+    private async Task GenerateSocialSetAsync()
+    {
+        if (_artifact?.Kind != "blog" || Campaign.TranscriptArtifactId is not { } transcriptId) return;
+        _generatingSocialSet = true;
+        var failures = new List<string>();
+        try
+        {
+            foreach (var kind in ArtifactDisplay.SocialKinds)
+            {
+                var result = await Generation.GenerateOneAsync(
+                    CampaignId, kind, transcriptId,
+                    string.IsNullOrWhiteSpace(_steering)
+                        ? $"Promote and reinforce the owned blog titled \"{_artifact.Title}\"."
+                        : _steering,
+                    parentArtifactId: _artifact.Id);
+                if (!result.Success) failures.Add(ArtifactDisplay.KindLabel(kind));
+            }
+            await Campaign.LoadAsync(CampaignId, force: true);
+            if (failures.Count == 0) Notifier.ShowSuccess("Six-post social set added under this blog.");
+            else Notifier.ShowError($"Some posts failed: {string.Join(", ", failures)}.");
+        }
+        catch (ApiException ex) { Notifier.ShowError(ex.Message); }
+        finally { _generatingSocialSet = false; }
+    }
+
+    private async Task LoadSeoReportAsync()
+    {
+        if (_seoReport is not null) return;
+        var preview = Campaign.Artifacts
+            .Where(item => item.Kind == "seo-report")
+            .OrderByDescending(item => item.UpdatedAt)
+            .FirstOrDefault();
+        if (preview is null) return;
+        try
+        {
+            var (artifact, _) = await Campaigns.GetArtifactAsync(CampaignId, preview.Id);
+            _seoReport = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(
+                artifact.ContentJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (Exception ex) when (ex is ApiException or JsonException)
+        {
+            _seoReport = null;
         }
     }
 

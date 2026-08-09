@@ -134,12 +134,13 @@ public static class ArtifactEndpoints
         var rows = await db.Artifacts
             .Where(a => a.CampaignId == campaignId)
             .OrderBy(a => a.Kind).ThenBy(a => a.CreatedAt)
-            .Select(a => new { a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson })
+            .Select(a => new { a.Id, a.CampaignId, a.ParentArtifactId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson, a.ContentJson })
             .ToListAsync(ct);
         var previews = rows
             .Select(a => new ArtifactPreviewResponse(
                 a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt,
-                ParseCitations(a.CitationsJson)))
+                ParseCitations(a.CitationsJson), a.ParentArtifactId,
+                a.ContentJson.Contains("\"placeholder\":true")))
             .ToList();
         return Results.Ok(previews);
     }
@@ -157,7 +158,8 @@ public static class ArtifactEndpoints
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(
             artifact.Id, artifact.CampaignId, artifact.Kind, artifact.Title,
-            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt));
+            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+            artifact.UpdatedAt, artifact.ParentArtifactId));
     }
 
     private static async Task<IResult> CreateAsync(
@@ -177,6 +179,12 @@ public static class ArtifactEndpoints
         {
             return invalid;
         }
+        if (request.ParentArtifactId is { } parentId
+            && !await db.Artifacts.AnyAsync(
+                a => a.Id == parentId && a.CampaignId == campaignId && a.Kind == "blog", ct))
+        {
+            return Results.Problem("A parent artifact must be a blog in this campaign.", statusCode: 400);
+        }
 
         var now = clock.GetUtcNow();
         var artifact = new Artifact
@@ -184,6 +192,7 @@ public static class ArtifactEndpoints
             Id = Guid.NewGuid(),
             TenantId = tenant.TenantId!.Value,
             CampaignId = campaignId,
+            ParentArtifactId = request.ParentArtifactId,
             Kind = request.Kind,
             Title = request.Title,
             ContentJson = request.ContentJson,
@@ -198,7 +207,8 @@ public static class ArtifactEndpoints
         return Results.Created(
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
             new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
-                artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt));
+                artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+                artifact.UpdatedAt, artifact.ParentArtifactId));
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -246,7 +256,8 @@ public static class ArtifactEndpoints
 
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
-            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt));
+            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+            artifact.UpdatedAt, artifact.ParentArtifactId));
     }
 
     private static async Task<IResult> DeleteAsync(
@@ -259,18 +270,26 @@ public static class ArtifactEndpoints
             return Results.NotFound();
         }
 
-        // Revisions are meaningless without their artifact — clear them in the same write.
-        var revisions = await db.ArtifactRevisions.Where(r => r.ArtifactId == id).ToListAsync(ct);
+        var childIds = await db.Artifacts.Where(a => a.ParentArtifactId == id).Select(a => a.Id).ToListAsync(ct);
+        var deletedIds = childIds.Append(id).ToList();
+        // Revisions and images are meaningless without their owning artifact.
+        var revisions = await db.ArtifactRevisions.Where(r => deletedIds.Contains(r.ArtifactId)).ToListAsync(ct);
         db.ArtifactRevisions.RemoveRange(revisions);
+        await db.ImageVariants
+            .Where(v => db.ImageSlots.Any(s => s.Id == v.SlotId && deletedIds.Contains(s.ArtifactId!.Value)))
+            .ExecuteDeleteAsync(ct);
+        await db.ImageSlots.Where(s => s.ArtifactId != null && deletedIds.Contains(s.ArtifactId.Value))
+            .ExecuteDeleteAsync(ct);
 
         // Schedule entries mirror text already composed for the broker (ADR-016) — they
         // survive the delete, but must not point at a row that no longer exists.
-        var scheduled = await db.ScheduleEntries.Where(s => s.ArtifactId == id).ToListAsync(ct);
+        var scheduled = await db.ScheduleEntries.Where(s => s.ArtifactId != null && deletedIds.Contains(s.ArtifactId.Value)).ToListAsync(ct);
         foreach (var entry in scheduled)
         {
             entry.ArtifactId = null;
         }
 
+        await db.Artifacts.Where(a => childIds.Contains(a.Id)).ExecuteDeleteAsync(ct);
         db.Artifacts.Remove(artifact);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
@@ -353,7 +372,8 @@ public static class ArtifactEndpoints
 
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
-            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt));
+            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+            artifact.UpdatedAt, artifact.ParentArtifactId));
     }
 
     /// <summary>
@@ -408,6 +428,7 @@ public static class ArtifactEndpoints
 
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
-            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt, artifact.UpdatedAt));
+            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+            artifact.UpdatedAt, artifact.ParentArtifactId));
     }
 }

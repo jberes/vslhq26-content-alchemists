@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Castmill.Api.Services.Seo;
 using Castmill.Core;
 using Castmill.Core.Ai;
@@ -15,6 +16,8 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task Analysis_is_persisted_and_must_be_approved_before_content_generation()
     {
@@ -69,6 +72,9 @@ public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
         var artifacts = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
             $"/api/v1/campaigns/{campaign.Id}/artifacts");
         Assert.Contains(artifacts!, a => a.Id == report.ReportArtifactId && a.Kind == "seo-report");
+        var placeholder = Assert.Single(artifacts!, a => a.Kind == "blog");
+        Assert.True(placeholder.IsPlaceholder);
+        Assert.Contains(report.Insights.ContentAngles[0].Angle, placeholder.Title, StringComparison.Ordinal);
 
         await client.PutAsJsonAsync($"/api/v1/campaigns/{campaign.Id}/seo-targets",
             new SeoTargetsRequest("react data grid", report.Research.Keywords, report.Research.Questions));
@@ -77,6 +83,29 @@ public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
             $"/api/v1/campaigns/{campaign.Id}/artifacts");
         Assert.Equal(ArtifactStatus.InReview, artifacts!.Single(a => a.Id == report.ReportArtifactId).Status);
 
+        // Changing approved targets invalidates only the derived angles. The endpoint can
+        // rebuild those angles without paying for another DataForSEO crawl.
+        await client.PutAsJsonAsync($"/api/v1/campaigns/{campaign.Id}/seo-targets",
+            new SeoTargetsRequest("react grid tutorial",
+                [new SeoTarget("react grid tutorial", 2200, 28, 78, "provider")],
+                report.Research.Questions));
+        var storedReport = await ReadReportAsync(client, campaign.Id, report.ReportArtifactId);
+        Assert.True(storedReport.AnglesStale);
+        Assert.False(storedReport.InputsStale);
+
+        var regenerate = await client.PostAsJsonAsync(
+            $"/api/v1/seo/reports/{report.ReportArtifactId}/angles/regenerate", new { });
+        regenerate.EnsureSuccessStatusCode();
+        storedReport = await ReadReportAsync(client, campaign.Id, report.ReportArtifactId);
+        Assert.False(storedReport.AnglesStale);
+
+        // A brief/content-type change invalidates the research inputs themselves.
+        await client.PutAsJsonAsync($"/api/v1/campaigns/{campaign.Id}",
+            new CampaignUpdateRequest(campaign.Name, "Audience: technical founders",
+                Status: CampaignStatus.Ready, ContentType: CampaignContentType.Tutorial));
+        storedReport = await ReadReportAsync(client, campaign.Id, report.ReportArtifactId);
+        Assert.True(storedReport.InputsStale);
+
         var allowed = await client.PostAsJsonAsync(
             $"/api/v1/ai/campaigns/{campaign.Id}/generate/newsletter",
             new { transcriptArtifactId = ingestBody.TranscriptArtifactId });
@@ -84,6 +113,14 @@ public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
     }
 
     private sealed record IngestResponse(Guid TranscriptArtifactId, int SegmentCount);
+
+    private static async Task<SeoAnalysisReportResponse> ReadReportAsync(
+        HttpClient client, Guid campaignId, Guid artifactId)
+    {
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{artifactId}");
+        return JsonSerializer.Deserialize<SeoAnalysisReportResponse>(artifact!.ContentJson, WebJson)!;
+    }
 
     private sealed class FixedResearch : ISeoResearch
     {

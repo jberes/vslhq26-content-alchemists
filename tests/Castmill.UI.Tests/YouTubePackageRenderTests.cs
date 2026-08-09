@@ -87,4 +87,25 @@ public sealed class YouTubePackageRenderTests
         Assert.Contains("# Just a title", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("{", markdown, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Scored_slots_and_the_grounded_pinned_comment_render_as_first_class_fields()
+    {
+        const string scored = """
+            {"content":{"title":"Deployment Automation Results","titleOptions":[
+              {"slot":"A","title":"Deployment Automation Results","angle":"seo","score":92,"rationale":"Concrete payoff"},
+              {"slot":"B","title":"What Changed Our Deployments?","angle":"curiosity","score":86,"rationale":"Knowledge gap"},
+              {"slot":"C","title":"Slow Deployments? Fix the Workflow","angle":"problem-solution","score":83,"rationale":"Names the pain"}],
+              "description":"A complete description.",
+              "suggestedPinnedComment":"The source measured a 50% improvement—where is your biggest delay?",
+              "chapters":[{"startSeconds":0,"title":"Deployment automation"}],"tags":["automation"]}}
+            """;
+
+        var markdown = StructuredContent.ToDisplayMarkdown("youtube", scored);
+        Assert.Contains("## Scored title experiment", markdown, StringComparison.Ordinal);
+        Assert.Contains("### A · seo · 92/100", markdown, StringComparison.Ordinal);
+        Assert.Contains("### C · problem-solution · 83/100", markdown, StringComparison.Ordinal);
+        Assert.Contains("## Suggested pinned comment", markdown, StringComparison.Ordinal);
+        Assert.Contains("where is your biggest delay?", markdown, StringComparison.OrdinalIgnoreCase);
+    }
 }

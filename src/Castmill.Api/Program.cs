@@ -117,7 +117,16 @@ builder.Services.AddHttpClient("broker").AddStandardResilienceHandler();
 builder.Services.AddHttpClient(GitHubClient.HttpClientName,
         client => client.Timeout = TimeSpan.FromMinutes(3))
     .AddStandardResilienceHandler();
-builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
+// DataForSEO's live LLM-response endpoints document an execution window of up to
+// 120 seconds. The standard handler's 10-second attempt timeout aborts valid AEO
+// work, so this client gets a provider-sized attempt and total budget.
+builder.Services.AddHttpClient("seo", client => client.Timeout = TimeSpan.FromMinutes(6))
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(130);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(5);
+    });
 builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
     .AddStandardResilienceHandler();
 builder.Services.AddHttpClient("foundry-images", client => client.Timeout = TimeSpan.FromMinutes(5))

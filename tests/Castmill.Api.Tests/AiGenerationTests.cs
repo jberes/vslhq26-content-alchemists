@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Castmill.Api.Services.Ai;
+using Castmill.Core.Ai;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -59,15 +61,17 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         // Every fan-out generator, plus blog (which runs its own outline→draft→audit pipeline
         // and so is not in FanOut). Derived rather than hard-coded: a literal here goes stale
         // the moment a generator is added, and reads as a regression rather than a new kind.
-        Assert.Equal(Generators.FanOut.Count + 1, body.Succeeded);
+        var millFanOutCount = Generators.FanOut.Count(spec => spec.Kind != "seo-brief");
+        Assert.Equal(millFanOutCount + 1, body.Succeeded);
 
         // Every artifact persisted; previews list them all (plus the transcript).
         var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
             $"/api/v1/campaigns/{campaignId}/artifacts");
-        Assert.Equal(Generators.FanOut.Count + 2, previews!.Count);
+        Assert.Equal(millFanOutCount + 2, previews!.Count);
         Assert.Contains(previews, p => p.Kind == "blog");
         Assert.Contains(previews, p => p.Kind == "social-x");
         Assert.Contains(previews, p => p.Kind == "image-prompts");
+        Assert.DoesNotContain(previews, p => p.Kind == "seo-brief");
     }
 
     /// <summary>
@@ -100,6 +104,60 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         Assert.Equal(3, posts.Count);
         // Three distinct rows, not one row saved three times.
         Assert.Equal(3, posts.Select(p => p.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Seo_brief_is_not_accepted_as_a_mill_content_type()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var batch = await client.PostAsJsonAsync($"/api/v1/ai/campaigns/{campaignId}/generate",
+            new { transcriptArtifactId = transcriptId, kinds = new[] { "seo-brief" } });
+        var single = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/seo-brief",
+            new { transcriptArtifactId = transcriptId });
+
+        Assert.Equal(HttpStatusCode.BadRequest, batch.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, single.StatusCode);
+    }
+
+    [Fact]
+    public async Task Youtube_runs_outline_draft_audit_and_can_regenerate_one_scored_slot()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId, brief = "Use the approved search intent" });
+        generate.EnsureSuccessStatusCode();
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(result!.Success);
+
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        var content = package.RootElement.GetProperty("content");
+        Assert.Equal(3, content.GetProperty("titleOptions").GetArrayLength());
+        Assert.Equal(["A", "B", "C"], content.GetProperty("titleOptions")
+            .EnumerateArray().Select(option => option.GetProperty("slot").GetString()));
+        Assert.EndsWith("?", content.GetProperty("suggestedPinnedComment").GetString(), StringComparison.Ordinal);
+        Assert.True(content.GetProperty("audit").GetProperty("hookWithin125").GetBoolean());
+
+        var regenerate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{artifact.Id}/youtube-titles/B/regenerate",
+            new YoutubeTitleRegenerationRequest("Make the curiosity gap more concrete"));
+        regenerate.EnsureSuccessStatusCode();
+        var regenerated = await regenerate.Content.ReadFromJsonAsync<YoutubeTitleRegenerationResponse>();
+        Assert.Equal("B", regenerated!.Option.Slot);
+        Assert.Equal(89, regenerated.Option.Score);
+
+        artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}");
+        Assert.Contains("What Halved Our Deployment Time?", artifact!.ContentJson, StringComparison.Ordinal);
+        var revisions = await client.GetFromJsonAsync<List<ArtifactRevisionResponse>>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}/revisions");
+        Assert.Contains(revisions!, revision => revision.Reason == "youtube-title-b");
     }
 
     [Fact]
@@ -189,6 +247,18 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
         private static string Respond(string prompt)
         {
+            if (prompt.Contains("Regenerate only title slot", StringComparison.Ordinal))
+            {
+                return """{"slot":"B","title":"What Halved Our Deployment Time?","angle":"curiosity","score":89,"rationale":"A concrete knowledge gap tied to the source result.","citations":["S2"]}""";
+            }
+            if (prompt.Contains("Plan a YouTube package", StringComparison.Ordinal))
+            {
+                return """{"searchIntent":"deployment automation","targetKeyword":"deployment automation","hook":"Cut deployment time in half with a grounded automation workflow.","chapters":[{"startSeconds":0,"keyword":"deployment automation","purpose":"answer"},{"startSeconds":8,"keyword":"delivery dashboard","purpose":"proof"},{"startSeconds":16,"keyword":"shipping workflow","purpose":"steps"}],"pinnedCommentMoment":"The deployment time result","titleAngles":[{"slot":"A","angle":"seo","promise":"half the time"},{"slot":"B","angle":"curiosity","promise":"the workflow"},{"slot":"C","angle":"problem-solution","promise":"slow deploys"}],"citations":["S1","S2"]}""";
+            }
+            if (prompt.Contains("fill out a campaign brief", StringComparison.Ordinal))
+            {
+                return """{"title":"Faster deployment automation","audience":"Platform engineering leaders evaluating deployment tooling","angle":"The launch cut deployment time in half","summary":"The product launch demonstrates a practical deployment automation workflow. The dashboard makes the improvement visible. The team shipped the change in six weeks.","keyPoints":["Deployment time was cut in half","The dashboard provides concrete proof","The team shipped in six weeks"]}""";
+            }
             if (prompt.Contains("Create an outline", StringComparison.Ordinal))
             {
                 return """{"title":"Launch story","sections":[{"heading":"Intro","segmentIds":["S1"]}],"citations":["S1","S2"]}""";
@@ -216,9 +286,9 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             }
             // Keyed on the schema field, not on prose: matching prose is how this fake went
             // stale before, when a prompt was reworded and the generator silently fell through.
-            if (prompt.Contains("\"titleVariants\"", StringComparison.Ordinal))
+            if (prompt.Contains("\"titleOptions\"", StringComparison.Ordinal))
             {
-                return """{"title":"Ship it","titleVariants":["a","b","c"],"description":"Line one.\n\nChapters:\n0:00 Intro\n\n{{LINKS}}","chapters":[{"startSeconds":0,"title":"Intro"}],"tags":["react","grid"],"citations":["S1"]}""";
+                return """{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Leads with the measured result."},{"slot":"B","title":"The Deployment Workflow Behind Faster Shipping","angle":"curiosity","score":84,"rationale":"Opens a useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Delivery Workflow","angle":"problem-solution","score":82,"rationale":"Names the pain directly."}],"description":"Deployment automation cut delivery time in half, and this grounded workflow shows the exact product and dashboard proof.\n\nLearn how the team shipped the product and used its dashboard.\n\nChapters:\n0:00 Deployment automation result\n0:08 Delivery dashboard proof\n0:16 Faster shipping workflow\n\n{{LINKS}}\n#devops #automation","chapters":[{"startSeconds":0,"title":"Deployment automation result"},{"startSeconds":8,"title":"Delivery dashboard proof"},{"startSeconds":16,"title":"Faster shipping workflow"}],"tags":["deployment automation","devops dashboard","shipping workflow","delivery time","product launch","faster deploys","release process","automation tool"],"suggestedPinnedComment":"The source says deployment time was cut in half after the launch—where would this workflow remove the most delay for your team?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1","S2","S3"]}""";
             }
             if (prompt.Contains("show notes", StringComparison.Ordinal))
             {

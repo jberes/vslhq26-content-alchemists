@@ -30,7 +30,7 @@ public interface IBrandContextService
 
 /// <summary>
 /// The ONE place brand steering becomes prompt text (G4's "all AI behind one seam",
-/// applied to brands). Text generators get the style block + per-kind default template;
+/// applied to brands). Text generators get the style block + authoritative per-kind template;
 /// image generation gets the image block; campaign links become a labeled facts section.
 /// A future URL scraper would enrich <see cref="BuildCampaignContextBlock"/> — nothing else.
 /// </summary>

@@ -7,7 +7,7 @@ namespace Castmill.UI.Tests;
 public sealed class DeepSeoReportTests : CastmillUiTestContext
 {
     [Fact]
-    public void Full_report_renders_every_decision_section_without_hiding_missing_data()
+    public async Task Full_report_renders_every_decision_section_without_hiding_missing_data()
     {
         var report = new SeoAnalysisReportResponse(
             Guid.NewGuid(), DateTimeOffset.UtcNow,
@@ -20,8 +20,11 @@ public sealed class DeepSeoReportTests : CastmillUiTestContext
             SiteUrl: "https://example.com",
             Insights: new SeoDeepInsights(
                 new SeoAeoScorecard(50, 4, 2,
-                    [new SeoAeoEngineResult("chat_gpt", "ChatGPT", true, true, "An answer",
-                        [new SeoCitation("Example", "https://example.com/grid", "example.com", true)])]),
+                    [new SeoAeoEngineResult("chat_gpt", "ChatGPT", true, true,
+                        "## Recommended answer\n\n- First point",
+                        [new SeoCitation("Example", "https://example.com/grid", "example.com", true)]),
+                     new SeoAeoEngineResult("gemini", "Gemini", true, false,
+                        "**Gemini answer** with a different framing.", [])]),
                 [new SeoTarget("react grid export", 900, 18, 32, "provider", .2, 2.1, "commercial")],
                 [new SeoRankedKeyword("existing grid query", 6, 1200, 25, 80, "https://example.com/existing", "informational")],
                 new SeoAuthoritySnapshot("example.com", 45, 4000, 220, 180, 3, 2),
@@ -54,5 +57,35 @@ public sealed class DeepSeoReportTests : CastmillUiTestContext
         Assert.Contains("People also ask and answer targets", view.Markup, StringComparison.Ordinal);
         Assert.Contains("Report-grounded content opportunities", view.Markup, StringComparison.Ordinal);
         Assert.Contains("One provider unavailable", view.Markup, StringComparison.Ordinal);
+        Assert.Equal(2, view.FindAll(".cm-aeo-tab").Count);
+        Assert.Equal("Recommended answer", view.Find(".cm-aeo-markdown h2").TextContent);
+        Assert.Equal("First point", view.Find(".cm-aeo-markdown li").TextContent);
+
+        await view.FindAll(".cm-aeo-tab")[1].ClickAsync();
+        Assert.Contains("Gemini answer", view.Find(".cm-aeo-markdown strong").TextContent,
+            StringComparison.Ordinal);
+
+        var drafted = false;
+        var regenerated = false;
+        var staleView = Render<DeepSeoReport>(parameters => parameters
+            .Add(p => p.Report, report with
+            {
+                InputsStale = true,
+                AnglesStale = true,
+                ShareStale = true,
+            })
+            .Add(p => p.OnDraftAngle,
+                Microsoft.AspNetCore.Components.EventCallback.Factory.Create<SeoContentAngle>(
+                    this, _ => drafted = true))
+            .Add(p => p.OnRegenerateAngles,
+                Microsoft.AspNetCore.Components.EventCallback.Factory.Create(
+                    this, () => regenerated = true)));
+        Assert.Contains("inputs changed", staleView.Markup, StringComparison.Ordinal);
+        Assert.Contains("targets changed", staleView.Markup, StringComparison.Ordinal);
+        Assert.Contains("public snapshot is out of date", staleView.Markup, StringComparison.Ordinal);
+        staleView.FindAll("button").Single(button => button.TextContent.Contains("Seed blog", StringComparison.Ordinal)).Click();
+        staleView.FindAll("button").Single(button => button.TextContent.Contains("Regenerate angles", StringComparison.Ordinal)).Click();
+        Assert.True(drafted);
+        Assert.True(regenerated);
     }
 }

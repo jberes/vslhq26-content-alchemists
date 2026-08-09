@@ -45,6 +45,8 @@ public sealed class CastmillDbContext(
         builder.Entity<Campaign>(e =>
         {
             e.Property(c => c.Name).HasMaxLength(200);
+            e.Property(c => c.Status).HasMaxLength(20).HasDefaultValue(CampaignStatus.Draft);
+            e.Property(c => c.ContentType).HasMaxLength(30);
             e.HasIndex(c => new { c.TenantId, c.UpdatedAt });
             e.HasIndex(c => new { c.TenantId, c.BrandId });
             // Structural tenant isolation (G1): every query is filtered to the
@@ -65,6 +67,7 @@ public sealed class CastmillDbContext(
                 + "JSON_QUERY([ContentJson], '$.content.citations')) END");
             e.Property(a => a.Version).IsConcurrencyToken();
             e.HasIndex(a => new { a.TenantId, a.CampaignId });
+            e.HasIndex(a => new { a.TenantId, a.ParentArtifactId });
             // The Front Page's review queue filters by status across the whole tenant.
             e.HasIndex(a => new { a.TenantId, a.Status });
             e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
@@ -199,7 +202,9 @@ public sealed class CastmillDbContext(
         {
             e.Property(t => t.Kind).HasMaxLength(50);
             e.Property(t => t.Name).HasMaxLength(200);
-            e.Property(t => t.SteeringPrompt).HasMaxLength(4000);
+            // Brand templates are full content briefs, not short style hints. A practical
+            // YouTube strategy prompt is commonly 7–10K characters.
+            e.Property(t => t.SteeringPrompt).HasMaxLength(20000);
             e.HasIndex(t => new { t.TenantId, t.BrandId, t.Kind, t.Name }).IsUnique();
             e.HasQueryFilter(t => t.TenantId == _tenantProvider.TenantId);
         });

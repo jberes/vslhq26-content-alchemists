@@ -39,6 +39,23 @@ public static class ArtifactContent
 
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 
+    public static string? PlaceholderSeed(string? contentJson)
+    {
+        if (string.IsNullOrWhiteSpace(contentJson)) return null;
+        try
+        {
+            if (JsonNode.Parse(contentJson) is not JsonObject root) return null;
+            var content = root["content"] as JsonObject ?? root;
+            return content["placeholder"]?.GetValue<bool>() == true
+                ? content["seedAngle"]?.GetValue<string>()
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Pulls the editable markdown out of an artifact payload. Falls back to the raw string
     /// when the payload is not JSON or has no markdown property, so an unexpected shape is
@@ -287,7 +304,34 @@ public static class StructuredContent
                 md.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"# {Str(c, "title")}");
                 md.AppendLine();
 
-                if (c.TryGetProperty("titleVariants", out var variants) && variants.GetArrayLength() > 0)
+                if (c.TryGetProperty("titleOptions", out var scored) && scored.GetArrayLength() > 0)
+                {
+                    md.AppendLine("## Scored title experiment");
+                    md.AppendLine();
+                    foreach (var option in scored.EnumerateArray())
+                    {
+                        var text = Str(option, "title");
+                        var slot = Str(option, "slot");
+                        var angle = Str(option, "angle");
+                        var score = option.TryGetProperty("score", out var scoreNode)
+                            ? scoreNode.GetDouble().ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+                            : "—";
+                        md.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                            $"### {slot} · {angle} · {score}/100");
+                        md.AppendLine();
+                        md.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                            $"{text}  *({text.Length} chars)*");
+                        var rationale = Str(option, "rationale");
+                        if (!string.IsNullOrWhiteSpace(rationale))
+                        {
+                            md.AppendLine();
+                            md.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                                $"> {rationale}");
+                        }
+                        md.AppendLine();
+                    }
+                }
+                else if (c.TryGetProperty("titleVariants", out var variants) && variants.GetArrayLength() > 0)
                 {
                     md.AppendLine("## Title options to A/B test");
                     md.AppendLine();
@@ -315,6 +359,15 @@ public static class StructuredContent
                 md.AppendLine();
                 md.AppendLine(Str(c, "description"));
                 md.AppendLine();
+
+                var pinnedComment = Str(c, "suggestedPinnedComment");
+                if (!string.IsNullOrWhiteSpace(pinnedComment))
+                {
+                    md.AppendLine("## Suggested pinned comment");
+                    md.AppendLine();
+                    md.AppendLine(pinnedComment);
+                    md.AppendLine();
+                }
 
                 if (c.TryGetProperty("chapters", out var ytChapters) && ytChapters.GetArrayLength() > 0)
                 {

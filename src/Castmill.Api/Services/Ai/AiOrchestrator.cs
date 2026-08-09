@@ -1,19 +1,25 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
+using Castmill.Core.Resources;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 
 namespace Castmill.Api.Services.Ai;
 
 public interface IAiOrchestrator
 {
-    Task<GenerationResult> RunBlogAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, CancellationToken ct);
-    Task<GenerationResult> RunGeneratorAsync(Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, CancellationToken ct);
+    Task<GenerationResult> RunBlogAsync(Guid userId, Campaign campaign, TranscriptContent transcript,
+        string? brief, CancellationToken ct, Guid? replaceArtifactId = null);
+    Task<GenerationResult> RunGeneratorAsync(Guid userId, Campaign campaign, TranscriptContent transcript,
+        string? brief, GeneratorSpec spec, CancellationToken ct,
+        Guid? parentArtifactId = null, Guid? replaceArtifactId = null);
     /// <summary>
     /// Fan-out. When <paramref name="runId"/> is supplied, per-artifact completions
     /// are written to that run row as they land so the Press Run can poll progress
@@ -32,6 +38,9 @@ public interface IAiOrchestrator
     Task<TechEditResult> RunTechEditAsync(
         Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
         string? steering, bool useKnowledgeBase, CancellationToken ct);
+    Task<YoutubeTitleRegenerationResponse> RegenerateYoutubeTitleAsync(
+        Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
+        string slot, string? steering, CancellationToken ct);
 }
 
 public sealed class AiOrchestrator(
@@ -55,8 +64,9 @@ public sealed class AiOrchestrator(
         copies = Math.Clamp(copies, 1, GenerateRequest.MaxCopies);
         kinds = kinds?.Select(Generators.Normalize).ToArray();
         var selected = kinds is { Length: > 0 }
-            ? Generators.FanOut.Where(g => kinds.Contains(g.Kind, StringComparer.OrdinalIgnoreCase)).ToList()
-            : [.. Generators.FanOut];
+            ? Generators.FanOut.Where(g => g.Kind != "seo-brief"
+                && kinds.Contains(g.Kind, StringComparer.OrdinalIgnoreCase)).ToList()
+            : [.. Generators.FanOut.Where(g => g.Kind != "seo-brief")];
 
         // Kind-major rather than round-robin, so "3 more LinkedIn posts" arrives as three
         // LinkedIn posts in a row on the board rather than interleaved with everything else.
@@ -73,7 +83,7 @@ public sealed class AiOrchestrator(
         // registry order, and image-prompts still lands after the blog it seeds against.
         foreach (var spec in wanted.Where(w => w.Kind == "youtube"))
         {
-            var result = await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct);
+            var result = await RunYoutubeCoreAsync(userId, campaign, transcript, brief, brand, ct);
             results.Add(result);
             if (result is { Success: true, ArtifactId: { } artifactId })
             {
@@ -84,14 +94,24 @@ public sealed class AiOrchestrator(
 
         wanted = [.. wanted.Where(w => w.Kind != "youtube")];
 
+        Guid? primaryBlogId = null;
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
+            var placeholderId = await db.Artifacts
+                .Where(a => a.CampaignId == campaign.Id && a.Kind == "blog"
+                    && a.ContentJson.Contains("\"placeholder\":true"))
+                .OrderBy(a => a.CreatedAt)
+                .Select(a => (Guid?)a.Id)
+                .FirstOrDefaultAsync(ct);
             for (var copy = 0; copy < copies; copy++)
             {
-                var blog = await RunBlogCoreAsync(userId, campaign, transcript, brief, brand, ct);
+                var blog = await RunBlogCoreAsync(
+                    userId, campaign, transcript, brief, brand, ct,
+                    copy == 0 ? placeholderId : null);
                 results.Add(blog);
                 if (blog is { Success: true, ArtifactId: { } blogId })
                 {
+                    primaryBlogId ??= blogId;
                     await imagePlan.EnsureSlotsAsync(campaign.Id, ct, blogId);
                 }
                 await RecordProgressAsync(runId, results, ct);
@@ -103,7 +123,11 @@ public sealed class AiOrchestrator(
         // model-side latency dominates and the Press Run consumes per-artifact results.
         foreach (var spec in wanted)
         {
-            var result = await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct);
+            var parentId = primaryBlogId is not null && IsBlogDerivative(spec.Kind)
+                ? primaryBlogId
+                : null;
+            var result = await RunGeneratorCoreAsync(
+                userId, campaign, transcript, brief, spec, brand, ct, parentId);
             results.Add(result);
 
             if (result is { Success: true, ArtifactId: { } contentArtifactId }
@@ -144,7 +168,7 @@ public sealed class AiOrchestrator(
     {
         var total = (kinds is { Length: > 0 }
             ? kinds.Length
-            : Generators.FanOut.Count + 1) // +1 for the blog pipeline
+            : Generators.FanOut.Count(spec => spec.Kind != "seo-brief") + 1) // +1 for blog
             * Math.Clamp(copies, 1, GenerateRequest.MaxCopies);
         var now = clock.GetUtcNow();
         var run = new GenerationRun
@@ -198,12 +222,25 @@ public sealed class AiOrchestrator(
     }
 
     public async Task<GenerationResult> RunGeneratorAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, CancellationToken ct) =>
-        await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, await brands.ResolveAsync(campaign, ct), ct);
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
+        GeneratorSpec spec, CancellationToken ct,
+        Guid? parentArtifactId = null, Guid? replaceArtifactId = null)
+    {
+        var brand = await brands.ResolveAsync(campaign, ct);
+        return spec.Kind == "youtube"
+            ? await RunYoutubeCoreAsync(
+                userId, campaign, transcript, brief, brand, ct, replaceArtifactId)
+            : await RunGeneratorCoreAsync(
+                userId, campaign, transcript, brief, spec, brand, ct,
+                parentArtifactId, replaceArtifactId);
+    }
 
     private async Task<GenerationResult> RunGeneratorCoreAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, GeneratorSpec spec, BrandContext brand, CancellationToken ct)
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
+        GeneratorSpec spec, BrandContext brand, CancellationToken ct,
+        Guid? parentArtifactId = null, Guid? replaceArtifactId = null)
     {
+        brief = WithContentType(campaign, brief);
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -229,7 +266,8 @@ public sealed class AiOrchestrator(
             {
                 return Fail(spec.Kind, validation.FatalError!, stopwatch);
             }
-            var artifactId = await PersistAsync(campaign, spec.Kind, json, validation, ct);
+            var artifactId = await PersistAsync(
+                campaign, spec.Kind, json, validation, ct, parentArtifactId, replaceArtifactId);
             return new GenerationResult(spec.Kind, true, artifactId, null, validation.Warnings, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -239,14 +277,185 @@ public sealed class AiOrchestrator(
         }
     }
 
+    /// <summary>YouTube is a search artifact, not a generic social card. Like the blog it
+    /// earns a deliberate outline → draft → audit pipeline, with the final pass required to
+    /// return the complete corrected package rather than a detached list of suggestions.</summary>
+    private async Task<GenerationResult> RunYoutubeCoreAsync(
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
+        BrandContext brand, CancellationToken ct, Guid? replaceArtifactId = null)
+    {
+        brief = WithContentType(campaign, brief);
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var outline = await CallModelAsync(userId, "chat", "youtube-outline", BuildPrompt(
+                """
+                Plan a YouTube package before writing it. Identify the primary search intent,
+                target keyword, the first-125-character hook, at least three transcript-grounded
+                chapters, one concrete moment for a pinned comment, and three distinct title
+                angles from: seo, curiosity, how-to, problem-solution, thought-leadership.
+                JSON schema: { "searchIntent": string, "targetKeyword": string,
+                  "hook": string, "chapters": [ { "startSeconds": number, "keyword": string,
+                  "purpose": string } ], "pinnedCommentMoment": string,
+                  "titleAngles": [ { "slot": string, "angle": string, "promise": string } ],
+                  "citations": string[] }
+                """, brief, transcript, brand, "youtube"), ct);
+
+            var draft = await CallModelAsync(userId, "chat", "youtube-draft", BuildPrompt(
+                $$"""
+                Write the complete YouTube package from this approved planning pass:
+                {{outline}}
+
+                Return ONLY this JSON schema:
+                { "title": string,
+                  "titleOptions": [
+                    { "slot": "A", "title": string, "angle": "seo", "score": number, "rationale": string },
+                    { "slot": "B", "title": string, "angle": "curiosity", "score": number, "rationale": string },
+                    { "slot": "C", "title": string, "angle": "problem-solution", "score": number, "rationale": string }
+                  ],
+                  "description": string,
+                  "chapters": [ { "startSeconds": number, "title": string } ],
+                  "tags": [ string ], "suggestedPinnedComment": string,
+                  "audit": { "hookWithin125": boolean, "hashtagsHoisted": boolean,
+                    "chapterKeywordsPresent": boolean, "warnings": [ string ] },
+                  "citations": string[] }
+
+                Put the target keyword and concrete payoff in the first 125 characters. Write
+                2-4 useful paragraphs, then a Chapters section with at least three keyworded
+                chapters starting at 0:00, then the exact {{"{{LINKS}}"}} line. Put at most three
+                hashtags on the final line. The pinned comment must cite a concrete source
+                moment in natural language and end with an open question.
+                """, brief, transcript, brand, "youtube"), ct);
+            var draftJson = CitationMarkers.Strip(ParseModelJson(draft));
+
+            var audited = await CallModelAsync(userId, "chat-audit", "youtube-audit", BuildPrompt(
+                $$"""
+                Audit and correct this YouTube package. Return the COMPLETE corrected JSON
+                package in exactly the same schema — not notes and not a wrapper.
+
+                Verify: a concrete keyword/payoff hook in the first 125 characters; no hashtags
+                before the final line; at least three ascending chapters beginning at 0:00 with
+                useful search terms in every title; A/B/C titles using three distinct values
+                from the supported angle taxonomy with
+                honest 0-100 scores; and a transcript-grounded pinned comment ending in a question.
+                Set the audit booleans from the corrected result and list remaining limitations.
+
+                Draft package:
+                {{draftJson.GetRawText()}}
+                """, brief, transcript, brand, "youtube"), ct);
+
+            var json = CitationMarkers.Strip(ParseModelJson(audited));
+            json = await SubstituteLinksAsync(userId, json, ct);
+            var validation = Generators.ValidateYoutube(json, transcript);
+            if (!validation.Passed)
+            {
+                return Fail("youtube", validation.FatalError!, stopwatch);
+            }
+            var artifactId = await PersistAsync(
+                campaign, "youtube", json, validation, ct,
+                replaceArtifactId: replaceArtifactId);
+            return new GenerationResult(
+                "youtube", true, artifactId, null, validation.Warnings,
+                stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "YouTube pipeline failed");
+            return Fail("youtube",
+                ex is AiNotConfiguredException ? ex.Message : $"Generation failed: {ex.GetType().Name}",
+                stopwatch);
+        }
+    }
+
+    public async Task<YoutubeTitleRegenerationResponse> RegenerateYoutubeTitleAsync(
+        Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
+        string slot, string? steering, CancellationToken ct)
+    {
+        steering = WithContentType(campaign, steering);
+        slot = slot.ToUpperInvariant();
+        var angle = slot switch
+        {
+            "A" => "seo",
+            "B" => "curiosity",
+            "C" => "problem-solution",
+            _ => throw new ArgumentOutOfRangeException(nameof(slot)),
+        };
+        var current = ExtractContent(artifact.ContentJson)
+            ?? throw new InvalidOperationException("The YouTube package could not be read.");
+        var brand = await brands.ResolveAsync(campaign, ct);
+        var response = await CallModelAsync(userId, "chat", "youtube-title-regenerate", BuildPrompt(
+            $$"""
+            Regenerate only title slot {{slot}} ({{angle}}) for this existing YouTube package.
+            Preserve its search intent but find a materially stronger hook. Keep it under 60
+            characters, put the primary keyword in the first half, and make no unsupported promise.
+            Current package: {{current.GetRawText()}}
+            JSON schema: { "slot": "{{slot}}", "title": string, "angle": "{{angle}}",
+              "score": number, "rationale": string, "citations": string[] }
+            """, steering, transcript, brand, "youtube"), ct);
+        var optionJson = CitationMarkers.Strip(ParseModelJson(response));
+        var citations = Generators.ValidateCitations(optionJson, transcript);
+        if (!citations.Passed
+            || !optionJson.TryGetProperty("title", out var titleNode)
+            || titleNode.GetString() is not { Length: > 0 and <= 100 } title
+            || !optionJson.TryGetProperty("score", out var scoreNode)
+            || !scoreNode.TryGetDouble(out var score) || score is < 0 or > 100)
+        {
+            throw new InvalidOperationException(
+                citations.FatalError ?? "The regenerated title did not satisfy the A/B slot contract.");
+        }
+        var rationale = optionJson.TryGetProperty("rationale", out var rationaleNode)
+            ? rationaleNode.GetString() ?? string.Empty
+            : string.Empty;
+
+        var root = JsonNode.Parse(artifact.ContentJson)?.AsObject()
+            ?? throw new InvalidOperationException("The YouTube package could not be updated.");
+        var content = root["content"] as JsonObject ?? root;
+        var options = content["titleOptions"] as JsonArray
+            ?? throw new InvalidOperationException(
+                "This package predates scored title slots. Regenerate the full package first.");
+        var index = slot[0] - 'A';
+        if (options.Count != 3)
+        {
+            throw new InvalidOperationException("This package has an incomplete title experiment.");
+        }
+        options[index] = new JsonObject
+        {
+            ["slot"] = slot,
+            ["title"] = title,
+            ["angle"] = angle,
+            ["score"] = score,
+            ["rationale"] = rationale,
+        };
+        if (slot == "A")
+        {
+            content["title"] = title;
+            artifact.Title = title.Length > 300 ? title[..300] : title;
+        }
+
+        var now = clock.GetUtcNow();
+        await Endpoints.ArtifactEndpoints.SnapshotRevisionAsync(
+            db, artifact, $"youtube-title-{slot.ToLowerInvariant()}", now, ct);
+        artifact.ContentJson = root.ToJsonString(Json);
+        artifact.Version++;
+        artifact.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        return new YoutubeTitleRegenerationResponse(
+            artifact.Id, artifact.Version,
+            new YoutubeTitleOptionResponse(slot, title, angle, score, rationale));
+    }
+
     /// <summary>Blog pipeline (B5.2): outline → draft → cross-model audit.</summary>
     public async Task<GenerationResult> RunBlogAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, CancellationToken ct) =>
-        await RunBlogCoreAsync(userId, campaign, transcript, brief, await brands.ResolveAsync(campaign, ct), ct);
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
+        CancellationToken ct, Guid? replaceArtifactId = null) =>
+        await RunBlogCoreAsync(userId, campaign, transcript, brief,
+            await brands.ResolveAsync(campaign, ct), ct, replaceArtifactId);
 
     private async Task<GenerationResult> RunBlogCoreAsync(
-        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief, BrandContext brand, CancellationToken ct)
+        Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
+        BrandContext brand, CancellationToken ct, Guid? replaceArtifactId = null)
     {
+        brief = WithContentType(campaign, brief);
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -302,7 +511,7 @@ public sealed class AiOrchestrator(
             }
 
             var artifactId = await PersistAsync(campaign, "blog", draftJson,
-                new ValidationOutcome(true, warnings), ct);
+                new ValidationOutcome(true, warnings), ct, replaceArtifactId: replaceArtifactId);
             return new GenerationResult("blog", true, artifactId, null, warnings, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -323,6 +532,7 @@ public sealed class AiOrchestrator(
         Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
         string? steering, bool useKnowledgeBase, CancellationToken ct)
     {
+        steering = WithContentType(campaign, steering);
         var stopwatch = Stopwatch.StartNew();
         var provider = "foundry";
         var knowledgeUsed = false;
@@ -512,7 +722,7 @@ public sealed class AiOrchestrator(
 
     /// <summary>
     /// The ONE place prompt text is assembled. Order matters and is deliberate: contract →
-    /// generator instructions → per-brand template steering (rides WITH the instructions) →
+    /// primary per-brand content template → generator pass/schema instructions →
     /// campaign brief → brand style block → campaign context links → SEO/AEO targets →
     /// source transcript.
     /// Labeled sections let the model distinguish contract vs steering vs facts.
@@ -521,9 +731,21 @@ public sealed class AiOrchestrator(
         string instructions, string? brief, TranscriptContent transcript,
         BrandContext? brand = null, string? kind = null)
     {
-        var steering = kind is not null
+        var templateBlock = kind is not null
             && brand?.TemplateSteeringByKind.TryGetValue(kind, out var template) == true
-                ? $"\nBrand template steering: {template}\n"
+                ? $"""
+
+                PRIMARY BRAND CONTENT TEMPLATE
+                Treat this as the authoritative brief for content strategy, voice, emphasis,
+                completeness and quality. It overrides conflicting generic writing guidance.
+                The required response schema, JSON-only envelope, transcript-grounding,
+                provenance and safety constraints remain mandatory; express the template's
+                requested content inside that schema rather than changing the schema.
+
+                {template}
+                END PRIMARY BRAND CONTENT TEMPLATE
+
+                """
                 : string.Empty;
         var styleBlock = string.IsNullOrWhiteSpace(brand?.StyleBlock) ? string.Empty : $"{brand!.StyleBlock}\n";
         var contextBlock = string.IsNullOrWhiteSpace(brand?.CampaignContextBlock)
@@ -540,8 +762,9 @@ public sealed class AiOrchestrator(
         return $"""
         {Generators.CommonContract}
 
+        {templateBlock}
+        GENERATOR PASS AND REQUIRED RESPONSE SHAPE
         {instructions}
-        {steering}
         {(string.IsNullOrWhiteSpace(brief) ? "" : $"Campaign brief: {brief}\n")}
         {styleBlock}{contextBlock}{seoBlock}
         Source transcript. Ground every claim in it and list the ids you used in the
@@ -613,7 +836,8 @@ public sealed class AiOrchestrator(
     }
 
     private async Task<Guid> PersistAsync(
-        Campaign campaign, string kind, JsonElement content, ValidationOutcome validation, CancellationToken ct)
+        Campaign campaign, string kind, JsonElement content, ValidationOutcome validation,
+        CancellationToken ct, Guid? parentArtifactId = null, Guid? replaceArtifactId = null)
     {
         var now = clock.GetUtcNow();
         var title = content.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String
@@ -626,11 +850,28 @@ public sealed class AiOrchestrator(
             validation = new { validation.Passed, validation.Warnings },
         }, Json);
 
+        if (replaceArtifactId is { } replaceId)
+        {
+            var existing = await db.Artifacts.SingleOrDefaultAsync(
+                a => a.Id == replaceId && a.CampaignId == campaign.Id && a.Kind == kind, ct)
+                ?? throw new InvalidOperationException("The placeholder artifact no longer exists.");
+            await Castmill.Api.Endpoints.ArtifactEndpoints.SnapshotRevisionAsync(
+                db, existing, "ai-generation", now, ct);
+            existing.Title = title.Length > 300 ? title[..300] : title;
+            existing.ContentJson = envelope;
+            existing.ParentArtifactId = parentArtifactId ?? existing.ParentArtifactId;
+            existing.Version++;
+            existing.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            return existing.Id;
+        }
+
         var artifact = new Artifact
         {
             Id = Guid.NewGuid(),
             TenantId = tenant.TenantId ?? throw new InvalidOperationException("Generation requires a tenant."),
             CampaignId = campaign.Id,
+            ParentArtifactId = parentArtifactId,
             Kind = kind,
             Title = title.Length > 300 ? title[..300] : title,
             ContentJson = envelope,
@@ -642,6 +883,15 @@ public sealed class AiOrchestrator(
         await db.SaveChangesAsync(ct);
         return artifact.Id;
     }
+
+    private static bool IsBlogDerivative(string kind) =>
+        kind.StartsWith("social-", StringComparison.Ordinal)
+        || kind is "email-sequence" or "newsletter";
+
+    private static string? WithContentType(Campaign campaign, string? brief) =>
+        string.IsNullOrWhiteSpace(campaign.ContentType)
+            ? brief
+            : $"Content type: {campaign.ContentType}. Shape structure, examples, CTA, and pacing for that format.\n{brief}";
 
     private static GenerationResult Fail(string kind, string error, Stopwatch stopwatch) =>
         new(kind, false, null, error, [], stopwatch.ElapsedMilliseconds);

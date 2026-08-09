@@ -18,6 +18,13 @@ public interface ISeoReportService
         TranscriptContent transcript,
         DateTimeOffset generatedAt,
         CancellationToken ct);
+
+    Task<IReadOnlyList<SeoContentAngle>> RegenerateAnglesAsync(
+        Guid userId,
+        SeoAnalysisReportResponse report,
+        string? audienceAndBrief,
+        TranscriptContent transcript,
+        CancellationToken ct);
 }
 
 /// <summary>
@@ -141,6 +148,27 @@ public sealed class SeoReportService(
             aeo, gaps, ranked, authority, competitors, angles, sections, generatedAt);
     }
 
+    public Task<IReadOnlyList<SeoContentAngle>> RegenerateAnglesAsync(
+        Guid userId,
+        SeoAnalysisReportResponse report,
+        string? audienceAndBrief,
+        TranscriptContent transcript,
+        CancellationToken ct)
+    {
+        var insights = report.Insights;
+        return GenerateAnglesAsync(
+            userId,
+            report.Research,
+            report.Serp,
+            insights?.RankedKeywords ?? [],
+            insights?.SiteAuthority,
+            insights?.Competitors,
+            insights?.Aeo ?? new SeoAeoScorecard(null, 0, 0, []),
+            audienceAndBrief,
+            transcript,
+            ct);
+    }
+
     private async Task<SeoAeoScorecard> BuildAeoAsync(
         string domain, string? brief, string primaryKeyword, CancellationToken ct)
     {
@@ -156,7 +184,10 @@ public sealed class SeoReportService(
                 return await LimitedAsync(
                     () => provider.QueryAnswerEngineAsync(engine, question, domain, ct), ct);
             }
-            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+            // A single optional engine must not turn the complete SEO report into a
+            // 500. Preserve genuine request cancellation, but record every upstream
+            // transport/envelope failure as an honest unavailable-engine row.
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 logger.LogWarning(ex, "Answer-engine query failed for {Engine}.", engine);
                 return new SeoAeoEngineResult(

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -42,6 +43,8 @@ public static class SeoEndpoints
 
         group.MapGet("/reports/{artifactId:guid}", GetReportAsync);
         group.MapPost("/reports/{artifactId:guid}/share", ShareAsync).RequireRateLimiting("writes");
+        group.MapPost("/reports/{artifactId:guid}/angles/regenerate", RegenerateAnglesAsync)
+            .RequireRateLimiting("ai");
         return routes;
     }
 
@@ -170,10 +173,23 @@ public static class SeoEndpoints
             .Where(a => a.CampaignId == campaign.Id && a.Kind == "seo-report")
             .OrderByDescending(a => a.UpdatedAt)
             .FirstOrDefaultAsync(ct);
+        SeoAnalysisReportResponse? previous = null;
+        if (existing is not null)
+        {
+            try
+            {
+                previous = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(existing.ContentJson, Json);
+            }
+            catch (JsonException)
+            {
+            }
+        }
         var id = existing?.Id ?? Guid.NewGuid();
         var report = new SeoAnalysisReportResponse(
             id, now, result, serp, recommendations, Status: "Draft",
-            SiteUrl: request.SiteUrl, CampaignBrief: campaign.Brief, Insights: insights);
+            SiteUrl: request.SiteUrl, CampaignBrief: campaign.Brief, Insights: insights,
+            InputsStale: false, AnglesStale: false,
+            ShareStale: previous?.SharedAt is not null, SharedAt: previous?.SharedAt);
         var serializedReport = JsonSerializer.Serialize(report, Json);
         var reportTitle = $"SEO/AEO analysis — {campaign.Name}";
         var artifact = existing ?? new Artifact
@@ -198,11 +214,120 @@ public static class SeoEndpoints
         {
             artifact.Version++;
         }
+
+        await UpsertPlaceholderBlogAsync(
+            campaign,
+            insights.ContentAngles.Count > 0 ? insights.ContentAngles[0] : null,
+            tenant, db, now, ct);
         await db.SaveChangesAsync(ct);
 
         return existing is null
             ? Results.Created($"/api/v1/seo/reports/{id}", report)
             : Results.Ok(report);
+    }
+
+    private static async Task UpsertPlaceholderBlogAsync(
+        Campaign campaign, SeoContentAngle? angle, ITenantProvider tenant,
+        CastmillDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        if (angle is null || await db.Artifacts.AnyAsync(
+                artifact => artifact.CampaignId == campaign.Id && artifact.Kind == "blog"
+                    && !artifact.ContentJson.Contains("\"placeholder\":true"), ct))
+        {
+            return;
+        }
+
+        var content = JsonSerializer.Serialize(new
+        {
+            markdown = $"# {angle.Angle}\n\n> Placeholder seeded from the strongest approved SEO/AEO opportunity. Use Generate in the Producer to draft it.",
+            placeholder = true,
+            seedAngle = angle.Angle,
+            targetKeyword = angle.TargetKeyword,
+            rationale = angle.Rationale,
+        }, Json);
+        var existing = await db.Artifacts.SingleOrDefaultAsync(
+            artifact => artifact.CampaignId == campaign.Id && artifact.Kind == "blog"
+                && artifact.ContentJson.Contains("\"placeholder\":true"), ct);
+        if (existing is null)
+        {
+            db.Artifacts.Add(new Artifact
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.TenantId!.Value,
+                CampaignId = campaign.Id,
+                Kind = "blog",
+                Title = angle.Angle.Length > 300 ? angle.Angle[..300] : angle.Angle,
+                ContentJson = content,
+                Version = 1,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            existing.Title = angle.Angle.Length > 300 ? angle.Angle[..300] : angle.Angle;
+            existing.ContentJson = content;
+            existing.Version++;
+            existing.UpdatedAt = now;
+        }
+    }
+
+    private static async Task<IResult> RegenerateAnglesAsync(
+        Guid artifactId,
+        ClaimsPrincipal principal,
+        ISeoReportService reportService,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var artifact = await db.Artifacts.SingleOrDefaultAsync(
+            row => row.Id == artifactId && row.Kind == "seo-report", ct);
+        if (artifact is null)
+        {
+            return Results.NotFound();
+        }
+        SeoAnalysisReportResponse report;
+        try
+        {
+            report = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(artifact.ContentJson, Json)
+                ?? throw new JsonException();
+        }
+        catch (JsonException)
+        {
+            return Results.Problem("The stored SEO/AEO report could not be read.", statusCode: 409);
+        }
+
+        var campaign = await db.Campaigns.SingleAsync(row => row.Id == artifact.CampaignId, ct);
+        var transcriptJson = await db.Artifacts
+            .Where(row => row.CampaignId == campaign.Id && row.Kind == "transcript")
+            .OrderByDescending(row => row.CreatedAt)
+            .Select(row => row.ContentJson)
+            .FirstOrDefaultAsync(ct);
+        var transcript = transcriptJson is null ? null : TranscriptService.Parse(transcriptJson);
+        if (transcript is null)
+        {
+            return Results.Problem("This campaign has no readable transcript.", statusCode: 409);
+        }
+
+        var angles = await reportService.RegenerateAnglesAsync(
+            AuthEndpoints.GetUserId(principal), report, campaign.Brief, transcript, ct);
+        var now = clock.GetUtcNow();
+        var insights = report.Insights ?? new SeoDeepInsights(
+            new SeoAeoScorecard(null, 0, 0, []), [], [], null, [], [], [], now);
+        var updated = report with
+        {
+            Insights = insights with { ContentAngles = angles, AnglesGeneratedAt = now },
+            AnglesStale = false,
+            ShareStale = report.SharedAt is not null,
+        };
+        artifact.ContentJson = JsonSerializer.Serialize(updated, Json);
+        artifact.Version++;
+        artifact.UpdatedAt = now;
+        await UpsertPlaceholderBlogAsync(
+            campaign, angles.Count > 0 ? angles[0] : null, tenant, db, now, ct);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new SeoAngleRegenerationResponse(artifact.Id, angles, now));
     }
 
     /// <summary>
@@ -277,14 +402,16 @@ public static class SeoEndpoints
             return Results.NotFound();
         }
 
-        // 1. AI SEO brief — the "focus" steer flows in as the generation brief.
+        // 1. Internal AI research pass — the "focus" steer flows into the SEO analysis.
+        // This uses the legacy seo-brief generator contract, but it is not a product artifact:
+        // the temporary row is removed after its structured result seeds the keyword plan.
         var spec = Generators.Find("seo-brief")!;
         var brief = await orchestrator.RunGeneratorAsync(
             AuthEndpoints.GetUserId(principal), campaign, transcript, request.Focus, spec, ct);
         if (!brief.Success)
         {
             return Results.Problem(statusCode: StatusCodes.Status502BadGateway,
-                detail: $"SEO brief generation failed: {brief.Error}");
+                detail: $"SEO research generation failed: {brief.Error}");
         }
         var briefArtifact = await db.Artifacts.SingleAsync(a => a.Id == brief.ArtifactId, ct);
         using var briefDoc = JsonDocument.Parse(briefArtifact.ContentJson);
@@ -331,7 +458,6 @@ public static class SeoEndpoints
             focus = request.Focus,
             youtubeTitles,
             keywords = merged,
-            seoBriefArtifactId = brief.ArtifactId,
             generatedAt = now,
         }, Json);
 
@@ -347,6 +473,7 @@ public static class SeoEndpoints
             CreatedAt = now,
             UpdatedAt = now,
         };
+        db.Artifacts.Remove(briefArtifact);
         db.Artifacts.Add(plan);
         await db.SaveChangesAsync(ct);
 
@@ -407,6 +534,7 @@ public static class SeoEndpoints
         Guid artifactId,
         IPublicContentStore publicStore,
         CastmillDbContext db,
+        TimeProvider clock,
         CancellationToken ct)
     {
         if (!publicStore.IsConfigured)
@@ -425,6 +553,22 @@ public static class SeoEndpoints
         var url = await publicStore.PublishAsync(
             $"seo-shares/{artifact.TenantId}/{artifact.Id}.html",
             Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8", ct);
+        try
+        {
+            var report = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(artifact.ContentJson, Json);
+            if (report is not null)
+            {
+                var now = clock.GetUtcNow();
+                artifact.ContentJson = JsonSerializer.Serialize(
+                    report with { SharedAt = now, ShareStale = false }, Json);
+                artifact.Version++;
+                artifact.UpdatedAt = now;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (JsonException)
+        {
+        }
         return Results.Ok(new { shareUrl = url.ToString() });
     }
 

@@ -55,19 +55,31 @@ public static class Generators
             Write the YouTube package for this video.
             JSON schema: {
               "title": string,
-              "titleVariants": [ string ],
+              "titleOptions": [
+                { "slot": "A" | "B" | "C", "title": string,
+                  "angle": "seo" | "curiosity" | "how-to" | "problem-solution" | "thought-leadership",
+                  "score": number, "rationale": string }
+              ],
               "description": string,
               "chapters": [ { "startSeconds": number, "title": string } ],
               "tags": [ string ],
+              "suggestedPinnedComment": string,
+              "audit": {
+                "hookWithin125": boolean,
+                "hashtagsHoisted": boolean,
+                "chapterKeywordsPresent": boolean,
+                "warnings": [ string ]
+              },
               "citations": string[]
             }
 
             Produce ONE package — the single best description you can write. The only thing
             there are alternatives of is the title.
 
-            "title" is the recommended title. "titleVariants" holds EXACTLY 3 further titles to
-            A/B test — genuinely different angles (outcome, curiosity, problem), not rewordings
-            of one another. Every title, including "title", must:
+            "title" is the recommended title. "titleOptions" holds EXACTLY three A/B/C titles,
+            each using a distinct angle from the supported taxonomy (SEO, curiosity, how-to,
+            problem-solution, thought-leadership), with a 0-100
+            predicted performance score and a short rationale. Every title must:
             - be under 60 characters, or search truncates it;
             - carry the primary keyword in the first half, where it is weighted and always
               visible;
@@ -90,9 +102,14 @@ public static class Generators
               not invent URLs; that placeholder is replaced with the real ones.
 
             "chapters" must be in ascending order, start at 0, and come from real transcript
-            moments. "tags" is 8-15 specific search terms, no hashes.
+            moments. Put a natural target keyword in every chapter title. "tags" is 8-15
+            specific search terms, no hashes. If hashtags are useful, place no more than three
+            on the final line of the description — never in its opening hook.
+
+            "suggestedPinnedComment" must refer to one concrete transcript moment, add useful
+            context rather than repeat the description, and end with an open question.
             """,
-            (json, t) => ValidateCommon(json, t, requireArray: "chapters", minItems: 1)));
+            ValidateYoutube));
 
         foreach (var platform in SocialPlatforms)
         {
@@ -346,6 +363,79 @@ public static class Generators
             }
         }
         return new ValidationOutcome(true, []);
+    }
+
+    /// <summary>The complete YouTube package contract. These checks are deterministic so a
+    /// polished audit response cannot silently omit the A/B/C experiment or pinned comment.</summary>
+    internal static ValidationOutcome ValidateYoutube(JsonElement json, TranscriptContent transcript)
+    {
+        var common = ValidateCommon(json, transcript, requireString: "description");
+        if (!common.Passed)
+        {
+            return common;
+        }
+        if (!json.TryGetProperty("titleOptions", out var options)
+            || options.ValueKind != JsonValueKind.Array || options.GetArrayLength() != 3)
+        {
+            return new ValidationOutcome(false, [], "Exactly three scored A/B/C titleOptions are required.");
+        }
+
+        var expectedSlots = new[] { "A", "B", "C" };
+        var allowedAngles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "seo", "curiosity", "how-to", "problem-solution", "thought-leadership" };
+        var seenAngles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var index = 0;
+        foreach (var option in options.EnumerateArray())
+        {
+            var slot = option.TryGetProperty("slot", out var slotNode) ? slotNode.GetString() : null;
+            var angle = option.TryGetProperty("angle", out var angleNode) ? angleNode.GetString() : null;
+            var title = option.TryGetProperty("title", out var titleNode) ? titleNode.GetString() : null;
+            if (!string.Equals(slot, expectedSlots[index], StringComparison.OrdinalIgnoreCase)
+                || angle is null || !allowedAngles.Contains(angle) || !seenAngles.Add(angle))
+            {
+                return new ValidationOutcome(false, [],
+                    "titleOptions must be A/B/C and use three distinct supported angle-taxonomy values.");
+            }
+            if (string.IsNullOrWhiteSpace(title) || title.Length > 100
+                || !option.TryGetProperty("score", out var scoreNode)
+                || !scoreNode.TryGetDouble(out var score) || score is < 0 or > 100)
+            {
+                return new ValidationOutcome(false, [],
+                    $"Title slot {expectedSlots[index]} needs a 1-100 character title and 0-100 score.");
+            }
+            index++;
+        }
+
+        if (!json.TryGetProperty("chapters", out var chapters)
+            || chapters.ValueKind != JsonValueKind.Array || chapters.GetArrayLength() < 3)
+        {
+            return new ValidationOutcome(false, [], "At least three keyworded YouTube chapters are required.");
+        }
+        var first = chapters[0];
+        if (!first.TryGetProperty("startSeconds", out var start) || start.GetDouble() != 0)
+        {
+            return new ValidationOutcome(false, [], "YouTube chapters must start at 0:00.");
+        }
+        if (!json.TryGetProperty("suggestedPinnedComment", out var commentNode)
+            || commentNode.ValueKind != JsonValueKind.String
+            || commentNode.GetString() is not { Length: > 10 } comment
+            || !comment.TrimEnd().EndsWith('?'))
+        {
+            return new ValidationOutcome(false, [], "The suggested pinned comment must be substantive and end with a question.");
+        }
+
+        var warnings = new List<string>();
+        var description = json.GetProperty("description").GetString()!;
+        var opening = description.Length <= 125 ? description : description[..125];
+        if (opening.Contains('#', StringComparison.Ordinal))
+        {
+            warnings.Add("A hashtag appears in the first 125 characters; hoist it to the final line.");
+        }
+        if (description.Length > 0 && description[..Math.Min(125, description.Length)].Trim().Length < 45)
+        {
+            warnings.Add("The first 125 characters may be too thin to work as a search hook.");
+        }
+        return new ValidationOutcome(true, warnings);
     }
 
     /// <summary>Blog validator (B5.2): word band + citations.</summary>

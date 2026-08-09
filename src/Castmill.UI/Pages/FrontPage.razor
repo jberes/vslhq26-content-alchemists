@@ -219,6 +219,9 @@
     /// </summary>
     private List<DashboardArtifact> Unapproved =>
         [.. _review.Concat(_aging)
+            // Defend against an older API/dashboard cache returning operational artifacts.
+            // Those have dedicated surfaces and must never open as a Focus manuscript.
+            .Where(a => ArtifactDisplay.Editable(a.Kind))
             .GroupBy(a => a.ArtifactId)
             .Select(g => g.First())
             .OrderByDescending(a => a.UpdatedAt)];

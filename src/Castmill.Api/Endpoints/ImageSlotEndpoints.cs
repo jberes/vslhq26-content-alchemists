@@ -271,6 +271,7 @@ public static class ImageSlotEndpoints
                 ? null
                 : CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
         effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
+        effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
@@ -366,6 +367,7 @@ public static class ImageSlotEndpoints
         var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
         effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
+        effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, request.Note, source.Id,
@@ -502,15 +504,19 @@ public static class ImageSlotEndpoints
     /// </summary>
     internal const string TypographyGuardrails = """
         Text rendering rules (follow exactly):
-        - This image will be CROPPED to a different aspect ratio after generation. Keep every
-          word, letter and logo inside the middle 80% of the frame, well clear of all four
-          edges. Nothing readable may touch or run off an edge.
-        - Leave generous empty margin around any text. Do not fill the frame edge to edge with
-          type.
+        - Keep every word, letter, logo and supporting graphic inside the middle 76% of the
+          frame, leaving at least 12% clear on every edge. Nothing meaningful may touch or
+          run off an edge.
+        - Use only text explicitly requested by the prompt or visible in an authoritative
+          product reference. Do not invent extra marketing captions, statistics, feature
+          tiles, footers, badges or interface labels.
+        - Leave generous empty margin around any text. Keep a text block to at most three
+          short lines and no more than 55% of the image height.
         - Render each word complete and correctly spelled. No cut-off glyphs, no clipped
           descenders, no words continuing past the border.
         - Use few words at a large size rather than many words small; if the text will not fit
-          comfortably inside the safe area, use fewer words.
+          comfortably inside the safe area, omit secondary copy instead of shrinking or
+          clipping it.
         - Keep text on an area of flat, contrasting tone so it stays legible.
         """;
 
@@ -539,9 +545,42 @@ public static class ImageSlotEndpoints
             prompt = $"{prompt}\nAdjustment: {steeringNote.Trim()}";
         }
 
-        // Last, so it is the most recent instruction the model reads and a brand style block
-        // or an adjustment cannot silently override it.
-        return $"{prompt}\n{TypographyGuardrails}";
+        return prompt;
+    }
+
+    /// <summary>
+    /// Model providers render only a few native canvas sizes, then Castmill crops/resizes to
+    /// the durable slot. Giving the model the final dimensions and ratio makes it compose for
+    /// that destination; repeating the safe-zone rules last prevents brand/reference text
+    /// from pushing essential content into the crop.
+    /// </summary>
+    internal static string AppendSlotCompositionGuardrails(string prompt, ImageSlot slot)
+    {
+        var divisor = GreatestCommonDivisor(slot.TargetWidth, slot.TargetHeight);
+        var ratioWidth = slot.TargetWidth / divisor;
+        var ratioHeight = slot.TargetHeight / divisor;
+        return $$"""
+            {{prompt.Trim()}}
+            Final composition target (follow exactly):
+            - The published image is {{slot.TargetWidth}}×{{slot.TargetHeight}} pixels,
+              aspect ratio {{ratioWidth}}:{{ratioHeight}}. Compose for this landscape/portrait
+              ratio now; do not design an edge-to-edge layout that only works on a square canvas.
+            - Center the complete composition and keep every essential subject, product panel,
+              label and decorative element inside the middle 76% of the frame so the final
+              aspect-ratio crop cannot remove it.
+            - The frame must read as one finished composition at the target size. No partial
+              cards, clipped rows, cut-off panels or content continuing below the canvas.
+            {{TypographyGuardrails}}
+            """;
+    }
+
+    private static int GreatestCommonDivisor(int left, int right)
+    {
+        while (right != 0)
+        {
+            (left, right) = (right, left % right);
+        }
+        return Math.Max(1, Math.Abs(left));
     }
 
     internal static string BuildAutoPrompt(ImageSlot slot, Campaign campaign, Artifact? artifact)

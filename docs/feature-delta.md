@@ -16,8 +16,8 @@ Status legend:
 
 Current delivery snapshot (verified 2026-08-09):
 
-- [x] ✅ **Completed:** 1–4, 6–9, 12, 47, and additions N1–N3 and N6–N8.
-- [ ] **Still open:** 5, 10–11, 13–46 (except 47), and additions N4–N5. Partially
+- [x] ✅ **Completed:** 1–4, 6–16, 22–28, 47, and additions N1–N3 and N6–N21.
+- [ ] **Still open:** 5, 17–21, 29–46 (except 47), and additions N4–N5. Partially
   implemented items remain open until their complete acceptance criteria are delivered.
 
 Deliberately excluded: everything Castmill already matches or beats — two-pass blog audit +
@@ -58,22 +58,22 @@ the cluster map; these go deeper.*
    extend/defend vs duplicate.
 - [x] ✅ **9. Authority-aware angle steering** — backlink gap vs best competitor quantitatively
    steers generation toward achievable (long-tail / low-KD) targets.
-- [ ] **10. Staleness badges** — derived `inputsStale` / `anglesStale` / `shareStale` signals
+- [x] ✅ **10. Staleness badges** — derived `inputsStale` / `anglesStale` / `shareStale` signals
     ("Inputs changed — re-run analysis", "New SEO data since these angles").
-- [ ] **11. Content-angle regeneration loop** — angles regenerated *from the report* (gaps, PAA,
+- [x] ✅ **11. Content-angle regeneration loop** — angles regenerated *from the report* (gaps, PAA,
     uncited engines), each one-click seeding a blog. Castmill's cluster map + Scout are
     adjacent; the report→angles→seed loop with staleness is the delta.
 - [x] ✅ **12. AI-Overview & featured-snippet surfacing** — the persisted deep analysis
   captures and displays DataForSEO AI-overview and featured-snippet answer surfaces and
   carries the resulting strategy into downstream generation prompts.
-- [ ] **13. Angle-labeled, scored YouTube titles** with per-slot regenerate (A/B/C slots; angle
+- [x] ✅ **13. Angle-labeled, scored YouTube titles** with per-slot regenerate (A/B/C slots; angle
     taxonomy: seo / curiosity / how-to / problem-solution / thought-leadership).
-- [ ] **14. Suggested pinned comment generator** (references a concrete moment, ends with a
+- [x] ✅ **14. Suggested pinned comment generator** (references a concrete moment, ends with a
     question).
-- [ ] **15. Two-pass (outline → draft → self-audit) for the YouTube description**, audited
+- [x] ✅ **15. Two-pass (outline → draft → self-audit) for the YouTube description**, audited
     against platform rules (125-char hook, hashtag hoist, chapter keywords). Castmill's
     two-pass is blog-only.
-- [ ] **16. Per-artifact grounding panel** — "Real search data informing this content" on the
+- [x] ✅ **16. Per-artifact grounding panel** — "Real search data informing this content" on the
     YouTube/blog screens (keyword badges, SERP list, AI-Overview badge, PAA), with an
     honest empty state when no provider is configured.
 
@@ -93,20 +93,20 @@ incremental work.*
 
 ## Group 4 — Structure & content model *(§2, §6.3, §7.3–7.5)*
 
-- [ ] **22. Artifact parent/child hierarchy** — a blog owns its own social posts and images.
+- [x] ✅ **22. Artifact parent/child hierarchy** — a blog owns its own social posts and images.
     Castmill scoped image slots per-blog already; socials/email are campaign-level only.
-- [ ] **23. Per-blog social sets** + blog accordion tree with availability dots / approval
+- [x] ✅ **23. Per-blog social sets** + blog accordion tree with availability dots / approval
     checks / count badges.
-- [ ] **24. Multi-file sources** — several recordings combine into one campaign transcript with
+- [x] ✅ **24. Multi-file sources** — several recordings combine into one campaign transcript with
     per-source labels.
-- [ ] **25. Placeholder blog seeded from the strongest angle** (renders the Generate panel and
+- [x] ✅ **25. Placeholder blog seeded from the strongest angle** (renders the Generate panel and
     seeds its first generation with that angle).
-- [ ] **26. Summary screen/artifact** — persisted, editable executive summary + numbered key
+- [x] ✅ **26. Summary screen/artifact** — persisted, editable executive summary + numbered key
     takeaways + keyword opportunities. Castmill's AI brief summary (run flow) is transient
     and never stored; no summary surface exists after the run.
-- [ ] **27. Campaign status lifecycle** (draft → ready) with a status badge, plus inline
+- [x] ✅ **27. Campaign status lifecycle** (draft → ready) with a status badge, plus inline
     campaign rename in the header.
-- [ ] **28. Content-type field on the brief** (tutorial / product demo / webinar / thought
+- [x] ✅ **28. Content-type field on the brief** (tutorial / product demo / webinar / thought
     leadership) steering every generator.
 
 ## Group 5 — Publishing & distribution *(§7.10–7.13, §7.8)*
@@ -187,14 +187,84 @@ incremental work.*
 - [x] ✅ 🆕 **N7. Verifiable DataForSEO coverage and live production E2E** — research
   combines Keyword Suggestions, Keyword Ideas and Keyword Overview and persists exact
   successful endpoint provenance; the report adds advanced SERP, ranked keywords, backlinks,
-  domain footprints, multi-keyword SERP competitors, and four answer engines. An opt-in
-  Playwright test drives the real analysis-first flow with metered provider calls, verifies
-  production gating plus ApexCharts/ApexTree rendering, and cleans up its test campaign.
+  domain footprints, multi-keyword SERP competitors, and four answer engines. Each answer
+  engine resolves an account-supported model through DataForSEO's live model catalog and
+  only requests web search when that model supports it. An opt-in Playwright test drives the
+  real analysis-first flow with metered provider calls, requires all four engines to succeed,
+  verifies production gating plus Focus ownership and ApexCharts/ApexTree rendering, and
+  cleans up its test campaign and Brand.
 - [x] ✅ 🆕 **N8. AI-derived research audience with authoritative Brand voice** — immediately
   after transcript ingest, a dedicated pre-report AI pass infers the specific research
   audience without generating titles, angles or content. The Context step keeps that audience
   editable, while brand voice is read-only and comes only from the selected Brand's persisted
   style card; changing or clearing the Brand synchronizes the voice deterministically.
+- [x] ✅ 🆕 **N9. In-place Brand asset reclassification** — every Asset Kit image exposes a
+  hover/focus type switcher (product, face, background, accent, logo or other). Changing the
+  type persists through a tenant-scoped endpoint and immediately moves the card into the
+  correct group without re-uploading the source image.
+- [x] ✅ 🆕 **N10. Stateful Image Studio controls and composition-safe generation** — prompt
+  mode updates its selected slot without reloading the campaign, chips are large toggle
+  controls with explicit applied state, and the content-first left rail has a dedicated,
+  properly spaced add-image action. Every generate and steer prompt now ends with the slot's
+  exact dimensions/aspect ratio, a central safe composition zone and strict instructions
+  against clipped typography, invented UI panels or off-canvas content.
+- [x] ✅ 🆕 **N11. Full-width Markdown AEO response workspace** — answer engines are full-width
+  accessible tabs with one focused response panel; engine answers render as sanitized
+  Markdown, and citations remain attached to the active engine.
+- [x] ✅ 🆕 **N12. Mill-Floor-parity Focus navigation and operational-artifact routing** —
+  Focus uses the Mill Floor's lane names and ordering as clean, alternate-colour vertical
+  category bands; only content rows are interactive, each selection updates the manuscript,
+  and row deletion uses the shared trash-can affordance. SEO reports, transcripts and image
+  planning artifacts are excluded from dashboard edit work and cannot render as raw Focus
+  manuscripts, including through stale deep links.
+- [x] ✅ 🆕 **N13. Unified campaign rail** — the workspace rail has one Campaigns section and
+  lists every campaign instead of duplicating the active campaign or reducing larger
+  workspaces to a recent subset. Rows show name, date added and update recency, preserve the
+  active state and view when switching, and use the standard hover/focus trash-can delete
+  affordance behind the existing destructive confirmation.
+- [x] ✅ 🆕 **N14. Authoritative full-height Brand content templates** — YouTube is a first-class
+  Brand Template with a strategy-focused starter. A saved template is injected as the primary
+  content brief into every applicable generation pass and takes precedence over generic writing
+  guidance while Castmill retains its JSON, grounding, provenance and safety contracts. The
+  complete 20,000-character prompt persists without truncation, and its responsive editor fills
+  the remaining screen height with a narrow/short-screen scrolling fallback.
+- [x] ✅ 🆕 **N15. Canonical content-type surface contract** — all thirteen user-generatable
+  artifact kinds are derived into campaign creation, Mill Floor on-demand generation and Brand
+  Templates from one tested inventory; Clip Suggestions is no longer missing and system-only
+  Campaign Summary is no longer offered as a generator. Publishable content is explicitly
+  separated from strategy and operational artifacts, preventing internal summaries, SEO plans,
+  clip instructions and deep-report machinery from leaking into Image Studio, the outward-facing
+  ApexTree cluster or The Wire. Campaign format remains visible after creation in the header,
+  campaign index and workspace switcher. The durable matrix is documented in
+  [content-type-surfaces.md](content-type-surfaces.md).
+- [x] ✅ 🆕 **N16. Cross-shell reliable copy actions** — transcript Copy and View → Copy all
+  use one clipboard service rather than invoking `navigator.clipboard` from Razor. The browser
+  path uses the asynchronous Clipboard API and automatically falls back to a synchronous hidden
+  selection for desktop WebViews or restricted browser contexts; SEO share-link copying uses the
+  same contract. Component tests verify both transcript actions receive the complete readable
+  text, and Playwright verifies both the real clipboard and forced fallback paths.
+- [x] ✅ 🆕 **N17. SEO Analysis is a dedicated artifact role, not Mill content** — SEO brief
+  has been removed from creation checkboxes, Print more, Mill Floor, Focus, Brand Templates,
+  dashboards and public generation endpoints. Keyword plans and deep SEO/AEO reports are also
+  excluded from all production/editing lists and surface only in the SEO Analysis tab. The
+  legacy AI `seo-brief` schema remains an internal research pass for the legacy keyword-plan
+  endpoint, which now consumes and deletes its temporary row rather than persisting a fake
+  content item. Existing legacy rows remain safely hidden.
+- [x] ✅ 🆕 **N18. Deterministic Focus entry selection** — entering Focus from a campaign or
+  the campaign tab opens and highlights the first visible content row in canonical lane order
+  (YouTube first when present). Valid artifact deep links still win, stale operational links
+  fall back to that first row, and switching campaigns cannot retain the previous selection.
+- [x] ✅ 🆕 **N19. Page-only production lane** — the obsolete `Page/SEO` Mill Floor and Focus
+  label is now `Page`. Landing pages remain production content; SEO/AEO reports and plans keep
+  their separate SEO Analysis role and never consume board space.
+- [x] ✅ 🆕 **N20. Race-safe Brand asset reclassification** — type changes return the server's
+  canonical updated asset, and keyed group/card rendering prevents a card moved between Face,
+  Background, Accent and other sections from inheriting a neighbouring select's DOM value.
+  The visible selector, group heading and persisted kind now stay in agreement.
+- [x] ✅ 🆕 **N21. Source-copy context for image decisions** — Image Studio and the full-size
+  take dialog show the actual artifact text the selected image supports, alongside—not replaced
+  by—the AI visual description. Inline blog images prefer prose surrounding their image marker;
+  selection-race guards prevent a slower previous artifact fetch from showing stale context.
 
 ---
 

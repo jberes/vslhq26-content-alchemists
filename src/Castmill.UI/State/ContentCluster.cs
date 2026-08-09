@@ -1,3 +1,4 @@
+using Castmill.Core;
 using Castmill.Core.Resources;
 
 namespace Castmill.UI.State;
@@ -56,7 +57,10 @@ public sealed record ContentCluster(
         Func<string, string> kindLabel)
     {
         var onBoard = artifacts
-            .Where(a => ArtifactDisplay.OnBoard(a.Kind))
+            // Strategy and system documents may be editable on the board, but they are not
+            // nodes in the outward-facing topic cluster. Only distributable content belongs
+            // under the pillar.
+            .Where(a => ArtifactKinds.IsDistributionContent(a.Kind))
             .OrderBy(a => a.CreatedAt)
             .ToList();
 

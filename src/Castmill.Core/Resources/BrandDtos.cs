@@ -58,6 +58,10 @@ public sealed record BrandAssetLinkRequest(
 /// without re-uploading the file it describes.</summary>
 public sealed record BrandAssetLabelRequest([property: MaxLength(200)] string? Label);
 
+/// <summary>Reclassifies an existing kit image without re-uploading its bytes.</summary>
+public sealed record BrandAssetKindRequest(
+    [property: Required, MinLength(1), MaxLength(20)] string Kind);
+
 public sealed record BrandAssetResponse(
     Guid Id, Guid BrandId, Guid AssetId, string Kind, string? Label,
     string FileName, string ContentType, DateTimeOffset CreatedAt);
@@ -65,7 +69,7 @@ public sealed record BrandAssetResponse(
 public sealed record BrandTemplateRequest(
     [property: Required, MaxLength(50)] string Kind,
     [property: Required, MinLength(1), MaxLength(200)] string Name,
-    [property: Required, MinLength(1), MaxLength(4000)] string SteeringPrompt,
+    [property: Required, MinLength(1), MaxLength(20000)] string SteeringPrompt,
     bool IsDefault = false);
 
 public sealed record BrandTemplateResponse(

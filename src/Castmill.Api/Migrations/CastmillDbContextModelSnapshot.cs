@@ -163,6 +163,9 @@ namespace Castmill.Api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("ParentArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -186,6 +189,8 @@ namespace Castmill.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "CampaignId");
+
+                    b.HasIndex("TenantId", "ParentArtifactId");
 
                     b.HasIndex("TenantId", "Status");
 
@@ -386,8 +391,8 @@ namespace Castmill.Api.Migrations
 
                     b.Property<string>("SteeringPrompt")
                         .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
+                        .HasMaxLength(20000)
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -415,6 +420,10 @@ namespace Castmill.Api.Migrations
                     b.Property<string>("Brief")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("ContextJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -431,6 +440,13 @@ namespace Castmill.Api.Migrations
 
                     b.Property<string>("SeoTargetsJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Draft");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");

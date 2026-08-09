@@ -11,6 +11,8 @@ namespace Castmill.Api.Endpoints;
 
 public static class CampaignEndpoints
 {
+    private static readonly string[] DashboardHiddenArtifactKinds =
+        ["transcript", "image-prompts", "thumbnail-concepts", "seo-brief", "seo-keyword-plan", "seo-report"];
     public static IEndpointRouteBuilder MapCampaignEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/campaigns").RequireAuthorization("TenantAllowed");
@@ -39,7 +41,8 @@ public static class CampaignEndpoints
         new(System.Text.Json.JsonSerializerDefaults.Web);
 
     internal static CampaignResponse ToResponse(Campaign c) =>
-        new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId, ParseLinks(c.ContextJson));
+        new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId,
+            ParseLinks(c.ContextJson), c.Status, c.ContentType);
 
     private static readonly JsonSerializerOptions TargetsJson = new(JsonSerializerDefaults.Web);
 
@@ -87,6 +90,8 @@ public static class CampaignEndpoints
             return Results.NotFound();
         }
 
+        var hadApprovedTargets = !string.IsNullOrWhiteSpace(campaign.SeoTargetsJson);
+        var previousTargetsJson = campaign.SeoTargetsJson;
         var keywords = request.Keywords ?? [];
         var questions = request.Questions ?? [];
 
@@ -126,7 +131,14 @@ public static class CampaignEndpoints
                 {
                     var approved = keywords.Count > 0;
                     reportArtifact.ContentJson = JsonSerializer.Serialize(
-                        report with { Status = approved ? "Approved" : "Draft" }, TargetsJson);
+                        report with
+                        {
+                            Status = approved ? "Approved" : "Draft",
+                            AnglesStale = report.AnglesStale || (hadApprovedTargets
+                                && !string.Equals(previousTargetsJson, campaign.SeoTargetsJson,
+                                    StringComparison.Ordinal)),
+                            ShareStale = report.ShareStale || report.SharedAt is not null,
+                        }, TargetsJson);
                     reportArtifact.Status = approved ? ArtifactStatus.InReview : ArtifactStatus.Draft;
                     reportArtifact.Version++;
                     reportArtifact.UpdatedAt = now;
@@ -163,7 +175,8 @@ public static class CampaignEndpoints
 
     /// <summary>Validates the brand/links half of a create or update; null means valid.</summary>
     private static async Task<IResult?> ValidateBrandAndLinksAsync(
-        Guid? brandId, IReadOnlyList<CampaignLink>? links, CastmillDbContext db, CancellationToken ct)
+        Guid? brandId, IReadOnlyList<CampaignLink>? links, CastmillDbContext db, CancellationToken ct,
+        string? status = null, string? contentType = null)
     {
         if (links is { Count: > 10 })
         {
@@ -174,6 +187,17 @@ public static class CampaignEndpoints
         if (brandId is { } id && !await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
         {
             return Results.Problem("That brand does not exist.", statusCode: 400);
+        }
+
+        if (status is not null && !CampaignStatus.IsValid(status))
+        {
+            return Results.Problem("Campaign status must be Draft or Ready.", statusCode: 400);
+        }
+        if (!CampaignContentType.IsValid(contentType))
+        {
+            return Results.Problem(
+                "Content type must be Tutorial, ProductDemo, Webinar, or ThoughtLeadership.",
+                statusCode: 400);
         }
 
         return null;
@@ -209,12 +233,13 @@ public static class CampaignEndpoints
         var artifactRows = await db.Artifacts
             .Where(a => a.CampaignId == id)
             .OrderBy(a => a.Kind).ThenBy(a => a.CreatedAt)
-            .Select(a => new { a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson })
+            .Select(a => new { a.Id, a.CampaignId, a.ParentArtifactId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson, a.ContentJson })
             .ToListAsync(ct);
         var artifacts = artifactRows
             .Select(a => new ArtifactPreviewResponse(
                 a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt,
-                ArtifactEndpoints.ParseCitations(a.CitationsJson)))
+                ArtifactEndpoints.ParseCitations(a.CitationsJson), a.ParentArtifactId,
+                a.ContentJson.Contains("\"placeholder\":true")))
             .ToList();
         var slots = await db.ImageSlots.Where(s => s.CampaignId == id).ToListAsync(ct);
 
@@ -274,7 +299,8 @@ public static class CampaignEndpoints
             .ToListAsync(ct);
 
         var review = await db.Artifacts
-            .Where(a => a.Status == ArtifactStatus.InReview)
+            .Where(a => a.Status == ArtifactStatus.InReview
+                && !DashboardHiddenArtifactKinds.Contains(a.Kind))
             .OrderByDescending(a => a.UpdatedAt)
             .Take(50)
             .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
@@ -283,7 +309,7 @@ public static class CampaignEndpoints
         var agingCutoff = clock.GetUtcNow() - TimeSpan.FromDays(7);
         var aging = await db.Artifacts
             .Where(a => a.Status == ArtifactStatus.Draft
-                && a.Kind != "transcript"
+                && !DashboardHiddenArtifactKinds.Contains(a.Kind)
                 && a.UpdatedAt < agingCutoff)
             .OrderBy(a => a.UpdatedAt)
             .Take(50)
@@ -292,7 +318,8 @@ public static class CampaignEndpoints
 
         // The Wire's queue: reviewed and waiting for a slot (ADR-F22's Queued state).
         var readyToSchedule = await db.Artifacts
-            .Where(a => a.Status == ArtifactStatus.Queued)
+            .Where(a => a.Status == ArtifactStatus.Queued
+                && ArtifactKinds.DistributionContent.Contains(a.Kind))
             .OrderBy(a => a.UpdatedAt)
             .Take(50)
             .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
@@ -338,7 +365,8 @@ public static class CampaignEndpoints
         TimeProvider clock,
         CancellationToken ct)
     {
-        if (await ValidateBrandAndLinksAsync(request.BrandId, request.Links, db, ct) is { } invalid)
+        if (await ValidateBrandAndLinksAsync(
+                request.BrandId, request.Links, db, ct, contentType: request.ContentType) is { } invalid)
         {
             return invalid;
         }
@@ -352,6 +380,7 @@ public static class CampaignEndpoints
             Name = request.Name,
             Brief = request.Brief,
             BrandId = request.BrandId,
+            ContentType = request.ContentType,
             ContextJson = request.Links is null
                 ? null
                 : System.Text.Json.JsonSerializer.Serialize(request.Links, Json),
@@ -376,20 +405,66 @@ public static class CampaignEndpoints
             return Results.NotFound();
         }
 
-        if (await ValidateBrandAndLinksAsync(request.BrandId, request.Links, db, ct) is { } invalid)
+        if (await ValidateBrandAndLinksAsync(
+                request.BrandId, request.Links, db, ct, request.Status, request.ContentType) is { } invalid)
         {
             return invalid;
         }
 
+        var inputsChanged = !string.Equals(campaign.Brief, request.Brief, StringComparison.Ordinal)
+            || campaign.BrandId != request.BrandId
+            || !string.Equals(campaign.ContentType, request.ContentType, StringComparison.Ordinal);
         campaign.Name = request.Name;
         campaign.Brief = request.Brief;
         campaign.BrandId = request.BrandId;
+        campaign.Status = request.Status;
+        campaign.ContentType = request.ContentType;
         campaign.ContextJson = request.Links is null
             ? null
             : System.Text.Json.JsonSerializer.Serialize(request.Links, Json);
         campaign.UpdatedAt = clock.GetUtcNow();
+        if (inputsChanged)
+        {
+            await MarkLatestReportStaleAsync(
+                campaign.Id, db, campaign.UpdatedAt, inputs: true, ct: ct);
+        }
         await db.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(campaign));
+    }
+
+    internal static async Task MarkLatestReportStaleAsync(
+        Guid campaignId, CastmillDbContext db, DateTimeOffset now,
+        bool inputs = false, bool angles = false, bool share = false,
+        CancellationToken ct = default)
+    {
+        var artifact = await db.Artifacts
+            .Where(a => a.CampaignId == campaignId && a.Kind == "seo-report")
+            .OrderByDescending(a => a.UpdatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (artifact is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var report = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(artifact.ContentJson, TargetsJson);
+            if (report is null)
+            {
+                return;
+            }
+            artifact.ContentJson = JsonSerializer.Serialize(report with
+            {
+                InputsStale = report.InputsStale || inputs,
+                AnglesStale = report.AnglesStale || angles,
+                ShareStale = report.ShareStale || share || report.SharedAt is not null,
+            }, TargetsJson);
+            artifact.Version++;
+            artifact.UpdatedAt = now;
+        }
+        catch (JsonException)
+        {
+        }
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, CastmillDbContext db, CancellationToken ct)

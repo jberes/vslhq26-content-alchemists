@@ -13,14 +13,6 @@ namespace Castmill.UI.State;
 /// </summary>
 public sealed class WorkspaceState(CampaignsClient campaigns)
 {
-    /// <summary>
-    /// The handoff's scaling rule: the rail lists campaigns up to about a dozen; past that
-    /// it shows the most recent few plus a link to the index, and ⌘K searches everything.
-    /// </summary>
-    public const int RailListLimit = 12;
-
-    public const int RailRecentCount = 5;
-
     private readonly List<CampaignResponse> _campaigns = [];
 
     private Task? _inFlight;
@@ -36,13 +28,12 @@ public sealed class WorkspaceState(CampaignsClient campaigns)
 
     public event Action? Changed;
 
-    /// <summary>True once there are more campaigns than the rail is willing to list.</summary>
-    public bool IsIndexed => _campaigns.Count > RailListLimit;
-
-    /// <summary>What the rail actually shows: everything, or the most recent few.</summary>
-    public IEnumerable<CampaignResponse> RailCampaigns => IsIndexed
-        ? _campaigns.OrderByDescending(c => c.UpdatedAt).Take(RailRecentCount)
-        : _campaigns.OrderByDescending(c => c.UpdatedAt);
+    /// <summary>
+    /// The complete campaign switcher, newest-created first. The rail owns vertical scrolling,
+    /// so hiding older campaigns behind a second index made the primary switcher incomplete.
+    /// </summary>
+    public IEnumerable<CampaignResponse> RailCampaigns =>
+        _campaigns.OrderByDescending(c => c.CreatedAt);
 
     /// <summary>
     /// Loads the campaign list, at most once at a time. Single-flight for the same reason as

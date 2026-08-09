@@ -19,7 +19,7 @@ public sealed record KeywordPlan(
     string? Focus,
     IReadOnlyList<string> YoutubeTitles,
     IReadOnlyList<KeywordRow> Keywords,
-    Guid SeoBriefArtifactId,
+    Guid? SeoBriefArtifactId,
     DateTimeOffset GeneratedAt);
 
 public sealed record ShareResult([property: JsonPropertyName("shareUrl")] string ShareUrl);
@@ -68,4 +68,9 @@ public sealed class SeoClient(ApiClient api)
     public Task<ShareResult> ShareReportAsync(Guid artifactId, CancellationToken ct = default) =>
         api.PostAsync<object, ShareResult>(
             $"api/v1/seo/reports/{artifactId}/share", new { }, anonymous: false, ct);
+
+    public Task<SeoAngleRegenerationResponse> RegenerateAnglesAsync(
+        Guid artifactId, CancellationToken ct = default) =>
+        api.PostAsync<object, SeoAngleRegenerationResponse>(
+            $"api/v1/seo/reports/{artifactId}/angles/regenerate", new { }, anonymous: false, ct);
 }

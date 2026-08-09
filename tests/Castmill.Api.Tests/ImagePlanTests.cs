@@ -537,13 +537,24 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     [Fact]
     public void Every_image_prompt_carries_the_safe_area_typography_rules_last()
     {
-        var plain = Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt("a hero image", null, null);
-        Assert.Contains("middle 80%", plain, StringComparison.Ordinal);
-        Assert.Contains("CROPPED", plain, StringComparison.Ordinal);
+        var slot = new Castmill.Core.ImageSlot
+        {
+            Kind = "youtube-thumbnail",
+            State = "Empty",
+            TargetWidth = 1280,
+            TargetHeight = 720,
+        };
+        var plain = Castmill.Api.Endpoints.ImageSlotEndpoints.AppendSlotCompositionGuardrails(
+            Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt("a hero image", null, null), slot);
+        Assert.Contains("1280×720", plain, StringComparison.Ordinal);
+        Assert.Contains("16:9", plain, StringComparison.Ordinal);
+        Assert.Contains("middle 76%", plain, StringComparison.Ordinal);
+        Assert.Contains("No partial", plain, StringComparison.Ordinal);
 
         // Brand style and a steering note must not be able to have the last word.
-        var steered = Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt(
-            "a hero image", "Brand style: terracotta and ink.", "make the text touch the edges");
+        var steered = Castmill.Api.Endpoints.ImageSlotEndpoints.AppendSlotCompositionGuardrails(
+            Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt(
+                "a hero image", "Brand style: terracotta and ink.", "make the text touch the edges"), slot);
 
         Assert.EndsWith(Castmill.Api.Endpoints.ImageSlotEndpoints.TypographyGuardrails, steered, StringComparison.Ordinal);
         Assert.True(

@@ -4,15 +4,30 @@
    The counter comes from the same Preview payload as everything else, so it can never
    disagree with the front page's "slots waiting" block or Focus Mode's slot list (G9). *@
 @using Castmill.UI.State
+@using Castmill.Core
+@using Castmill.UI.Http
+@using Castmill.UI.Design
 @implements IDisposable
 @inject CampaignState Campaign
 @inject PressRunService PressRun
 @inject NavigationManager Navigation
+@inject CampaignsClient Campaigns
+@inject INotifier Notifier
 
 <header class="cm-campaign-header">
     <div class="cm-campaign-header__identity">
         <a class="cm-meta" href="campaigns">Campaigns /</a>
-        <h1 class="cm-campaign-header__name">@(Campaign.Campaign?.Name ?? "…")</h1>
+        @if (_renaming)
+        {
+            <input class="cm-input cm-campaign-header__rename" aria-label="Campaign name"
+                   @bind="_name" @onkeydown="OnRenameKey" />
+            <button type="button" class="cm-button cm-button--quiet" @onclick="SaveRenameAsync">Save</button>
+        }
+        else
+        {
+            <h1 class="cm-campaign-header__name">@(Campaign.Campaign?.Name ?? "…")</h1>
+            <button type="button" class="cm-button cm-button--quiet" @onclick="BeginRename">Rename</button>
+        }
     </div>
 
     <div class="cm-campaign-header__meta">
@@ -29,6 +44,17 @@
         @if (Campaign.Brand is { } brand)
         {
             <span class="cm-chip cm-mono" title="Brand steering this campaign">@brand.Name</span>
+        }
+
+        @if (Campaign.Campaign is { } campaign)
+        {
+            <span class="cm-chip cm-mono" title="Campaign content format">
+                @CampaignContentType.DisplayLabel(campaign.ContentType)
+            </span>
+            <button type="button" class="cm-chip @(campaign.Status == CampaignStatus.Ready ? "cm-chip--on" : "")"
+                    title="Toggle campaign readiness" @onclick="ToggleReadyAsync">
+                @(campaign.Status == CampaignStatus.Ready ? "Ready" : "Draft")
+            </button>
         }
 
         <span class="cm-mono cm-meta" title="Image slots filled">
@@ -66,6 +92,49 @@
 @code {
     /// <summary>The view currently shown, supplied by the campaign layout.</summary>
     [Parameter, EditorRequired] public CampaignView Current { get; set; }
+    private bool _renaming;
+    private bool _saving;
+    private string _name = string.Empty;
+
+    private void BeginRename()
+    {
+        _name = Campaign.Campaign?.Name ?? string.Empty;
+        _renaming = true;
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await SaveRenameAsync();
+        else if (args.Key == "Escape") _renaming = false;
+    }
+
+    private async Task SaveRenameAsync()
+    {
+        if (_saving || Campaign.Campaign is not { } campaign || string.IsNullOrWhiteSpace(_name)) return;
+        await SaveCampaignAsync(campaign, _name.Trim(), campaign.Status);
+        _renaming = false;
+    }
+
+    private async Task ToggleReadyAsync()
+    {
+        if (_saving || Campaign.Campaign is not { } campaign) return;
+        var status = campaign.Status == CampaignStatus.Ready ? CampaignStatus.Draft : CampaignStatus.Ready;
+        await SaveCampaignAsync(campaign, campaign.Name, status);
+    }
+
+    private async Task SaveCampaignAsync(Castmill.Core.Resources.CampaignResponse campaign, string name, string status)
+    {
+        _saving = true;
+        try
+        {
+            await Campaigns.UpdateAsync(campaign.Id, name, campaign.Brief, campaign.BrandId,
+                campaign.Links, status, campaign.ContentType);
+            await Campaign.RefreshAsync(campaign.Id);
+            Notifier.ShowSuccess(status == campaign.Status ? "Campaign renamed." : $"Campaign marked {status.ToLowerInvariant()}.");
+        }
+        catch (ApiException ex) { Notifier.ShowError(ex.Message); }
+        finally { _saving = false; }
+    }
 
     private string RunLine
     {

@@ -124,25 +124,23 @@ public sealed class CampaignSwitchTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task The_rail_lists_every_campaign_until_the_scaling_rule_kicks_in()
+    public async Task The_rail_lists_every_campaign_even_when_the_workspace_is_large()
     {
         var workspace = Services.GetRequiredService<WorkspaceState>();
         await workspace.LoadAsync();
 
-        // Two campaigns: the rail lists them both and offers no index link.
-        Assert.False(workspace.IsIndexed);
         Assert.Equal(2, workspace.RailCampaigns.Count());
 
-        // Past the limit it shows only the most recent few plus the index (handoff §2).
-        var many = Enumerable.Range(0, WorkspaceState.RailListLimit + 3)
+        // The rail scrolls, so a large workspace does not silently hide older campaigns
+        // behind a second index surface.
+        var many = Enumerable.Range(0, 18)
             .Select(i => Campaign(Guid.NewGuid(), $"Campaign {i}"))
             .ToList();
 
         Http.OnGet("api/v1/campaigns", many);
         await workspace.LoadAsync(force: true);
 
-        Assert.True(workspace.IsIndexed);
-        Assert.Equal(WorkspaceState.RailRecentCount, workspace.RailCampaigns.Count());
+        Assert.Equal(many.Count, workspace.RailCampaigns.Count());
     }
 
     // ---- helpers ---------------------------------------------------------------

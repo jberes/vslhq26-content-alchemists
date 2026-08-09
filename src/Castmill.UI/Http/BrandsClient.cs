@@ -48,6 +48,12 @@ public sealed class BrandsClient(ApiClient api)
     public Task RenameAssetAsync(Guid brandId, Guid brandAssetId, string? label, CancellationToken ct = default) =>
         api.PatchAsync($"api/v1/brands/{brandId}/assets/{brandAssetId}", new BrandAssetLabelRequest(label), ct);
 
+    public Task<BrandAssetResponse> ChangeAssetKindAsync(
+        Guid brandId, Guid brandAssetId, string kind, CancellationToken ct = default) =>
+        api.PatchAsync<BrandAssetKindRequest, BrandAssetResponse>(
+            $"api/v1/brands/{brandId}/assets/{brandAssetId}/kind",
+            new BrandAssetKindRequest(kind), etag: null, ct);
+
     public Task UnlinkAssetAsync(Guid brandId, Guid brandAssetId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{brandId}/assets/{brandAssetId}", ct);
 

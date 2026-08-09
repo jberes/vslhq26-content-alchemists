@@ -12,6 +12,7 @@ using Castmill.Api.Services.Seo;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
+using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -25,6 +26,8 @@ public sealed record TranscribeRequest(
 
 public static class AiEndpoints
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapAiEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/ai").RequireAuthorization("TenantAllowed");
@@ -39,6 +42,9 @@ public static class AiEndpoints
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
         group.MapPost("/campaigns/{campaignId:guid}/generate/{kind}", GenerateOneAsync)
             .Validate<GenerateRequest>().RequireRateLimiting("ai");
+        group.MapPost("/campaigns/{campaignId:guid}/artifacts/{artifactId:guid}/youtube-titles/{slot}/regenerate",
+                RegenerateYoutubeTitleAsync)
+            .RequireRateLimiting("ai");
         // Second pass over one existing artifact (ADR-020). Revises in place behind a
         // revision snapshot, so unlike generate it returns the artifact, not a new row.
         group.MapPost("/campaigns/{campaignId:guid}/artifacts/{artifactId:guid}/tech-edit", TechEditAsync)
@@ -90,7 +96,8 @@ public static class AiEndpoints
                 Math.Max(0, s.StartSeconds),
                 Math.Max(s.StartSeconds, s.EndSeconds),
                 string.IsNullOrWhiteSpace(s.Speaker) ? null : s.Speaker,
-                s.Text.Trim()))
+                s.Text.Trim(),
+                string.IsNullOrWhiteSpace(s.SourceLabel) ? source : s.SourceLabel.Trim()))
             .ToList();
         return new TranscriptContent(source ?? "local-transcription", normalized);
     }
@@ -207,6 +214,9 @@ public static class AiEndpoints
             });
         }
         var artifact = await PersistTranscriptAsync(campaignId, transcript, tenant, db, clock, ct);
+        await CampaignEndpoints.MarkLatestReportStaleAsync(
+            campaignId, db, clock.GetUtcNow(), inputs: true, ct: ct);
+        await db.SaveChangesAsync(ct);
         return Results.Created(
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
             new { transcriptArtifactId = artifact.Id, segmentCount = transcript.Segments.Count });
@@ -260,6 +270,9 @@ public static class AiEndpoints
         }
 
         var artifact = await PersistTranscriptAsync(campaignId, transcript, tenant, db, clock, ct);
+        await CampaignEndpoints.MarkLatestReportStaleAsync(
+            campaignId, db, clock.GetUtcNow(), inputs: true, ct: ct);
+        await db.SaveChangesAsync(ct);
         return Results.Created(
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
             new { transcriptArtifactId = artifact.Id, segmentCount = transcript.Segments.Count });
@@ -287,6 +300,19 @@ public static class AiEndpoints
             && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
         {
             return SeoAnalysisRequired();
+        }
+
+        var unsupportedKinds = (request.Kinds ?? [])
+            .Select(Generators.Normalize)
+            .Where(kind => !ArtifactKinds.IsUserContent(kind)
+                && kind is not ("image-prompts" or "thumbnail-concepts"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (unsupportedKinds.Count > 0)
+        {
+            return Results.Problem(
+                $"These are not Mill content types: {string.Join(", ", unsupportedKinds)}.",
+                statusCode: 400);
         }
 
         // Open the run row first: the client can start polling /ai/runs/{id} the
@@ -344,16 +370,38 @@ public static class AiEndpoints
         }
         var userId = AuthEndpoints.GetUserId(principal);
 
+        if (!ArtifactKinds.IsUserContent(Generators.Normalize(kind)))
+        {
+            return Results.Problem($"{kind} is not a Mill content type.", statusCode: 400);
+        }
+
+        if (request.ParentArtifactId is { } parentId
+            && !await db.Artifacts.AnyAsync(
+                a => a.Id == parentId && a.CampaignId == campaignId && a.Kind == "blog", ct))
+        {
+            return Results.Problem("A generated child must belong to a blog in this campaign.", statusCode: 400);
+        }
+        if (request.ReplaceArtifactId is { } replaceId
+            && !await db.Artifacts.AnyAsync(
+                a => a.Id == replaceId && a.CampaignId == campaignId
+                    && a.Kind == Generators.Normalize(kind), ct))
+        {
+            return Results.Problem("The placeholder does not match this campaign and content kind.", statusCode: 400);
+        }
+
         if (kind.Equals("blog", StringComparison.OrdinalIgnoreCase))
         {
-            return Results.Ok(await orchestrator.RunBlogAsync(userId, campaign, transcript, request.Brief, ct));
+            return Results.Ok(await orchestrator.RunBlogAsync(
+                userId, campaign, transcript, request.Brief, ct, request.ReplaceArtifactId));
         }
         var spec = Generators.Find(kind);
         if (spec is null)
         {
             return Results.NotFound();
         }
-        return Results.Ok(await orchestrator.RunGeneratorAsync(userId, campaign, transcript, request.Brief, spec, ct));
+        return Results.Ok(await orchestrator.RunGeneratorAsync(
+            userId, campaign, transcript, request.Brief, spec, ct,
+            request.ParentArtifactId, request.ReplaceArtifactId));
     }
 
     private static async Task<bool> HasApprovedSeoAnalysisAsync(
@@ -363,6 +411,46 @@ public static class AiEndpoints
         return targets.Keywords.Count > 0
             && await db.Artifacts.AnyAsync(
                 a => a.CampaignId == campaign.Id && a.Kind == "seo-report", ct);
+    }
+
+    private static async Task<IResult> RegenerateYoutubeTitleAsync(
+        Guid campaignId,
+        Guid artifactId,
+        string slot,
+        YoutubeTitleRegenerationRequest request,
+        ClaimsPrincipal principal,
+        IAiOrchestrator orchestrator,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        slot = slot.ToUpperInvariant();
+        if (slot is not ("A" or "B" or "C"))
+        {
+            return Results.Problem("Title slot must be A, B, or C.", statusCode: 400);
+        }
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, ct);
+        var artifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == artifactId && a.CampaignId == campaignId && a.Kind == "youtube", ct);
+        var transcriptJson = await db.Artifacts
+            .Where(a => a.CampaignId == campaignId && a.Kind == "transcript")
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => a.ContentJson)
+            .FirstOrDefaultAsync(ct);
+        var transcript = transcriptJson is null ? null : TranscriptService.Parse(transcriptJson);
+        if (campaign is null || artifact is null || transcript is null)
+        {
+            return Results.NotFound();
+        }
+        try
+        {
+            return Results.Ok(await orchestrator.RegenerateYoutubeTitleAsync(
+                AuthEndpoints.GetUserId(principal), campaign, artifact, transcript,
+                slot, request.Steering, ct));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 409);
+        }
     }
 
     private static IResult SeoAnalysisRequired() => Results.Problem(
@@ -466,7 +554,9 @@ public static class AiEndpoints
         ClaimsPrincipal principal,
         IBriefSuggester suggester,
         IBrandContextService brandContext,
+        ITenantProvider tenant,
         CastmillDbContext db,
+        TimeProvider clock,
         IOptions<SeoOptions> seoOptions,
         CancellationToken ct)
     {
@@ -484,9 +574,18 @@ public static class AiEndpoints
         try
         {
             var context = await brandContext.ResolveAsync(pair.Campaign, ct);
+            var strategy = string.Join("\n\n", new[]
+            {
+                context.SeoTargetBlock,
+                string.IsNullOrWhiteSpace(pair.Campaign.ContentType)
+                    ? null
+                    : $"Required content format: {pair.Campaign.ContentType}.",
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
             var brief = await suggester.SuggestAsync(
                 AuthEndpoints.GetUserId(principal), pair.Transcript, title,
-                context.SeoTargetBlock, ct);
+                strategy, ct);
+
+            await PersistSummaryAsync(pair.Campaign, brief, tenant, db, clock.GetUtcNow(), ct);
 
             return Results.Ok(new BriefSuggestionResponse(
                 brief.Title, brief.Audience, brief.BrandVoice, brief.Angle,
@@ -500,6 +599,70 @@ public static class AiEndpoints
         {
             return Results.Problem("The model's brief could not be read.", statusCode: 502);
         }
+    }
+
+    private static async Task PersistSummaryAsync(
+        Campaign campaign, BriefSuggestion brief, ITenantProvider tenant,
+        CastmillDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(brief.Summary) && brief.KeyPoints.Count == 0)
+        {
+            return;
+        }
+
+        var targets = CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson);
+        var markdown = new System.Text.StringBuilder();
+        markdown.AppendLine("# Executive summary").AppendLine();
+        markdown.AppendLine(brief.Summary ?? "Summary pending review.").AppendLine();
+        markdown.AppendLine("## Key takeaways").AppendLine();
+        foreach (var point in brief.KeyPoints)
+        {
+            markdown.Append("1. ").AppendLine(point);
+        }
+        markdown.AppendLine().AppendLine("## Keyword opportunities").AppendLine();
+        foreach (var keyword in targets.Keywords.Take(10))
+        {
+            markdown.Append("- ").Append(keyword.Term);
+            if (keyword.Volume is { } volume)
+            {
+                markdown.Append(" — ").Append(volume.ToString("N0", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(" monthly searches");
+            }
+            markdown.AppendLine();
+        }
+
+        var content = JsonSerializer.Serialize(new
+        {
+            markdown = markdown.ToString().Trim(),
+            summary = brief.Summary,
+            keyPoints = brief.KeyPoints,
+            keywordOpportunities = targets.Keywords.Take(10).Select(keyword => keyword.Term).ToList(),
+        }, WebJson);
+        var existing = await db.Artifacts.SingleOrDefaultAsync(
+            artifact => artifact.CampaignId == campaign.Id && artifact.Kind == "campaign-summary", ct);
+        if (existing is null)
+        {
+            db.Artifacts.Add(new Artifact
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.TenantId!.Value,
+                CampaignId = campaign.Id,
+                Kind = "campaign-summary",
+                Title = $"Summary — {campaign.Name}",
+                ContentJson = content,
+                Version = 1,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else
+        {
+            await ArtifactEndpoints.SnapshotRevisionAsync(db, existing, "ai-generation", now, ct);
+            existing.ContentJson = content;
+            existing.Version++;
+            existing.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>

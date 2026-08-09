@@ -6,7 +6,10 @@ namespace Castmill.Core.Ai;
 /// One timed segment of a source transcript. Segment ids are the provenance
 /// anchors (G5): every generated claim cites the segments it came from.
 /// </summary>
-public sealed record TranscriptSegment(string Id, double StartSeconds, double EndSeconds, string? Speaker, string Text);
+public sealed record TranscriptSegment(
+    string Id, double StartSeconds, double EndSeconds, string? Speaker, string Text,
+    /// <summary>Original recording/file label in a combined multi-source transcript.</summary>
+    string? SourceLabel = null);
 
 /// <summary>Stored as the ContentJson of an artifact with Kind = "transcript".</summary>
 public sealed record TranscriptContent(string Source, IReadOnlyList<TranscriptSegment> Segments);
@@ -33,7 +36,11 @@ public sealed record GenerateRequest(
     /// "social-linkedin" twice in the array still generates it once — so "three more LinkedIn
     /// posts" is expressed here. Capped so a slip of the keyboard cannot start 500 generations.
     /// </summary>
-    [property: Range(1, GenerateRequest.MaxCopies)] int Count = 1)
+    [property: Range(1, GenerateRequest.MaxCopies)] int Count = 1,
+    /// <summary>Optional blog/pillar that owns the generated derivative.</summary>
+    Guid? ParentArtifactId = null,
+    /// <summary>Optional placeholder artifact replaced in place by generation.</summary>
+    Guid? ReplaceArtifactId = null)
 {
     public const int MaxCopies = 5;
 }

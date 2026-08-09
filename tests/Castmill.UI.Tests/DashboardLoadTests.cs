@@ -28,7 +28,11 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
 
         Http.OnGet("api/v1/campaigns/dashboard", new DashboardResponse(
             [new DashboardArtifact(CampaignA, "Webinar campaign", Guid.NewGuid(),
-                "blog", "Cutting deployment time", ArtifactStatus.InReview, DateTimeOffset.UtcNow)],
+                "blog", "Cutting deployment time", ArtifactStatus.InReview, DateTimeOffset.UtcNow),
+             // A stale API/cache may still return this; the client must not offer raw report
+             // JSON as a Focus-mode manuscript.
+             new DashboardArtifact(CampaignA, "Webinar campaign", Guid.NewGuid(),
+                "seo-report", "Internal deep report", ArtifactStatus.InReview, DateTimeOffset.UtcNow)],
             [new DashboardArtifact(CampaignB, "Podcast campaign", Guid.NewGuid(),
                 "newsletter", "Stale October letter", ArtifactStatus.Draft, DateTimeOffset.UtcNow.AddDays(-9))],
             [
@@ -50,6 +54,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             TimeSpan.FromSeconds(5));
 
         Assert.Contains("Stale October letter", page.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Internal deep report", page.Markup, StringComparison.Ordinal);
         Assert.Contains("10", page.Markup, StringComparison.Ordinal);
         Assert.Contains("gpt-image-2", page.Markup, StringComparison.Ordinal);
 
@@ -85,10 +90,15 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
 
         Assert.Contains("2/6 images", page.Markup, StringComparison.Ordinal);
         Assert.Contains("1 in review", page.Markup, StringComparison.Ordinal);
+        Assert.Contains("Webinar", page.Markup, StringComparison.Ordinal);
+        Assert.Contains("Thought leadership", page.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain(Http.Requests, r =>
             r.RequestUri!.AbsolutePath.EndsWith("/preview", StringComparison.Ordinal));
     }
 
     private static CampaignResponse Campaign(Guid id, string name) =>
-        new(id, Guid.NewGuid(), name, null, DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+        new(id, Guid.NewGuid(), name, null, DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow,
+            ContentType: name.StartsWith("Webinar", StringComparison.Ordinal)
+                ? CampaignContentType.Webinar
+                : CampaignContentType.ThoughtLeadership);
 }

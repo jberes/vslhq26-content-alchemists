@@ -8,19 +8,24 @@ public sealed record CampaignCreateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
     [property: MaxLength(8000)] string? Brief,
     Guid? BrandId = null,
-    IReadOnlyList<CampaignLink>? Links = null);
+    IReadOnlyList<CampaignLink>? Links = null,
+    [property: MaxLength(30)] string? ContentType = null);
 
 public sealed record CampaignUpdateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
     [property: MaxLength(8000)] string? Brief,
     Guid? BrandId = null,
-    IReadOnlyList<CampaignLink>? Links = null);
+    IReadOnlyList<CampaignLink>? Links = null,
+    [property: MaxLength(20)] string Status = CampaignStatus.Draft,
+    [property: MaxLength(30)] string? ContentType = null);
 
 public sealed record CampaignResponse(
     Guid Id, Guid OwnerId, string Name, string? Brief,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     Guid? BrandId = null,
-    IReadOnlyList<CampaignLink>? Links = null);
+    IReadOnlyList<CampaignLink>? Links = null,
+    string Status = CampaignStatus.Draft,
+    string? ContentType = null);
 
 /// <summary>One artifact row on the workspace dashboard (review queue / aging drafts).</summary>
 public sealed record DashboardArtifact(
@@ -52,7 +57,8 @@ public sealed record DashboardResponse(
 public sealed record ArtifactCreateRequest(
     [property: Required, MinLength(1), MaxLength(50)] string Kind,
     [property: Required, MinLength(1), MaxLength(300)] string Title,
-    [property: Required] string ContentJson);
+    [property: Required] string ContentJson,
+    Guid? ParentArtifactId = null);
 
 public sealed record ArtifactUpdateRequest(
     [property: Required, MinLength(1), MaxLength(300)] string Title,
@@ -63,11 +69,14 @@ public sealed record ArtifactPreviewResponse(
     Guid Id, Guid CampaignId, string Kind, string Title, string Status, long Version,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     /// <summary>Transcript segment ids this artifact cites — the provenance threads' data.</summary>
-    IReadOnlyList<string>? Citations = null);
+    IReadOnlyList<string>? Citations = null,
+    Guid? ParentArtifactId = null,
+    bool IsPlaceholder = false);
 
 public sealed record ArtifactResponse(
     Guid Id, Guid CampaignId, string Kind, string Title, string ContentJson, string Status,
-    long Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    long Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+    Guid? ParentArtifactId = null);
 
 /// <summary>
 /// Status transitions are their own action, not part of a content save: "mark reviewed" and
@@ -340,7 +349,22 @@ public sealed record SeoAnalysisReportResponse(
     string Status = "Draft",
     string? SiteUrl = null,
     string? CampaignBrief = null,
-    SeoDeepInsights? Insights = null);
+    SeoDeepInsights? Insights = null,
+    bool InputsStale = false,
+    bool AnglesStale = false,
+    bool ShareStale = false,
+    DateTimeOffset? SharedAt = null);
+
+public sealed record SeoAngleRegenerationResponse(
+    Guid ReportArtifactId,
+    IReadOnlyList<SeoContentAngle> Angles,
+    DateTimeOffset GeneratedAt);
+
+public sealed record YoutubeTitleRegenerationRequest(string? Steering = null);
+public sealed record YoutubeTitleOptionResponse(
+    string Slot, string Title, string Angle, double Score, string Rationale);
+public sealed record YoutubeTitleRegenerationResponse(
+    Guid ArtifactId, long Version, YoutubeTitleOptionResponse Option);
 
 /// <summary>
 /// The chosen targets, saved on the CAMPAIGN so every later run — including content added

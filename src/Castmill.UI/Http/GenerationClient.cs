@@ -1,4 +1,5 @@
 using Castmill.Core.Ai;
+using Castmill.Core.Resources;
 
 namespace Castmill.UI.Http;
 
@@ -89,12 +90,20 @@ public sealed class GenerationClient(ApiClient api)
     /// currently inserts a new artifact row rather than revising in place.</summary>
     public Task<RunItem> GenerateOneAsync(
         Guid campaignId, string kind, Guid transcriptArtifactId, string? brief,
+        Guid? parentArtifactId = null, Guid? replaceArtifactId = null,
         CancellationToken ct = default) =>
         api.PostAsync<object, RunItem>(
             $"api/v1/ai/campaigns/{campaignId}/generate/{Uri.EscapeDataString(kind)}",
-            new { transcriptArtifactId, brief },
+            new { transcriptArtifactId, brief, parentArtifactId, replaceArtifactId },
             anonymous: false,
             ct);
+
+    public Task<YoutubeTitleRegenerationResponse> RegenerateYoutubeTitleAsync(
+        Guid campaignId, Guid artifactId, string slot, string? steering,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, YoutubeTitleRegenerationResponse>(
+            $"api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/youtube-titles/{slot}/regenerate",
+            new YoutubeTitleRegenerationRequest(steering), anonymous: false, ct);
 
     /// <summary>
     /// Second pass over one artifact (backend ADR-020). Unlike <see cref="GenerateOneAsync"/>

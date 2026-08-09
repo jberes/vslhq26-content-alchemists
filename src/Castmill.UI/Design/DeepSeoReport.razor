@@ -1,5 +1,6 @@
 @using ApexCharts
 @using Castmill.Core.Resources
+@using Castmill.UI.Editor
 @using System.Globalization
 
 <article class="cm-deep-report" aria-label="Deep SEO and AEO analysis">
@@ -11,6 +12,18 @@
         </div>
         <span class="cm-chip cm-chip--on">@Report.Status</span>
     </header>
+
+    @if (Report.InputsStale || Report.AnglesStale || Report.ShareStale)
+    {
+        <div class="cm-seo__banner" role="status">
+            <strong>Some report layers need attention.</strong>
+            <div class="cm-chips">
+                @if (Report.InputsStale) { <span class="cm-chip">inputs changed · re-run analysis</span> }
+                @if (Report.AnglesStale) { <span class="cm-chip">targets changed · regenerate angles</span> }
+                @if (Report.ShareStale) { <span class="cm-chip">public snapshot is out of date</span> }
+            </div>
+        </div>
+    }
 
     <section class="cm-report-stats" aria-label="Report summary">
         <div class="cm-report-stat">
@@ -71,39 +84,65 @@
         </div>
         @if (Insights?.Aeo.Engines.Count > 0)
         {
-            <div class="cm-aeo-grid">
+            <div class="cm-aeo-tabs" role="tablist" aria-label="Answer engines">
                 @foreach (var engine in Insights.Aeo.Engines)
                 {
-                    <details class="cm-aeo-card" open="@(engine.Succeeded)">
-                        <summary>
-                            <strong>@engine.Label</strong>
-                            <span class="cm-chip @(engine.DomainCited ? "cm-chip--on" : "")">
-                                @(engine.Succeeded ? engine.DomainCited ? "cites site" : "not cited" : "unavailable")
-                            </span>
-                        </summary>
-                        @if (!engine.Succeeded)
-                        {
-                            <p class="cm-meta">@engine.Error</p>
-                        }
-                        else
-                        {
-                            <p>@(string.IsNullOrWhiteSpace(engine.Answer) ? "The engine returned no answer text." : engine.Answer)</p>
-                            @if (engine.Citations.Count > 0)
-                            {
-                                <div class="cm-chips">
-                                    @foreach (var citation in engine.Citations)
-                                    {
-                                        <a class="cm-chip @(citation.IsOwnDomain ? "cm-chip--on" : "")"
-                                           href="@citation.Url" target="_blank" rel="noopener noreferrer">
-                                            @citation.Domain
-                                        </a>
-                                    }
-                                </div>
-                            }
-                        }
-                    </details>
+                    var active = ActiveAeoEngine?.Provider == engine.Provider;
+                    <button type="button" role="tab"
+                            id="cm-aeo-tab-@engine.Provider"
+                            aria-controls="cm-aeo-panel-@engine.Provider"
+                            aria-selected="@(active ? "true" : "false")"
+                            tabindex="@(active ? "0" : "-1")"
+                            class="cm-aeo-tab @(active ? "cm-aeo-tab--active" : null)"
+                            @onclick="() => SelectAeoEngine(engine.Provider)">
+                        <strong>@engine.Label</strong>
+                        <span>@(engine.Succeeded ? engine.DomainCited ? "Cites site" : "Not cited" : "Unavailable")</span>
+                    </button>
                 }
             </div>
+            @if (ActiveAeoEngine is { } activeEngine)
+            {
+                <div class="cm-aeo-panel" role="tabpanel"
+                     id="cm-aeo-panel-@activeEngine.Provider"
+                     aria-labelledby="cm-aeo-tab-@activeEngine.Provider">
+                    <header class="cm-aeo-panel__head">
+                        <div>
+                            <span class="cm-kicker">@activeEngine.Label response</span>
+                            <h4>@(activeEngine.Succeeded ? "What the engine says" : "Engine unavailable")</h4>
+                        </div>
+                        <span class="cm-chip @(activeEngine.DomainCited ? "cm-chip--on" : "")">
+                            @(activeEngine.Succeeded ? activeEngine.DomainCited ? "cites site" : "not cited" : "unavailable")
+                        </span>
+                    </header>
+                    @if (!activeEngine.Succeeded)
+                    {
+                        <p class="cm-meta">@activeEngine.Error</p>
+                    }
+                    else if (string.IsNullOrWhiteSpace(activeEngine.Answer))
+                    {
+                        <p class="cm-meta">The engine returned no answer text.</p>
+                    }
+                    else
+                    {
+                        <div class="cm-aeo-markdown">@MarkdownRenderer.ToHtml(activeEngine.Answer)</div>
+                    }
+                    @if (activeEngine.Citations.Count > 0)
+                    {
+                        <footer class="cm-aeo-panel__sources">
+                            <span class="cm-kicker">Cited sources</span>
+                            <div class="cm-chips">
+                                @foreach (var citation in activeEngine.Citations)
+                                {
+                                    <a class="cm-chip @(citation.IsOwnDomain ? "cm-chip--on" : "")"
+                                       href="@citation.Url" target="_blank" rel="noopener noreferrer">
+                                        @citation.Domain
+                                    </a>
+                                }
+                            </div>
+                        </footer>
+                    }
+                </div>
+            }
         }
         else
         {
@@ -281,7 +320,16 @@
     @if (Insights is { ContentAngles.Count: > 0 } angleInsights)
     {
         <section class="cm-deep-report__section">
-            <h3>Report-grounded content opportunities</h3>
+            <div class="cm-deep-report__section-head">
+                <div><h3>Report-grounded content opportunities</h3></div>
+                @if (OnRegenerateAngles.HasDelegate)
+                {
+                    <button type="button" class="cm-button cm-button--quiet"
+                            disabled="@RegeneratingAngles" @onclick="OnRegenerateAngles">
+                        @(RegeneratingAngles ? "Regenerating…" : "Regenerate angles")
+                    </button>
+                }
+            </div>
             <p class="cm-meta">These are the strategic options the later brief and generators will use.</p>
             <ol class="cm-report-angle-grid">
                 @foreach (var angle in angleInsights.ContentAngles)
@@ -291,6 +339,13 @@
                         <span class="cm-meta">@angle.AudienceNeed</span>
                         <div class="cm-chips"><span class="cm-chip cm-chip--on">@angle.TargetKeyword</span><span class="cm-chip">@angle.SuggestedAsset</span></div>
                         <p>@angle.Rationale</p>
+                        @if (OnDraftAngle.HasDelegate)
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="() => OnDraftAngle.InvokeAsync(angle)">
+                                Seed blog from this angle
+                            </button>
+                        }
                     </li>
                 }
             </ol>
@@ -300,8 +355,25 @@
 
 @code {
     [Parameter, EditorRequired] public SeoAnalysisReportResponse Report { get; set; } = default!;
+    [Parameter] public EventCallback<SeoContentAngle> OnDraftAngle { get; set; }
+    [Parameter] public EventCallback OnRegenerateAngles { get; set; }
+    [Parameter] public bool RegeneratingAngles { get; set; }
 
     private SeoDeepInsights? Insights => Report.Insights;
+    private string? _activeAeoProvider;
+    private SeoAeoEngineResult? ActiveAeoEngine
+    {
+        get
+        {
+            var engines = Insights?.Aeo.Engines;
+            return engines?.FirstOrDefault(engine => engine.Provider == _activeAeoProvider)
+                ?? engines?.FirstOrDefault(engine => engine.Succeeded)
+                ?? engines?.FirstOrDefault();
+        }
+    }
+
+    private void SelectAeoEngine(string provider) => _activeAeoProvider = provider;
+
     private string Visibility => Insights?.Aeo.VisibilityPercent is { } value
         ? $"{value:0.#}%"
         : "—";

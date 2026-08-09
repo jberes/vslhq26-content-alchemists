@@ -10,6 +10,7 @@
    pasted transcripts work everywhere.
 *@
 @page "/campaigns/new"
+@using Castmill.Core
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
@@ -56,11 +57,16 @@
                         Nothing leaves it except the finished transcript.
                     </p>
                     <button type="button" class="cm-button" @onclick="PickMediaAsync">
-                        Pick a file &amp; transcribe…
+                        Pick files &amp; transcribe…
                     </button>
-                    @if (_picked is { } picked)
+                    @if (_pickedFiles.Count > 0)
                     {
-                        <p class="cm-mono cm-meta">@picked.FileName · @(picked.SizeBytes / 1_048_576) MB</p>
+                        <ul class="cm-log" aria-label="Selected source files">
+                            @foreach (var picked in _pickedFiles)
+                            {
+                                <li class="cm-mono cm-meta">@picked.FileName · @(picked.SizeBytes / 1_048_576) MB</li>
+                            }
+                        </ul>
                     }
                 </div>
             }
@@ -94,7 +100,7 @@
             }
 
             <div class="cm-form__actions">
-                @if (_picked is not null)
+                @if (_pickedFiles.Count > 0)
                 {
                     <button type="button" class="cm-button" disabled="@(_name.Trim().Length == 0)"
                             @onclick="StartLocalIngestAsync">
@@ -162,6 +168,16 @@
             </label>
 
             <div class="cm-brief">
+                <label class="cm-field">
+                    <span class="cm-field__label">Content type</span>
+                    <select class="cm-input" @bind="_contentType">
+                        @foreach (var contentType in CampaignContentType.All)
+                        {
+                            <option value="@contentType">@CampaignContentType.DisplayLabel(contentType)</option>
+                        }
+                    </select>
+                    <span class="cm-field__hint cm-meta">Steers the analysis, brief, and every downstream generator.</span>
+                </label>
                 <label class="cm-field">
                     <span class="cm-field__label">AI-generated audience for the analysis</span>
                     <textarea class="cm-input cm-textarea" rows="2" @ref="_briefFirstField" @bind="_audience"
@@ -413,6 +429,15 @@
 
             <div class="cm-brief">
                 <label class="cm-field">
+                    <span class="cm-field__label">Content type</span>
+                    <select class="cm-input" @bind="_contentType">
+                        @foreach (var contentType in CampaignContentType.All)
+                        {
+                            <option value="@contentType">@CampaignContentType.DisplayLabel(contentType)</option>
+                        }
+                    </select>
+                </label>
+                <label class="cm-field">
                     <span class="cm-field__label">Audience</span>
                     <textarea class="cm-input cm-textarea" rows="2" @bind="_audience"></textarea>
                 </label>
@@ -507,10 +532,9 @@
             new("social", "Social set (6 platforms)", selected: false),
         };
 
-        items.AddRange(ArtifactDisplay.Known
-            .Where(k => k.OnBoard
-                        && k.Lane != "Social"
-                        && k.Kind is not ("blog" or "youtube" or "seo-keyword-plan"))
+        items.AddRange(ArtifactDisplay.UserGeneratableKinds
+            .Where(k => k.Lane != "Social"
+                        && k.Kind is not ("blog" or "youtube"))
             .Select(k => new FanOutItem(k.Kind, k.Label, selected: false)));
 
         return items;
@@ -577,6 +601,7 @@
     private string _audience = string.Empty;
     private string _voice = string.Empty;
     private string _angle = string.Empty;
+    private string _contentType = CampaignContentType.ThoughtLeadership;
     private string _siteUrl = string.Empty;
     private string? _error;
     private bool _busy;
@@ -584,6 +609,7 @@
     private Guid? _campaignId;
     private Guid? _transcriptArtifactId;
     private PickedMedia? _picked;
+    private readonly List<PickedMedia> _pickedFiles = [];
     private bool _contextSuggesting;
     private string? _contextError;
 
@@ -988,16 +1014,19 @@
     private async Task PickMediaAsync()
     {
         _error = null;
-        var picked = await Media.PickMediaAsync();
-        if (picked is null)
+        var picked = await Media.PickMediaFilesAsync();
+        if (picked.Count == 0)
         {
             return;
         }
 
-        _picked = picked;
+        _pickedFiles.Clear();
+        _pickedFiles.AddRange(picked);
+        _picked = picked[0];
         if (_name.Trim().Length == 0)
         {
-            _name = System.IO.Path.GetFileNameWithoutExtension(picked.FileName);
+            _name = System.IO.Path.GetFileNameWithoutExtension(picked[0].FileName)
+                + (picked.Count > 1 ? $" + {picked.Count - 1} sources" : string.Empty);
         }
 
         // The pick resumes on the MAUI main thread, outside Blazor's render loop — without
@@ -1015,7 +1044,7 @@
     /// </summary>
     private async Task StartLocalIngestAsync()
     {
-        if (_picked is not { } picked)
+        if (_pickedFiles.Count == 0)
         {
             return;
         }
@@ -1044,11 +1073,33 @@
 
         try
         {
-            var transcription = await Media.TranscribeAsync(picked, progress);
-
-            if (transcription.Segments.Count == 0)
+            var combined = new List<Castmill.Core.Ai.TranscriptSegment>();
+            double offset = 0;
+            for (var sourceIndex = 0; sourceIndex < _pickedFiles.Count; sourceIndex++)
             {
-                _error = "Whisper heard nothing usable in that file.";
+                var picked = _pickedFiles[sourceIndex];
+                await NarrateAsync(
+                    $"transcribing source {sourceIndex + 1}/{_pickedFiles.Count} · {picked.FileName}",
+                    Math.Max(2, sourceIndex * 85 / _pickedFiles.Count));
+                var transcription = await Media.TranscribeAsync(picked, progress);
+                foreach (var segment in transcription.Segments)
+                {
+                    combined.Add(segment with
+                    {
+                        StartSeconds = segment.StartSeconds + offset,
+                        EndSeconds = segment.EndSeconds + offset,
+                        SourceLabel = picked.FileName,
+                    });
+                }
+                if (transcription.Segments.Count > 0)
+                {
+                    offset = combined[^1].EndSeconds + 0.25;
+                }
+            }
+
+            if (combined.Count == 0)
+            {
+                _error = "Whisper heard nothing usable in the selected files.";
                 return;
             }
 
@@ -1057,9 +1108,10 @@
             _campaignId = campaign.Id;
             Workspace.Add(campaign);
 
-            await NarrateAsync($"ingesting {transcription.Segments.Count} timed segments…", 98);
+            await NarrateAsync($"combining {_pickedFiles.Count} sources · {combined.Count} timed segments…", 98);
             var ingest = await Generation.IngestTranscriptAsync(
-                campaign.Id, transcription.JoinedText, picked.FileName, transcription.Segments);
+                campaign.Id, string.Join(' ', combined.Select(segment => segment.Text)),
+                string.Join(" + ", _pickedFiles.Select(file => file.FileName)), combined);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
 
             await NarrateAsync($"{ingest.Segments} timed segments · inferring the research audience…", 85);
@@ -1141,6 +1193,7 @@
     }
 
     private string CampaignBrief => string.Join('\n',
+        $"Content type: {_contentType}",
         $"Audience: {_audience}",
         $"Brand voice: {_voice}",
         $"Angle: {_angle}");
@@ -1161,7 +1214,8 @@
         await Campaigns.UpdateAsync(
             campaignId, _name.Trim(), CampaignBrief,
             Guid.TryParse(_brandId, out var brandId) ? brandId : null,
-            links.Count > 0 ? links : null);
+            links.Count > 0 ? links : null,
+            CampaignStatus.Draft, _contentType);
     }
 
     private async Task PressRunAsync()

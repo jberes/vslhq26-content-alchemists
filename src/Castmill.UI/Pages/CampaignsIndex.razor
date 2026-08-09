@@ -50,7 +50,11 @@
                         <span class="cm-campaign-card__band cm-duotone" aria-hidden="true"></span>
                         <span class="cm-campaign-card__body">
                             <span class="cm-kicker">
-                                @(summary is null ? "Campaign" : $"{summary.Artifacts} artifacts · {summary.Filled}/{summary.Slots} images")
+                                @CampaignContentType.DisplayLabel(campaign.ContentType)
+                                @if (summary is not null)
+                                {
+                                    <span> · @summary.Artifacts artifacts · @summary.Filled/@summary.Slots images</span>
+                                }
                             </span>
                             <span class="cm-campaign-card__title">@campaign.Name</span>
                             <span class="cm-meta">

@@ -25,6 +25,10 @@ public sealed class Campaign : ITenantScoped
     public Guid OwnerId { get; set; }
     public required string Name { get; set; }
     public string? Brief { get; set; }
+    /// <summary>Draft while strategy/content is assembled; Ready after producer review.</summary>
+    public string Status { get; set; } = CampaignStatus.Draft;
+    /// <summary>Tutorial | ProductDemo | Webinar | ThoughtLeadership.</summary>
+    public string? ContentType { get; set; }
 
     /// <summary>The brand steering this campaign's generation — null means "None".
     /// No FK constraint; brand delete detaches campaigns explicitly (house style).</summary>
@@ -46,11 +50,43 @@ public sealed class Campaign : ITenantScoped
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public static class CampaignStatus
+{
+    public const string Draft = "Draft";
+    public const string Ready = "Ready";
+    public static readonly string[] All = [Draft, Ready];
+    public static bool IsValid(string? value) => value is not null
+        && All.Contains(value, StringComparer.Ordinal);
+}
+
+public static class CampaignContentType
+{
+    public const string Tutorial = "Tutorial";
+    public const string ProductDemo = "ProductDemo";
+    public const string Webinar = "Webinar";
+    public const string ThoughtLeadership = "ThoughtLeadership";
+    public static readonly string[] All = [Tutorial, ProductDemo, Webinar, ThoughtLeadership];
+    public static bool IsValid(string? value) => string.IsNullOrWhiteSpace(value)
+        || All.Contains(value, StringComparer.Ordinal);
+
+    /// <summary>One shared product label for creation, campaign cards, rail and header.</summary>
+    public static string DisplayLabel(string? value) => value switch
+    {
+        Tutorial => "Tutorial",
+        ProductDemo => "Product demo",
+        Webinar => "Webinar",
+        ThoughtLeadership => "Thought leadership",
+        _ => "Campaign",
+    };
+}
+
 public sealed class Artifact : ITenantScoped
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public Guid CampaignId { get; set; }
+    /// <summary>Optional pillar/blog that owns this derivative artifact.</summary>
+    public Guid? ParentArtifactId { get; set; }
     public required string Kind { get; set; }
     public required string Title { get; set; }
     /// <summary>Typed JSON content (ADR-003); schema-validated at the boundary before persist.</summary>
@@ -300,9 +336,10 @@ public sealed class BrandAsset : ITenantScoped
 }
 
 /// <summary>
-/// Per-brand steering for one generator kind — "our newsletter template", "our blog
-/// voice". The default template for a kind is appended to that generator's instructions
-/// on every run for campaigns carrying the brand.
+/// Per-brand primary content brief for one generator kind — "our YouTube strategy", "our
+/// newsletter format". It takes precedence over generic writing guidance on every run for
+/// campaigns carrying the brand; machine-readable output and provenance contracts remain
+/// mandatory so the result can still be validated and persisted.
 /// </summary>
 public sealed class BrandTemplate : ITenantScoped
 {
@@ -315,7 +352,7 @@ public sealed class BrandTemplate : ITenantScoped
 
     public required string Name { get; set; }
 
-    /// <summary>The steering prompt appended to the generator's instructions.</summary>
+    /// <summary>The authoritative content instructions supplied to the generator.</summary>
     public required string SteeringPrompt { get; set; }
 
     /// <summary>The template auto-applied for this kind; at most one per (brand, kind).</summary>

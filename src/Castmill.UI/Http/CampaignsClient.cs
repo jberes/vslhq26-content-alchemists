@@ -35,15 +35,18 @@ public sealed class CampaignsClient(ApiClient api)
 
     public Task<CampaignResponse> CreateAsync(
         string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
+        string? contentType = null,
         CancellationToken ct = default) =>
         api.PostAsync<CampaignCreateRequest, CampaignResponse>(
-            "api/v1/campaigns", new CampaignCreateRequest(name, brief, brandId, links), anonymous: false, ct);
+            "api/v1/campaigns", new CampaignCreateRequest(name, brief, brandId, links, contentType), anonymous: false, ct);
 
     public Task<CampaignResponse> UpdateAsync(
         Guid id, string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
+        string status = "Draft", string? contentType = null,
         CancellationToken ct = default) =>
         api.PutAsync<CampaignUpdateRequest, CampaignResponse>(
-            $"api/v1/campaigns/{id}", new CampaignUpdateRequest(name, brief, brandId, links), etag: null, ct);
+            $"api/v1/campaigns/{id}",
+            new CampaignUpdateRequest(name, brief, brandId, links, status, contentType), etag: null, ct);
 
     /// <summary>Deletes the campaign and everything in it — artifacts, revisions, slots,
     /// schedule entries, runs. The server cascades explicitly; there is no undo.</summary>

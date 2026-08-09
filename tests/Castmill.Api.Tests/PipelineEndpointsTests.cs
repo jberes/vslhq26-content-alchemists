@@ -207,7 +207,7 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
         var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
             $"/api/v1/campaigns/{campaign.Id}/artifacts");
         Assert.Contains(previews!, p => p.Kind == "seo-keyword-plan");
-        Assert.Contains(previews!, p => p.Kind == "seo-brief");
+        Assert.DoesNotContain(previews!, p => p.Kind == "seo-brief");
     }
 
     [Fact]

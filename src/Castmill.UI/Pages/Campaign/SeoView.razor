@@ -20,7 +20,7 @@
 @inject ScoutClient Scout
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
-@inject Microsoft.JSInterop.IJSRuntime Js
+@inject IClipboardService Clipboard
 @inject NavigationManager Navigation
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — SEO analysis</PageTitle>
@@ -111,7 +111,10 @@
             {
                 @if (_analysis is { } deepReport)
                 {
-                    <DeepSeoReport Report="deepReport" />
+                    <DeepSeoReport Report="deepReport"
+                                   OnDraftAngle="DraftAngleAsync"
+                                   OnRegenerateAngles="RegenerateAnglesAsync"
+                                   RegeneratingAngles="_regeneratingAngles" />
                     <section class="cm-deep-report__section">
                         <div class="cm-form__actions">
                             <input class="cm-input cm-seo__focus" aria-label="Site URL for re-analysis"
@@ -274,7 +277,7 @@
                                     <span class="cm-mono cm-meta">@(angle.Volume?.ToString("N0") ?? "—")/mo</span>
                                     <button type="button" class="cm-button cm-button--quiet"
                                             disabled="@(_drafting == angle.Term)"
-                                            @onclick="() => DraftAngleAsync(angle.Term)">
+                                            @onclick="() => DraftKeywordAngleAsync(angle.Term)">
                                         @(_drafting == angle.Term ? "Drafting…" : "Draft as artifact")
                                     </button>
                                 </li>
@@ -723,25 +726,48 @@
         }
     }
 
-    private async Task DraftAngleAsync(string term)
+    private bool _regeneratingAngles;
+
+    private Task DraftKeywordAngleAsync(string term) => DraftAngleAsync(new SeoContentAngle(
+        term, "Searchers asking about this opportunity", "blog", term,
+        "Selected from the report's opportunity-ranked keyword table."));
+
+    private async Task RegenerateAnglesAsync()
+    {
+        if (_planArtifactId is not { } reportId) return;
+        _regeneratingAngles = true;
+        try
+        {
+            await Seo.RegenerateAnglesAsync(reportId);
+            _planArtifactId = null;
+            await Campaign.LoadAsync(CampaignId, force: true);
+            Notifier.ShowSuccess("Content angles regenerated from the current report and targets.");
+        }
+        catch (ApiException ex) { Notifier.ShowError(ex.Message); }
+        finally { _regeneratingAngles = false; }
+    }
+
+    private async Task DraftAngleAsync(SeoContentAngle angle)
     {
         if (Campaign.TranscriptArtifactId is not { } transcriptId)
         {
             return;
         }
 
-        _drafting = term;
+        _drafting = angle.Angle;
         StateHasChanged();
 
         try
         {
             var item = await Generation.GenerateOneAsync(
                 CampaignId, "blog", transcriptId,
-                $"Angle this around the search keyword \"{term}\": it should be the natural title focus.");
+                $"Use the approved angle \"{angle.Angle}\" for {angle.AudienceNeed}. "
+                + $"Target \"{angle.TargetKeyword}\". {angle.Rationale}",
+                replaceArtifactId: Campaign.Artifacts.FirstOrDefault(a => a.IsPlaceholder)?.Id);
 
             if (item.Success)
             {
-                Notifier.ShowSuccess($"Drafted \"{term}\" as a blog take · {item.DurationMs / 1000.0:0.0}s");
+                Notifier.ShowSuccess($"Drafted \"{angle.Angle}\" as the pillar blog · {item.DurationMs / 1000.0:0.0}s");
                 await Campaign.LoadAsync(CampaignId, force: true);
             }
             else
@@ -761,12 +787,11 @@
 
     private async Task CopyAsync(string text)
     {
-        try
+        if (await Clipboard.CopyTextAsync(text))
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
             Notifier.ShowSuccess("Copied.");
         }
-        catch (Microsoft.JSInterop.JSException)
+        else
         {
             Notifier.ShowError("Clipboard unavailable.");
         }

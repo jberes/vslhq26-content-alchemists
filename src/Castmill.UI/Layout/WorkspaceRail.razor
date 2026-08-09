@@ -2,6 +2,7 @@
    The four campaign views are NEVER rail items; they are tabs on the campaign header. That
    separation is what keeps "where am I" answerable and makes switching campaign orthogonal
    to switching view. *@
+@using Castmill.Core
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
@@ -80,23 +81,9 @@
     </div>
 
     <div class="cm-rail__group">
-        <span class="cm-kicker" id="cm-rail-campaign">In this campaign</span>
+        <span class="cm-kicker" id="cm-rail-campaigns">Campaigns</span>
 
-        @if (Workspace.Active is { } active)
-        {
-            @* The active-campaign card. Clicking it opens the switcher below rather than
-               navigating, because switching campaign must keep the current view. *@
-            <div class="cm-rail__card">
-                <span class="cm-rail__card-name">@active.Name</span>
-                <span class="cm-meta">@ArtifactDisplay.Ago(active.UpdatedAt, DateTimeOffset.Now)</span>
-            </div>
-        }
-        else
-        {
-            <p class="cm-rail__empty cm-meta">No campaign open.</p>
-        }
-
-        <ul class="cm-rail__items" aria-labelledby="cm-rail-campaign">
+        <ul class="cm-rail__items" aria-labelledby="cm-rail-campaigns">
             @foreach (var campaign in Workspace.RailCampaigns)
             {
                 <li class="cm-rail__row">
@@ -108,26 +95,28 @@
                         @* Collapsed, the name is hidden and this initial is all that is left,
                            so it has to be enough to tell two campaigns apart at a glance. *@
                         <span class="cm-rail__glyph cm-rail__glyph--initial" aria-hidden="true">@Initial(campaign.Name)</span>
-                        <span class="cm-rail__label">@campaign.Name</span>
+                        <span class="cm-rail__campaign-copy cm-rail__label">
+                            <span class="cm-rail__campaign-name">@campaign.Name</span>
+                            <span class="cm-rail__campaign-meta">
+                                @CampaignContentType.DisplayLabel(campaign.ContentType)
+                                <span aria-hidden="true"> · </span>
+                                Added @campaign.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                <span aria-hidden="true"> · </span>
+                                Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)
+                            </span>
+                        </span>
                     </button>
                     <button type="button" class="cm-rail__delete"
                             title="Delete campaign" aria-label="Delete @campaign.Name"
                             @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
-                        &#x2715;
+                        <span aria-hidden="true">🗑</span>
                     </button>
                 </li>
             }
 
-            @if (Workspace.IsIndexed)
+            @if (Workspace.Campaigns.Count == 0)
             {
-                @* The handoff's scaling rule: past about a dozen campaigns the rail stops
-                   trying to list them all. *@
-                <li>
-                    <a class="cm-rail__item cm-rail__index" href="campaigns">
-                        <span class="cm-rail__label">Index — all @Workspace.Campaigns.Count</span>
-                        <span aria-hidden="true">&rarr;</span>
-                    </a>
-                </li>
+                <li class="cm-rail__empty cm-meta">No campaigns yet.</li>
             }
         </ul>
     </div>

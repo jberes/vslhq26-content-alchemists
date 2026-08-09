@@ -18,8 +18,8 @@
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject IConfirmService Confirm
 @inject INotifier Notifier
+@inject IClipboardService Clipboard
 @inject NavigationManager Navigation
-@inject Microsoft.JSInterop.IJSRuntime Js
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Mill Floor</PageTitle>
 
@@ -553,9 +553,8 @@
     /// </summary>
     private static readonly string[] AllKinds =
         [.. new[] { "blog", "social" }
-            .Concat(ArtifactDisplay.Known
-                .Where(k => k.OnBoard && k.Lane != "Social" && k.Kind != "blog"
-                            && k.Kind != "seo-keyword-plan")
+            .Concat(ArtifactDisplay.UserGeneratableKinds
+                .Where(k => k.Lane != "Social" && k.Kind != "blog")
                 .Select(k => k.Kind))];
 
     private static readonly int[] CountChoices = [1, 2, 3, 5];
@@ -803,15 +802,18 @@
     private async Task CopyTranscriptAsync()
     {
         var text = string.Join("\n\n", TranscriptParagraphs());
-        try
+        if (text.Length == 0)
         {
-            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notifier.ShowError("There is no transcript text to copy.");
+            return;
+        }
+
+        if (await Clipboard.CopyTextAsync(text))
+        {
             Notifier.ShowSuccess($"Transcript copied — {text.Length:N0} characters.");
         }
-        catch (Microsoft.JSInterop.JSException)
+        else
         {
-            // Clipboard access can be denied (permissions, non-secure context). The modal
-            // still allows manual select-all, so say that instead of failing silently.
             Notifier.ShowError("The clipboard was blocked here — open View and copy manually.");
         }
     }

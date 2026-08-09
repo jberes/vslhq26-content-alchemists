@@ -69,6 +69,11 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
             new BrandTemplateRequest("press-release", "Nope", "steer"));
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
 
+        // Image-planning prompts are internal generator machinery, not Brand content types.
+        var operational = await client.PostAsJsonAsync(baseUrl,
+            new BrandTemplateRequest("image-prompts", "Hidden machinery", "steer"));
+        Assert.Equal(HttpStatusCode.BadRequest, operational.StatusCode);
+
         var first = await client.PostAsJsonAsync(baseUrl,
             new BrandTemplateRequest("newsletter", "Monthly", "Three sections, one CTA.", IsDefault: true));
         first.EnsureSuccessStatusCode();
@@ -77,9 +82,19 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
             new BrandTemplateRequest("newsletter", "Launch special", "Louder.", IsDefault: true));
         second.EnsureSuccessStatusCode();
 
+        // A real strategy prompt is substantially longer than a style hint. YouTube is a
+        // first-class kind and the complete prompt must survive validation + persistence.
+        var youtubePrompt = "YOUTUBE-PRIMARY-BEGIN\n" + new string('y', 7_600) + "\nYOUTUBE-PRIMARY-END";
+        var youtube = await client.PostAsJsonAsync(baseUrl,
+            new BrandTemplateRequest("youtube", "YouTube strategy", youtubePrompt, IsDefault: true));
+        youtube.EnsureSuccessStatusCode();
+
         var templates = await client.GetFromJsonAsync<List<BrandTemplateResponse>>(baseUrl);
-        Assert.Equal(2, templates!.Count);
-        Assert.Equal("Launch special", Assert.Single(templates, t => t.IsDefault).Name);
+        Assert.Equal(3, templates!.Count);
+        Assert.Equal("Launch special", Assert.Single(templates,
+            t => t.Kind == "newsletter" && t.IsDefault).Name);
+        Assert.Equal(youtubePrompt, Assert.Single(templates,
+            t => t.Kind == "youtube" && t.IsDefault).SteeringPrompt);
     }
 
     [Fact]
@@ -161,6 +176,19 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
         kit = await client.GetFromJsonAsync<List<BrandAssetResponse>>($"/api/v1/brands/{brand.Id}/assets");
         Assert.Null(Assert.Single(kit!).Label);
 
+        var retype = await client.PatchAsJsonAsync(
+            $"/api/v1/brands/{brand.Id}/assets/{link.Id}/kind",
+            new BrandAssetKindRequest("background"));
+        Assert.Equal(HttpStatusCode.OK, retype.StatusCode);
+        Assert.Equal("background", (await retype.Content.ReadFromJsonAsync<BrandAssetResponse>())!.Kind);
+        kit = await client.GetFromJsonAsync<List<BrandAssetResponse>>($"/api/v1/brands/{brand.Id}/assets");
+        Assert.Equal("background", Assert.Single(kit!).Kind);
+
+        var invalidKind = await client.PatchAsJsonAsync(
+            $"/api/v1/brands/{brand.Id}/assets/{link.Id}/kind",
+            new BrandAssetKindRequest("avatar"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidKind.StatusCode);
+
         // Another brand's link id is a plain 404 — the tenant filter plus the brand check.
         var foreign = await client.PatchAsJsonAsync(
             $"/api/v1/brands/{brand.Id}/assets/{Guid.NewGuid()}",
@@ -200,6 +228,47 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
         Assert.Contains("Exactly three sections and a PS.", prompt, StringComparison.Ordinal);
         Assert.Contains("https://acme.example", prompt, StringComparison.Ordinal);
         Assert.Contains("game-changer", prompt, StringComparison.Ordinal); // banned phrases listed
+    }
+
+    [Fact]
+    public async Task Youtube_brand_template_is_the_primary_brief_in_all_three_generation_passes()
+    {
+        var capture = new CapturingFoundryFactory();
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(_ => capture))));
+
+        var client = await AuthedClientAsync(app);
+        var brand = await CreateBrandAsync(client);
+        const string template = "YOUTUBE-AUTHORITATIVE-BEGIN\nBuild the semantic topic cluster before writing.\nYOUTUBE-AUTHORITATIVE-END";
+        (await client.PostAsJsonAsync($"/api/v1/brands/{brand.Id}/templates",
+            new BrandTemplateRequest("youtube", "YouTube strategy", template, IsDefault: true)))
+            .EnsureSuccessStatusCode();
+
+        var create = await client.PostAsJsonAsync("/api/v1/campaigns",
+            new CampaignCreateRequest("YouTube steered", "Technical walkthrough", brand.Id));
+        var campaignId = (await create.Content.ReadFromJsonAsync<CampaignResponse>())!.Id;
+        var ingest = await client.PostAsJsonAsync($"/api/v1/ai/campaigns/{campaignId}/transcripts",
+            new { text = "The deployment workflow cut delivery time in half and the dashboard proves the result.", source = "test" });
+        var transcriptId = (await ingest.Content.ReadFromJsonAsync<IngestResponse>())!.TranscriptArtifactId;
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        generate.EnsureSuccessStatusCode();
+
+        var youtubePasses = capture.Prompts.Where(prompt =>
+            prompt.Contains("Plan a YouTube package", StringComparison.Ordinal)
+            || prompt.Contains("Write the complete YouTube package", StringComparison.Ordinal)
+            || prompt.Contains("Audit and correct this YouTube package", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, youtubePasses.Count);
+        Assert.All(youtubePasses, prompt =>
+        {
+            Assert.Contains("PRIMARY BRAND CONTENT TEMPLATE", prompt, StringComparison.Ordinal);
+            Assert.Contains("YOUTUBE-AUTHORITATIVE-END", prompt, StringComparison.Ordinal);
+            Assert.Contains("overrides conflicting generic writing guidance", prompt, StringComparison.Ordinal);
+            Assert.True(prompt.IndexOf("PRIMARY BRAND CONTENT TEMPLATE", StringComparison.Ordinal)
+                < prompt.IndexOf("GENERATOR PASS AND REQUIRED RESPONSE SHAPE", StringComparison.Ordinal));
+        });
     }
 
     [Fact]
@@ -252,8 +321,13 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
         {
             var prompt = string.Join("\n", messages.Select(m => m.Text));
             prompts.Add(prompt);
+            var response = prompt.Contains("Plan a YouTube package", StringComparison.Ordinal)
+                ? """{"searchIntent":"deployment automation","targetKeyword":"deployment automation","hook":"Cut deployment time in half.","chapters":[{"startSeconds":0,"keyword":"deployment automation","purpose":"answer"},{"startSeconds":8,"keyword":"delivery dashboard","purpose":"proof"},{"startSeconds":16,"keyword":"shipping workflow","purpose":"steps"}],"pinnedCommentMoment":"The measured result","titleAngles":[{"slot":"A","angle":"seo","promise":"faster delivery"},{"slot":"B","angle":"curiosity","promise":"the workflow"},{"slot":"C","angle":"problem-solution","promise":"slow deploys"}],"citations":["S1"]}"""
+                : prompt.Contains("\"titleOptions\"", StringComparison.Ordinal)
+                    ? """{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Search-led."},{"slot":"B","title":"The Workflow Behind Faster Deployments","angle":"curiosity","score":86,"rationale":"Useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Workflow","angle":"problem-solution","score":83,"rationale":"Names the problem."}],"description":"Deployment automation cut delivery time in half, and this walkthrough shows the dashboard evidence behind the result.\n\nLearn the grounded workflow.\n\nChapters:\n0:00 Deployment automation\n0:08 Delivery dashboard\n0:16 Shipping workflow\n\n{{LINKS}}","chapters":[{"startSeconds":0,"title":"Deployment automation"},{"startSeconds":8,"title":"Delivery dashboard"},{"startSeconds":16,"title":"Shipping workflow"}],"tags":["deployment automation","delivery workflow","devops dashboard","faster deployment","release automation","shipping workflow","platform engineering","delivery time"],"suggestedPinnedComment":"The walkthrough reports that deployment time was cut in half—which part of this workflow would help your team most?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1"]}"""
+                    : """{"title":"News","subject":"s","bodyMarkdown":"body","citations":["S1"]}""";
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                """{"title":"News","subject":"s","bodyMarkdown":"body","citations":["S1"]}""")));
+                response)));
         }
 
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

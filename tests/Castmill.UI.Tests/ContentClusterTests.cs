@@ -38,11 +38,14 @@ public sealed class ContentClusterTests
     }
 
     [Fact]
-    public void Non_board_kinds_are_not_nodes()
+    public void Operational_and_strategy_kinds_are_not_nodes()
     {
-        // image-prompts and transcript are machinery, not content — they must not clutter the
-        // map, exactly as they are absent from the board.
-        var cluster = Build([Artifact("blog"), Artifact("image-prompts"), Artifact("transcript")]);
+        // Machinery and internal strategy documents are not outward-facing content and must
+        // not clutter the hierarchy even when they are editable elsewhere.
+        var cluster = Build([
+            Artifact("blog"), Artifact("image-prompts"), Artifact("transcript"),
+            Artifact("campaign-summary"), Artifact("seo-keyword-plan"), Artifact("seo-brief")
+        ]);
 
         Assert.NotNull(cluster.Pillar);
         Assert.Empty(cluster.Supporting);

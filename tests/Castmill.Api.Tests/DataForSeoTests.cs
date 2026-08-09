@@ -210,16 +210,28 @@ public sealed class DataForSeoTests
     }
 
     [Fact]
-    public async Task Answer_engine_response_extracts_exact_domain_citations()
+    public async Task Answer_engine_uses_live_model_catalog_and_extracts_exact_domain_citations()
     {
-        var handler = new StubHandler(_ => """
-            {"status_code":20000,"tasks":[{"status_code":20000,"result":[
-              {"answer":"Use a virtualized grid.","citations":[
-                {"title":"Example guide","url":"https://www.example.com/grid"},
-                {"title":"Other guide","url":"https://other.example/grid"}
-              ]}
-            ]}]}
-            """);
+        var requests = new List<(HttpMethod Method, string Path, string? Body)>();
+        var handler = new StubHandler(request =>
+        {
+            requests.Add((request.Method, request.RequestUri!.AbsolutePath,
+                request.Content?.ReadAsStringAsync().GetAwaiter().GetResult()));
+            return request.Method == HttpMethod.Get
+                ? """
+                  {"status_code":20000,"tasks":[{"status_code":20000,"result":[
+                    {"model_name":"gpt-current","web_search_supported":true}
+                  ]}]}
+                  """
+                : """
+                  {"status_code":20000,"tasks":[{"status_code":20000,"result":[
+                    {"answer":"Use a virtualized grid.","citations":[
+                      {"title":"Example guide","url":"https://www.example.com/grid"},
+                      {"title":"Other guide","url":"https://other.example/grid"}
+                    ]}
+                  ]}]}
+                  """;
+        });
         var provider = CreateProvider(handler);
 
         var result = await provider.QueryAnswerEngineAsync(
@@ -230,6 +242,49 @@ public sealed class DataForSeoTests
         Assert.True(result.DomainCited);
         Assert.Equal(2, result.Citations.Count);
         Assert.Single(result.Citations, c => c.IsOwnDomain);
+        Assert.Equal(2, requests.Count);
+        Assert.Equal(HttpMethod.Get, requests[0].Method);
+        Assert.Equal("/v3/ai_optimization/chat_gpt/llm_responses/models", requests[0].Path);
+        Assert.Equal(HttpMethod.Post, requests[1].Method);
+        using var body = JsonDocument.Parse(requests[1].Body!);
+        var task = body.RootElement[0];
+        Assert.Equal("gpt-current", task.GetProperty("model_name").GetString());
+        Assert.True(task.GetProperty("web_search").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Answer_engine_omits_web_search_when_selected_model_does_not_support_it()
+    {
+        var postBody = string.Empty;
+        var handler = new StubHandler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                return """
+                    {"status_code":20000,"tasks":[{"status_code":20000,"result":[
+                      {"model_name":"claude-account-model","web_search_supported":false}
+                    ]}]}
+                    """;
+            }
+
+            postBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return """
+                {"status_code":20000,"tasks":[{"status_code":20000,"result":[
+                  {"answer":"A grounded answer."}
+                ]}]}
+                """;
+        });
+        var provider = CreateProvider(handler);
+
+        var result = await provider.QueryAnswerEngineAsync(
+            "claude", "What is a React data grid?", "example.com",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        using var body = JsonDocument.Parse(postBody);
+        var task = body.RootElement[0];
+        Assert.Equal("claude-account-model", task.GetProperty("model_name").GetString());
+        Assert.False(task.TryGetProperty("web_search", out _));
     }
 
     [Fact]
