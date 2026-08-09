@@ -112,6 +112,22 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Assert.Contains("Launch thread", view.Markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Producer_only_shows_images_owned_by_the_open_content_item()
+    {
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(),
+            [Artifact(BlogId, "blog", "Launch-day blog post"), Artifact(SocialId, "social-x", "Launch thread")],
+            [Slot("blog-hero", BlogId), Slot("social-card", SocialId)], 0, 2));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Images for this content item");
+
+        var producer = view.Find(".cm-focus__producer").TextContent;
+        Assert.Contains("Blog header", producer, StringComparison.Ordinal);
+        Assert.DoesNotContain("Social card", producer, StringComparison.Ordinal);
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private sealed class AutoConfirm(bool accept) : IConfirmService
@@ -154,4 +170,8 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     private static ArtifactPreviewResponse Artifact(Guid id, string kind, string title) =>
         new(id, CampaignId, kind, title, ArtifactStatus.Draft, 1,
             DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+
+    private static ImageSlotResponse Slot(string kind, Guid artifactId) => new(
+        Guid.NewGuid(), CampaignId, kind, 1200, 675, null, "foundry", null, null, true,
+        "Empty", null, null, DateTimeOffset.UtcNow, ArtifactId: artifactId);
 }

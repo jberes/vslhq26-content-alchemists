@@ -1,4 +1,5 @@
 using Bunit;
+using Castmill.Core.Ai;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages;
@@ -10,7 +11,7 @@ namespace Castmill.UI.Tests;
 /// fan-out, as a report about content already written — so nothing was ever aimed at anything.
 ///
 /// Two properties matter and are easy to lose: the low-friction default (the best three
-/// pre-selected so "Press Run" stays one click), and that research failing never blocks a run.
+/// pre-selected so "Press Run" stays one click), and that the required analysis gates a run.
 /// </summary>
 public sealed class TargetsStepTests : CastmillUiTestContext
 {
@@ -31,11 +32,23 @@ public sealed class TargetsStepTests : CastmillUiTestContext
         HasProviderMetrics: true,
         Notes: []);
 
+    private static SeoAnalysisReportResponse Analysis(SeoResearchResponse? research = null) => new(
+        Guid.NewGuid(), DateTimeOffset.UtcNow, research ?? Research(),
+        new SeoSerpSnapshot("react data grid", null, "A concise answer", []),
+        ["Answer the priority questions directly."]);
+
     private void ArrangeRun()
+    {
+        ArrangeBase();
+        Http.OnPost("api/v1/seo/deep-analysis", Analysis());
+    }
+
+    private void ArrangeBase()
     {
         SignInTestUser();
         Http.OnGet("api/v1/brands", new List<BrandProfileDetailResponse>());
-        Http.OnPost("api/v1/seo/research", Research());
+        Http.OnPut($"api/v1/campaigns/{CampaignId}", new CampaignResponse(
+            CampaignId, Guid.NewGuid(), "Campaign", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -76,31 +89,28 @@ public sealed class TargetsStepTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Research_failing_leaves_the_run_available_rather_than_blocking_it()
+    public async Task Analysis_failing_keeps_content_generation_locked()
     {
-        SignInTestUser();
-        Http.OnGet("api/v1/brands", new List<BrandProfileDetailResponse>());
-        Http.OnStatus(HttpMethod.Post, "api/v1/seo/research", System.Net.HttpStatusCode.ServiceUnavailable);
+        ArrangeBase();
+        Http.OnStatus(HttpMethod.Post, "api/v1/seo/deep-analysis", System.Net.HttpStatusCode.ServiceUnavailable);
 
         var view = Render<NewCampaign>();
         await EnterTargetsAsync(view);
 
-        // Targets are an improvement, not a gate.
-        Assert.Contains("run without targets", view.Markup, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("could not be completed", view.Markup, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(view.FindAll("button"),
-            b => b.TextContent.Contains("Press Run", StringComparison.Ordinal) && !b.HasAttribute("disabled"));
+            b => b.TextContent.Contains("Approve report", StringComparison.Ordinal) && b.HasAttribute("disabled"));
     }
 
     [Fact]
     public async Task With_no_provider_metrics_the_step_says_so_instead_of_showing_zeroes()
     {
-        SignInTestUser();
-        Http.OnGet("api/v1/brands", new List<BrandProfileDetailResponse>());
-        Http.OnPost("api/v1/seo/research", new SeoResearchResponse(
+        ArrangeBase();
+        Http.OnPost("api/v1/seo/deep-analysis", Analysis(new SeoResearchResponse(
             [new SeoTarget("react data grid", null, null, null, "model")],
             [],
             HasProviderMetrics: false,
-            Notes: ["No SEO provider is configured, so there are no volume or difficulty numbers."]));
+            Notes: ["No SEO provider is configured, so there are no volume or difficulty numbers."])));
 
         var view = Render<NewCampaign>();
         await EnterTargetsAsync(view);
@@ -109,6 +119,37 @@ public sealed class TargetsStepTests : CastmillUiTestContext
         // which is a different and false claim.
         Assert.Contains("—", view.Markup, StringComparison.Ordinal);
         Assert.Contains("no volume or difficulty numbers", view.Markup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Report_approval_is_saved_before_the_content_brief_is_requested()
+    {
+        ArrangeRun();
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/seo-targets",
+            new SeoTargetsResponse("react data grid", Research().Keywords, Research().Questions));
+        Http.OnPost($"api/v1/ai/campaigns/{CampaignId}/brief",
+            new BriefSuggestionResponse(
+                "SEO title", "Engineering leaders", "Direct", "Answer the deployment question",
+                "A report-informed brief.", ["Use the live SERP gap."]));
+
+        var view = Render<NewCampaign>();
+        await EnterTargetsAsync(view);
+
+        await view.InvokeAsync(async () =>
+        {
+            var approve = typeof(NewCampaign).GetMethod("ApproveAnalysisAsync",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            await (Task)approve.Invoke(view.Instance, null)!;
+        });
+
+        var targetSave = Http.Bodies.FindIndex(call => call.Method == HttpMethod.Put
+            && call.Path.EndsWith("seo-targets", StringComparison.Ordinal));
+        var briefRequest = Http.Bodies.FindIndex(call => call.Method == HttpMethod.Post
+            && call.Path.EndsWith("/brief", StringComparison.Ordinal));
+        Assert.True(targetSave >= 0);
+        Assert.True(briefRequest > targetSave);
+        Assert.Contains("Built from the approved report", view.Markup, StringComparison.Ordinal);
+        Assert.Contains("A report-informed brief", view.Markup, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -124,10 +165,13 @@ public sealed class TargetsStepTests : CastmillUiTestContext
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             var transcript = typeof(NewCampaign).GetField("_transcriptArtifactId",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            var siteUrl = typeof(NewCampaign).GetField("_siteUrl",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
 
             campaign.SetValue(view.Instance, CampaignId);
             transcript.SetValue(view.Instance, TranscriptId);
-            step.SetValue(view.Instance, Enum.Parse(step.FieldType, "Brief"));
+            siteUrl.SetValue(view.Instance, "https://example.com");
+            step.SetValue(view.Instance, Enum.Parse(step.FieldType, "Context"));
         });
 
         view.Render();

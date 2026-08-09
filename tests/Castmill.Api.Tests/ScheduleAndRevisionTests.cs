@@ -358,13 +358,11 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         // Reveal order is completion order.
         Assert.Equal("social-x", run.RootElement.GetProperty("items")[0].GetProperty("kind").GetString());
 
-        // The run also reserved the image plan (ADR-012). This fan-out produced no blog, so
-        // only the campaign-wide half exists — blog slots belong to a specific blog now, and
-        // reserving four of them for a campaign with no blog is what the old plan got wrong.
+        // Image cards belong to successful content items. Both calls failed here, so there is
+        // no owner and therefore no campaign-wide orphan plan to reserve.
         var slots = (await client.GetFromJsonAsync<List<ImageSlotResponse>>(
             $"/api/v1/campaigns/{campaign.Id}/image-slots"))!;
-        Assert.Equal(2, slots.Count);
-        Assert.All(slots, s => Assert.Null(s.ArtifactId));
+        Assert.Empty(slots);
 
         // Another tenant cannot read the run.
         var stranger = await AuthedClientAsync(app);

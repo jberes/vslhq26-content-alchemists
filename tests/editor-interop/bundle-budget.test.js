@@ -13,6 +13,8 @@ const BUDGET_BYTES = 250 * 1024;
 
 const bundle = fileURLToPath(
     new URL('../../src/Castmill.UI/wwwroot/js/castmill-editor.js', import.meta.url));
+const apexTreeBundle = fileURLToPath(
+    new URL('../../src/Castmill.UI/wwwroot/js/castmill-apextree.js', import.meta.url));
 
 describe('editor bundle', () => {
     it('has been built', () => {
@@ -36,5 +38,21 @@ describe('editor bundle', () => {
         for (const marker of ['react-dom', 'createElement:', '__vue__', 'Vue.createApp']) {
             expect(source).not.toContain(marker);
         }
+    });
+});
+
+describe('ApexTree bundle', () => {
+    it('is built as its own lazy asset', () => {
+        expect(existsSync(apexTreeBundle),
+            `expected a built bundle at ${apexTreeBundle} — run \`npm run build\``).toBe(true);
+
+        const editorSource = readFileSync(bundle, 'utf8');
+        expect(editorSource).not.toContain('Campaign content hierarchy');
+    });
+
+    it('stays below 100 KB gzip', () => {
+        const gzipped = gzipSync(readFileSync(apexTreeBundle)).length;
+        console.log(`ApexTree bundle: ${(gzipped / 1024).toFixed(1)} KB gzip of 100 KB budget`);
+        expect(gzipped).toBeLessThan(100 * 1024);
     });
 });

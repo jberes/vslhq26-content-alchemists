@@ -80,11 +80,14 @@ builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
 builder.Services.AddImageProviders(builder.Configuration);
 builder.Services.AddSingleton<IImageComposer, ImageComposer>();
 builder.Services.AddScoped<IImagePlanService, ImagePlanService>();
+builder.Services.AddScoped<IImageReferenceResolver, ImageReferenceResolver>();
 builder.Services.AddScoped<IImageRenderer, ImageRenderer>();
 builder.Services.AddScoped<IBrandLookup, BrandLookup>();
+builder.Services.AddScoped<IResearchContextSuggester, ResearchContextSuggester>();
 builder.Services.AddScoped<IBriefSuggester, BriefSuggester>();
 builder.Services.AddScoped<IWorkspaceLinks, WorkspaceLinks>();
 builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoResearch, Castmill.Api.Services.Seo.SeoResearch>();
+builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoReportService, Castmill.Api.Services.Seo.SeoReportService>();
 builder.Services.AddHostedService<InterruptedRunSweeper>();
 // Its own client: a short timeout and no resilience retries, because re-fetching a slow
 // third-party site would only make the user wait longer for the same answer.
@@ -116,6 +119,8 @@ builder.Services.AddHttpClient(GitHubClient.HttpClientName,
     .AddStandardResilienceHandler();
 builder.Services.AddHttpClient("seo").AddStandardResilienceHandler();
 builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
+    .AddStandardResilienceHandler();
+builder.Services.AddHttpClient("foundry-images", client => client.Timeout = TimeSpan.FromMinutes(5))
     .AddStandardResilienceHandler();
 builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
         client => client.Timeout = TimeSpan.FromSeconds(60))

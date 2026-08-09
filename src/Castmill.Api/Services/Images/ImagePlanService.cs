@@ -54,6 +54,7 @@ public sealed class ImagePlanService(
         new("blog-inline-2", 1200, 675, "16:9", Headline: false, PerArtifact: true),
         new("blog-inline-3", 1200, 675, "16:9", Headline: false, PerArtifact: true),
         new("social-card", 1200, 1200, "1:1", Headline: false),
+        new("content-image-1", 1200, 675, "16:9", Headline: false, PerArtifact: true),
     ];
 
     public static SlotTemplate? Template(string kind) =>
@@ -68,10 +69,16 @@ public sealed class ImagePlanService(
         var now = clock.GetUtcNow();
         var added = false;
 
-        // Reserving for an artifact creates only the per-artifact slots, and reserving for
-        // the campaign only the campaign-wide ones — otherwise every blog would get its own
-        // YouTube thumbnail and the campaign would get a header belonging to no blog.
-        foreach (var template in Templates.Where(t => t.PerArtifact == (artifactId is not null)))
+        var wanted = artifactId is null
+            ? Templates.Where(t => !t.PerArtifact)
+            : TemplatesFor(await db.Artifacts
+                .Where(a => a.Id == artifactId && a.CampaignId == campaignId)
+                .Select(a => a.Kind)
+                .SingleOrDefaultAsync(ct));
+
+        // Every new slot belongs to a content item. Campaign-wide reservation remains for
+        // old clients/data, but current runs call this with the artifact they just printed.
+        foreach (var template in wanted)
         {
             if (existing.Any(s => s.Kind.Equals(template.Kind, StringComparison.OrdinalIgnoreCase)))
             {
@@ -102,6 +109,17 @@ public sealed class ImagePlanService(
         }
         return [.. existing.OrderBy(s => Array.FindIndex(Templates, t => t.Kind == s.Kind))];
     }
+
+    private static IEnumerable<SlotTemplate> TemplatesFor(string? artifactKind) => artifactKind switch
+    {
+        "blog" => Templates.Where(t => t.Kind is "blog-header" or "blog-inline-1" or "blog-inline-2" or "blog-inline-3"),
+        "youtube" => Templates.Where(t => t.Kind == "youtube-thumbnail"),
+        "social-x" or "social-linkedin" or "social-facebook" or "social-instagram"
+            or "social-threads" or "social-bluesky" => Templates.Where(t => t.Kind == "social-card"),
+        null or "transcript" or "image-prompts" or "thumbnail-concepts" or "seo-report"
+            or "seo-keyword-plan" => [],
+        _ => Templates.Where(t => t.Kind == "content-image-1"),
+    };
 
     public async Task<int> SeedPromptsAsync(
         Guid campaignId, string imagePromptsContentJson, CancellationToken ct, Guid? artifactId = null)

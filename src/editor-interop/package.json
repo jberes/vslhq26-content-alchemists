@@ -12,7 +12,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
-    "clean": "node -e \"import('node:fs').then(fs=>{for(const f of ['castmill-editor.js','castmill-editor.js.map'])fs.rmSync(new URL('../Castmill.UI/wwwroot/js/'+f,import.meta.url),{force:true})})\""
+    "clean": "node -e \"import('node:fs').then(fs=>{for(const f of ['castmill-editor.js','castmill-editor.js.map','castmill-apextree.js','castmill-apextree.js.map'])fs.rmSync(new URL('../Castmill.UI/wwwroot/js/'+f,import.meta.url),{force:true})})\""
   },
   "devDependencies": {
     "esbuild": "0.28.1"
@@ -27,6 +27,7 @@
     "@tiptap/extension-task-item": "3.29.2",
     "@tiptap/extension-task-list": "3.29.2",
     "@tiptap/starter-kit": "3.29.2",
+    "apextree": "1.15.0",
     "markdown-it": "14.3.0",
     "tiptap-markdown": "0.9.0"
   }

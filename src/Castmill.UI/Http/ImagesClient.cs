@@ -20,15 +20,23 @@ public sealed class ImagesClient(ApiClient api)
         api.PostAsync<object, List<ImageSlotResponse>>(
             $"api/v1/campaigns/{campaignId}/image-slots/reserve", new { }, anonymous: false, ct);
 
+    public Task<ImageSlotResponse> CreateAsync(
+        Guid campaignId, Guid artifactId, string promptMode = "Auto",
+        string? prompt = null, CancellationToken ct = default) =>
+        api.PostAsync<object, ImageSlotResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots",
+            new { artifactId, prompt, promptMode }, anonymous: false, ct);
+
     /// <summary>Updates prompt / model / headline / safe-area on a slot.</summary>
     public Task<ImageSlotResponse> PatchAsync(
         Guid campaignId, Guid slotId,
         string? prompt = null, string? modelAlias = null, string? sourceSegmentId = null,
         string? headlineText = null, bool? safeArea = null,
+        string? promptMode = null, IReadOnlyList<Guid>? referenceAssetIds = null,
         CancellationToken ct = default) =>
         api.PatchAsync<object, ImageSlotResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}",
-            new { prompt, modelAlias, sourceSegmentId, headlineText, safeArea },
+            new { prompt, modelAlias, sourceSegmentId, headlineText, safeArea, promptMode, referenceAssetIds },
             etag: null,
             ct);
 

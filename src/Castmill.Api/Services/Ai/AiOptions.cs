@@ -29,6 +29,8 @@ public sealed class AiOptions
     /// </summary>
     public Dictionary<string, TextProviderOptions> TextProviders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public SpeechOptions Speech { get; set; } = new();
+    /// <summary>REST version used for multipart image edits (reference-image generation).</summary>
+    public string ImageApiVersion { get; set; } = "2025-04-01-preview";
 
     public sealed class FoundryOptions
     {

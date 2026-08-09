@@ -140,6 +140,15 @@ public sealed class ImageSlot : ITenantScoped
     public int TargetWidth { get; set; }
     public int TargetHeight { get; set; }
     public string? Prompt { get; set; }
+    /// <summary>
+    /// Auto rebuilds the effective prompt from the owning artifact, campaign brief and the
+    /// slot's current reference set on every run. Manual sends <see cref="Prompt"/> verbatim
+    /// apart from non-negotiable safety/fidelity instructions.
+    /// </summary>
+    public string PromptMode { get; set; } = "Auto";
+    /// <summary>JSON array of explicitly selected BrandAsset ids. Product assets are not
+    /// stored here: up to three attach automatically from the campaign brand.</summary>
+    public string? ReferenceAssetIdsJson { get; set; }
     /// <summary>Model alias or provider name to render with; null uses the "image" alias.</summary>
     public string? ModelAlias { get; set; }
     /// <summary>Transcript segment this image illustrates — prompts stay provenance-labelled.</summary>
@@ -281,7 +290,7 @@ public sealed class BrandAsset : ITenantScoped
     public Guid BrandId { get; set; }
     public Guid AssetId { get; set; }
 
-    /// <summary>logo | background | face | other.</summary>
+    /// <summary>logo | background | face | product | accent | other.</summary>
     public required string Kind { get; set; }
 
     /// <summary>Display name, doubling as prompt text ("the host, short dark hair").</summary>

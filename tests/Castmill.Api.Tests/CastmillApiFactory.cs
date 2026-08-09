@@ -58,6 +58,9 @@ public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncL
         builder.UseSetting("Ai:TextProviders:anthropic:Enabled", "false");
         builder.UseSetting("KnowledgeBase:BaseUrl", "");
         builder.UseSetting("Seo:ApiKey", "");
+        // Legacy endpoint tests exercise generation in isolation. The dedicated SEO gate test
+        // turns this back on and proves the production default contract.
+        builder.UseSetting("Seo:RequireAnalysisBeforeGeneration", "false");
         // High enough that functional tests never trip it; the rate-limit test
         // uses its own factory with a tiny limit.
         builder.UseSetting("RateLimits:AuthPerMinute", "1000");

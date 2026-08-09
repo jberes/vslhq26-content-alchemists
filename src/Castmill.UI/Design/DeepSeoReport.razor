@@ -1,0 +1,328 @@
+@using ApexCharts
+@using Castmill.Core.Resources
+@using System.Globalization
+
+<article class="cm-deep-report" aria-label="Deep SEO and AEO analysis">
+    <header class="cm-deep-report__head">
+        <div>
+            <span class="cm-kicker">SEO/AEO intelligence report</span>
+            <h2>@Report.Serp.Keyword</h2>
+            <p class="cm-meta">Generated @Report.GeneratedAt.LocalDateTime.ToString("f", CultureInfo.CurrentCulture) · review this evidence before content production.</p>
+        </div>
+        <span class="cm-chip cm-chip--on">@Report.Status</span>
+    </header>
+
+    <section class="cm-report-stats" aria-label="Report summary">
+        <div class="cm-report-stat">
+            <span class="cm-kicker">AI visibility</span>
+            <strong>@Visibility</strong>
+            <span class="cm-meta">@AeoDetail</span>
+        </div>
+        <div class="cm-report-stat">
+            <span class="cm-kicker">Organic competitors</span>
+            <strong>@Report.Serp.OrganicResults.Count</strong>
+            <span class="cm-meta">live SERP rows</span>
+        </div>
+        <div class="cm-report-stat">
+            <span class="cm-kicker">Keyword gaps</span>
+            <strong>@(Insights?.KeywordGaps.Count ?? 0)</strong>
+            <span class="cm-meta">supported opportunities</span>
+        </div>
+        <div class="cm-report-stat">
+            <span class="cm-kicker">Questions</span>
+            <strong>@Report.Research.Questions.Count</strong>
+            <span class="cm-meta">answer targets</span>
+        </div>
+    </section>
+
+    @if (Insights is { Sections.Count: > 0 } insightStatus)
+    {
+        <section class="cm-deep-report__section">
+            <h3>Data coverage</h3>
+            <ul class="cm-report-coverage">
+                @foreach (var section in insightStatus.Sections)
+                {
+                    <li class="@(section.Available ? "cm-report-coverage--ok" : "")">
+                        <strong>@section.Section</strong>
+                        <span class="cm-meta">@section.Detail</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    <section class="cm-deep-report__section">
+        <h3>Executive strategy</h3>
+        <ol class="cm-report-recommendations">
+            @foreach (var recommendation in Report.Recommendations)
+            {
+                <li>@recommendation</li>
+            }
+        </ol>
+    </section>
+
+    <section class="cm-deep-report__section">
+        <div class="cm-deep-report__section-head">
+            <div>
+                <span class="cm-kicker">AEO</span>
+                <h3>AI answer visibility</h3>
+            </div>
+            <span class="cm-meta">Failed engines are excluded from the percentage.</span>
+        </div>
+        @if (Insights?.Aeo.Engines.Count > 0)
+        {
+            <div class="cm-aeo-grid">
+                @foreach (var engine in Insights.Aeo.Engines)
+                {
+                    <details class="cm-aeo-card" open="@(engine.Succeeded)">
+                        <summary>
+                            <strong>@engine.Label</strong>
+                            <span class="cm-chip @(engine.DomainCited ? "cm-chip--on" : "")">
+                                @(engine.Succeeded ? engine.DomainCited ? "cites site" : "not cited" : "unavailable")
+                            </span>
+                        </summary>
+                        @if (!engine.Succeeded)
+                        {
+                            <p class="cm-meta">@engine.Error</p>
+                        }
+                        else
+                        {
+                            <p>@(string.IsNullOrWhiteSpace(engine.Answer) ? "The engine returned no answer text." : engine.Answer)</p>
+                            @if (engine.Citations.Count > 0)
+                            {
+                                <div class="cm-chips">
+                                    @foreach (var citation in engine.Citations)
+                                    {
+                                        <a class="cm-chip @(citation.IsOwnDomain ? "cm-chip--on" : "")"
+                                           href="@citation.Url" target="_blank" rel="noopener noreferrer">
+                                            @citation.Domain
+                                        </a>
+                                    }
+                                </div>
+                            }
+                        }
+                    </details>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="cm-meta">Add a site URL and configure DataForSEO to measure citations across ChatGPT, Gemini, Claude, and Perplexity.</p>
+        }
+    </section>
+
+    <section class="cm-deep-report__section">
+        <h3>Target keywords and opportunity</h3>
+        @if (KeywordChartRows.Count > 0)
+        {
+            <div class="cm-seo__chart">
+                <ApexChart TItem="KeywordChartRow" Height="340">
+                    <ApexPointSeries TItem="KeywordChartRow" Items="KeywordChartRows"
+                                     Name="Monthly searches" SeriesType="SeriesType.Bar"
+                                     XValue="@(row => row.Term)" YValue="@(row => row.Volume)" />
+                </ApexChart>
+            </div>
+        }
+        <div class="cm-scroll-x">
+            <table class="cm-seo__table">
+                <thead><tr><th>Keyword</th><th>Intent</th><th>Volume</th><th>Difficulty</th><th>CPC</th><th>Opportunity</th><th>Source</th></tr></thead>
+                <tbody>
+                    @foreach (var keyword in Report.Research.Keywords.Take(24))
+                    {
+                        <tr>
+                            <td><strong>@keyword.Term</strong></td>
+                            <td>@(keyword.Intent ?? "—")</td>
+                            <td class="cm-mono">@(keyword.Volume?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                            <td class="cm-mono">@(keyword.Difficulty?.ToString("0", CultureInfo.CurrentCulture) ?? "—")</td>
+                            <td class="cm-mono">@(keyword.Cpc?.ToString("C2", CultureInfo.CurrentCulture) ?? "—")</td>
+                            <td class="cm-mono">@(keyword.Opportunity?.ToString("0.0", CultureInfo.CurrentCulture) ?? "—")</td>
+                            <td><span class="cm-chip">@keyword.Source</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    @if (Insights is { KeywordGaps.Count: > 0 } gapInsights)
+    {
+        <section class="cm-deep-report__section">
+            <h3>Keyword ideas and gaps</h3>
+            <p class="cm-meta">Related queries the site does not currently rank for, ordered by achievable opportunity.</p>
+            <div class="cm-report-cards">
+                @foreach (var gap in gapInsights.KeywordGaps.Take(12))
+                {
+                    <div class="cm-report-card">
+                        <span class="cm-chip cm-chip--on">gap</span>
+                        <strong>@gap.Term</strong>
+                        <span class="cm-meta">@(gap.Volume?.ToString("N0", CultureInfo.CurrentCulture) ?? "—") searches · KD @(gap.Difficulty?.ToString("0", CultureInfo.CurrentCulture) ?? "—") · @gap.Intent</span>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+
+    @if (Insights is { RankedKeywords.Count: > 0 } rankingInsights)
+    {
+        <section class="cm-deep-report__section">
+            <h3>Keywords the site already ranks for</h3>
+            <p class="cm-meta">Extend or defend these positions; avoid publishing another page for the same intent.</p>
+            <div class="cm-scroll-x">
+                <table class="cm-seo__table">
+                    <thead><tr><th>Position</th><th>Keyword</th><th>Intent</th><th>Volume</th><th>Difficulty</th><th>Est. traffic</th><th>Ranking page</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in rankingInsights.RankedKeywords.Take(20))
+                        {
+                            <tr>
+                                <td class="cm-mono">#@row.Position</td><td><strong>@row.Term</strong></td><td>@(row.Intent ?? "—")</td>
+                                <td class="cm-mono">@(row.Volume?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(row.Difficulty?.ToString("0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(row.EstimatedTraffic?.ToString("N1", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td><a href="@row.Url" target="_blank" rel="noopener noreferrer">Open</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    @if (Insights?.Competitors is { Count: > 0 } competitors)
+    {
+        <section class="cm-deep-report__section">
+            <h3>Who ranks around you</h3>
+            @if (AuthorityChartRows.Count > 0 || TopicVisibilityRows.Count > 0)
+            {
+                <div class="cm-answer-surfaces">
+                    @if (TopicVisibilityRows.Count > 0)
+                    {
+                        <div class="cm-seo__chart">
+                            <ApexChart TItem="TopicVisibilityRow" Height="320">
+                                <ApexPointSeries TItem="TopicVisibilityRow" Items="TopicVisibilityRows"
+                                                 Name="Topic visibility %" SeriesType="SeriesType.Bar"
+                                                 XValue="@(row => row.Domain)" YValue="@(row => row.VisibilityPercent)" />
+                            </ApexChart>
+                        </div>
+                    }
+                    @if (AuthorityChartRows.Count > 0)
+                    {
+                        <div class="cm-seo__chart">
+                            <ApexChart TItem="AuthorityChartRow" Height="320">
+                                <ApexPointSeries TItem="AuthorityChartRow" Items="AuthorityChartRows"
+                                                 Name="Referring domains" SeriesType="SeriesType.Bar"
+                                                 XValue="@(row => row.Domain)" YValue="@(row => row.ReferringDomains)" />
+                            </ApexChart>
+                        </div>
+                    }
+                </div>
+            }
+            <div class="cm-scroll-x">
+                <table class="cm-seo__table">
+                    <thead><tr><th>Domain</th><th>Primary SERP</th><th>Topic keywords</th><th>Topic visibility</th><th>Avg. topic rank</th><th>Topic ETV</th><th>Domain rank</th><th>Referring domains</th><th>#1</th><th>#2–3</th><th>#4–10</th><th>Organic footprint</th></tr></thead>
+                    <tbody>
+                        @foreach (var competitor in competitors)
+                        {
+                            <tr class="@(competitor.IsOwnDomain ? "cm-report-own-domain" : "")">
+                                <td><strong>@competitor.Domain</strong> @(competitor.IsOwnDomain ? "(your site)" : "")</td>
+                                <td class="cm-mono">@(competitor.BestSerpPosition > 0 ? $"#{competitor.BestSerpPosition}" : "—")</td>
+                                <td class="cm-mono">@(competitor.TopicKeywordCount?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.TopicVisibility is { } visibility ? $"{visibility * 100:0.#}%" : "—")</td>
+                                <td class="cm-mono">@(competitor.TopicAveragePosition?.ToString("0.0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.TopicEstimatedTraffic?.ToString("N1", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Authority?.Rank?.ToString("0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Authority?.ReferringDomains?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Footprint?.Position1.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Footprint?.Positions2To3.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Footprint?.Positions4To10.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                <td class="cm-mono">@(competitor.Footprint?.TotalOrganic.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    <section class="cm-deep-report__section">
+        <h3>SERP and zero-click answer surfaces</h3>
+        <div class="cm-answer-surfaces">
+            <div class="cm-report-card">
+                <span class="cm-kicker">AI Overview</span>
+                <p>@(Report.Serp.AiOverview ?? "No AI Overview was detected for this query.")</p>
+            </div>
+            <div class="cm-report-card">
+                <span class="cm-kicker">Featured snippet</span>
+                <p>@(Report.Serp.FeaturedSnippet ?? "No featured snippet was detected for this query.")</p>
+            </div>
+        </div>
+        <div class="cm-scroll-x">
+            <table class="cm-seo__table">
+                <thead><tr><th>Rank</th><th>Result</th><th>Domain</th><th>What the result promises</th></tr></thead>
+                <tbody>
+                    @foreach (var result in Report.Serp.OrganicResults)
+                    {
+                        <tr><td class="cm-mono">#@result.Rank</td><td><a href="@result.Url" target="_blank" rel="noopener noreferrer">@result.Title</a></td><td>@result.Domain</td><td>@result.Description</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="cm-deep-report__section">
+        <h3>People also ask and answer targets</h3>
+        <div class="cm-report-cards">
+            @foreach (var question in Report.Research.Questions)
+            {
+                <div class="cm-report-card"><strong>@question.Question</strong><span class="cm-chip">@question.Source</span></div>
+            }
+        </div>
+    </section>
+
+    @if (Insights is { ContentAngles.Count: > 0 } angleInsights)
+    {
+        <section class="cm-deep-report__section">
+            <h3>Report-grounded content opportunities</h3>
+            <p class="cm-meta">These are the strategic options the later brief and generators will use.</p>
+            <ol class="cm-report-angle-grid">
+                @foreach (var angle in angleInsights.ContentAngles)
+                {
+                    <li>
+                        <strong>@angle.Angle</strong>
+                        <span class="cm-meta">@angle.AudienceNeed</span>
+                        <div class="cm-chips"><span class="cm-chip cm-chip--on">@angle.TargetKeyword</span><span class="cm-chip">@angle.SuggestedAsset</span></div>
+                        <p>@angle.Rationale</p>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+</article>
+
+@code {
+    [Parameter, EditorRequired] public SeoAnalysisReportResponse Report { get; set; } = default!;
+
+    private SeoDeepInsights? Insights => Report.Insights;
+    private string Visibility => Insights?.Aeo.VisibilityPercent is { } value
+        ? $"{value:0.#}%"
+        : "—";
+    private string AeoDetail => Insights?.Aeo is { } score && score.EnginesSucceeded > 0
+        ? $"{score.EnginesCitingDomain} of {score.EnginesSucceeded} engines cite the site"
+        : "site citation measurement unavailable";
+
+    private IReadOnlyList<KeywordChartRow> KeywordChartRows =>
+        [.. Report.Research.Keywords.Where(k => k.Volume is > 0).Take(10)
+            .Select(k => new KeywordChartRow(k.Term, k.Volume ?? 0))];
+
+    private IReadOnlyList<AuthorityChartRow> AuthorityChartRows =>
+        [.. (Insights?.Competitors ?? []).Where(c => c.Authority?.ReferringDomains is > 0)
+            .Select(c => new AuthorityChartRow(c.Domain, c.Authority!.ReferringDomains!.Value))];
+
+    private IReadOnlyList<TopicVisibilityRow> TopicVisibilityRows =>
+        [.. (Insights?.Competitors ?? []).Where(c => c.TopicVisibility is > 0)
+            .Select(c => new TopicVisibilityRow(c.Domain,
+                Math.Round((decimal)c.TopicVisibility!.Value * 100m, 2)))];
+
+    private sealed record KeywordChartRow(string Term, decimal Volume);
+    private sealed record AuthorityChartRow(string Domain, decimal ReferringDomains);
+    private sealed record TopicVisibilityRow(string Domain, decimal VisibilityPercent);
+}

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Castmill.Core.Resources;
 
 namespace Castmill.Api.Services.Seo;
 
@@ -14,10 +15,21 @@ public sealed class SeoOptions
     /// <summary>Google Ads location code (2840 = United States).</summary>
     public int LocationCode { get; set; } = 2840;
     public string LanguageCode { get; set; } = "en";
+    public bool RequireAnalysisBeforeGeneration { get; set; } = true;
     public bool IsConfigured => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(ApiKey);
 }
 
-public sealed record SeoKeyword(string Term, long Volume, double Difficulty, double Competition, double Cpc);
+public sealed record SeoKeyword(
+    string Term, long Volume, double Difficulty, double Competition, double Cpc,
+    string? Intent = null);
+
+/// <summary>A domain's visibility across the report's full keyword set, not just one SERP.</summary>
+public sealed record SeoCompetitorCandidate(
+    string Domain,
+    double? AveragePosition,
+    int KeywordCount,
+    double? Visibility,
+    double? EstimatedTraffic);
 
 public sealed record SeoAnalysis(
     string Keyword,
@@ -30,10 +42,14 @@ public sealed record SeoAnalysis(
 public interface ISeoProvider
 {
     bool IsConfigured { get; }
-    /// <summary>Exact volume/competition/CPC for a list of candidate keywords (google_ads/search_volume).</summary>
+    /// <summary>Exact volume, difficulty, intent, competition and CPC for candidate keywords.</summary>
     Task<IReadOnlyList<SeoKeyword>> GetKeywordMetricsAsync(IReadOnlyList<string> keywords, CancellationToken ct);
     /// <summary>Related keyword ideas with volume + difficulty for a seed (dataforseo_labs keyword_suggestions).</summary>
     Task<IReadOnlyList<SeoKeyword>> GetSuggestionsAsync(string seedKeyword, int limit, CancellationToken ct);
+    /// <summary>Category-adjacent keyword ideas for several transcript-grounded seeds.</summary>
+    Task<IReadOnlyList<SeoKeyword>> GetKeywordIdeasAsync(
+        IReadOnlyList<string> seedKeywords, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SeoKeyword>>([]);
     /// <summary>One-keyword analysis used by /seo/analyze + the share snapshot.</summary>
     Task<SeoAnalysis> AnalyzeAsync(string keyword, string? targetUrl, CancellationToken ct);
 
@@ -43,6 +59,31 @@ public interface ISeoProvider
     /// research: real questions people type, not questions a model imagined.
     /// </summary>
     Task<IReadOnlyList<string>> GetQuestionsAsync(string keyword, CancellationToken ct);
+
+    /// <summary>The real result page shape used by the analysis-first report: organic
+    /// competitors plus answer surfaces that can satisfy a query without a click.</summary>
+    Task<SeoSerpSnapshot> GetSerpSnapshotAsync(string keyword, CancellationToken ct) =>
+        Task.FromResult(new SeoSerpSnapshot(keyword, null, null, []));
+
+    Task<IReadOnlyList<SeoRankedKeyword>> GetRankedKeywordsAsync(
+        string domain, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SeoRankedKeyword>>([]);
+
+    Task<SeoAuthoritySnapshot?> GetAuthorityAsync(string domain, CancellationToken ct) =>
+        Task.FromResult<SeoAuthoritySnapshot?>(null);
+
+    Task<SeoPositionFootprint?> GetPositionFootprintAsync(string domain, CancellationToken ct) =>
+        Task.FromResult<SeoPositionFootprint?>(null);
+
+    /// <summary>Domains visible across the complete target-keyword set.</summary>
+    Task<IReadOnlyList<SeoCompetitorCandidate>> GetSerpCompetitorsAsync(
+        IReadOnlyList<string> keywords, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SeoCompetitorCandidate>>([]);
+
+    Task<SeoAeoEngineResult> QueryAnswerEngineAsync(
+        string provider, string question, string? siteDomain, CancellationToken ct) =>
+        Task.FromResult(new SeoAeoEngineResult(
+            provider, provider, false, false, null, [], "Answer-engine analysis is unavailable."));
 }
 
 /// <summary>
@@ -55,13 +96,16 @@ public sealed class DataForSeoProvider(
     Microsoft.Extensions.Options.IOptions<SeoOptions> options) : ISeoProvider
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly string[] OrganicItemTypes = ["organic"];
+    private static readonly string[] EstimatedTrafficOrder = ["ranked_serp_element.serp_item.etv,desc"];
+    private static readonly string[] RelevanceOrder = ["relevance,desc", "keyword_info.search_volume,desc"];
     private readonly SeoOptions _options = options.Value;
 
     public bool IsConfigured => _options.IsConfigured;
 
     public async Task<IReadOnlyList<SeoKeyword>> GetKeywordMetricsAsync(IReadOnlyList<string> keywords, CancellationToken ct)
     {
-        using var doc = await PostAsync("v3/keywords_data/google_ads/search_volume/live", new[]
+        using var doc = await PostAsync("v3/dataforseo_labs/google/keyword_overview/live", new[]
         {
             new
             {
@@ -72,14 +116,18 @@ public sealed class DataForSeoProvider(
         }, ct);
 
         var results = new List<SeoKeyword>();
-        foreach (var item in TaskResultItems(doc, itemsNestedInResult: false))
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
         {
+            var info = Object(item, "keyword_info");
+            var props = Object(item, "keyword_properties");
+            var intent = Object(item, "search_intent_info");
             results.Add(new SeoKeyword(
                 Str(item, "keyword"),
-                Num(item, "search_volume"),
-                0, // difficulty comes from the labs endpoints, not google_ads
-                Dbl(item, "competition_index") / 100.0,
-                Dbl(item, "cpc")));
+                Num(info, "search_volume"),
+                Dbl(props, "keyword_difficulty"),
+                Dbl(info, "competition"),
+                Dbl(info, "cpc"),
+                NullableText(intent, "main_intent") ?? NullableText(intent, "intent")));
         }
         return results;
     }
@@ -103,12 +151,60 @@ public sealed class DataForSeoProvider(
         {
             var info = item.TryGetProperty("keyword_info", out var ki) ? ki : default;
             var props = item.TryGetProperty("keyword_properties", out var kp) ? kp : default;
+            var intent = item.TryGetProperty("search_intent_info", out var si) ? si : default;
             results.Add(new SeoKeyword(
                 Str(item, "keyword"),
                 info.ValueKind == JsonValueKind.Object ? Num(info, "search_volume") : 0,
                 props.ValueKind == JsonValueKind.Object ? Dbl(props, "keyword_difficulty") : 0,
                 info.ValueKind == JsonValueKind.Object ? Dbl(info, "competition") : 0,
-                info.ValueKind == JsonValueKind.Object ? Dbl(info, "cpc") : 0));
+                info.ValueKind == JsonValueKind.Object ? Dbl(info, "cpc") : 0,
+                intent.ValueKind == JsonValueKind.Object
+                    ? NullableText(intent, "main_intent") ?? NullableText(intent, "intent")
+                    : null));
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<SeoKeyword>> GetKeywordIdeasAsync(
+        IReadOnlyList<string> seedKeywords, int limit, CancellationToken ct)
+    {
+        var seeds = seedKeywords
+            .Where(keyword => !string.IsNullOrWhiteSpace(keyword))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(200)
+            .ToArray();
+        if (seeds.Length == 0)
+        {
+            return [];
+        }
+
+        using var doc = await PostAsync("v3/dataforseo_labs/google/keyword_ideas/live", new[]
+        {
+            new
+            {
+                keywords = seeds,
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+                closely_variants = false,
+                ignore_synonyms = true,
+                limit = Math.Clamp(limit, 1, 1000),
+                order_by = RelevanceOrder,
+            },
+        }, ct);
+
+        var results = new List<SeoKeyword>();
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var info = Object(item, "keyword_info");
+            var props = Object(item, "keyword_properties");
+            var intent = Object(item, "search_intent_info");
+            results.Add(new SeoKeyword(
+                Str(item, "keyword"),
+                Num(info, "search_volume"),
+                Dbl(props, "keyword_difficulty"),
+                Dbl(info, "competition"),
+                Dbl(info, "cpc"),
+                NullableText(intent, "main_intent") ?? NullableText(intent, "intent")));
         }
         return results;
     }
@@ -163,7 +259,9 @@ public sealed class DataForSeoProvider(
                 {
                     // Related searches are mostly phrases, not questions. Only the ones that
                     // ARE questions belong in an answer-engine brief.
-                    var text = entry.ValueKind == JsonValueKind.String ? entry.GetString() : null;
+                    var text = entry.ValueKind == JsonValueKind.String
+                        ? entry.GetString()
+                        : FirstString(entry, "title", "text", "keyword");
                     if (LooksLikeQuestion(text))
                     {
                         Add(text);
@@ -183,6 +281,253 @@ public sealed class DataForSeoProvider(
                 questions.Add(trimmed);
             }
         }
+    }
+
+    public async Task<SeoSerpSnapshot> GetSerpSnapshotAsync(string keyword, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/serp/google/organic/live/advanced", new[]
+        {
+            new
+            {
+                keyword,
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+                depth = 20,
+            },
+        }, ct);
+
+        string? aiOverview = null;
+        string? featuredSnippet = null;
+        var organic = new List<SeoSerpResult>();
+
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var type = Str(item, "type");
+            if (type == "organic")
+            {
+                var url = Str(item, "url");
+                organic.Add(new SeoSerpResult(
+                    (int)Num(item, "rank_absolute"), Str(item, "title"), url,
+                    Str(item, "domain"), NullableText(item, "description")));
+            }
+            else if (type is "featured_snippet" or "answer_box")
+            {
+                featuredSnippet ??= FirstText(item, "description", "text", "title")
+                    ?? FindFirstAnswer(item);
+            }
+            else if (type.Contains("ai_overview", StringComparison.OrdinalIgnoreCase))
+            {
+                // Current advanced-SERP responses can place answer text in nested
+                // ai_overview_element/items rather than the outer feature row.
+                aiOverview ??= FirstText(item, "markdown", "text", "description")
+                    ?? FindFirstAnswer(item);
+            }
+        }
+
+        return new SeoSerpSnapshot(keyword, aiOverview, featuredSnippet,
+            [.. organic.OrderBy(r => r.Rank).Take(10)]);
+
+        static string? FirstText(JsonElement item, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (NullableText(item, name) is { Length: > 0 } value)
+                {
+                    return value;
+                }
+            }
+            return null;
+        }
+    }
+
+    public async Task<IReadOnlyList<SeoRankedKeyword>> GetRankedKeywordsAsync(
+        string domain, int limit, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/dataforseo_labs/google/ranked_keywords/live", new[]
+        {
+            new
+            {
+                target = NormalizeDomain(domain),
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+                limit = Math.Clamp(limit, 1, 50),
+                item_types = OrganicItemTypes,
+                order_by = EstimatedTrafficOrder,
+            },
+        }, ct);
+
+        var rows = new List<SeoRankedKeyword>();
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var keywordData = Object(item, "keyword_data");
+            var keywordInfo = Object(keywordData, "keyword_info");
+            var properties = Object(keywordData, "keyword_properties");
+            var intent = Object(keywordData, "search_intent_info");
+            var ranked = Object(item, "ranked_serp_element");
+            var serpItem = Object(ranked, "serp_item");
+            var term = Str(keywordData, "keyword");
+            if (term.Length == 0)
+            {
+                continue;
+            }
+
+            rows.Add(new SeoRankedKeyword(
+                term,
+                (int)Num(serpItem, "rank_absolute"),
+                NullableLong(keywordInfo, "search_volume"),
+                NullableDouble(properties, "keyword_difficulty"),
+                NullableDouble(serpItem, "etv"),
+                Str(serpItem, "url"),
+                NullableText(intent, "main_intent") ?? NullableText(intent, "intent")));
+        }
+
+        return [.. rows.OrderByDescending(r => r.EstimatedTraffic ?? 0).Take(limit)];
+    }
+
+    public async Task<SeoAuthoritySnapshot?> GetAuthorityAsync(string domain, CancellationToken ct)
+    {
+        var normalized = NormalizeDomain(domain);
+        using var doc = await PostAsync("v3/backlinks/summary/live", new[]
+        {
+            new { target = normalized, include_subdomains = true },
+        }, ct);
+
+        var item = TaskResultItems(doc, itemsNestedInResult: false).FirstOrDefault();
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new SeoAuthoritySnapshot(
+            normalized,
+            NullableDouble(item, "rank"),
+            NullableLong(item, "backlinks"),
+            NullableLong(item, "referring_domains"),
+            NullableLong(item, "referring_main_domains"),
+            NullableLong(item, "broken_backlinks"),
+            NullableDouble(item, "spam_score"));
+    }
+
+    public async Task<SeoPositionFootprint?> GetPositionFootprintAsync(
+        string domain, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/dataforseo_labs/google/domain_rank_overview/live", new[]
+        {
+            new
+            {
+                target = NormalizeDomain(domain),
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+            },
+        }, ct);
+
+        var item = TaskResultItems(doc, itemsNestedInResult: true).FirstOrDefault();
+        var metrics = Object(item, "metrics");
+        var organic = Object(metrics, "organic");
+        if (organic.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new SeoPositionFootprint(
+            Num(organic, "pos_1"), Num(organic, "pos_2_3"), Num(organic, "pos_4_10"),
+            Num(organic, "count"), NullableDouble(organic, "etv"));
+    }
+
+    public async Task<IReadOnlyList<SeoCompetitorCandidate>> GetSerpCompetitorsAsync(
+        IReadOnlyList<string> keywords, int limit, CancellationToken ct)
+    {
+        var terms = keywords
+            .Where(keyword => keyword.Trim().Length >= 3)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(200)
+            .ToArray();
+        if (terms.Length == 0)
+        {
+            return [];
+        }
+
+        using var doc = await PostAsync("v3/dataforseo_labs/google/serp_competitors/live", new[]
+        {
+            new
+            {
+                keywords = terms,
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+                include_subdomains = true,
+                item_types = OrganicItemTypes,
+                limit = Math.Clamp(limit, 1, 100),
+            },
+        }, ct);
+
+        var rows = new List<SeoCompetitorCandidate>();
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var domain = NormalizeDomain(Str(item, "domain"));
+            if (domain.Length == 0)
+            {
+                continue;
+            }
+            rows.Add(new SeoCompetitorCandidate(
+                domain,
+                NullableDouble(item, "avg_position"),
+                (int)Num(item, "keywords_count"),
+                NullableDouble(item, "visibility"),
+                NullableDouble(item, "etv")));
+        }
+
+        return [.. rows
+            .OrderByDescending(row => row.Visibility ?? 0)
+            .ThenByDescending(row => row.KeywordCount)
+            .Take(limit)];
+    }
+
+    public async Task<SeoAeoEngineResult> QueryAnswerEngineAsync(
+        string provider, string question, string? siteDomain, CancellationToken ct)
+    {
+        var (label, model) = provider switch
+        {
+            "chat_gpt" => ("ChatGPT", "gpt-4.1-mini"),
+            "gemini" => ("Gemini", "gemini-2.5-flash"),
+            "claude" => ("Claude", "claude-sonnet-4-0"),
+            "perplexity" => ("Perplexity", "sonar"),
+            _ => (provider, string.Empty),
+        };
+        if (model.Length == 0)
+        {
+            return new SeoAeoEngineResult(provider, label, false, false, null, [], "Unknown answer engine.");
+        }
+
+        object task = provider == "perplexity"
+            ? new { user_prompt = question[..Math.Min(question.Length, 500)], model_name = model, max_output_tokens = 1024 }
+            : new { user_prompt = question[..Math.Min(question.Length, 500)], model_name = model, max_output_tokens = 1024, web_search = true };
+
+        using var doc = await PostAsync($"v3/ai_optimization/{provider}/llm_responses/live", new[] { task }, ct);
+        var result = TaskResults(doc).FirstOrDefault();
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            return new SeoAeoEngineResult(provider, label, false, false, null, [], "No answer returned.");
+        }
+
+        var citations = FindCitationObjects(result)
+            .Select(c =>
+            {
+                var url = FirstString(c, "url", "link", "source_url");
+                var citationDomain = NormalizeDomain(url);
+                var own = siteDomain is { Length: > 0 }
+                    && (citationDomain.Equals(siteDomain, StringComparison.OrdinalIgnoreCase)
+                        || citationDomain.EndsWith($".{siteDomain}", StringComparison.OrdinalIgnoreCase));
+                return new SeoCitation(
+                    FirstString(c, "title", "name", "source") ?? citationDomain,
+                    url ?? string.Empty, citationDomain, own);
+            })
+            .Where(c => c.Url.Length > 0)
+            .DistinctBy(c => c.Url, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var answer = FindFirstAnswer(result);
+        return new SeoAeoEngineResult(
+            provider, label, true, citations.Any(c => c.IsOwnDomain), answer, citations);
     }
 
     /// <summary>
@@ -277,6 +622,135 @@ public sealed class DataForSeoProvider(
         }
     }
 
+    private static IEnumerable<JsonElement> TaskResults(JsonDocument doc)
+    {
+        if (!doc.RootElement.TryGetProperty("tasks", out var tasks) || tasks.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+        foreach (var task in tasks.EnumerateArray())
+        {
+            if (task.TryGetProperty("status_code", out var status)
+                && status.ValueKind == JsonValueKind.Number && status.GetInt32() != 20000)
+            {
+                var message = task.TryGetProperty("status_message", out var statusMessage)
+                    ? statusMessage.GetString()
+                    : "unknown";
+                throw new InvalidOperationException($"DataForSEO task error: {message}");
+            }
+            if (task.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in result.EnumerateArray())
+                {
+                    yield return entry;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<JsonElement> FindCitationObjects(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if ((element.TryGetProperty("url", out var url) || element.TryGetProperty("link", out url)
+                 || element.TryGetProperty("source_url", out url))
+                && url.ValueKind == JsonValueKind.String)
+            {
+                yield return element;
+            }
+            foreach (var property in element.EnumerateObject())
+            {
+                foreach (var found in FindCitationObjects(property.Value))
+                {
+                    yield return found;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in element.EnumerateArray())
+            {
+                foreach (var found in FindCitationObjects(child))
+                {
+                    yield return found;
+                }
+            }
+        }
+    }
+
+    private static string? FindFirstAnswer(JsonElement element)
+    {
+        foreach (var name in new[] { "answer", "text", "content", "markdown" })
+        {
+            if (element.ValueKind == JsonValueKind.Object
+                && element.TryGetProperty(name, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(value.GetString()))
+            {
+                return value.GetString();
+            }
+        }
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (FindFirstAnswer(property.Value) is { } nested)
+                {
+                    return nested;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var child in element.EnumerateArray())
+            {
+                if (FindFirstAnswer(child) is { } nested)
+                {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    internal static string NormalizeDomain(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+        var candidate = value.Trim();
+        if (!candidate.Contains("://", StringComparison.Ordinal))
+        {
+            candidate = $"https://{candidate}";
+        }
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+        {
+            var host = uri.Host.ToLowerInvariant();
+            return host.StartsWith("www.", StringComparison.Ordinal) ? host[4..] : host;
+        }
+        return value.Trim().Trim('/').ToLowerInvariant();
+    }
+
+    private static JsonElement Object(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(name, out var value)
+        && value.ValueKind == JsonValueKind.Object
+            ? value
+            : default;
+
+    private static string? FirstString(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (NullableText(element, name) is { Length: > 0 } value)
+            {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private static string Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
 
@@ -285,4 +759,21 @@ public sealed class DataForSeoProvider(
 
     private static double Dbl(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0;
+
+    private static long? NullableLong(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object
+        && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.TryGetInt64(out var number) ? number : (long)v.GetDouble()
+            : null;
+
+    private static double? NullableDouble(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object
+        && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetDouble()
+            : null;
+
+    private static string? NullableText(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 }

@@ -106,7 +106,39 @@ public static class CampaignEndpoints
         campaign.SeoTargetsJson = keywords.Count == 0 && questions.Count == 0
             ? null   // clearing is a real action, not an empty object
             : JsonSerializer.Serialize(stored, TargetsJson);
-        campaign.UpdatedAt = clock.GetUtcNow();
+        var now = clock.GetUtcNow();
+        campaign.UpdatedAt = now;
+
+        // Target approval is the report's review action. Persist it on the report itself so
+        // reopening the SEO desk says Approved rather than showing a permanent Draft badge
+        // beside content that has already been generated from it.
+        var reportArtifact = await db.Artifacts
+            .Where(a => a.CampaignId == campaign.Id && a.Kind == "seo-report")
+            .OrderByDescending(a => a.UpdatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (reportArtifact is not null)
+        {
+            try
+            {
+                var report = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(
+                    reportArtifact.ContentJson, TargetsJson);
+                if (report is not null)
+                {
+                    var approved = keywords.Count > 0;
+                    reportArtifact.ContentJson = JsonSerializer.Serialize(
+                        report with { Status = approved ? "Approved" : "Draft" }, TargetsJson);
+                    reportArtifact.Status = approved ? ArtifactStatus.InReview : ArtifactStatus.Draft;
+                    reportArtifact.Version++;
+                    reportArtifact.UpdatedAt = now;
+                }
+            }
+            catch (JsonException)
+            {
+                // Legacy/unreadable reports remain untouched; the selected campaign targets
+                // are still the generation gate and must not be lost because display metadata
+                // could not be upgraded.
+            }
+        }
         await db.SaveChangesAsync(ct);
 
         return Results.Ok(stored);

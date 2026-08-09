@@ -62,10 +62,6 @@ public sealed class AiOrchestrator(
         // LinkedIn posts in a row on the board rather than interleaved with everything else.
         var wanted = selected.SelectMany(spec => Enumerable.Repeat(spec, copies)).ToList();
 
-        // The image plan is reserved by the run (ADR-012): empty slots must be
-        // visible from the moment the campaign has content, not at publish time.
-        await imagePlan.EnsureSlotsAsync(campaign.Id, ct);
-
         // Brand + campaign context resolve ONCE per run and steer every generator.
         var brand = await brands.ResolveAsync(campaign, ct);
 
@@ -77,16 +73,17 @@ public sealed class AiOrchestrator(
         // registry order, and image-prompts still lands after the blog it seeds against.
         foreach (var spec in wanted.Where(w => w.Kind == "youtube"))
         {
-            results.Add(await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct));
+            var result = await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct);
+            results.Add(result);
+            if (result is { Success: true, ArtifactId: { } artifactId })
+            {
+                await imagePlan.EnsureSlotsAsync(campaign.Id, ct, artifactId);
+            }
             await RecordProgressAsync(runId, results, ct);
         }
 
         wanted = [.. wanted.Where(w => w.Kind != "youtube")];
 
-        // The blog this run's image prompts belong to. A run that adds a second blog seeds
-        // that blog's own slots rather than finding the first blog's already filled and
-        // silently seeding nothing.
-        Guid? blogArtifactId = null;
         if (kinds is null || kinds.Length == 0 || kinds.Contains("blog", StringComparer.OrdinalIgnoreCase))
         {
             for (var copy = 0; copy < copies; copy++)
@@ -95,7 +92,6 @@ public sealed class AiOrchestrator(
                 results.Add(blog);
                 if (blog is { Success: true, ArtifactId: { } blogId })
                 {
-                    blogArtifactId ??= blogId;
                     await imagePlan.EnsureSlotsAsync(campaign.Id, ct, blogId);
                 }
                 await RecordProgressAsync(runId, results, ct);
@@ -110,6 +106,12 @@ public sealed class AiOrchestrator(
             var result = await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct);
             results.Add(result);
 
+            if (result is { Success: true, ArtifactId: { } contentArtifactId }
+                && result.Kind is not ("image-prompts" or "thumbnail-concepts" or "seo-brief"))
+            {
+                await imagePlan.EnsureSlotsAsync(campaign.Id, ct, contentArtifactId);
+            }
+
             // Image prompts seed the reserved slots, keeping each prompt tied to the
             // transcript moment it illustrates.
             if (result is { Success: true, Kind: "image-prompts", ArtifactId: { } artifactId })
@@ -117,12 +119,15 @@ public sealed class AiOrchestrator(
                 var artifact = await db.Artifacts.FindAsync([artifactId], ct);
                 if (artifact is not null)
                 {
-                    // Campaign-wide slots (thumbnail, social card) always; the blog-scoped
-                    // ones only when this run actually produced a blog to attach them to.
-                    await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct);
-                    if (blogArtifactId is { } blogId)
+                    // Seed each content item's own cards. Auto-mode cards that have no
+                    // matching canned prompt rebuild from their owning artifact at render time.
+                    foreach (var ownerId in results
+                        .Where(r => r.Success && r.ArtifactId is not null
+                            && r.Kind is not ("image-prompts" or "thumbnail-concepts" or "seo-brief"))
+                        .Select(r => r.ArtifactId!.Value)
+                        .Distinct())
                     {
-                        await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct, blogId);
+                        await imagePlan.SeedPromptsAsync(campaign.Id, artifact.ContentJson, ct, ownerId);
                     }
                 }
             }

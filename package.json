@@ -4,12 +4,14 @@
   "description": "npm workspace root. The ONLY npm surface in the product is the editor bundle (Frontend-Architecture.md §4).",
   "workspaces": [
     "src/editor-interop",
-    "tests/editor-interop"
+    "tests/editor-interop",
+    "tests/e2e"
   ],
   "scripts": {
     "build": "npm run build --workspace=castmill-editor-interop",
     "watch": "npm run watch --workspace=castmill-editor-interop",
-    "test": "npm test --workspace=castmill-editor-interop-tests"
+    "test": "npm test --workspace=castmill-editor-interop-tests",
+    "test:e2e": "npm test --workspace=castmill-e2e"
   },
   "engines": {
     "node": ">=22"

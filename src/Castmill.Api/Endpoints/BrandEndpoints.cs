@@ -25,7 +25,7 @@ public static partial class BrandEndpoints
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>The kinds a brand asset can be — small on purpose; "other" is the escape hatch.</summary>
-    private static readonly string[] AssetKinds = ["logo", "background", "face", "accent", "other"];
+    private static readonly string[] AssetKinds = ["logo", "background", "face", "product", "accent", "other"];
 
     public static IEndpointRouteBuilder MapBrandEndpoints(this IEndpointRouteBuilder routes)
     {

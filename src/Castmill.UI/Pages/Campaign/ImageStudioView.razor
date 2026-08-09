@@ -3,6 +3,7 @@
    generates without an explicit click — variants are live model calls that cost money,
    which is why generation is a button, never a side effect (the user's rule). *@
 @page "/campaigns/{CampaignId:guid}/images"
+@using System.Text.Json
 @using Castmill.Core.Ai
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
@@ -10,6 +11,7 @@
 @using Castmill.UI.State
 @implements IDisposable
 @inject CampaignState Campaign
+@inject CampaignsClient Campaigns
 @inject ImagesClient Images
 @using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient BrandsApi
@@ -17,31 +19,35 @@
 @inject StudioRunService StudioRun
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
+@inject NavigationManager Navigation
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
 
 <CampaignShell CampaignId="CampaignId" View="CampaignView.ImageStudio">
     <div class="cm-page">
         <div class="cm-measure--dashboard">
-            @if (Campaign.ImageSlots.Count == 0)
+            @if (!ImageContentItems.Any() && Campaign.ImageSlots.Count == 0)
             {
                 <EmptyState Kicker="Image studio"
-                            Headline="No image plan yet."
-                            Detail="Every campaign gets six typed slots — YouTube thumbnail, blog header, a social card per shape. Reserving them costs nothing; generating variants is always your click.">
-                    <Action>
-                        <button type="button" class="cm-button" disabled="@_reserving" @onclick="ReserveAsync">
-                            @(_reserving ? "Reserving…" : "Reserve the image plan")
-                        </button>
-                    </Action>
-                </EmptyState>
+                            Headline="No content items yet."
+                            Detail="Image Studio is organized by content item. Generate or add content first, then create the images that belong to it." />
             }
             else
             {
                 <div class="cm-studio">
                     <section>
-                        <span class="cm-kicker">Slots · @Campaign.ImagesFilled/@Campaign.ImagesTotal filled</span>
-                        <ul class="cm-studio__slots">
-                            @foreach (var slot in Campaign.ImageSlots)
+                        <span class="cm-kicker">Content · @Campaign.ImagesFilled/@Campaign.ImagesTotal images filled</span>
+                        @foreach (var item in ImageContentItems)
+                        {
+                            var slots = SlotsFor(item.Id).ToList();
+                            <div class="cm-tree__group">
+                                <div class="cm-tree__head">
+                                    <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                    <span class="cm-tree__count cm-mono">@slots.Count</span>
+                                </div>
+                                <p class="cm-meta">@item.Title</p>
+                                <ul class="cm-studio__slots">
+                            @foreach (var slot in slots)
                             {
                                 <li>
                                     <button type="button"
@@ -56,7 +62,32 @@
                                     </button>
                                 </li>
                             }
-                        </ul>
+                                </ul>
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
+                                    @(_addingFor == item.Id ? "Adding…" : "+ Add image")
+                                </button>
+                            </div>
+                        }
+                        @if (LegacySlots.Any())
+                        {
+                            <div class="cm-tree__group">
+                                <div class="cm-tree__head"><span class="cm-kicker">Legacy campaign images</span></div>
+                                <ul class="cm-studio__slots">
+                                    @foreach (var slot in LegacySlots)
+                                    {
+                                        <li>
+                                            <button type="button"
+                                                    class="cm-studio__slot @(slot.Id == _selectedId ? "cm-studio__slot--active" : null)"
+                                                    @onclick="() => SelectSlotAsync(slot)">
+                                                <span>@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+                                                <span class="cm-studio__slot-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
+                                            </button>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
                     </section>
 
                     @if (Selected is { } slot2)
@@ -76,13 +107,46 @@
                             </div>
 
                             <div>
+                                @if (IsThumbnail(slot2) && _thumbnailConcepts.Count > 0)
+                                {
+                                    <span class="cm-kicker">Concepts first</span>
+                                    <p class="cm-meta">Choose a strategic direction before generating pixels.</p>
+                                    <div class="cm-studio__chips">
+                                        @foreach (var concept in _thumbnailConcepts)
+                                        {
+                                            <button type="button" class="cm-studio__chip" title="@concept.Reason"
+                                                    @onclick="() => ApplyConceptAsync(concept)">
+                                                @concept.Name · @concept.OverlayText
+                                            </button>
+                                        }
+                                    </div>
+                                }
+
+                                <span class="cm-kicker">Prompt mode</span>
+                                <div class="cm-studio__row">
+                                    <label class="cm-studio__model">
+                                        <input type="radio" name="cm-prompt-mode" checked="@IsAutoPrompt"
+                                               @onchange='() => ChangePromptModeAsync("Auto")' />
+                                        <span>Auto from this item</span>
+                                    </label>
+                                    <label class="cm-studio__model">
+                                        <input type="radio" name="cm-prompt-mode" checked="@(!IsAutoPrompt)"
+                                               @onchange='() => ChangePromptModeAsync("Manual")' />
+                                        <span>Manual</span>
+                                    </label>
+                                </div>
                                 <span class="cm-kicker">Prompt</span>
                                 @* oninput, not onchange: the Generate button must enable while
                                    typing, not after the field loses focus. The PATCH waits for blur. *@
                                 <textarea class="cm-studio__prompt" @bind="_prompt" @bind:event="oninput"
                                           @onblur="SavePromptAsync"
+                                          disabled="@IsAutoPrompt"
                                           placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
-                                @if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
+                                @if (IsAutoPrompt)
+                                {
+                                    <p class="cm-meta">Castmill rebuilds the prompt from this item's content, the approved SEO/AEO targets and the brand style every time.</p>
+                                }
+                                else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
                                 {
                                     <p class="cm-meta">
                                         No prompt yet — write one, or let the AI draft a prompt for
@@ -101,6 +165,48 @@
                                 </div>
                             </div>
 
+                            @if (Campaign.Brand is not null)
+                            {
+                                <div>
+                                    <span class="cm-kicker">Reference images</span>
+                                    @if (ProductAssets.Count > 0)
+                                    {
+                                        <p class="cm-meta">Up to three product screenshots are attached automatically for product fidelity.</p>
+                                        <div class="cm-studio__picks">
+                                            @foreach (var asset in ProductAssets.Take(3))
+                                            {
+                                                <span class="cm-studio__pick cm-studio__pick--on">
+                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var productThumb))
+                                                    {
+                                                        <img src="@productThumb" alt="" loading="lazy" />
+                                                    }
+                                                    <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName) · automatic</span>
+                                                </span>
+                                            }
+                                        </div>
+                                    }
+                                    @foreach (var group in ReferenceKit)
+                                    {
+                                        <span class="cm-meta">@KindLabel(group.Key)</span>
+                                        <div class="cm-studio__picks">
+                                            @foreach (var asset in group)
+                                            {
+                                                var isOn = _picked.Values.Any(a => a.Id == asset.Id);
+                                                <button type="button" class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
+                                                        aria-pressed="@(isOn ? "true" : "false")"
+                                                        @onclick="() => TogglePickAsync(group.Key, asset)">
+                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
+                                                    {
+                                                        <img src="@thumb" alt="" loading="lazy" />
+                                                    }
+                                                    <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
+                                                </button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+
                             <div class="cm-studio__models">
                                 <span class="cm-kicker">Model</span>
                                 @if (_status is null)
@@ -111,14 +217,19 @@
                                 {
                                     @foreach (var provider in _status.ImageProviders)
                                     {
-                                        <label class="cm-studio__model @(provider.Ready ? null : "cm-studio__model--off")">
-                                            <input type="radio" name="cm-studio-model" disabled="@(!provider.Ready)"
+                                        <label class="cm-studio__model @(provider.Ready && (!HasReferences || provider.SupportsReferenceImages) ? null : "cm-studio__model--off")">
+                                            <input type="radio" name="cm-studio-model"
+                                                   disabled="@(!provider.Ready || (HasReferences && !provider.SupportsReferenceImages))"
                                                    checked="@(SelectedAlias == provider.Name)"
                                                    @onchange="() => PickModelAsync(provider.Name)" />
                                             <span>@provider.Name</span>
                                             @if (!provider.Ready)
                                             {
                                                 <span class="cm-meta">— unavailable: @(provider.Reason ?? "not configured")</span>
+                                            }
+                                            else if (HasReferences && !provider.SupportsReferenceImages)
+                                            {
+                                                <span class="cm-meta">— unavailable for cards with reference images</span>
                                             }
                                         </label>
                                     }
@@ -137,8 +248,11 @@
                             {
                                 <p class="cm-meta">
                                     Belongs to
-                                    <strong>@(Blogs.FirstOrDefault(b => b.Id == owner)?.Title ?? "a blog that has been deleted")</strong>
-                                    — placing rewrites that blog's stub.
+                                    <strong>@(SelectedOwner?.Title ?? "a content item that has been deleted")</strong>.
+                                    @if (SelectedOwner?.Kind == "blog")
+                                    {
+                                        <text> Placing also rewrites that blog's stub.</text>
+                                    }
                                 </p>
                             }
                             else if (IsBlogSlot(slot2.Kind) && Blogs.Count > 1)
@@ -180,10 +294,12 @@
                             @if (!CanGenerate && !IsGenerating)
                             {
                                 <p class="cm-meta">
-                                    @(string.IsNullOrWhiteSpace(_prompt)
+                                    @(!IsAutoPrompt && string.IsNullOrWhiteSpace(_prompt)
                                         ? "Generate enables as soon as this slot has a prompt."
                                         : _status is null
                                             ? "Waiting for provider readiness…"
+                                            : HasReferences && !SelectedProviderSupportsReferences
+                                                ? "Choose Foundry for real reference-image inputs, or remove the optional references."
                                             : "No image provider is configured — see the model list above.")
                                 </p>
                             }
@@ -382,15 +498,8 @@
                                     }
                                 </div>
 
-                                @* The brand kit, usable from here rather than only from the
-                                   Brands page: pick an existing face or background, or add one
-                                   without leaving the studio.
-
-                                   Honest about what this does — the renderer takes TEXT only
-                                   (IImageRenderer.RenderExactAsync has no reference-image
-                                   parameter), so an asset contributes its DESCRIPTION to the
-                                   prompt. It is steering, not compositing, and the panel says
-                                   so rather than implying a likeness will be reproduced. *@
+                                @* These are real image inputs persisted on the selected card.
+                                   The same references are reattached when steering from a take. *@
                                 <span class="cm-kicker">From @(Campaign.Brand?.Name ?? "the brand kit")</span>
 
                                 @if (Campaign.Brand is null)
@@ -403,12 +512,11 @@
                                 }
                                 else
                                 {
-                                    @* A picker, not a list of append-buttons: one face, one
-                                       background, one accent. Click the chosen one; click it
-                                       again to clear. Selections compose into the steering text
-                                       automatically, so what is selected and what the model is
-                                       told can never disagree. *@
-                                    @foreach (var group in BrandKit)
+                                    @if (ProductAssets.Count > 0)
+                                    {
+                                        <p class="cm-meta">Product screenshots stay attached automatically.</p>
+                                    }
+                                    @foreach (var group in ReferenceKit)
                                     {
                                         <div class="cm-studio__kit">
                                             <span class="cm-meta">
@@ -426,7 +534,7 @@
                                                             class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
                                                             aria-pressed="@(isOn ? "true" : "false")"
                                                             title="@(asset.Label ?? asset.FileName)"
-                                                            @onclick="() => TogglePick(group.Key, asset)">
+                                                            @onclick="() => TogglePickAsync(group.Key, asset)">
                                                         @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
                                                         {
                                                             <img src="@thumb" alt="" loading="lazy" />
@@ -440,13 +548,14 @@
                                         </div>
                                     }
 
-                                    @if (!BrandKit.Any())
+                                    @if (!ReferenceKit.Any())
                                     {
                                         <p class="cm-meta">Nothing in the kit yet — add a face or background below.</p>
                                     }
 
                                     <div class="cm-studio__upload">
                                         <select class="cm-input" @bind="_uploadKind" aria-label="What this asset is">
+                                            <option value="product">Product screenshot</option>
                                             <option value="face">Face</option>
                                             <option value="background">Background</option>
                                             <option value="logo">Logo</option>
@@ -551,7 +660,7 @@
     private AiStatusResponse? _status;
     private string? _pickedAlias;
     private int _variantCount = 2;
-    private bool _reserving;
+    private Guid? _addingFor;
     private bool _seeding;
     private bool _placing;
     private bool _compositing;
@@ -574,11 +683,8 @@
         ("Slate", "#2F4858"),
     ];
 
-    /// <summary>
-    /// The brand's asset kit. A label doubles as prompt text ("the host, short dark hair"),
-    /// which is what BrandAsset.Label is for — so using one is prompt steering, not pixel
-    /// compositing. The renderer accepts text only.
-    /// </summary>
+    /// <summary>The brand's real reference images. Selected ids are persisted on the card;
+    /// product screenshots are attached automatically by the server.</summary>
     private List<BrandAssetResponse> _brandAssets = [];
     private Guid? _facesLoadedFor;
 
@@ -588,12 +694,18 @@
     private string? _uploadError;
 
     /// <summary>Faces first — they are what the panel is reached for most.</summary>
-    private static readonly string[] KitOrder = ["face", "background", "accent", "logo", "other"];
+    private static readonly string[] KitOrder = ["product", "face", "background", "accent", "logo", "other"];
 
     private IEnumerable<IGrouping<string, BrandAssetResponse>> BrandKit =>
         _brandAssets
             .GroupBy(a => a.Kind.ToLowerInvariant())
             .OrderBy(g => Array.IndexOf(KitOrder, g.Key) is var i && i >= 0 ? i : KitOrder.Length);
+
+    private IEnumerable<IGrouping<string, BrandAssetResponse>> ReferenceKit =>
+        BrandKit.Where(g => g.Key != "product");
+
+    private IReadOnlyList<BrandAssetResponse> ProductAssets =>
+        [.. _brandAssets.Where(a => a.Kind.Equals("product", StringComparison.OrdinalIgnoreCase))];
 
     /// <summary>At most one asset per kind — a picker, not a multi-select.</summary>
     private readonly Dictionary<string, BrandAssetResponse> _picked = new(StringComparer.Ordinal);
@@ -604,28 +716,15 @@
     private static string KindLabel(string kind) => kind switch
     {
         "face" => "Face",
+        "product" => "Product screenshot",
         "background" => "Background",
         "accent" => "Accent",
         "logo" => "Logo",
         _ => "Other",
     };
 
-    /// <summary>The steering line an asset contributes. Its label IS the prompt text.</summary>
-    private static string AssetPrompt(BrandAssetResponse asset) =>
-        asset.Kind.ToLowerInvariant() switch
-        {
-            "background" => $"set against {asset.Label ?? asset.FileName}",
-            "accent" => $"accented with {asset.Label ?? asset.FileName}",
-            "logo" => $"carrying {asset.Label ?? asset.FileName}",
-            _ => $"featuring {asset.Label ?? asset.FileName}",
-        };
-
-    /// <summary>
-    /// Selecting replaces whatever was chosen for that kind; selecting the same one clears it.
-    /// The steering box is then rewritten from the selections, so the two cannot drift apart —
-    /// appending text on each click left stale mentions behind after a change of mind.
-    /// </summary>
-    private void TogglePick(string kind, BrandAssetResponse asset)
+    /// <summary>Selecting a reference changes the actual image input, not just prompt text.</summary>
+    private async Task TogglePickAsync(string kind, BrandAssetResponse asset)
     {
         if (_picked.TryGetValue(kind, out var current) && current.Id == asset.Id)
         {
@@ -636,37 +735,61 @@
             _picked[kind] = asset;
         }
 
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+
+        try
+        {
+            await Images.PatchAsync(CampaignId, slot.Id,
+                referenceAssetIds: [.. _picked.Values.Select(a => a.Id)]);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    // Kept as a pure selection helper for component-level tests and non-rendered callers.
+    // The visible picker uses TogglePickAsync, which additionally persists real reference ids.
+    private void TogglePick(string kind, BrandAssetResponse asset)
+    {
+        if (_picked.TryGetValue(kind, out var current) && current.Id == asset.Id)
+        {
+            _picked.Remove(kind);
+        }
+        else
+        {
+            _picked[kind] = asset;
+        }
         SyncPickedSteering();
     }
 
-    /// <summary>
-    /// Keeps the kit sentence at the END of the steering note, leaving anything the user typed
-    /// above it untouched.
-    /// </summary>
+    private static string AssetPrompt(BrandAssetResponse asset) =>
+        asset.Kind.ToLowerInvariant() switch
+        {
+            "background" => $"set against {asset.Label ?? asset.FileName}",
+            "accent" => $"accented with {asset.Label ?? asset.FileName}",
+            "logo" => $"carrying {asset.Label ?? asset.FileName}",
+            _ => $"featuring {asset.Label ?? asset.FileName}",
+        };
+
     private void SyncPickedSteering()
     {
         const string marker = "From the brand kit: ";
-
         var typed = _steerNote ?? string.Empty;
         var at = typed.IndexOf(marker, StringComparison.Ordinal);
         if (at >= 0)
         {
             typed = typed[..at].TrimEnd();
         }
-
-        if (_picked.Count == 0)
-        {
-            _steerNote = typed;
-            return;
-        }
-
-        var parts = _picked
-            .OrderBy(p => Array.IndexOf(KitOrder, p.Key))
-            .Select(p => AssetPrompt(p.Value));
-
-        _steerNote = string.IsNullOrWhiteSpace(typed)
-            ? marker + string.Join(", ", parts) + "."
-            : typed + "\n" + marker + string.Join(", ", parts) + ".";
+        var parts = _picked.OrderBy(p => Array.IndexOf(KitOrder, p.Key)).Select(p => AssetPrompt(p.Value));
+        _steerNote = _picked.Count == 0
+            ? typed
+            : string.IsNullOrWhiteSpace(typed)
+                ? marker + string.Join(", ", parts) + "."
+                : typed + "\n" + marker + string.Join(", ", parts) + ".";
     }
 
     private async Task LoadBrandFacesAsync()
@@ -693,6 +816,15 @@
                 }
                 catch (ApiException)
                 {
+                }
+            }
+
+            _picked.Clear();
+            foreach (var id in Selected?.ReferenceAssetIds ?? [])
+            {
+                if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } selected)
+                {
+                    _picked[selected.Kind.ToLowerInvariant()] = selected;
                 }
             }
         }
@@ -761,11 +893,43 @@
     private string _steerNote = string.Empty;
     private ElementReference _dialogPanel;
     private bool _dialogNeedsFocus;
+    private readonly List<ThumbnailConcept> _thumbnailConcepts = [];
+    private Guid? _conceptArtifactId;
+
+    private sealed record ThumbnailConcept(
+        string Name, string Angle, string Prompt, string OverlayText, string Reason);
 
     [Parameter] public Guid CampaignId { get; set; }
 
+    [SupplyParameterFromQuery(Name = "artifact")]
+    private Guid? RequestedArtifact { get; set; }
+
+    [SupplyParameterFromQuery(Name = "slot")]
+    private Guid? RequestedSlot { get; set; }
+
+    private IEnumerable<ArtifactPreviewResponse> ImageContentItems => Campaign.Artifacts
+        .Where(a => ArtifactDisplay.Editable(a.Kind)
+                    && a.Kind is not ("seo-brief" or "seo-keyword-plan"))
+        .OrderBy(a => ArtifactDisplay.KindOrder(a.Kind))
+        .ThenBy(a => a.CreatedAt);
+
+    private IEnumerable<ImageSlotResponse> SlotsFor(Guid artifactId) =>
+        Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId);
+
+    private IEnumerable<ImageSlotResponse> LegacySlots =>
+        Campaign.ImageSlots.Where(s => s.ArtifactId is null);
+
     private ImageSlotResponse? Selected =>
         Campaign.ImageSlots.FirstOrDefault(s => s.Id == _selectedId);
+
+    private ArtifactPreviewResponse? SelectedOwner => Selected?.ArtifactId is { } owner
+        ? Campaign.Artifacts.FirstOrDefault(a => a.Id == owner)
+        : null;
+
+    private bool IsAutoPrompt => !string.Equals(Selected?.PromptMode, "Manual", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsThumbnail(ImageSlotResponse slot) =>
+        slot.Kind.Equals("youtube-thumbnail", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Blogs in the campaign, oldest first — the candidates a stub can be placed into.</summary>
     private IReadOnlyList<ArtifactPreviewResponse> Blogs =>
@@ -793,6 +957,24 @@
 
     private bool IsGenerating => _selectedId is { } id && StudioRun.IsActiveFor(id);
 
+    private bool HasReferences => ProductAssets.Count > 0 || _picked.Count > 0;
+
+    private bool SelectedProviderSupportsReferences
+    {
+        get
+        {
+            if (!HasReferences)
+            {
+                return true;
+            }
+            var alias = SelectedAlias;
+            var provider = _status?.ImageProviders.FirstOrDefault(p =>
+                string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase))
+                ?? _status?.ImageProviders.FirstOrDefault(p => p.Name == "foundry");
+            return provider?.SupportsReferenceImages == true;
+        }
+    }
+
     /// <summary>"42s" under a minute, "2m 08s" after — renders run for minutes and a bare
     /// spinner gave no sense of whether anything was still moving.</summary>
     private static string ElapsedLabel(TimeSpan elapsed) =>
@@ -800,8 +982,8 @@
             ? $"{(int)elapsed.TotalSeconds}s"
             : $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s";
 
-    private bool CanGenerate => !string.IsNullOrWhiteSpace(_prompt) &&
-        _status?.ImageProviders.Any(p => p.Ready) == true;
+    private bool CanGenerate => (IsAutoPrompt || !string.IsNullOrWhiteSpace(_prompt)) &&
+        _status?.ImageProviders.Any(p => p.Ready) == true && SelectedProviderSupportsReferences;
 
     /// <summary>Kept takes lead, then candidates, then (when shown) discarded — newest first.</summary>
     private IEnumerable<ImageVariantResponse> OrderedGallery =>
@@ -886,11 +1068,24 @@
 
     private async Task SyncSelectionAsync()
     {
+        await LoadThumbnailConceptsAsync();
+
         if (Campaign.ImageSlots.Count == 0)
         {
             return;
         }
-        if (_selectedId is null || Campaign.ImageSlots.All(s => s.Id != _selectedId))
+
+        var requested = RequestedSlot is { } slotId
+            ? Campaign.ImageSlots.FirstOrDefault(s => s.Id == slotId)
+            : RequestedArtifact is { } artifactId
+                ? Campaign.ImageSlots.FirstOrDefault(s => s.ArtifactId == artifactId)
+                : null;
+
+        if (requested is not null && requested.Id != _selectedId)
+        {
+            await SelectSlotAsync(requested);
+        }
+        else if (_selectedId is null || Campaign.ImageSlots.All(s => s.Id != _selectedId))
         {
             await SelectSlotAsync(Campaign.ImageSlots[0]);
         }
@@ -1003,16 +1198,28 @@
         _headline = slot.HeadlineText;
         _headlineBackground = slot.HeadlineBackground;
         _safeArea = slot.SafeArea;
+        _picked.Clear();
+        foreach (var id in slot.ReferenceAssetIds ?? [])
+        {
+            if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } asset)
+            {
+                _picked[asset.Kind.ToLowerInvariant()] = asset;
+            }
+        }
         await ReloadGalleryAsync();
     }
 
-    private async Task ReserveAsync()
+    private async Task AddImageAsync(Guid artifactId)
     {
-        _reserving = true;
+        _addingFor = artifactId;
         try
         {
-            await Images.ReserveAsync(CampaignId);
+            var slot = await Images.CreateAsync(CampaignId, artifactId);
             await Campaign.LoadAsync(CampaignId, force: true);
+            RequestedArtifact = artifactId;
+            RequestedSlot = slot.Id;
+            await SelectSlotAsync(slot);
+            Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}", replace: true);
         }
         catch (ApiException ex)
         {
@@ -1020,7 +1227,7 @@
         }
         finally
         {
-            _reserving = false;
+            _addingFor = null;
         }
     }
 
@@ -1056,9 +1263,90 @@
         }
     }
 
+    private async Task ChangePromptModeAsync(string mode)
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        try
+        {
+            await Images.PatchAsync(CampaignId, slot.Id, promptMode: mode);
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private async Task ApplyConceptAsync(ThumbnailConcept concept)
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+
+        try
+        {
+            _prompt = concept.Prompt;
+            _savedPrompt = concept.Prompt;
+            _headline = concept.OverlayText;
+            await Images.PatchAsync(CampaignId, slot.Id, prompt: concept.Prompt,
+                promptMode: "Manual", headlineText: concept.OverlayText);
+            await Campaign.LoadAsync(CampaignId, force: true);
+            Notifier.ShowSuccess($"Applied the {concept.Name} concept. Review the prompt, then generate takes.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private async Task LoadThumbnailConceptsAsync()
+    {
+        var preview = Campaign.Artifacts
+            .Where(a => a.Kind == "thumbnail-concepts")
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefault();
+        if (preview is null || preview.Id == _conceptArtifactId)
+        {
+            return;
+        }
+
+        try
+        {
+            var (artifact, _) = await Campaigns.GetArtifactAsync(CampaignId, preview.Id);
+            using var doc = JsonDocument.Parse(artifact.ContentJson);
+            var root = doc.RootElement;
+            var content = root.TryGetProperty("content", out var nested) ? nested : root;
+            _thumbnailConcepts.Clear();
+            if (content.TryGetProperty("concepts", out var concepts) && concepts.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in concepts.EnumerateArray())
+                {
+                    _thumbnailConcepts.Add(new ThumbnailConcept(
+                        Text(item, "name"), Text(item, "angle"), Text(item, "prompt"),
+                        Text(item, "overlayText"), Text(item, "reason")));
+                }
+            }
+            _conceptArtifactId = preview.Id;
+        }
+        catch (Exception ex) when (ex is ApiException or JsonException)
+        {
+            _thumbnailConcepts.Clear();
+        }
+
+        static string Text(JsonElement item, string name) =>
+            item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? string.Empty
+                : string.Empty;
+    }
+
     private async Task SavePromptAsync()
     {
-        if (Selected is not { } slot || string.Equals(_prompt, _savedPrompt, StringComparison.Ordinal))
+        if (Selected is not { } slot || IsAutoPrompt
+            || string.Equals(_prompt, _savedPrompt, StringComparison.Ordinal))
         {
             return;
         }

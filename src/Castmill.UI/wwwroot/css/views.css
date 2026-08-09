@@ -2110,6 +2110,150 @@
     margin: 0 0 var(--cm-space-2);
 }
 
+/* Full pre-production SEO/AEO report. Shared by the run wizard and the campaign SEO desk. */
+.cm-deep-report {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-6);
+}
+
+.cm-deep-report__head,
+.cm-deep-report__section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--cm-space-4);
+}
+
+.cm-deep-report__head h2,
+.cm-deep-report__section h3 {
+    margin: var(--cm-space-1) 0;
+}
+
+.cm-deep-report__section {
+    padding-top: var(--cm-space-6);
+    border-top: 1px solid var(--cm-rule-strong);
+}
+
+.cm-report-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--cm-space-3);
+}
+
+.cm-report-stat,
+.cm-report-card,
+.cm-aeo-card {
+    padding: var(--cm-space-4);
+    background: var(--cm-surface-raised);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+}
+
+.cm-report-stat {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+.cm-report-stat strong {
+    font-size: var(--cm-text-h2);
+    color: var(--cm-accent-strong);
+}
+
+.cm-report-coverage,
+.cm-report-recommendations {
+    margin: var(--cm-space-3) 0 0;
+    padding-left: var(--cm-space-6);
+}
+
+.cm-report-coverage {
+    list-style: none;
+    padding-left: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-2);
+}
+
+.cm-report-coverage li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-3);
+    border-inline-start: 3px solid var(--cm-danger);
+    background: var(--cm-surface-raised);
+}
+
+.cm-report-coverage li.cm-report-coverage--ok {
+    border-inline-start-color: var(--cm-success);
+}
+
+.cm-aeo-grid,
+.cm-report-cards,
+.cm-answer-surfaces {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-3);
+    margin-top: var(--cm-space-3);
+}
+
+.cm-aeo-card summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+    cursor: pointer;
+}
+
+.cm-aeo-card p {
+    white-space: pre-wrap;
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+.cm-report-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--cm-space-2);
+}
+
+.cm-report-own-domain {
+    background: var(--cm-accent-wash);
+}
+
+.cm-report-angle-grid {
+    margin: var(--cm-space-3) 0 0;
+    padding-left: var(--cm-space-6);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-3);
+    list-style-position: inside;
+}
+
+.cm-report-angle-grid li {
+    padding: var(--cm-space-4);
+    background: var(--cm-surface-raised);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+}
+
+.cm-report-angle-grid li > * {
+    display: block;
+    margin-top: var(--cm-space-2);
+}
+
+@media (max-width: 52rem) {
+    .cm-report-stats,
+    .cm-report-coverage,
+    .cm-aeo-grid,
+    .cm-report-cards,
+    .cm-answer-surfaces,
+    .cm-report-angle-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 /* ---- Image studio (F10) ----------------------------------------------------------- */
 
 .cm-studio {
@@ -3780,7 +3924,7 @@
     margin-block: var(--cm-space-2) var(--cm-space-6);
 }
 
-/* ---- SEO: content cluster map ----------------------------------------------------- */
+/* ---- SEO: ApexTree content hierarchy --------------------------------------------- */
 
 .cm-seo__cluster {
     margin-block-end: var(--cm-space-8);
@@ -3793,103 +3937,21 @@
     margin-block-end: var(--cm-space-2);
 }
 
-.cm-cluster__svg {
+.cm-cluster__tree {
     inline-size: 100%;
-    max-inline-size: 46rem;
-    block-size: auto;
-    display: block;
-    margin-inline: auto;
-}
-
-.cm-cluster__spoke {
-    stroke: var(--cm-rule-strong);
-    stroke-width: 1.5;
-}
-
-.cm-cluster__spoke--gap {
-    stroke: var(--cm-rule);
-    stroke-dasharray: 4 4;
-}
-
-.cm-cluster__pillar circle {
-    fill: var(--cm-accent-strong);
-}
-
-.cm-cluster__kicker {
-    fill: var(--cm-on-accent);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: var(--cm-tracking-kicker);
-    text-anchor: middle;
-}
-
-.cm-cluster__title {
-    fill: var(--cm-on-accent);
-    font-size: 13px;
-    font-weight: 600;
-    text-anchor: middle;
-}
-
-.cm-cluster__kw {
-    fill: var(--cm-on-accent);
-    font-size: 11px;
-    font-style: italic;
-    text-anchor: middle;
-    opacity: 0.85;
-}
-
-.cm-cluster__node {
-    cursor: pointer;
-}
-
-.cm-cluster__node circle {
-    fill: var(--cm-surface-raised);
-    stroke: var(--cm-rule-strong);
-    stroke-width: 1.5;
-    transition: stroke var(--cm-motion), fill var(--cm-motion);
-}
-
-.cm-cluster__node:hover circle,
-.cm-cluster__node:focus-visible circle {
-    stroke: var(--cm-accent);
-    stroke-width: 2.5;
-}
-
-.cm-cluster__node:focus-visible {
-    outline: none;
-}
-
-/* Status colour lives on the ring, not the fill, so labels stay readable in both themes. */
-.cm-cluster__node--approved { stroke: var(--cm-success); }
-.cm-cluster__node--review { stroke: var(--cm-accent); }
-.cm-cluster__node--draft { stroke: var(--cm-rule-strong); }
-
-.cm-cluster__node--gap circle {
-    fill: transparent;
-    stroke: var(--cm-rule);
-    stroke-dasharray: 5 4;
-}
-
-.cm-cluster__node-kind {
-    fill: var(--cm-on-surface);
-    font-size: 12px;
-    font-weight: 600;
-    text-anchor: middle;
-}
-
-.cm-cluster__node-status {
-    fill: var(--cm-on-surface-muted);
-    font-size: 10px;
-    text-anchor: middle;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.cm-cluster__node-add {
-    fill: var(--cm-accent);
-    font-size: 11px;
-    font-weight: 600;
-    text-anchor: middle;
+    min-block-size: 32.5rem;
+    overflow: hidden;
+    border: 1px solid var(--cm-rule);
+    background: var(--cm-surface-sunken);
+    border-radius: var(--cm-radius-lg);
+    /* ApexTree owns the SVG internals. These properties keep its toolbar native to both
+       Castmill theme families without reaching into generated class names. */
+    --toolbar-bg-color: var(--cm-surface-raised);
+    --toolbar-border-color: var(--cm-rule);
+    --toolbar-icon-color: var(--cm-on-surface-muted);
+    --toolbar-hover-bg-color: var(--cm-surface);
+    --toolbar-icon-hover-color: var(--cm-on-surface);
+    --toolbar-active-bg-color: var(--cm-accent-wash);
 }
 
 .cm-cluster__legend {
@@ -3897,6 +3959,8 @@
     margin-block-start: var(--cm-space-2);
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .cm-cluster__node circle { transition: none; }
+@media (max-width: 56.25rem) {
+    .cm-cluster__tree {
+        min-block-size: 28rem;
+    }
 }

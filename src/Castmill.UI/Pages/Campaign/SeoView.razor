@@ -1,6 +1,6 @@
 @* The SEO / AEO desk (F9 slice, handoff §9): scorecard · keyword table + share-of-voice
    bars (Blazor-ApexCharts, ADR-F24) · content angles, plus the A/B YouTube titles, the
-   share link and the blog metadata tabs.
+   share link and the required pre-production analysis.
 
    HONESTY RULE, on the surface: this campaign has not published, so every position here
    is PROJECTED — said in the banner, not a tooltip. *@
@@ -29,8 +29,9 @@
     <div class="cm-page">
         <div class="cm-measure--dashboard">
             <p class="cm-seo__banner">
-                <strong>Projected, not measured.</strong> This campaign hasn't published yet, so
-                positions and share-of-voice are projections from search metrics — not rankings.
+                <strong>Point-in-time research, not ongoing rank tracking.</strong> Search demand,
+                SERP positions, backlinks and AI citations were measured when this report ran.
+                Predicted campaign outcomes remain recommendations until the content publishes.
             </p>
 
             @* What the content was actually WRITTEN to hit, as opposed to the analysis below,
@@ -88,15 +89,15 @@
             @if (_plan is null)
             {
                 <EmptyState Kicker="SEO / AEO"
-                            Headline="No keyword plan yet."
-                            Detail="The plan runs in two legs: an AI SEO brief from your transcript, then live DataForSEO metrics and related keywords, merged and ranked by opportunity. Takes about 15 seconds.">
+                            Headline="Run the analysis before creating content."
+                            Detail="Castmill researches grounded keywords, answer-engine questions and the live results page. You approve those targets before titles or copy can be generated.">
                     <Action>
                         <div class="cm-form__actions">
-                            <input class="cm-input cm-seo__focus" placeholder="Optional focus — what should this rank for?"
+                            <input class="cm-input cm-seo__focus" placeholder="Site URL required for domain intelligence"
                                    @bind="_focus" disabled="@_planning" />
-                            <button type="button" class="cm-button" disabled="@(_planning || Campaign.TranscriptArtifactId is null)"
+                            <button type="button" class="cm-button" disabled="@(_planning || Campaign.TranscriptArtifactId is null || !HasValidSiteUrl)"
                                     @onclick="RunPlanAsync">
-                                @(_planning ? "Planning… (AI brief, then DataForSEO)" : "Run keyword plan")
+                                @(_planning ? "Analyzing SEO/AEO…" : "Run SEO/AEO analysis")
                             </button>
                         </div>
                         @if (_planError is not null)
@@ -108,27 +109,58 @@
             }
             else
             {
-                <div class="cm-seo">
+                @if (_analysis is { } deepReport)
+                {
+                    <DeepSeoReport Report="deepReport" />
+                    <section class="cm-deep-report__section">
+                        <div class="cm-form__actions">
+                            <input class="cm-input cm-seo__focus" aria-label="Site URL for re-analysis"
+                                   @bind="_focus" disabled="@_planning" />
+                            <button type="button" class="cm-button cm-button--quiet" disabled="@(_planning || !HasValidSiteUrl)"
+                                    @onclick="RunPlanAsync">
+                                @(_planning ? "Re-running deep analysis…" : "Re-run deep analysis")
+                            </button>
+                            @if (_shareUrl is null)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet" disabled="@_sharing"
+                                        @onclick="ShareAsync">
+                                    @(_sharing ? "Publishing snapshot…" : "Create public link")
+                                </button>
+                            }
+                            else
+                            {
+                                <a href="@_shareUrl" target="_blank" class="cm-meta cm-seo__share">@_shareUrl</a>
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => CopyAsync(_shareUrl!)">Copy link</button>
+                            }
+                        </div>
+                    </section>
+                }
+                else
+                {
+                    <div class="cm-seo">
                     <section class="cm-seo__scorecard">
                         <span class="cm-kicker">Scorecard</span>
                         <div class="cm-seo__score cm-mono">@Score</div>
                         <p class="cm-meta">@Verdict</p>
                         <ul class="cm-seo__checks">
                             <li class="@CheckClass(HasBlog)">Blog drafted</li>
-                            <li class="@CheckClass(_plan.YoutubeTitles.Count >= 3)">A/B titles ready</li>
-                            <li class="@CheckClass(HasBlog && _plan is not null)">Head + JSON-LD built</li>
+                            <li class="@CheckClass(_analysis is not null)">SEO/AEO report created</li>
+                            <li class="@CheckClass(_targets?.Keywords.Count > 0)">Targets approved</li>
+                            <li class="@CheckClass(_targets?.Questions.Count > 0)">Answer questions selected</li>
                             <li class="@CheckClass(Campaign.ImagesFilled > 0)">Images placed (@Campaign.ImagesFilled/@Campaign.ImagesTotal)</li>
                         </ul>
 
-                        <div class="cm-producer__group">
-                            <span class="cm-kicker">A/B YouTube titles</span>
-                            <ol class="cm-seo__titles">
-                                @foreach (var title in _plan!.YoutubeTitles.Take(3))
-                                {
-                                    <li>@title <span class="cm-mono cm-meta">@title.Length/100</span></li>
-                                }
-                            </ol>
-                        </div>
+                        @if (_analysis is { } report)
+                        {
+                            <div class="cm-producer__group">
+                                <span class="cm-kicker">Answer surfaces</span>
+                                <p class="cm-meta">
+                                    @(report.Serp.AiOverview is null ? "No AI overview detected" : "AI overview detected") ·
+                                    @(report.Serp.FeaturedSnippet is null ? "No featured snippet detected" : "Featured snippet detected")
+                                </p>
+                                <p class="cm-meta">@report.Serp.OrganicResults.Count organic competitors captured for “@report.Serp.Keyword”.</p>
+                            </div>
+                        }
 
                         <div class="cm-producer__group">
                             <span class="cm-kicker">Share report</span>
@@ -148,6 +180,52 @@
                     </section>
 
                     <section class="cm-seo__main">
+                        @if (_analysis is { } analysis)
+                        {
+                            <h2>SEO/AEO strategy</h2>
+                            <ul class="cm-seo__angle-list">
+                                @foreach (var recommendation in analysis.Recommendations)
+                                {
+                                    <li><span class="cm-seo__angle-term">@recommendation</span></li>
+                                }
+                            </ul>
+
+                            <h2>Live organic snapshot — @analysis.Serp.Keyword</h2>
+                            @if (analysis.Serp.OrganicResults.Count == 0)
+                            {
+                                <p class="cm-meta">No live organic rows were available; the report still uses transcript-grounded targets.</p>
+                            }
+                            else
+                            {
+                                <div class="cm-scroll-x">
+                                    <table class="cm-seo__table">
+                                        <thead><tr><th>Rank</th><th>Result</th><th>Domain</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var result in analysis.Serp.OrganicResults)
+                                            {
+                                                <tr>
+                                                    <td class="cm-mono">@result.Rank</td>
+                                                    <td>@result.Title</td>
+                                                    <td class="cm-meta">@result.Domain</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+
+                            <h2>Answer-engine questions</h2>
+                            <ul class="cm-seo__angle-list">
+                                @foreach (var question in analysis.Research.Questions)
+                                {
+                                    <li>
+                                        <span class="cm-seo__angle-term">@question.Question</span>
+                                        <span class="cm-chip cm-mono">@question.Source</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
                         <h2>Share of voice — projected</h2>
                         <div class="cm-seo__chart">
                             <ApexChart TItem="KeywordRow" Options="_chartOptions" Height="360">
@@ -203,7 +281,8 @@
                             }
                         </ul>
                     </section>
-                </div>
+                    </div>
+                }
 
                 @* The Content Scout (E4). This generalises the per-keyword "Draft as artifact"
                    button above: it spans every kind rather than only blogs, and — the point —
@@ -291,47 +370,23 @@
                     }
                 </section>
 
-                <section class="cm-seo__metadata">
-                    <h2>Blog metadata</h2>
-                    @if (!HasBlog)
-                    {
-                        <p class="cm-meta">Draft the blog first — metadata builds from it.</p>
-                    }
-                    else
-                    {
-                        <div class="cm-tabs cm-seo__meta-tabs" role="tablist" aria-label="Metadata format">
-                            @foreach (var tab in MetaTabs)
-                            {
-                                <button type="button" role="tab" class="cm-tabs__tab"
-                                        aria-selected="@(_metaTab == tab)" @onclick="() => _metaTab = tab">
-                                    @tab
-                                </button>
-                            }
-                        </div>
-                        <pre class="cm-seo__meta-pre cm-mono">@MetadataFor(_metaTab)</pre>
-                        <button type="button" class="cm-button cm-button--quiet"
-                                @onclick="() => CopyAsync(MetadataFor(_metaTab))">
-                            Copy @_metaTab.ToLowerInvariant()
-                        </button>
-                    }
-                </section>
             }
         </div>
     </div>
 </CampaignShell>
 
 @code {
-    private static readonly string[] MetaTabs = ["Combined", "Head", "JSON-LD"];
-
     private KeywordPlan? _plan;
+    private SeoAnalysisReportResponse? _analysis;
     private Guid? _planArtifactId;
     private string _focus = string.Empty;
+    private bool HasValidSiteUrl => Uri.TryCreate(_focus.Trim(), UriKind.Absolute, out var site)
+        && site.Scheme is "http" or "https";
     private bool _planning;
     private string? _planError;
     private bool _sharing;
     private string? _shareUrl;
     private string? _drafting;
-    private string _metaTab = "Combined";
     private ApexChartOptions<KeywordRow>? _chartOptions;
 
     [Parameter] public Guid CampaignId { get; set; }
@@ -468,17 +523,20 @@
         return Task.CompletedTask;
     }, Notifier, StateHasChanged, "Reading the keyword plan"));
 
-    /// <summary>The plan is an artifact like any other — newest wins.</summary>
+    /// <summary>The pre-production report is authoritative. Legacy keyword-plan artifacts
+    /// remain readable for campaigns created before the analysis-first flow.</summary>
     private void LoadPlanFromState()
     {
         var planPreview = Campaign.Artifacts
-            .Where(a => a.Kind == "seo-keyword-plan")
-            .OrderByDescending(a => a.CreatedAt)
+            .Where(a => a.Kind is "seo-report" or "seo-keyword-plan")
+            .OrderByDescending(a => a.Kind == "seo-report")
+            .ThenByDescending(a => a.CreatedAt)
             .FirstOrDefault();
 
         if (planPreview is null)
         {
             _plan = null;
+            _analysis = null;
             _planArtifactId = null;
             return;
         }
@@ -497,17 +555,37 @@
         try
         {
             var (artifact, _) = await Campaigns.GetArtifactAsync(CampaignId, artifactId);
-            _plan = JsonSerializer.Deserialize<KeywordPlan>(
-                artifact.ContentJson, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            if (artifact.Kind == "seo-report")
+            {
+                _analysis = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(artifact.ContentJson, options);
+                _focus = _analysis?.SiteUrl ?? _focus;
+                _plan = _analysis is null ? null : new KeywordPlan(
+                    string.Join(" ", _analysis.Recommendations),
+                    _analysis.Serp.Keyword,
+                    [],
+                    [.. _analysis.Research.Keywords.Select(k => new KeywordRow(
+                        k.Term, k.Volume, k.Difficulty, null, null, k.Source,
+                        k.Opportunity ?? 0))],
+                    artifact.Id,
+                    _analysis.GeneratedAt);
+            }
+            else
+            {
+                _analysis = null;
+                _plan = JsonSerializer.Deserialize<KeywordPlan>(artifact.ContentJson, options);
+            }
             await InvokeAsync(StateHasChanged);
         }
         catch (ApiException)
         {
             _plan = null;
+            _analysis = null;
         }
         catch (JsonException)
         {
             _plan = null;
+            _analysis = null;
         }
     }
 
@@ -523,10 +601,10 @@
 
         try
         {
-            await Seo.CreateKeywordPlanAsync(
+            await Seo.DeepAnalysisAsync(
                 CampaignId, transcriptId, string.IsNullOrWhiteSpace(_focus) ? null : _focus);
             await Campaign.LoadAsync(CampaignId, force: true);
-            Notifier.ShowSuccess("Keyword plan ready — ranked by opportunity.");
+            Notifier.ShowSuccess("SEO/AEO analysis ready. Approve its targets before generating content.");
         }
         catch (ApiException ex)
         {
@@ -692,45 +770,6 @@
         {
             Notifier.ShowError("Clipboard unavailable.");
         }
-    }
-
-    /// <summary>Head tags + JSON-LD built client-side from the blog + plan (roadmap 9.4).</summary>
-    private string MetadataFor(string tab)
-    {
-        var blog = Campaign.Artifacts.FirstOrDefault(a => a.Kind == "blog");
-        var title = blog?.Title ?? Campaign.Campaign?.Name ?? "";
-        var description = _plan?.Summary is { Length: > 0 } s
-            ? (s.Length > 155 ? s[..152] + "…" : s)
-            : title;
-        var keywords = string.Join(", ", _plan?.Keywords.Take(6).Select(k => k.Term) ?? []);
-
-        var head = $"""
-            <title>{title}</title>
-            <meta name="description" content="{description}" />
-            <meta name="keywords" content="{keywords}" />
-            <meta property="og:title" content="{title}" />
-            <meta property="og:description" content="{description}" />
-            <meta property="og:type" content="article" />
-            """;
-
-        var jsonLd = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["@context"] = "https://schema.org",
-            ["@type"] = "Article",
-            ["headline"] = title,
-            ["description"] = description,
-            ["keywords"] = keywords,
-            ["datePublished"] = _plan?.GeneratedAt.ToString("yyyy-MM-dd"),
-        }, new JsonSerializerOptions { WriteIndented = true });
-
-        var jsonLdBlock = $"<script type=\"application/ld+json\">\n{jsonLd}\n</script>";
-
-        return tab switch
-        {
-            "Head" => head,
-            "JSON-LD" => jsonLdBlock,
-            _ => head + "\n" + jsonLdBlock,
-        };
     }
 
     public void Dispose() => Campaign.Changed -= OnChanged;

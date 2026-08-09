@@ -15,6 +15,11 @@ public interface IImageRenderer
     /// fixed size set, so slot dimensions are always produced here.
     /// </summary>
     Task<byte[]> RenderExactAsync(Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct);
+
+    Task<byte[]> RenderExactAsync(
+        Guid userId, string prompt, int width, int height, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct) =>
+        RenderExactAsync(userId, prompt, width, height, modelAlias, ct);
 }
 
 public sealed class ImageRenderer(IImageProviderRegistry providers, IImageComposer composer) : IImageRenderer
@@ -34,6 +39,16 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
     {
         var provider = providers.Resolve(modelAlias);
         var raw = await provider.GenerateAsync(userId, prompt, AspectFor(width, height), modelAlias, ct);
+        return composer.ToSlotWebp(raw, width, height);
+    }
+
+    public async Task<byte[]> RenderExactAsync(
+        Guid userId, string prompt, int width, int height, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct)
+    {
+        var provider = providers.Resolve(modelAlias);
+        var raw = await provider.GenerateAsync(
+            userId, prompt, AspectFor(width, height), modelAlias, references, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 

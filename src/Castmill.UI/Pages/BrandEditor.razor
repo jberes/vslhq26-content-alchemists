@@ -685,10 +685,11 @@
     private int _uploadTotal;
     private int _uploadDone;
 
-    private static readonly string[] AssetKinds = ["face", "background", "accent", "logo", "other"];
+    private static readonly string[] AssetKinds = ["product", "face", "background", "accent", "logo", "other"];
 
     private static string KindLabel(string kind) => kind switch
     {
+        "product" => "Product screenshot",
         "face" => "Face",
         "background" => "Background",
         "accent" => "Accent",

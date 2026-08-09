@@ -3,13 +3,15 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Azure.AI.OpenAI;
+using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Secrets;
 using Microsoft.Extensions.Options;
 using OpenAI.Images;
 
 namespace Castmill.Api.Services.Ai;
 
-public sealed record ImageProviderStatus(string Name, bool Ready, string? Reason);
+public sealed record ImageProviderStatus(
+    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false);
 
 /// <summary>
 /// Image-generation seam (ADR-015). Foundry is the default and the only provider
@@ -22,6 +24,11 @@ public interface IImageProvider
     Task<ImageProviderStatus> StatusAsync(Guid userId, CancellationToken ct);
     /// <summary>Returns raw encoded image bytes (PNG/JPEG/WebP) — the caller crops and re-encodes.</summary>
     Task<byte[]> GenerateAsync(Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct);
+
+    Task<byte[]> GenerateAsync(
+        Guid userId, string prompt, string aspectRatio, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct) =>
+        GenerateAsync(userId, prompt, aspectRatio, modelAlias, ct);
 }
 
 public interface IImageProviderRegistry
@@ -59,7 +66,10 @@ public sealed class ImageProviderRegistry(
 }
 
 /// <summary>Default provider: the Foundry image deployments behind the alias table.</summary>
-public sealed class FoundryImageProvider(IFoundryClientFactory clients) : IImageProvider
+public sealed class FoundryImageProvider(
+    IFoundryClientFactory clients,
+    IHttpClientFactory httpClients,
+    Microsoft.Extensions.Options.IOptions<AiOptions> options) : IImageProvider
 {
     public string Name => "foundry";
 
@@ -70,7 +80,7 @@ public sealed class FoundryImageProvider(IFoundryClientFactory clients) : IImage
             var target = await clients.ResolveTargetAsync(userId, "image", ct);
             return target is null
                 ? new ImageProviderStatus(Name, false, "No credentials or no deployment mapped for the 'image' alias.")
-                : new ImageProviderStatus(Name, true, null);
+                : new ImageProviderStatus(Name, true, null, SupportsReferenceImages: true);
         }
         catch (AiNotConfiguredException ex)
         {
@@ -102,6 +112,61 @@ public sealed class FoundryImageProvider(IFoundryClientFactory clients) : IImage
         }, ct);
         return generated.Value.ImageBytes.ToArray();
     }
+
+    public async Task<byte[]> GenerateAsync(
+        Guid userId, string prompt, string aspectRatio, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct)
+    {
+        if (references.Count == 0)
+        {
+            return await GenerateAsync(userId, prompt, aspectRatio, modelAlias, ct);
+        }
+
+        var alias = string.IsNullOrWhiteSpace(modelAlias) || modelAlias.Equals(Name, StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : modelAlias;
+        var target = await clients.ResolveTargetAsync(userId, alias, ct)
+            ?? throw new AiNotConfiguredException($"No Foundry credentials/deployment for image alias '{alias}'.");
+
+        var endpoint = target.Credentials.Endpoint.TrimEnd('/');
+        var apiVersion = Uri.EscapeDataString(options.Value.ImageApiVersion);
+        var deployment = Uri.EscapeDataString(target.Deployment);
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{endpoint}/openai/deployments/{deployment}/images/edits?api-version={apiVersion}");
+        request.Headers.TryAddWithoutValidation("api-key", target.Credentials.ApiKey);
+
+        var form = new MultipartFormDataContent();
+        form.Add(new StringContent(prompt), "prompt");
+        form.Add(new StringContent(target.Deployment), "model");
+        form.Add(new StringContent(SizeFor(aspectRatio)), "size");
+        form.Add(new StringContent("1"), "n");
+        form.Add(new StringContent("high"), "input_fidelity");
+        foreach (var reference in references)
+        {
+            var image = new ByteArrayContent(reference.Bytes);
+            image.Headers.ContentType = new MediaTypeHeaderValue(reference.ContentType);
+            form.Add(image, "image[]", reference.FileName);
+        }
+        request.Content = form;
+
+        using var response = await httpClients.CreateClient("foundry-images").SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Foundry reference-image generation returned {(int)response.StatusCode}.");
+        }
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var b64 = doc.RootElement.GetProperty("data")[0].GetProperty("b64_json").GetString()
+            ?? throw new InvalidOperationException("Foundry returned no reference-image result.");
+        return Convert.FromBase64String(b64);
+    }
+
+    private static string SizeFor(string aspectRatio) => aspectRatio.Trim() switch
+    {
+        "16:9" or "3:2" or "landscape" => "1536x1024",
+        "9:16" or "2:3" or "portrait" => "1024x1536",
+        _ => "1024x1024",
+    };
 }
 
 /// <summary>
@@ -175,6 +240,14 @@ public sealed class ExternalImageProvider(
             ?? throw new InvalidOperationException($"Image provider '{Name}' returned no image data.");
         return Convert.FromBase64String(b64);
     }
+
+    public Task<byte[]> GenerateAsync(
+        Guid userId, string prompt, string aspectRatio, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct) =>
+        references.Count == 0
+            ? GenerateAsync(userId, prompt, aspectRatio, modelAlias, ct)
+            : throw new InvalidOperationException(
+                $"Image provider '{Name}' does not support reference-image inputs. Choose Foundry or remove the references.");
 
     private static string SizeFor(string aspectRatio) => aspectRatio.Trim() switch
     {

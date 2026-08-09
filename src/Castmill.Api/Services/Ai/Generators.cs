@@ -193,6 +193,25 @@ public static class Generators
             """,
             (json, t) => ValidateCommon(json, t, requireArray: "images", minItems: 3)));
 
+        specs.Add(new GeneratorSpec(
+            "thumbnail-concepts",
+            """
+            Create 3-5 DISTINCT YouTube thumbnail concepts before any pixels are rendered.
+            Each concept must express a different visual angle, not a minor colour variation.
+            Ground every concept in the transcript and the campaign's saved SEO/AEO analysis.
+
+            For each concept return:
+              "name": a short working name;
+              "angle": the single idea or tension the image communicates;
+              "prompt": a production-ready image prompt with composition, subject, lighting,
+                        negative space and visual hierarchy, but NO rendered words;
+              "overlayText": 2-5 words, no more than 32 characters, to composite after generation;
+              "reason": why this concept supports the primary query and earns a click without clickbait.
+
+            JSON schema: { "title": string, "concepts": [ { "name": string, "angle": string, "prompt": string, "overlayText": string, "reason": string } ], "citations": string[] }
+            """,
+            (json, t) => ValidateCommon(json, t, requireArray: "concepts", minItems: 3)));
+
         return specs;
     }
 

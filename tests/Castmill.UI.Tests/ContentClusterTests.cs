@@ -1,5 +1,6 @@
 using Castmill.Core;
 using Castmill.Core.Resources;
+using Castmill.UI.Canvas;
 using Castmill.UI.State;
 
 namespace Castmill.UI.Tests;
@@ -86,5 +87,42 @@ public sealed class ContentClusterTests
 
         Assert.Single(cluster.Questions);
         Assert.Equal("What is a data grid?", cluster.Questions[0].Question);
+    }
+
+    [Fact]
+    public void ApexTree_hierarchy_puts_supporting_content_and_gaps_under_the_pillar()
+    {
+        var blog = Artifact("blog", "Enterprise data grids", "Approved");
+        var linkedIn = Artifact("social-linkedin", "The practical rollout", "Draft");
+        var cluster = Build(
+            [blog, linkedIn],
+            new SeoTargetsResponse("react data grid", [], []));
+
+        var tree = ClusterMap.BuildTree(cluster);
+
+        Assert.Equal(blog.Id.ToString("D"), tree.Id);
+        Assert.Equal("Pillar blog", tree.Title);
+        Assert.Equal("open", tree.Action);
+        Assert.Equal("success", tree.Tone);
+
+        var supporting = Assert.Single(tree.Children, child => child.Id == linkedIn.Id.ToString("D"));
+        Assert.Equal("open", supporting.Action);
+        Assert.Equal(linkedIn.Id.ToString("D"), supporting.Value);
+
+        var gap = Assert.Single(tree.Children, child => child.Id == "gap-youtube");
+        Assert.Equal("draft", gap.Action);
+        Assert.Equal("youtube", gap.Value);
+        Assert.Equal("gap", gap.Tone);
+    }
+
+    [Fact]
+    public void ApexTree_uses_a_non_actionable_campaign_root_until_a_pillar_exists()
+    {
+        var social = Artifact("social-x", "Launch thread");
+        var tree = ClusterMap.BuildTree(Build([social]));
+
+        Assert.Equal("campaign-root", tree.Id);
+        Assert.Equal("none", tree.Action);
+        Assert.Contains(tree.Children, child => child.Id == social.Id.ToString("D"));
     }
 }

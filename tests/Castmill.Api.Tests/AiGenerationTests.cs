@@ -243,6 +243,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             {
                 return """{"title":"Images","images":[{"slot":"blog-hero","prompt":"p","aspectRatio":"16:9"},{"slot":"youtube-thumbnail","prompt":"p","aspectRatio":"16:9"},{"slot":"blog-inline-1","prompt":"p","aspectRatio":"4:3"}],"citations":["S3"]}""";
             }
+            if (prompt.Contains("\"overlayText\"", StringComparison.Ordinal))
+            {
+                return """{"title":"Thumbnail directions","concepts":[{"name":"Speed","angle":"faster delivery","prompt":"a fast product launch with negative space","overlayText":"SHIP FASTER","reason":"Matches the deployment intent"},{"name":"Before and after","angle":"transformation","prompt":"split-screen delivery workflow","overlayText":"TIME CUT IN HALF","reason":"Shows the concrete outcome"},{"name":"Dashboard proof","angle":"product evidence","prompt":"product dashboard in an editorial composition","overlayText":"THE PROOF","reason":"Grounds the claim in the product"}],"citations":["S2","S3"]}""";
+            }
             // Social posts (each platform prompt says "Write one <platform> post").
             return """{"title":"Post","text":"Short launch post.","hashtags":["#launch"],"citations":["S1"]}""";
         }

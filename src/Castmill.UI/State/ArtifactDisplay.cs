@@ -69,6 +69,7 @@ public static class ArtifactDisplay
         new("seo-brief", "SEO brief", "Page/SEO", Editable: true, OnBoard: true),
         new("seo-keyword-plan", "Keyword plan", "Page/SEO", Editable: true, OnBoard: true),
         new("image-prompts", "Image prompts", "Images", Editable: false, OnBoard: false),
+        new("thumbnail-concepts", "Thumbnail concepts", "Images", Editable: false, OnBoard: false),
         new("transcript", "Transcript", "Source", Editable: false, OnBoard: false),
     ];
 

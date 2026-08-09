@@ -8,6 +8,7 @@ using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Services.Scout;
 using Castmill.Api.Services.Secrets;
+using Castmill.Api.Services.Seo;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Ai;
@@ -44,6 +45,8 @@ public static class AiEndpoints
             .Validate<TechEditRequest>().RequireRateLimiting("ai");
         // The Content Scout (E4): an agent loop, so it is on the "ai" partition.
         group.MapPost("/campaigns/{campaignId:guid}/brief", SuggestBriefAsync)
+            .RequireRateLimiting("ai");
+        group.MapPost("/campaigns/{campaignId:guid}/research-context", SuggestResearchContextAsync)
             .RequireRateLimiting("ai");
 
         group.MapPost("/campaigns/{campaignId:guid}/scout", ScoutAsync)
@@ -168,7 +171,8 @@ public static class AiEndpoints
             models,
             options.Value.Speech.IsConfigured,
             probeResult,
-            [.. providers.Select(p => new ImageProviderReadiness(p.Name, p.Ready, p.Reason))],
+            [.. providers.Select(p => new ImageProviderReadiness(
+                p.Name, p.Ready, p.Reason, p.SupportsReferenceImages))],
             [.. text.Select(p => new TextProviderReadiness(p.Name, p.Ready, p.Reason))],
             knowledgeReady));
     }
@@ -269,6 +273,7 @@ public static class AiEndpoints
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
         CastmillDbContext db,
+        IOptions<SeoOptions> seoOptions,
         HttpResponse response,
         CancellationToken ct)
     {
@@ -276,6 +281,12 @@ public static class AiEndpoints
         if (loaded is not var (campaign, transcript))
         {
             return Results.NotFound();
+        }
+
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration
+            && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
+        {
+            return SeoAnalysisRequired();
         }
 
         // Open the run row first: the client can start polling /ai/runs/{id} the
@@ -318,12 +329,18 @@ public static class AiEndpoints
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
         CastmillDbContext db,
+        IOptions<SeoOptions> seoOptions,
         CancellationToken ct)
     {
         var loaded = await LoadAsync(campaignId, request.TranscriptArtifactId, db, ct);
         if (loaded is not var (campaign, transcript))
         {
             return Results.NotFound();
+        }
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration
+            && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
+        {
+            return SeoAnalysisRequired();
         }
         var userId = AuthEndpoints.GetUserId(principal);
 
@@ -338,6 +355,20 @@ public static class AiEndpoints
         }
         return Results.Ok(await orchestrator.RunGeneratorAsync(userId, campaign, transcript, request.Brief, spec, ct));
     }
+
+    private static async Task<bool> HasApprovedSeoAnalysisAsync(
+        Campaign campaign, CastmillDbContext db, CancellationToken ct)
+    {
+        var targets = CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson);
+        return targets.Keywords.Count > 0
+            && await db.Artifacts.AnyAsync(
+                a => a.CampaignId == campaign.Id && a.Kind == "seo-report", ct);
+    }
+
+    private static IResult SeoAnalysisRequired() => Results.Problem(
+        statusCode: StatusCodes.Status409Conflict,
+        title: "SEO/AEO analysis required",
+        detail: "Run the campaign's SEO/AEO analysis and approve at least one target before generating content.");
 
     /// <summary>
     /// Runs the Tech Edit over one artifact (ADR-020). Follows the AI group's convention of
@@ -434,7 +465,9 @@ public static class AiEndpoints
         string? title,
         ClaimsPrincipal principal,
         IBriefSuggester suggester,
+        IBrandContextService brandContext,
         CastmillDbContext db,
+        IOptions<SeoOptions> seoOptions,
         CancellationToken ct)
     {
         var loaded = await LoadAsync(campaignId, transcriptArtifactId, db, ct);
@@ -442,11 +475,18 @@ public static class AiEndpoints
         {
             return Results.NotFound();
         }
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration
+            && !await HasApprovedSeoAnalysisAsync(pair.Campaign, db, ct))
+        {
+            return SeoAnalysisRequired();
+        }
 
         try
         {
+            var context = await brandContext.ResolveAsync(pair.Campaign, ct);
             var brief = await suggester.SuggestAsync(
-                AuthEndpoints.GetUserId(principal), pair.Transcript, title, ct);
+                AuthEndpoints.GetUserId(principal), pair.Transcript, title,
+                context.SeoTargetBlock, ct);
 
             return Results.Ok(new BriefSuggestionResponse(
                 brief.Title, brief.Audience, brief.BrandVoice, brief.Angle,
@@ -459,6 +499,40 @@ public static class AiEndpoints
         catch (JsonException)
         {
             return Results.Problem("The model's brief could not be read.", statusCode: 502);
+        }
+    }
+
+    /// <summary>
+    /// Infers the audience that shapes the initial SEO/AEO investigation. Unlike the content
+    /// brief endpoint, this is deliberately available before report approval and produces no
+    /// title, angle or publishable copy.
+    /// </summary>
+    private static async Task<IResult> SuggestResearchContextAsync(
+        Guid campaignId,
+        Guid transcriptArtifactId,
+        ClaimsPrincipal principal,
+        IResearchContextSuggester suggester,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var loaded = await LoadAsync(campaignId, transcriptArtifactId, db, ct);
+        if (loaded is not { } pair)
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            return Results.Ok(await suggester.SuggestAsync(
+                AuthEndpoints.GetUserId(principal), pair.Transcript, ct));
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 409);
+        }
+        catch (JsonException)
+        {
+            return Results.Problem("The model's research audience could not be read.", statusCode: 502);
         }
     }
 

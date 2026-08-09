@@ -60,4 +60,8 @@ dist/
 # and by the RCL's BuildEditorInterop target. Never hand-edited, never committed.
 src/Castmill.UI/wwwroot/js/castmill-editor.js
 src/Castmill.UI/wwwroot/js/castmill-editor.js.map
+src/Castmill.UI/wwwroot/js/castmill-apextree.js
+src/Castmill.UI/wwwroot/js/castmill-apextree.js.map
 src/Castmill.UI/wwwroot/js/*.LEGAL.txt
+tests/e2e/test-results/
+tests/e2e/playwright-report/

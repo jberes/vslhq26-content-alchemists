@@ -18,8 +18,9 @@ public interface ISeoResearch
 ///
 /// Three sources, deliberately kept distinguishable in the output rather than blended:
 ///   • the model reads the transcript and proposes seed terms and questions it actually covers;
-///   • DataForSEO expands those seeds and attaches volume/difficulty (keyword_suggestions +
-///     search_volume) and returns the real People-Also-Ask box for the strongest seed;
+///   • DataForSEO expands those seeds with phrase-match suggestions and category-based ideas,
+///     enriches exact seeds through keyword_overview, and returns the real People-Also-Ask
+///     box for the strongest seed;
 ///   • the customer knowledge base contributes the follow-up questions its own readers ask.
 ///
 /// Every stage is optional. With no SEO credential this still returns the model's keywords,
@@ -44,6 +45,7 @@ public sealed class SeoResearch(
 
         var keywords = new List<SeoTarget>();
         var questions = new List<SeoQuestion>();
+        var providerLookups = new List<string>();
 
         foreach (var question in seed.Questions.Take(MaxQuestions))
         {
@@ -55,7 +57,9 @@ public sealed class SeoResearch(
         {
             try
             {
-                keywords.AddRange(await ExpandAsync(seed.Keywords, ct));
+                var expansion = await ExpandAsync(seed.Keywords, ct);
+                keywords.AddRange(expansion.Keywords);
+                providerLookups.AddRange(expansion.Lookups);
                 hasMetrics = keywords.Count > 0;
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
@@ -77,6 +81,7 @@ public sealed class SeoResearch(
                     // second call only happens when the first found nothing.
                     var top = keywords[0].Term;
                     var paa = await seo.GetQuestionsAsync(top, ct);
+                    providerLookups.Add("serp/google/organic/live/advanced");
 
                     if (paa.Count == 0)
                     {
@@ -137,7 +142,8 @@ public sealed class SeoResearch(
             // were the ones nobody picked.
             [.. questions.OrderBy(q => QuestionRank(q.Source)).Take(MaxQuestions)],
             hasMetrics,
-            notes);
+            notes,
+            [.. providerLookups.Distinct(StringComparer.Ordinal)]);
 
         static int QuestionRank(string source) => source switch
         {
@@ -158,36 +164,81 @@ public sealed class SeoResearch(
     }
 
     /// <summary>
-    /// Expands the model's seeds through DataForSEO and merges the two metric sources: labs
-    /// suggestions carry difficulty, google_ads carries the authoritative volume for the exact
-    /// seed terms. Both matter — ranking on volume alone picks unwinnable head terms.
+    /// Expands the model's seeds through DataForSEO and merges three complementary lookups:
+    /// phrase-match suggestions for long-tail coverage, category-based ideas for adjacent
+    /// opportunities, and keyword overview for complete exact-seed metrics and intent.
     /// </summary>
-    private async Task<List<SeoTarget>> ExpandAsync(IReadOnlyList<string> seeds, CancellationToken ct)
+    private async Task<KeywordExpansion> ExpandAsync(IReadOnlyList<string> seeds, CancellationToken ct)
     {
         var merged = new Dictionary<string, SeoKeyword>(StringComparer.OrdinalIgnoreCase);
 
-        // One expansion, from the strongest seed: each call is billed, and suggestions for
-        // near-identical seeds overlap almost entirely.
-        foreach (var suggestion in await seo.GetSuggestionsAsync(seeds[0], 40, ct))
+        // One phrase expansion from the strongest seed avoids paying for near-identical
+        // suggestion sets. Keyword Ideas can take the complete seed set in one task.
+        var suggestionsTask = OptionalLookupAsync(
+            "dataforseo_labs/google/keyword_suggestions/live",
+            () => seo.GetSuggestionsAsync(seeds[0], 40, ct));
+        var ideasTask = OptionalLookupAsync(
+            "dataforseo_labs/google/keyword_ideas/live",
+            () => seo.GetKeywordIdeasAsync([.. seeds.Take(12)], 40, ct));
+        var metricsTask = OptionalLookupAsync(
+            "dataforseo_labs/google/keyword_overview/live",
+            () => seo.GetKeywordMetricsAsync([.. seeds.Take(20)], ct));
+        await Task.WhenAll(suggestionsTask, ideasTask, metricsTask);
+
+        foreach (var idea in ideasTask.Result.Rows)
+        {
+            merged[idea.Term] = idea;
+        }
+
+        foreach (var suggestion in suggestionsTask.Result.Rows)
         {
             merged[suggestion.Term] = suggestion;
         }
 
-        foreach (var exact in await seo.GetKeywordMetricsAsync([.. seeds.Take(20)], ct))
+        foreach (var exact in metricsTask.Result.Rows)
         {
-            // google_ads has no difficulty; keep the labs value when we already have one.
-            merged[exact.Term] = merged.TryGetValue(exact.Term, out var existing)
-                ? existing with { Volume = exact.Volume, Competition = exact.Competition, Cpc = exact.Cpc }
-                : exact;
+            // Keyword Overview is the complete exact-term record, so it wins over an expanded
+            // copy of the same term.
+            merged[exact.Term] = exact;
         }
 
-        return [.. merged.Values
+        var keywords = merged.Values
             .Where(k => k.Volume > 0 || seeds.Contains(k.Term, StringComparer.OrdinalIgnoreCase))
             .Select(k => new SeoTarget(
                 k.Term, k.Volume, k.Difficulty,
-                Math.Round(DataForSeoProvider.Opportunity(k), 2), "provider"))
-            .OrderByDescending(k => k.Opportunity)];
+                Math.Round(DataForSeoProvider.Opportunity(k), 2), "provider",
+                k.Competition, k.Cpc, k.Intent))
+            .OrderByDescending(k => k.Opportunity)
+            .ToList();
+        var lookups = new[] { suggestionsTask.Result, ideasTask.Result, metricsTask.Result }
+            .Where(result => result.Succeeded)
+            .Select(result => result.Path)
+            .ToList();
+        return new KeywordExpansion(keywords, lookups);
+
+        async Task<LookupResult> OptionalLookupAsync(
+            string lookup, Func<Task<IReadOnlyList<SeoKeyword>>> action)
+        {
+            try
+            {
+                return new LookupResult(lookup, await action(), true);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+            {
+                logger.LogWarning(ex, "DataForSEO {Lookup} was unavailable; keeping other keyword sources.", lookup);
+                return new LookupResult(lookup, [], false);
+            }
+        }
     }
+
+    private sealed record KeywordExpansion(
+        IReadOnlyList<SeoTarget> Keywords,
+        IReadOnlyList<string> Lookups);
+
+    private sealed record LookupResult(
+        string Path,
+        IReadOnlyList<SeoKeyword> Rows,
+        bool Succeeded);
 
     private sealed record Seed(IReadOnlyList<string> Keywords, IReadOnlyList<string> Questions);
 

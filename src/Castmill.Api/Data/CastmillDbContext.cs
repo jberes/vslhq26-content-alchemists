@@ -82,6 +82,8 @@ public sealed class CastmillDbContext(
         {
             e.Property(s => s.Kind).HasMaxLength(50);
             e.Property(s => s.Prompt).HasMaxLength(4000);
+            e.Property(s => s.PromptMode).HasMaxLength(10).HasDefaultValue("Auto");
+            e.Property(s => s.ReferenceAssetIdsJson).HasMaxLength(4000);
             e.Property(s => s.ModelAlias).HasMaxLength(100);
             e.Property(s => s.SourceSegmentId).HasMaxLength(50);
             e.Property(s => s.HeadlineText).HasMaxLength(32);

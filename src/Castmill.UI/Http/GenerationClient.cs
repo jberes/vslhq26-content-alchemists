@@ -41,7 +41,14 @@ public sealed record RunFinished(Guid RunId, int Succeeded, int Failed, IReadOnl
 /// <summary>Typed client for <c>/api/v1/ai/*</c> — ingest, generation and run progress.</summary>
 public sealed class GenerationClient(ApiClient api)
 {
-    /// <summary>Reads the campaign brief off the transcript so step 3 is a review, not a form.</summary>
+    /// <summary>Infers the audience before SEO/AEO research without generating content.</summary>
+    public Task<ResearchContextSuggestionResponse> SuggestResearchContextAsync(
+        Guid campaignId, Guid transcriptArtifactId, CancellationToken ct = default) =>
+        api.PostAsync<object, ResearchContextSuggestionResponse>(
+            $"api/v1/ai/campaigns/{campaignId}/research-context?transcriptArtifactId={transcriptArtifactId}",
+            new { }, anonymous: false, ct);
+
+    /// <summary>Builds the production brief after SEO/AEO approval so the final step is review, not a form.</summary>
     public Task<BriefSuggestionResponse> SuggestBriefAsync(
         Guid campaignId, Guid transcriptArtifactId, string? title, CancellationToken ct = default)
     {

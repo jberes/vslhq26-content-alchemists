@@ -59,7 +59,8 @@ public sealed record AiStatusResponse(
     /// <summary>Whether a knowledge-base gateway is configured AND has a stored token.</summary>
     bool KnowledgeBaseReady = false);
 
-public sealed record ImageProviderReadiness(string Name, bool Ready, string? Reason);
+public sealed record ImageProviderReadiness(
+    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false);
 
 public sealed record TextProviderReadiness(string Name, bool Ready, string? Reason);
 
@@ -120,3 +121,9 @@ public sealed record TechEditResult(
 public sealed record BriefSuggestionResponse(
     string? Title, string? Audience, string? BrandVoice, string? Angle,
     string? Summary, IReadOnlyList<string> KeyPoints);
+
+/// <summary>
+/// Research context inferred before SEO/AEO analysis. This intentionally contains no title,
+/// angle or content copy: those are downstream of report approval.
+/// </summary>
+public sealed record ResearchContextSuggestionResponse(string? Audience);

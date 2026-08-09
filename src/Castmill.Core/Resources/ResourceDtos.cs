@@ -99,7 +99,11 @@ public sealed record ImageSlotResponse(
     /// and inline images). Null for campaign-wide slots. Placing an image rewrites THIS
     /// artifact's stub markers.
     /// </summary>
-    Guid? ArtifactId = null);
+    Guid? ArtifactId = null,
+    /// <summary>Auto | Manual.</summary>
+    string PromptMode = "Auto",
+    /// <summary>Explicitly selected brand-kit reference rows. Product references attach automatically.</summary>
+    IReadOnlyList<Guid>? ReferenceAssetIds = null);
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,
@@ -107,7 +111,18 @@ public sealed record ImageSlotPatchRequest(
     [property: MaxLength(50)] string? SourceSegmentId,
     /// <summary>Composited after generation (ADR-013) — never sent to the model.</summary>
     [property: MaxLength(32)] string? HeadlineText,
-    bool? SafeArea);
+    bool? SafeArea,
+    [property: MaxLength(10)] string? PromptMode = null,
+    IReadOnlyList<Guid>? ReferenceAssetIds = null);
+
+/// <summary>Adds an image card to a specific content artifact. The server chooses a
+/// platform-correct shape from the artifact kind unless explicit dimensions are supplied.</summary>
+public sealed record ImageSlotCreateRequest(
+    [property: Required] Guid ArtifactId,
+    [property: MaxLength(4000)] string? Prompt = null,
+    [property: MaxLength(10)] string PromptMode = "Auto",
+    [property: Range(256, 4096)] int? TargetWidth = null,
+    [property: Range(256, 4096)] int? TargetHeight = null);
 
 public sealed record GenerateVariantsRequest(
     [property: Range(1, 6)] int Variants = 2);
@@ -201,7 +216,10 @@ public sealed record SeoTarget(
     /// <summary>volume / (difficulty + 10) — the existing ranking heuristic.</summary>
     double? Opportunity = null,
     /// <summary>"provider" when DataForSEO returned it, "model" when only the model proposed it.</summary>
-    string Source = "model");
+    string Source = "model",
+    double? Competition = null,
+    double? Cpc = null,
+    string? Intent = null);
 
 /// <summary>What the research step proposes. Nothing here is persisted until the user picks.</summary>
 public sealed record SeoResearchResponse(
@@ -211,7 +229,9 @@ public sealed record SeoResearchResponse(
     /// <summary>False when no SEO provider is configured: the keywords are the model's alone.</summary>
     bool HasProviderMetrics,
     /// <summary>Anything the user should know about how thin the data is.</summary>
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    /// <summary>Exact provider endpoint paths that completed for this research run.</summary>
+    IReadOnlyList<string>? ProviderLookups = null);
 
 public sealed record SeoQuestion(
     [property: Required, MinLength(1), MaxLength(300)] string Question,
@@ -221,6 +241,106 @@ public sealed record SeoQuestion(
 public sealed record SeoResearchRequest(
     [property: Required] Guid CampaignId,
     [property: Required] Guid TranscriptArtifactId);
+
+/// <summary>The required, persisted analysis that precedes content generation.</summary>
+public sealed record SeoDeepAnalysisRequest(
+    [property: Required] Guid CampaignId,
+    [property: Required] Guid TranscriptArtifactId,
+    [property: MaxLength(2000), Url] string? SiteUrl = null);
+
+public sealed record SeoSerpResult(
+    int Rank, string Title, string Url, string Domain, string? Description = null);
+
+public sealed record SeoSerpSnapshot(
+    string Keyword,
+    string? AiOverview,
+    string? FeaturedSnippet,
+    IReadOnlyList<SeoSerpResult> OrganicResults);
+
+public sealed record SeoCitation(string Title, string Url, string Domain, bool IsOwnDomain = false);
+
+public sealed record SeoAeoEngineResult(
+    string Provider,
+    string Label,
+    bool Succeeded,
+    bool DomainCited,
+    string? Answer,
+    IReadOnlyList<SeoCitation> Citations,
+    string? Error = null);
+
+public sealed record SeoAeoScorecard(
+    double? VisibilityPercent,
+    int EnginesSucceeded,
+    int EnginesCitingDomain,
+    IReadOnlyList<SeoAeoEngineResult> Engines);
+
+public sealed record SeoRankedKeyword(
+    string Term,
+    int Position,
+    long? Volume,
+    double? Difficulty,
+    double? EstimatedTraffic,
+    string Url,
+    string? Intent = null);
+
+public sealed record SeoAuthoritySnapshot(
+    string Domain,
+    double? Rank,
+    long? Backlinks,
+    long? ReferringDomains,
+    long? ReferringMainDomains,
+    long? BrokenBacklinks,
+    double? SpamScore);
+
+public sealed record SeoPositionFootprint(
+    long Position1,
+    long Positions2To3,
+    long Positions4To10,
+    long TotalOrganic,
+    double? EstimatedTraffic);
+
+public sealed record SeoCompetitorSnapshot(
+    string Domain,
+    int BestSerpPosition,
+    SeoAuthoritySnapshot? Authority,
+    SeoPositionFootprint? Footprint,
+    bool IsOwnDomain = false,
+    int? TopicKeywordCount = null,
+    double? TopicVisibility = null,
+    double? TopicEstimatedTraffic = null,
+    double? TopicAveragePosition = null);
+
+public sealed record SeoContentAngle(
+    string Angle,
+    string AudienceNeed,
+    string SuggestedAsset,
+    string TargetKeyword,
+    string Rationale);
+
+public sealed record SeoSectionStatus(string Section, bool Available, string Detail);
+
+/// <summary>The expensive report-only datasets. Kept behind one optional property so older
+/// persisted reports remain readable while new reports can grow without another artifact kind.</summary>
+public sealed record SeoDeepInsights(
+    SeoAeoScorecard Aeo,
+    IReadOnlyList<SeoTarget> KeywordGaps,
+    IReadOnlyList<SeoRankedKeyword> RankedKeywords,
+    SeoAuthoritySnapshot? SiteAuthority,
+    IReadOnlyList<SeoCompetitorSnapshot>? Competitors,
+    IReadOnlyList<SeoContentAngle> ContentAngles,
+    IReadOnlyList<SeoSectionStatus> Sections,
+    DateTimeOffset AnglesGeneratedAt);
+
+public sealed record SeoAnalysisReportResponse(
+    Guid ReportArtifactId,
+    DateTimeOffset GeneratedAt,
+    SeoResearchResponse Research,
+    SeoSerpSnapshot Serp,
+    IReadOnlyList<string> Recommendations,
+    string Status = "Draft",
+    string? SiteUrl = null,
+    string? CampaignBrief = null,
+    SeoDeepInsights? Insights = null);
 
 /// <summary>
 /// The chosen targets, saved on the CAMPAIGN so every later run — including content added

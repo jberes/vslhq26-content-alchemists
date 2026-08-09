@@ -106,6 +106,9 @@ public sealed class StubHttpHandler : HttpMessageHandler
     public void OnPost<T>(string path, T body) =>
         _routes[$"POST {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
 
+    public void OnPut<T>(string path, T body) =>
+        _routes[$"PUT {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
+
     public void OnPatch<T>(string path, T body) =>
         _routes[$"PATCH {path}"] = () => JsonResponse(HttpStatusCode.OK, body);
 

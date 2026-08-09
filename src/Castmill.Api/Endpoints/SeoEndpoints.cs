@@ -38,10 +38,171 @@ public static class SeoEndpoints
         // Research runs BEFORE generation and persists nothing: it is a proposal the user
         // edits. /keyword-plan stays as the post-hoc report that creates an artifact.
         group.MapPost("/research", ResearchAsync).Validate<SeoResearchRequest>().RequireRateLimiting("ai");
+        group.MapPost("/deep-analysis", DeepAnalysisAsync).Validate<SeoDeepAnalysisRequest>().RequireRateLimiting("ai");
 
         group.MapGet("/reports/{artifactId:guid}", GetReportAsync);
         group.MapPost("/reports/{artifactId:guid}/share", ShareAsync).RequireRateLimiting("writes");
         return routes;
+    }
+
+    /// <summary>
+    /// The mandatory pre-production analysis. It persists the keyword/AEO research and a
+    /// live SERP snapshot as the campaign's SEO report before any titles or copy are made.
+    /// The report remains a draft until the user saves their chosen campaign targets.
+    /// </summary>
+    private static async Task<IResult> DeepAnalysisAsync(
+        SeoDeepAnalysisRequest request,
+        System.Security.Claims.ClaimsPrincipal principal,
+        ISeoResearch research,
+        ISeoProvider provider,
+        ISeoReportService reportService,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == request.CampaignId, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var transcriptArtifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == request.TranscriptArtifactId
+                 && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
+        var transcript = transcriptArtifact is null
+            ? null
+            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+        if (transcript is null)
+        {
+            return Results.NotFound();
+        }
+
+        var researchContext = string.IsNullOrWhiteSpace(campaign.Brief)
+            ? campaign.Name
+            : $"{campaign.Name}\nCampaign audience and editorial brief:\n{campaign.Brief}";
+        var result = await research.ResearchAsync(
+            AuthEndpoints.GetUserId(principal), transcript, researchContext, ct);
+        var primary = result.Keywords.Count > 0 ? result.Keywords[0].Term : null;
+        if (string.IsNullOrWhiteSpace(primary))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "The analysis could not identify a grounded search target. Refine the brief or source, then run it again.");
+        }
+
+        SeoSerpSnapshot serp;
+        if (!provider.IsConfigured)
+        {
+            serp = new SeoSerpSnapshot(primary, null, null, []);
+        }
+        else
+        {
+            try
+            {
+                serp = await provider.GetSerpSnapshotAsync(primary, ct);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+            {
+                serp = new SeoSerpSnapshot(primary, null, null, []);
+                result = result with
+                {
+                    Notes = [.. result.Notes,
+                        "The live SERP and zero-click answer surfaces were unavailable for this run."]
+                };
+            }
+        }
+
+        var now = clock.GetUtcNow();
+        var insights = await reportService.BuildAsync(
+            AuthEndpoints.GetUserId(principal), result, serp, request.SiteUrl,
+            campaign.Brief, transcript, now, ct);
+
+        var recommendations = new List<string>
+        {
+            $"Use “{primary}” as the primary topic in the title, opening and first heading.",
+            $"Answer {Math.Min(result.Questions.Count, 5)} priority questions in self-contained passages suitable for answer engines.",
+            "Keep every channel aligned to the same search intent while changing the hook for its audience.",
+        };
+        if (serp.OrganicResults.Count > 0)
+        {
+            recommendations.Add("Differentiate from the live organic leaders listed in this report; do not merely paraphrase their titles.");
+        }
+        if (serp.AiOverview is not null || serp.FeaturedSnippet is not null)
+        {
+            recommendations.Add("Lead with a concise, attributable answer that can compete for the existing zero-click answer surface.");
+        }
+        if (Uri.TryCreate(request.SiteUrl, UriKind.Absolute, out var siteUri))
+        {
+            var domainRanks = serp.OrganicResults.Any(r =>
+                r.Domain.Equals(siteUri.Host, StringComparison.OrdinalIgnoreCase)
+                || r.Domain.EndsWith($".{siteUri.Host}", StringComparison.OrdinalIgnoreCase));
+            recommendations.Add(domainRanks
+                ? $"{siteUri.Host} already appears in this result set; strengthen its topical authority with the campaign cluster."
+                : $"{siteUri.Host} is absent from the captured top results; make the source-backed differentiation explicit.");
+        }
+
+        if (insights.Aeo.EnginesSucceeded > 0)
+        {
+            recommendations.Add(insights.Aeo.EnginesCitingDomain == 0
+                ? "No available answer engine cited the site. Prioritize definition, comparison, and direct Q&A formats with attributable claims."
+                : $"AI-answer visibility is {insights.Aeo.VisibilityPercent:0.#}%; reinforce the formats and sources already earning citations while targeting the missing engines.");
+        }
+        if (insights.SiteAuthority?.ReferringDomains is { } ownRefs
+            && insights.Competitors is { Count: > 1 } competitors)
+        {
+            var bestRefs = competitors.Where(c => !c.IsOwnDomain)
+                .Max(c => c.Authority?.ReferringDomains ?? 0);
+            if (bestRefs > ownRefs * 1.5)
+            {
+                recommendations.Add($"Authority is outmatched ({ownRefs:N0} vs {bestRefs:N0} referring domains). Prefer specific lower-difficulty queries before competing for head terms.");
+            }
+        }
+        if (insights.RankedKeywords.Count > 0)
+        {
+            recommendations.Add($"Protect and extend {insights.RankedKeywords.Count} existing organic positions instead of publishing duplicate pages for the same intent.");
+        }
+        if (insights.KeywordGaps.Count > 0)
+        {
+            recommendations.Add($"The report identified {insights.KeywordGaps.Count} transcript-supported keyword gaps; use the content angles to turn the strongest gaps into assets.");
+        }
+
+        var existing = await db.Artifacts
+            .Where(a => a.CampaignId == campaign.Id && a.Kind == "seo-report")
+            .OrderByDescending(a => a.UpdatedAt)
+            .FirstOrDefaultAsync(ct);
+        var id = existing?.Id ?? Guid.NewGuid();
+        var report = new SeoAnalysisReportResponse(
+            id, now, result, serp, recommendations, Status: "Draft",
+            SiteUrl: request.SiteUrl, CampaignBrief: campaign.Brief, Insights: insights);
+        var serializedReport = JsonSerializer.Serialize(report, Json);
+        var reportTitle = $"SEO/AEO analysis — {campaign.Name}";
+        var artifact = existing ?? new Artifact
+        {
+            Id = id,
+            TenantId = tenant.TenantId!.Value,
+            CampaignId = campaign.Id,
+            Kind = "seo-report",
+            Title = reportTitle,
+            ContentJson = serializedReport,
+            Version = 1,
+            CreatedAt = now,
+        };
+        artifact.Title = reportTitle;
+        artifact.ContentJson = serializedReport;
+        artifact.UpdatedAt = now;
+        if (existing is null)
+        {
+            db.Artifacts.Add(artifact);
+        }
+        else
+        {
+            artifact.Version++;
+        }
+        await db.SaveChangesAsync(ct);
+
+        return existing is null
+            ? Results.Created($"/api/v1/seo/reports/{id}", report)
+            : Results.Ok(report);
     }
 
     /// <summary>
@@ -273,7 +434,13 @@ public static class SeoEndpoints
         var encoder = HtmlEncoder.Default;
         using var doc = JsonDocument.Parse(artifact.ContentJson);
         var root = doc.RootElement;
-        var keyword = root.TryGetProperty("keyword", out var k) ? k.GetString() ?? "" : "";
+        var serp = root.TryGetProperty("serp", out var serpNode) ? serpNode : default;
+        var research = root.TryGetProperty("research", out var researchNode) ? researchNode : default;
+        var keyword = root.TryGetProperty("keyword", out var k)
+            ? k.GetString() ?? ""
+            : serp.ValueKind == JsonValueKind.Object && serp.TryGetProperty("keyword", out var sk)
+                ? sk.GetString() ?? ""
+                : "";
         var heading = keyword.Length > 0 ? $"SEO report — {keyword}" : artifact.Title;
         // Reports carry a score; keyword plans don't — never invent a 0/100.
         var scoreHtml = root.TryGetProperty("score", out var s)
@@ -294,7 +461,12 @@ public static class SeoEndpoints
         var titlesHtml = titles.Length > 0 ? $"<h2>YouTube title candidates</h2><ol>{titles}</ol>" : "";
 
         var rows = new StringBuilder();
-        if (root.TryGetProperty("keywords", out var kws) && kws.ValueKind == JsonValueKind.Array)
+        var kws = root.TryGetProperty("keywords", out var directKeywords)
+            ? directKeywords
+            : research.ValueKind == JsonValueKind.Object && research.TryGetProperty("keywords", out var researchedKeywords)
+                ? researchedKeywords
+                : default;
+        if (kws.ValueKind == JsonValueKind.Array)
         {
             foreach (var kw in kws.EnumerateArray())
             {
@@ -312,7 +484,12 @@ public static class SeoEndpoints
         }
 
         var angles = new StringBuilder();
-        if (root.TryGetProperty("contentAngles", out var ang) && ang.ValueKind == JsonValueKind.Array)
+        var ang = root.TryGetProperty("contentAngles", out var contentAngles)
+            ? contentAngles
+            : root.TryGetProperty("recommendations", out var recommendations)
+                ? recommendations
+                : default;
+        if (ang.ValueKind == JsonValueKind.Array)
         {
             foreach (var angle in ang.EnumerateArray())
             {

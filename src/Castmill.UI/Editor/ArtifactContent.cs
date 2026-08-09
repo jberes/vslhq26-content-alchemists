@@ -116,6 +116,63 @@ public static class ArtifactContent
 
         return new JsonObject { [MarkdownProperty] = markdown }.ToJsonString(Options);
     }
+
+    public static BlogPublishingMetadata PublishingMetadata(string? contentJson)
+    {
+        try
+        {
+            if (JsonNode.Parse(contentJson ?? "{}") is not JsonObject root)
+            {
+                return new();
+            }
+            var publishing = root["publishingMetadata"] as JsonObject;
+            var content = root["content"] as JsonObject ?? root;
+            return new BlogPublishingMetadata
+            {
+                CanonicalUrl = Text(publishing, "canonicalUrl"),
+                SiteName = Text(publishing, "siteName"),
+                Author = Text(publishing, "author"),
+                OrganizationLogoUrl = Text(publishing, "organizationLogoUrl"),
+                VideoUrl = Text(publishing, "videoUrl"),
+                Description = Text(publishing, "description") ?? Text(content, "metaDescription"),
+                Keywords = Text(publishing, "keywords"),
+            };
+        }
+        catch (JsonException)
+        {
+            return new();
+        }
+
+        static string? Text(JsonObject? obj, string name) =>
+            obj?[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    public static string WithPublishingMetadata(string? contentJson, BlogPublishingMetadata metadata)
+    {
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(contentJson ?? "{}") as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject { [MarkdownProperty] = contentJson ?? string.Empty };
+        }
+
+        root["publishingMetadata"] = JsonSerializer.SerializeToNode(metadata, Options);
+        return root.ToJsonString(Options);
+    }
+}
+
+public sealed class BlogPublishingMetadata
+{
+    public string? CanonicalUrl { get; set; }
+    public string? SiteName { get; set; }
+    public string? Author { get; set; }
+    public string? OrganizationLogoUrl { get; set; }
+    public string? VideoUrl { get; set; }
+    public string? Description { get; set; }
+    public string? Keywords { get; set; }
 }
 
 /// <summary>

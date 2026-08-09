@@ -24,6 +24,7 @@ public static class ImageSlotEndpoints
             .RequireAuthorization("TenantAllowed");
 
         group.MapGet("/", ListAsync);
+        group.MapPost("/", CreateAsync).Validate<ImageSlotCreateRequest>().RequireRateLimiting("writes");
         group.MapPost("/reserve", ReserveAsync).RequireRateLimiting("writes");
         group.MapPatch("/{slotId:guid}", PatchAsync).Validate<ImageSlotPatchRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
@@ -50,7 +51,8 @@ public static class ImageSlotEndpoints
     internal static ImageSlotResponse ToResponse(ImageSlot s) =>
         new(s.Id, s.CampaignId, s.Kind, s.TargetWidth, s.TargetHeight, s.Prompt, s.ModelAlias,
             s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt,
-            s.HeadlineBackground, s.ArtifactId);
+            s.HeadlineBackground, s.ArtifactId, s.PromptMode,
+            [.. ImageReferenceResolver.ParseIds(s.ReferenceAssetIdsJson)]);
 
     private static async Task<IResult> ListAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
     {
@@ -118,14 +120,102 @@ public static class ImageSlotEndpoints
         {
             return Results.NotFound();
         }
+        if (request.PromptMode is not null && request.PromptMode is not ("Auto" or "Manual"))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["PromptMode"] = ["Prompt mode must be Auto or Manual."],
+            });
+        }
+        if (request.ReferenceAssetIds is { Count: > 5 })
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["ReferenceAssetIds"] = ["Choose at most 5 explicit reference images; up to 3 product screenshots attach automatically."],
+            });
+        }
+        if (request.ReferenceAssetIds is { Count: > 0 } requestedReferences)
+        {
+            var brandId = await db.Campaigns
+                .Where(c => c.Id == campaignId)
+                .Select(c => c.BrandId)
+                .SingleAsync(ct);
+            var valid = brandId is { } id
+                ? await db.BrandAssets.CountAsync(
+                    a => a.BrandId == id && requestedReferences.Contains(a.Id), ct)
+                : 0;
+            if (valid != requestedReferences.Distinct().Count())
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["ReferenceAssetIds"] = ["Every reference must belong to this campaign's brand kit."],
+                });
+            }
+        }
         slot.Prompt = request.Prompt ?? slot.Prompt;
         slot.ModelAlias = request.ModelAlias ?? slot.ModelAlias;
         slot.SourceSegmentId = request.SourceSegmentId ?? slot.SourceSegmentId;
         slot.HeadlineText = request.HeadlineText ?? slot.HeadlineText;
         slot.SafeArea = request.SafeArea ?? slot.SafeArea;
+        slot.PromptMode = request.PromptMode ?? slot.PromptMode;
+        if (request.ReferenceAssetIds is not null)
+        {
+            slot.ReferenceAssetIdsJson = System.Text.Json.JsonSerializer.Serialize(
+                request.ReferenceAssetIds.Distinct().ToArray(), JsonWeb);
+        }
         slot.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(slot));
+    }
+
+    private static async Task<IResult> CreateAsync(
+        Guid campaignId,
+        ImageSlotCreateRequest request,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (request.PromptMode is not ("Auto" or "Manual"))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["PromptMode"] = ["Prompt mode must be Auto or Manual."],
+            });
+        }
+        var artifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == request.ArtifactId && a.CampaignId == campaignId, ct);
+        if (artifact is null)
+        {
+            return Results.NotFound();
+        }
+
+        var sequence = await db.ImageSlots.CountAsync(
+            s => s.CampaignId == campaignId && s.ArtifactId == artifact.Id
+                && s.Kind.StartsWith("content-image-"), ct) + 1;
+        var (defaultWidth, defaultHeight) = artifact.Kind.StartsWith("social-", StringComparison.Ordinal)
+            ? (1200, 1200)
+            : artifact.Kind == "youtube" ? (1280, 720) : (1200, 675);
+        var now = clock.GetUtcNow();
+        var slot = new ImageSlot
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.TenantId!.Value,
+            CampaignId = campaignId,
+            ArtifactId = artifact.Id,
+            Kind = $"content-image-{sequence}",
+            TargetWidth = request.TargetWidth ?? defaultWidth,
+            TargetHeight = request.TargetHeight ?? defaultHeight,
+            Prompt = string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt.Trim(),
+            PromptMode = request.PromptMode,
+            State = "Empty",
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.ImageSlots.Add(slot);
+        await db.SaveChangesAsync(ct);
+        return Results.Created(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slot.Id}", ToResponse(slot));
     }
 
     /// <summary>Generates N variants at the slot's exact dimensions, persists each as an
@@ -138,6 +228,7 @@ public static class ImageSlotEndpoints
         ClaimsPrincipal principal,
         HttpContext http,
         IImageRenderer renderer,
+        IImageReferenceResolver references,
         IPublicContentStore publicStore,
         IImageComposer composer,
         IBrandContextService brands,
@@ -156,7 +247,7 @@ public static class ImageSlotEndpoints
         {
             return Results.NotFound();
         }
-        if (string.IsNullOrWhiteSpace(slot.Prompt))
+        if (slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
@@ -166,13 +257,25 @@ public static class ImageSlotEndpoints
 
         var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
         var brand = await brands.ResolveAsync(campaign, ct);
+        var owner = slot.ArtifactId is { } artifactId
+            ? await db.Artifacts.SingleOrDefaultAsync(
+                a => a.Id == artifactId && a.CampaignId == campaignId, ct)
+            : null;
+        var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
+        var basePrompt = slot.PromptMode == "Manual"
+            ? slot.Prompt!
+            : BuildAutoPrompt(slot, campaign, owner);
         var effectivePrompt = ComposeEffectivePrompt(
-            slot.Prompt!, brand.ImageStyleBlock, steeringNote: null,
-            CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
+            basePrompt, slot.PromptMode == "Manual" ? null : brand.ImageStyleBlock, steeringNote: null,
+            slot.PromptMode == "Manual"
+                ? null
+                : CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
+        effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
-            principal, http, renderer, publicStore, composer, tenant, db, clock, ct);
+            principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
+            resolvedReferences);
     }
 
     private static async Task<IResult> ListVariantsAsync(
@@ -232,6 +335,7 @@ public static class ImageSlotEndpoints
         ClaimsPrincipal principal,
         HttpContext http,
         IImageRenderer renderer,
+        IImageReferenceResolver references,
         IPublicContentStore publicStore,
         IImageComposer composer,
         ITenantProvider tenant,
@@ -259,10 +363,14 @@ public static class ImageSlotEndpoints
         // The source's persisted prompt already carries brand steering — append only
         // the adjustment, so lineage is honest and reproducible.
         var effectivePrompt = ComposeEffectivePrompt(source.Prompt, imageStyleBlock: null, request.Note);
+        var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
+        var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
+        effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, request.Note, source.Id,
-            principal, http, renderer, publicStore, composer, tenant, db, clock, ct);
+            principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
+            resolvedReferences);
     }
 
     /// <summary>The shared render loop for generate and steer: run row first, then one
@@ -281,7 +389,8 @@ public static class ImageSlotEndpoints
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<ImageReference>? references = null)
     {
         var userId = AuthEndpoints.GetUserId(principal);
         var now = clock.GetUtcNow();
@@ -313,7 +422,8 @@ public static class ImageSlotEndpoints
             try
             {
                 var webp = await renderer.RenderExactAsync(
-                    userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, slot.ModelAlias, ct);
+                    userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, slot.ModelAlias,
+                    references ?? [], ct);
                 var thumb = composer.ToThumbWebp(webp);
 
                 // Unique names: published blobs carry immutable cache headers, so a
@@ -434,6 +544,49 @@ public static class ImageSlotEndpoints
         return $"{prompt}\n{TypographyGuardrails}";
     }
 
+    internal static string BuildAutoPrompt(ImageSlot slot, Campaign campaign, Artifact? artifact)
+    {
+        var content = artifact?.ContentJson;
+        if (content is { Length: > 5000 })
+        {
+            content = content[..5000];
+        }
+        return $$"""
+            Create a {{ArtifactDisplayName(slot.Kind)}} for the content item
+            "{{artifact?.Title ?? campaign.Name}}".
+            Rebuild the composition from the current source every time; do not preserve a
+            person, background or product that is no longer present in the references.
+            Campaign brief: {{campaign.Brief ?? "(none)"}}
+            Content item: {{content ?? "(no structured content)"}}
+            {{(string.IsNullOrWhiteSpace(slot.Prompt) ? "" : $"Creative direction: {slot.Prompt}")}}
+            """;
+    }
+
+    private static string ArtifactDisplayName(string kind) => kind switch
+    {
+        "youtube-thumbnail" => "YouTube thumbnail",
+        "blog-header" => "blog header image",
+        _ when kind.StartsWith("blog-inline-", StringComparison.Ordinal) => "supporting blog figure",
+        "social-card" => "social-media image",
+        _ => "supporting image",
+    };
+
+    internal static string AppendReferenceInstructions(
+        string prompt, IReadOnlyList<ImageReference> references)
+    {
+        if (references.Count == 0)
+        {
+            return prompt;
+        }
+        var hasProduct = references.Any(r => r.Kind == "product");
+        return prompt + "\nActual reference images are attached. Use their pixels, not just "
+            + "their descriptions; preserve recognizable faces, objects and layouts."
+            + (hasProduct
+                ? " Product screenshots are authoritative: reproduce the real interface, "
+                    + "including its layout and controls, and never invent replacement UI."
+                : string.Empty);
+    }
+
     internal static ImageVariantResponse ToResponse(ImageVariant v) =>
         new(v.Id, v.SlotId, v.Url, v.ThumbUrl, v.Model, v.State,
             v.SteeringNote, v.SourceVariantId, v.Width, v.Height, v.CreatedAt);
@@ -515,7 +668,8 @@ public static class ImageSlotEndpoints
         }
 
         long? blogVersion = null;
-        if (request.BlogArtifactId is { } blogId)
+        var artifactToPatch = request.BlogArtifactId ?? slot.ArtifactId;
+        if (artifactToPatch is { } blogId)
         {
             var blog = await db.Artifacts.SingleOrDefaultAsync(
                 a => a.Id == blogId && a.CampaignId == campaignId, ct);

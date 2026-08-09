@@ -3,6 +3,7 @@
    itself: the manuscript column, the outline rail and blur-commit saving against the
    artifact's ETag. *@
 @page "/campaigns/{CampaignId:guid}/focus"
+@using System.Text.Json
 @using Castmill.Core
 @using Castmill.Core.Ai
 @using Castmill.Core.Resources
@@ -390,19 +391,88 @@
                     </p>
                 </div>
 
+                @if (_artifact.Kind == "blog")
+                {
+                    <div class="cm-producer__group">
+                        <span class="cm-kicker">Blog publishing metadata</span>
+                        <p class="cm-meta">This belongs to this blog—not the campaign SEO report.</p>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Canonical URL</span>
+                            <input class="cm-input" @bind="_blogMetadata.CanonicalUrl" placeholder="https://example.com/blog/post" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Description</span>
+                            <textarea class="cm-input cm-textarea" rows="3" maxlength="320" @bind="_blogMetadata.Description"></textarea>
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Keywords</span>
+                            <input class="cm-input" @bind="_blogMetadata.Keywords" placeholder="primary keyword, supporting term" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Site name</span>
+                            <input class="cm-input" @bind="_blogMetadata.SiteName" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Author</span>
+                            <input class="cm-input" @bind="_blogMetadata.Author" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Organization logo URL</span>
+                            <input class="cm-input" @bind="_blogMetadata.OrganizationLogoUrl" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Related video URL <span class="cm-meta">optional</span></span>
+                            <input class="cm-input" @bind="_blogMetadata.VideoUrl" />
+                        </label>
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@_savingMetadata"
+                                @onclick="SaveBlogMetadataAsync">
+                            @(_savingMetadata ? "Saving…" : "Save metadata")
+                        </button>
+                        <div class="cm-tabs" role="tablist" aria-label="Blog metadata format">
+                            @foreach (var tab in BlogMetaTabs)
+                            {
+                                <button type="button" role="tab" class="cm-tabs__tab"
+                                        aria-selected="@(_blogMetaTab == tab)" @onclick="() => _blogMetaTab = tab">@tab</button>
+                            }
+                        </div>
+                        <pre class="cm-seo__meta-pre cm-mono">@BlogMetadataOutput(_blogMetaTab)</pre>
+                    </div>
+                }
+
                 <div class="cm-producer__group">
-                    <span class="cm-kicker">Image slots in this campaign</span>
+                    <span class="cm-kicker">Images for this content item</span>
+                    @if (!ArtifactImageSlots.Any())
+                    {
+                        <p class="cm-meta">No image cards yet. Add one for this item, then create its takes in Image Studio.</p>
+                    }
+                    else
+                    {
                     <ul class="cm-plan__slots">
-                        @foreach (var slot in Campaign.ImageSlots)
+                        @foreach (var slot in ArtifactImageSlots)
                         {
                             <li class="cm-plan__slot">
                                 <span class="cm-plan__slot-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
                                 <span class="cm-badge @(slot.State == "Filled" ? "cm-badge--done" : "cm-badge--empty")">
                                     @(slot.State == "Filled" ? "DONE" : "EMPTY")
                                 </span>
+                                <a class="cm-meta"
+                                   href="@ImageStudioPath(slot.Id)">Open</a>
                             </li>
                         }
                     </ul>
+                    }
+                    <div class="cm-form__actions">
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_addingImage" @onclick="AddImageAsync">
+                            @(_addingImage ? "Adding…" : "+ Add image")
+                        </button>
+                        @if (_artifactId is { } artifactId)
+                        {
+                            <a class="cm-meta" href="@ImageStudioForArtifact(artifactId)">
+                                Focus in Image Studio
+                            </a>
+                        }
+                    </div>
                 </div>
 
                 <div class="cm-producer__group">
@@ -459,6 +529,11 @@
     private ArtifactRevisionDetailResponse? _previewRevision;
     private string _steering = string.Empty;
     private bool _regenerating;
+    private bool _addingImage;
+    private bool _savingMetadata;
+    private BlogPublishingMetadata _blogMetadata = new();
+    private string _blogMetaTab = "Combined";
+    private static readonly string[] BlogMetaTabs = ["Combined", "Head", "JSON-LD"];
     private ArtifactResponse? _artifact;
     private Guid? _artifactId;
     private string? _etag;
@@ -654,6 +729,9 @@
             _markdown = StructuredContent.IsStructured(artifact.Kind)
                 ? StructuredContent.ToDisplayMarkdown(artifact.Kind, artifact.ContentJson)
                 : ArtifactContent.ToMarkdown(artifact.ContentJson);
+            _blogMetadata = artifact.Kind == "blog"
+                ? ArtifactContent.PublishingMetadata(artifact.ContentJson)
+                : new BlogPublishingMetadata();
             _headings.Clear();
             _saveState = "Saved on blur";
             _previewRevision = null;
@@ -1077,9 +1155,142 @@
     private string? _mediaDialog;
     private string _mediaUrl = string.Empty;
 
-    /// <summary>Filled image slots in this campaign — the first-class insert candidates.</summary>
+    /// <summary>Every Producer control follows the selected artifact. Images from a sibling
+    /// post are never offered for insertion or shown as though they belong to this item.</summary>
+    private IEnumerable<ImageSlotResponse> ArtifactImageSlots => _artifactId is { } artifactId
+        ? Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId)
+        : [];
+
+    /// <summary>Filled image slots owned by the open content item.</summary>
     private IEnumerable<ImageSlotResponse> CampaignImages =>
-        Campaign.ImageSlots.Where(s => s.State == "Filled" && !string.IsNullOrWhiteSpace(s.PublishedUrl));
+        ArtifactImageSlots.Where(s => s.State == "Filled" && !string.IsNullOrWhiteSpace(s.PublishedUrl));
+
+    private string ImageStudioPath(Guid slotId) =>
+        $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slotId}";
+
+    private string ImageStudioForArtifact(Guid artifactId) =>
+        $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?artifact={artifactId}";
+
+    private async Task AddImageAsync()
+    {
+        if (_artifactId is not { } artifactId)
+        {
+            return;
+        }
+
+        _addingImage = true;
+        try
+        {
+            var slot = await Images.CreateAsync(CampaignId, artifactId);
+            await Campaign.LoadAsync(CampaignId, force: true);
+            Navigation.NavigateTo(ImageStudioPath(slot.Id));
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _addingImage = false;
+        }
+    }
+
+    private async Task SaveBlogMetadataAsync()
+    {
+        if (_artifact is not { Kind: "blog" } artifact || _artifactId is not { } id)
+        {
+            return;
+        }
+
+        _savingMetadata = true;
+        try
+        {
+            var contentJson = ArtifactContent.WithPublishingMetadata(artifact.ContentJson, _blogMetadata);
+            var saved = await Campaigns.SaveArtifactAsync(
+                CampaignId, id, artifact.Title, contentJson, _etag);
+            _artifact = saved;
+            _etag = $"\"{saved.Version}\"";
+            _saveState = $"Metadata saved · v{saved.Version}";
+            await LoadRevisionsAsync(id);
+            Notifier.ShowSuccess("Blog metadata and schema saved on this blog.");
+        }
+        catch (ConflictApiException)
+        {
+            Notifier.ShowError("This blog changed since you opened it. Reload before saving metadata.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _savingMetadata = false;
+        }
+    }
+
+    private string BlogMetadataOutput(string tab)
+    {
+        if (_artifact is null)
+        {
+            return string.Empty;
+        }
+
+        Func<string?, string?> encode = System.Net.WebUtility.HtmlEncode;
+        var title = _artifact.Title;
+        var description = string.IsNullOrWhiteSpace(_blogMetadata.Description)
+            ? title
+            : _blogMetadata.Description!;
+        var canonical = _blogMetadata.CanonicalUrl;
+        var head = $"""
+            <title>{encode(title)}</title>
+            <meta name="description" content="{encode(description)}" />
+            <meta name="keywords" content="{encode(_blogMetadata.Keywords ?? string.Empty)}" />
+            <meta property="og:type" content="article" />
+            <meta property="og:title" content="{encode(title)}" />
+            <meta property="og:description" content="{encode(description)}" />
+            {(!string.IsNullOrWhiteSpace(canonical) ? $"<link rel=\"canonical\" href=\"{encode(canonical)}\" />" : string.Empty)}
+            """;
+
+        var article = new Dictionary<string, object?>
+        {
+            ["@type"] = "Article",
+            ["headline"] = title,
+            ["description"] = description,
+            ["keywords"] = _blogMetadata.Keywords,
+            ["mainEntityOfPage"] = canonical,
+            ["dateModified"] = _artifact.UpdatedAt.ToString("O"),
+            ["author"] = string.IsNullOrWhiteSpace(_blogMetadata.Author) ? null : new Dictionary<string, object?>
+            {
+                ["@type"] = "Person", ["name"] = _blogMetadata.Author,
+            },
+            ["publisher"] = string.IsNullOrWhiteSpace(_blogMetadata.SiteName) ? null : new Dictionary<string, object?>
+            {
+                ["@type"] = "Organization", ["name"] = _blogMetadata.SiteName,
+                ["logo"] = _blogMetadata.OrganizationLogoUrl,
+            },
+        };
+        var graph = new List<object> { article };
+        if (!string.IsNullOrWhiteSpace(_blogMetadata.VideoUrl))
+        {
+            graph.Add(new Dictionary<string, object?>
+            {
+                ["@type"] = "VideoObject", ["name"] = title,
+                ["description"] = description, ["contentUrl"] = _blogMetadata.VideoUrl,
+            });
+        }
+        var jsonLd = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["@context"] = "https://schema.org", ["@graph"] = graph,
+        }, new JsonSerializerOptions { WriteIndented = true });
+        var jsonLdBlock = $"<script type=\"application/ld+json\">\n{jsonLd}\n</script>";
+
+        return tab switch
+        {
+            "Head" => head,
+            "JSON-LD" => jsonLdBlock,
+            _ => head + "\n" + jsonLdBlock,
+        };
+    }
 
     private void OpenMediaDialog(string kind)
     {

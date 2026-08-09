@@ -1,9 +1,9 @@
-@* New campaign — four steps, and the only path that creates one (handoff §3).
+@* New campaign — five steps, and the only path that creates one (ADR-F29).
      1. pick a source            drop zone + paste URL / paste transcript / pick from assets
      2. transcription progress   determinate bar + narrated log (ADR-F13: never a spinner)
-     3. the brief                AI-drafted full-width fields + fan-out checklist
-     4. search targets           live keyword research, saved to the campaign (ADR-023),
-                                 then Press Run
+     3. research context         audience, voice, brand and required site URL; no generation
+     4. deep SEO/AEO report      live evidence, suggestions and editable target approval
+     5. production brief         AI-drafted from the approved report, then Press Run
 
    Desktop (F7): pick an MP3/MP4 → ffmpeg extracts → Whisper transcribes on-device → the
    TIMED segments go to the server. Web: capability flagged off with a stated reason (G3);
@@ -137,87 +137,59 @@
             }
         </section>
     }
-    else if (_step == Step.Brief)
+    else if (_step == Step.Context)
     {
         <section class="cm-run__panel">
-            @* The brief is drafted from the transcript the moment this step opens, so the
-               default state is "review what the machine understood" rather than "fill in four
-               empty boxes". Every field stays editable — this replaces the typing, not the
-               judgement. *@
-            @if (_briefing)
-            {
-                <div class="cm-brief__reading" role="status">
-                    <span class="cm-spinner" aria-hidden="true"></span>
-                    <span>Reading the transcript and drafting the brief…</span>
-                </div>
-            }
-            else if (_summary is { } summary)
-            {
-                <div class="cm-brief__summary">
-                    <div class="cm-brief__summary-head">
-                        <span class="cm-kicker">What this source says</span>
-                        <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
-                            Re-read
-                        </button>
-                    </div>
-                    <p>@summary</p>
-                    @if (_keyPoints.Count > 0)
-                    {
-                        <ul class="cm-brief__points">
-                            @foreach (var point in _keyPoints)
-                            {
-                                <li>@point</li>
-                            }
-                        </ul>
-                    }
-                </div>
-            }
-            else if (_briefError is { } briefError)
-            {
-                <p class="cm-form__error" role="alert">
-                    Couldn't draft the brief — @briefError
-                    <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
-                        Try again
-                    </button>
-                </p>
-            }
+            <p class="cm-seo__banner">
+                <strong>No content is generated at this stage.</strong> Castmill infers the
+                research audience from the transcript, and the selected Brand supplies its
+                approved voice. The SEO/AEO report comes next; titles, angles, and the production
+                brief are derived only after you approve it.
+            </p>
 
-            @* Full-width, multi-line fields: the AI drafts a sentence or two into each of
-               these, and a single-line half-column input showed forty characters of it. *@
+            <label class="cm-field">
+                <span class="cm-field__label">Brand</span>
+                <select class="cm-input cm-brand__kind" value="@_brandId" @onchange="BrandChanged">
+                    <option value="">None</option>
+                    @foreach (var brand in _brands)
+                    {
+                        <option value="@brand.Id">@brand.Name</option>
+                    }
+                </select>
+                <span class="cm-field__hint cm-meta">
+                    The selected Brand's saved style card is authoritative for voice, colours and templates.
+                </span>
+            </label>
+
             <div class="cm-brief">
                 <label class="cm-field">
-                    <span class="cm-field__label">Title</span>
-                    <input class="cm-input" @ref="_briefFirstField" @bind="_name" />
+                    <span class="cm-field__label">AI-generated audience for the analysis</span>
+                    <textarea class="cm-input cm-textarea" rows="2" @ref="_briefFirstField" @bind="_audience"
+                              placeholder="@(_contextSuggesting ? "Inferring the audience from the transcript…" : "Audience inferred from the transcript")"></textarea>
+                    <span class="cm-field__hint cm-meta">Review or refine this before research.</span>
                 </label>
                 <label class="cm-field">
-                    <span class="cm-field__label">Audience</span>
-                    <textarea class="cm-input cm-textarea" rows="2" @bind="_audience"
-                              placeholder="Platform engineers evaluating tooling"></textarea>
+                    <span class="cm-field__label">Brand voice — from selected Brand</span>
+                    <textarea class="cm-input cm-textarea" rows="2" value="@_voice" readonly
+                              aria-readonly="true"
+                              placeholder="@BrandVoicePlaceholder"></textarea>
                 </label>
                 <label class="cm-field">
-                    <span class="cm-field__label">Brand voice</span>
-                    <textarea class="cm-input cm-textarea" rows="2" @bind="_voice"
-                              placeholder="Direct, specific, no hype"></textarea>
-                </label>
-                <label class="cm-field">
-                    <span class="cm-field__label">Angle</span>
-                    <textarea class="cm-input cm-textarea" rows="2" @bind="_angle"
-                              placeholder="What changed and why it matters"></textarea>
+                    <span class="cm-field__label">Site URL</span>
+                    <input class="cm-input" type="url" @bind="_siteUrl" @bind:event="oninput"
+                           placeholder="https://example.com" />
+                    <span class="cm-field__hint cm-meta">Required for ranked keywords, backlinks, competitors, and AI citation visibility.</span>
                 </label>
             </div>
 
-            <h2 class="cm-front__block-title">Brand</h2>
-            <p class="cm-meta">
-                A brand steers every generator with its voice, colours and templates —
-                or pick None and steer by hand.
-            </p>
-            <select class="cm-input cm-brand__kind" @bind="_brandId">
-                <option value="">None</option>
-                @foreach (var brand in _brands)
-                {
-                    <option value="@brand.Id">@brand.Name</option>
-                }
-            </select>
+            <button type="button" class="cm-button cm-button--quiet"
+                    disabled="@_contextSuggesting" @onclick="SuggestResearchContextAsync">
+                @(_contextSuggesting ? "Inferring audience…" : "Regenerate audience from transcript")
+            </button>
+            @if (_contextError is { } contextError)
+            {
+                <p class="cm-form__error" role="alert">@contextError You can refine the audience manually or try again.</p>
+            }
 
             <h2 class="cm-front__block-title">Context links</h2>
             <p class="cm-meta">
@@ -237,44 +209,32 @@
             <button type="button" class="cm-button cm-button--quiet" @onclick="() => _links.Add(new LinkRow())"
                     disabled="@(_links.Count >= 10)">+ Add link</button>
 
-            <h2 class="cm-front__block-title">Fan-out</h2>
-            <ul class="cm-fanout">
-                @foreach (var item in _fanOut)
-                {
-                    <li>
-                        <label class="cm-fanout__item">
-                            <input type="checkbox" checked="@item.Selected"
-                                   @onchange="e => item.Selected = (bool)(e.Value ?? false)" />
-                            <span>@item.Label</span>
-                        </label>
-                    </li>
-                }
-            </ul>
-
             @if (_error is not null)
             {
                 <p class="cm-form__error" role="alert">@_error</p>
             }
 
             <div class="cm-form__actions">
-                <button type="button" class="cm-button" disabled="@_busy" @onclick="GoToTargetsAsync">
-                    Next — search targets
+                <button type="button" class="cm-button" disabled="@(!CanRunAnalysis)" @onclick="GoToTargetsAsync">
+                    Build the deep SEO/AEO report
                 </button>
-                <span class="cm-meta">@_fanOut.Count(f => f.Selected) of @_fanOut.Count selected</span>
+                @if (!HasValidSiteUrl)
+                {
+                    <span class="cm-meta">Enter a valid site URL to unlock the full domain analysis.</span>
+                }
             </div>
         </section>
     }
     else if (_step == Step.Targets)
     {
         <section class="cm-run__panel">
-            @* Research BEFORE the fan-out, so every generator is written to a target instead of
-               being analysed afterwards. The top three are pre-selected and "Press Run" is one
-               click away — the careful path is available, not compulsory. *@
+            @* Analysis is a required production stage, not a post-hoc report. Content cannot
+               run until this report exists and its targets have been approved. *@
             @if (_researching)
             {
                 <div class="cm-brief__reading" role="status">
                     <span class="cm-spinner" aria-hidden="true"></span>
-                    <span>Researching keywords and the questions people ask…</span>
+                    <span>Building the deep SEO/AEO report — demand, SERP, AI visibility, rankings, authority, competitors, gaps and content opportunities…</span>
                 </div>
             }
             else
@@ -285,6 +245,11 @@
                     {
                         <p class="cm-meta">@note</p>
                     }
+                }
+
+                @if (_analysis is { } analysis)
+                {
+                    <DeepSeoReport Report="analysis" />
                 }
 
                 <h2 class="cm-front__block-title">
@@ -302,7 +267,7 @@
 
                 @if (_targets.Count == 0)
                 {
-                    <p class="cm-meta">No keywords came back. You can run without targets.</p>
+                    <p class="cm-form__error">No grounded keywords came back. Refine the brief and rerun the analysis before generating content.</p>
                 }
                 else
                 {
@@ -383,18 +348,113 @@
             }
 
             <div class="cm-form__actions">
-                <button type="button" class="cm-button" disabled="@(_busy || _researching)"
-                        @onclick="PressRunAsync">
-                    @(_busy ? "Starting the run…" : "Press Run")
+                <button type="button" class="cm-button" disabled="@(!CanApproveReport)"
+                        @onclick="ApproveAnalysisAsync">
+                    @(_busy ? "Building the content brief…" : "Approve report & build content brief")
                 </button>
                 <button type="button" class="cm-button cm-button--quiet" disabled="@_busy"
-                        @onclick="() => _step = Step.Brief">
+                        @onclick="() => _step = Step.Context">
                     Back
+                </button>
+                <button type="button" class="cm-button cm-button--quiet" disabled="@(_busy || _researching)"
+                        @onclick="ResearchAsync">
+                    Re-run analysis
                 </button>
                 <span class="cm-meta">
                     @(_targets.Count(t => t.Selected)) keywords ·
                     @(_questions.Count(q => q.Selected)) questions
                 </span>
+            </div>
+        </section>
+    }
+    else if (_step == Step.Brief)
+    {
+        <section class="cm-run__panel">
+            <p class="cm-seo__banner">
+                <strong>Built from the approved report.</strong> This production brief, its angle,
+                and every selected output inherit the SEO/AEO evidence you just approved.
+            </p>
+
+            @if (_briefing)
+            {
+                <div class="cm-brief__reading" role="status">
+                    <span class="cm-spinner" aria-hidden="true"></span>
+                    <span>Turning the approved SEO/AEO strategy into a production brief…</span>
+                </div>
+            }
+            else if (_summary is { } summary)
+            {
+                <div class="cm-brief__summary">
+                    <div class="cm-brief__summary-head">
+                        <span class="cm-kicker">SEO-informed source brief</span>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
+                            Rebuild from report
+                        </button>
+                    </div>
+                    <p>@summary</p>
+                    @if (_keyPoints.Count > 0)
+                    {
+                        <ul class="cm-brief__points">
+                            @foreach (var point in _keyPoints)
+                            {
+                                <li>@point</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+            else if (_briefError is { } briefError)
+            {
+                <p class="cm-form__error" role="alert">
+                    Couldn't build the content brief — @briefError
+                    <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">Try again</button>
+                </p>
+            }
+
+            <div class="cm-brief">
+                <label class="cm-field">
+                    <span class="cm-field__label">Audience</span>
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_audience"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Brand voice — from selected Brand</span>
+                    <textarea class="cm-input cm-textarea" rows="2" value="@_voice" readonly
+                              aria-readonly="true" placeholder="@BrandVoicePlaceholder"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">SEO-informed campaign angle</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_angle"
+                              placeholder="The approved report will propose the core angle."></textarea>
+                </label>
+            </div>
+
+            <h2 class="cm-front__block-title">Fan-out</h2>
+            <p class="cm-meta">Choose what to produce from this shared strategy. Channel titles and copy are generated only after Press Run.</p>
+            <ul class="cm-fanout">
+                @foreach (var item in _fanOut)
+                {
+                    <li>
+                        <label class="cm-fanout__item">
+                            <input type="checkbox" checked="@item.Selected"
+                                   @onchange="e => item.Selected = (bool)(e.Value ?? false)" />
+                            <span>@item.Label</span>
+                        </label>
+                    </li>
+                }
+            </ul>
+
+            @if (_error is not null)
+            {
+                <p class="cm-form__error" role="alert">@_error</p>
+            }
+
+            <div class="cm-form__actions">
+                <button type="button" class="cm-button" disabled="@(_busy || _briefing)" @onclick="PressRunAsync">
+                    @(_busy ? "Starting the run…" : "Press Run")
+                </button>
+                <button type="button" class="cm-button cm-button--quiet" disabled="@_busy"
+                        @onclick="() => _step = Step.Targets">Back to report</button>
+                <span class="cm-meta">@_fanOut.Count(f => f.Selected) of @_fanOut.Count selected</span>
             </div>
         </section>
     }
@@ -406,8 +466,9 @@
     {
         Source,
         Transcribing,
-        Brief,
+        Context,
         Targets,
+        Brief,
     }
 
     private sealed class FanOutItem(string kind, string label, bool selected = true)
@@ -460,7 +521,7 @@
         // image slots, and omitting it here is why campaigns sat at 0/6 images until someone
         // pressed "Seed all prompts" by hand.
         [.. kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]),
-         "image-prompts"];
+         "thumbnail-concepts", "image-prompts"];
 
     private sealed class LinkRow
     {
@@ -495,7 +556,7 @@
                     await _sourceFirstField.FocusAsync();
                     _focusedStep = _step;
                     break;
-                case Step.Brief when !_briefing:
+                case Step.Context:
                     await _briefFirstField.FocusAsync();
                     _focusedStep = _step;
                     break;
@@ -516,16 +577,27 @@
     private string _audience = string.Empty;
     private string _voice = string.Empty;
     private string _angle = string.Empty;
+    private string _siteUrl = string.Empty;
     private string? _error;
     private bool _busy;
     private int _percent;
     private Guid? _campaignId;
     private Guid? _transcriptArtifactId;
     private PickedMedia? _picked;
+    private bool _contextSuggesting;
+    private string? _contextError;
 
     private bool CanStart => _name.Trim().Length > 0 && _transcript.Trim().Length > 40;
+    private bool HasValidSiteUrl => Uri.TryCreate(_siteUrl.Trim(), UriKind.Absolute, out var site)
+        && site.Scheme is "http" or "https";
+    private bool CanRunAnalysis => !_busy && !_researching && !_contextSuggesting
+        && !string.IsNullOrWhiteSpace(_audience) && HasValidSiteUrl;
 
-    // ---- Targets step -----------------------------------------------------------------
+    private string BrandVoicePlaceholder => string.IsNullOrWhiteSpace(_brandId)
+        ? "Select a Brand to inherit its voice"
+        : "This Brand has no saved voice guidelines";
+
+    // ---- Deep report and target-approval step ------------------------------------------
 
     private sealed class TargetRow
     {
@@ -536,6 +608,12 @@
         public double? Difficulty { get; init; }
 
         public double? Opportunity { get; init; }
+
+        public double? Competition { get; init; }
+
+        public double? Cpc { get; init; }
+
+        public string? Intent { get; init; }
 
         public required string Source { get; init; }
 
@@ -558,6 +636,9 @@
     private bool _researching;
     private bool _hasMetrics;
     private string? _primaryKeyword;
+    private SeoAnalysisReportResponse? _analysis;
+    private bool CanApproveReport => !_busy && !_researching && _analysis is not null
+        && _targets.Any(t => t.Selected);
 
     private bool IsPrimary(TargetRow row) =>
         string.Equals(row.Term, _primaryKeyword, StringComparison.OrdinalIgnoreCase);
@@ -621,7 +702,7 @@
     }
 
     /// <summary>
-    /// Moves to the Targets step and researches in the background. The step is shown
+    /// Moves to the report step and researches in the background. The step is shown
     /// immediately rather than after the research: a blank wait with no context is worse than
     /// a visible step that fills in.
     /// </summary>
@@ -629,7 +710,18 @@
     {
         _step = Step.Targets;
         _error = null;
-        await ResearchAsync();
+        try
+        {
+            if (_campaignId is { } campaignId)
+            {
+                await SaveCampaignContextAsync(campaignId);
+            }
+            await ResearchAsync();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't reach the Castmill API.";
+        }
     }
 
     private async Task ResearchAsync()
@@ -643,11 +735,14 @@
         _targets.Clear();
         _questions.Clear();
         _researchNotes.Clear();
+        _analysis = null;
         StateHasChanged();
 
         try
         {
-            var research = await Seo.ResearchAsync(campaignId, transcriptId);
+            _analysis = await Seo.DeepAnalysisAsync(campaignId, transcriptId,
+                _siteUrl.Trim());
+            var research = _analysis.Research;
 
             _hasMetrics = research.HasProviderMetrics;
             _researchNotes.AddRange(research.Notes);
@@ -658,6 +753,9 @@
                 Volume = k.Volume,
                 Difficulty = k.Difficulty,
                 Opportunity = k.Opportunity,
+                Competition = k.Competition,
+                Cpc = k.Cpc,
+                Intent = k.Intent,
                 Source = k.Source,
             }));
 
@@ -683,12 +781,11 @@
         }
         catch (ApiException ex)
         {
-            // Research failing must not block the run — targets are an improvement, not a gate.
-            _researchNotes.Add($"Keyword research is unavailable ({ex.Message}) — you can run without targets.");
+            _researchNotes.Add($"The required SEO/AEO analysis could not be completed: {ex.Message}");
         }
         catch (HttpRequestException)
         {
-            _researchNotes.Add("Couldn't reach the Castmill API for keyword research — you can run without targets.");
+            _researchNotes.Add("Couldn't reach the Castmill API. Content generation stays locked until the analysis completes.");
         }
         finally
         {
@@ -703,7 +800,9 @@
     {
         var keywords = _targets
             .Where(t => t.Selected)
-            .Select(t => new SeoTarget(t.Term, t.Volume, t.Difficulty, t.Opportunity, t.Source))
+            .Select(t => new SeoTarget(
+                t.Term, t.Volume, t.Difficulty, t.Opportunity, t.Source,
+                t.Competition, t.Cpc, t.Intent))
             .ToList();
 
         var questions = _questions
@@ -711,19 +810,41 @@
             .Select(q => new SeoQuestion(q.Question, q.Source))
             .ToList();
 
-        if (keywords.Count == 0 && questions.Count == 0)
+        if (keywords.Count == 0)
+        {
+            throw new InvalidOperationException("Approve at least one keyword before pressing Run.");
+        }
+
+        await Seo.SaveTargetsAsync(campaignId, new SeoTargetsRequest(_primaryKeyword, keywords, questions));
+    }
+
+    private async Task ApproveAnalysisAsync()
+    {
+        if (_campaignId is not { } campaignId || _analysis is null)
         {
             return;
         }
 
+        _busy = true;
+        _error = null;
         try
         {
-            await Seo.SaveTargetsAsync(campaignId, new SeoTargetsRequest(_primaryKeyword, keywords, questions));
+            // Approval lands before the model drafts a single content angle. The brief endpoint
+            // reads the saved targets and report, so reversing these two awaits would recreate
+            // the post-hoc SEO flow this screen exists to prevent.
+            await SaveTargetsAsync(campaignId);
+            _step = Step.Brief;
+            await SuggestBriefAsync();
         }
-        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or InvalidOperationException)
         {
-            // Losing the targets is bad; losing the run because of it is worse.
-            _researchNotes.Add("The targets could not be saved — the run will proceed without them.");
+            _error = ex is ApiException api ? api.Message
+                : ex is InvalidOperationException invalid ? invalid.Message
+                : "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
@@ -762,10 +883,6 @@
             {
                 _audience = audience;
             }
-            if (string.IsNullOrWhiteSpace(_voice) && brief.BrandVoice is { } voice)
-            {
-                _voice = voice;
-            }
             if (string.IsNullOrWhiteSpace(_angle) && brief.Angle is { } angle)
             {
                 _angle = angle;
@@ -802,21 +919,33 @@
         }
     }
 
+    private void BrandChanged(ChangeEventArgs args)
+    {
+        _brandId = args.Value?.ToString() ?? string.Empty;
+        var selected = Guid.TryParse(_brandId, out var brandId)
+            ? _brands.FirstOrDefault(brand => brand.Id == brandId)
+            : null;
+        _voice = selected?.StyleCard?.Voice?.Trim() ?? string.Empty;
+    }
+
     private string StepTitle => StepTitleFor(_step);
 
     private static string StepTitleFor(Step step) => step switch
     {
         Step.Source => "Pick a source.",
         Step.Transcribing => "Reading the source.",
-        _ => "The brief.",
+        Step.Context => "Set the research context.",
+        Step.Targets => "Review the deep SEO/AEO report.",
+        _ => "Build from the approved strategy.",
     };
 
     private static string Title(Step step) => step switch
     {
         Step.Source => "Source",
         Step.Transcribing => "Transcript",
-        Step.Targets => "Targets",
-        _ => "Brief",
+        Step.Context => "Context",
+        Step.Targets => "SEO/AEO",
+        _ => "Production brief",
     };
 
     private async Task StartIngestAsync()
@@ -837,10 +966,10 @@
             var ingest = await Generation.IngestTranscriptAsync(campaign.Id, _transcript);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
 
-            await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
-
-            _step = Step.Brief;
-            await SuggestBriefAsync();
+            await NarrateAsync($"{ingest.Segments} timed segments · inferring the research audience…", 85);
+            await SuggestResearchContextAsync();
+            await NarrateAsync("research audience ready for review", 100);
+            _step = Step.Context;
         }
         catch (ApiException ex)
         {
@@ -849,6 +978,10 @@
         catch (HttpRequestException)
         {
             _error = "Couldn't reach the Castmill API.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
         }
     }
 
@@ -929,9 +1062,10 @@
                 campaign.Id, transcription.JoinedText, picked.FileName, transcription.Segments);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
 
-            await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
-            _step = Step.Brief;
-            await SuggestBriefAsync();
+            await NarrateAsync($"{ingest.Segments} timed segments · inferring the research audience…", 85);
+            await SuggestResearchContextAsync();
+            await NarrateAsync("research audience ready for review", 100);
+            _step = Step.Context;
         }
         catch (NotSupportedException ex)
         {
@@ -970,6 +1104,66 @@
         await Task.Yield();
     }
 
+    private async Task SuggestResearchContextAsync()
+    {
+        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _contextSuggesting = true;
+        _contextError = null;
+        StateHasChanged();
+
+        try
+        {
+            var suggestion = await Generation.SuggestResearchContextAsync(campaignId, transcriptId);
+            if (!string.IsNullOrWhiteSpace(suggestion.Audience))
+            {
+                _audience = suggestion.Audience.Trim();
+            }
+            else
+            {
+                _contextError = "The model did not return a research audience.";
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _contextError = ex is ApiException api
+                ? $"Couldn't infer the research audience: {api.Message}"
+                : "Couldn't reach the Castmill API to infer the research audience.";
+        }
+        finally
+        {
+            _contextSuggesting = false;
+            StateHasChanged();
+        }
+    }
+
+    private string CampaignBrief => string.Join('\n',
+        $"Audience: {_audience}",
+        $"Brand voice: {_voice}",
+        $"Angle: {_angle}");
+
+    private async Task SaveCampaignContextAsync(Guid campaignId)
+    {
+        var links = _links
+            .Where(l => !string.IsNullOrWhiteSpace(l.Url))
+            .Select(l => new CampaignLink(
+                string.IsNullOrWhiteSpace(l.Label) ? "Link" : l.Label.Trim(), l.Url.Trim()))
+            .ToList();
+        if (HasValidSiteUrl && !links.Any(link =>
+                string.Equals(link.Url, _siteUrl.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            links.Insert(0, new CampaignLink("Site", _siteUrl.Trim()));
+        }
+
+        await Campaigns.UpdateAsync(
+            campaignId, _name.Trim(), CampaignBrief,
+            Guid.TryParse(_brandId, out var brandId) ? brandId : null,
+            links.Count > 0 ? links : null);
+    }
+
     private async Task PressRunAsync()
     {
         if (_campaignId is not { } campaignId)
@@ -982,22 +1176,12 @@
 
         try
         {
-            // The brief is stored on the campaign; the fan-out selection drives generation.
-            var brief = string.Join('\n',
-                $"Audience: {_audience}",
-                $"Brand voice: {_voice}",
-                $"Angle: {_angle}");
-
-            var links = _links
-                .Where(l => !string.IsNullOrWhiteSpace(l.Url))
-                .Select(l => new CampaignLink(
-                    string.IsNullOrWhiteSpace(l.Label) ? "Link" : l.Label.Trim(), l.Url.Trim()))
-                .ToList();
-
-            await Campaigns.UpdateAsync(
-                campaignId, _name.Trim(), brief,
-                Guid.TryParse(_brandId, out var brandId) ? brandId : null,
-                links.Count > 0 ? links : null);
+            if (_analysis is null)
+            {
+                _error = "Complete the SEO/AEO analysis before starting the content run.";
+                return;
+            }
+            await SaveCampaignContextAsync(campaignId);
 
             if (_transcriptArtifactId is not { } transcriptId)
             {
@@ -1012,7 +1196,7 @@
             // Hand the run to the press-run service and go straight to the Mill Floor:
             // the reveal happens there, card by card, as completions land (ADR-F13).
             PressRun.Start(
-                campaignId, transcriptId, brief,
+                campaignId, transcriptId, CampaignBrief,
                 ExpandKinds(_fanOut.Where(f => f.Selected).Select(f => f.Kind)));
 
             Navigation.NavigateTo(CampaignViews.PathFor(campaignId, CampaignView.MillFloor));
@@ -1025,6 +1209,10 @@
         catch (HttpRequestException)
         {
             _error = "Couldn't reach the Castmill API.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
         }
         finally
         {

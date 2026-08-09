@@ -11,6 +11,8 @@ using Castmill.Core.Resources;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace Castmill.Api.Tests;
@@ -95,6 +97,29 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task Foundry_reference_generation_posts_real_images_to_the_edits_endpoint()
+    {
+        var handler = new CapturingImageHandler();
+        var provider = new FoundryImageProvider(
+            new StaticFoundryTarget(), new SingleHttpClientFactory(new HttpClient(handler)),
+            Options.Create(new AiOptions { ImageApiVersion = "2025-04-01-preview" }));
+        var png = SolidPng(16, 16, SKColors.Blue);
+
+        var result = await provider.GenerateAsync(Guid.NewGuid(), "faithful product screenshot", "16:9", null,
+            [new ImageReference(Guid.NewGuid(), "product.png", "image/png", png, "product")],
+            CancellationToken.None);
+
+        Assert.Equal(png, result);
+        Assert.Contains("/openai/deployments/gpt-image/images/edits", handler.RequestUri,
+            StringComparison.Ordinal);
+        Assert.Contains("api-version=2025-04-01-preview", handler.RequestUri, StringComparison.Ordinal);
+        Assert.Contains("name=\"image[]\"", handler.MultipartBody, StringComparison.Ordinal);
+        Assert.Contains("product.png", handler.MultipartBody, StringComparison.Ordinal);
+        Assert.Contains("input_fidelity", handler.MultipartBody, StringComparison.Ordinal);
+        Assert.Equal("secret", handler.ApiKey);
+    }
+
+    [Fact]
     public void Long_headline_shrinks_instead_of_being_clipped()
     {
         var composer = NewComposer();
@@ -109,6 +134,48 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         Microsoft.Extensions.Logging.Abstractions.NullLogger<ImageComposer>.Instance);
 
+    private sealed class StaticFoundryTarget : IFoundryClientFactory
+    {
+        private static readonly FoundryCredentials Credentials =
+            new("https://foundry.example", "secret", "test");
+        public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
+            Task.FromResult<FoundryCredentials?>(Credentials);
+        public string? ResolveDeployment(string modelAlias) => "gpt-image";
+        public Task<FoundryTarget?> ResolveTargetAsync(Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<FoundryTarget?>(new FoundryTarget(Credentials, "gpt-image"));
+        public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class SingleHttpClientFactory(HttpClient client) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class CapturingImageHandler : HttpMessageHandler
+    {
+        public string RequestUri { get; private set; } = string.Empty;
+        public string MultipartBody { get; private set; } = string.Empty;
+        public string? ApiKey { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri!.ToString();
+            ApiKey = request.Headers.GetValues("api-key").Single();
+            MultipartBody = System.Text.Encoding.Latin1.GetString(
+                await request.Content!.ReadAsByteArrayAsync(cancellationToken));
+            var png = SolidPng(16, 16, SKColors.Blue);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    data = new[] { new { b64_json = Convert.ToBase64String(png) } },
+                }),
+            };
+        }
+    }
+
     // ---- Integration fakes -----------------------------------------------------
 
     /// <summary>Returns real decodable bytes so the crop + composite path is exercised end to end.</summary>
@@ -116,6 +183,12 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     {
         public int Calls { get; private set; }
         public List<(int Width, int Height)> Requested { get; } = [];
+
+        public void Reset()
+        {
+            Calls = 0;
+            Requested.Clear();
+        }
 
         public Task<byte[]> RenderWebpAsync(Guid userId, string prompt, string aspectRatio, string modelAlias, CancellationToken ct) =>
             Task.FromResult(SolidPng(64, 64, SKColors.Teal));
@@ -127,6 +200,33 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
             // Emit at a model-native size; the endpoint owns the crop to slot size.
             return Task.FromResult(SolidPng(1024, 1024, SKColors.Teal));
         }
+    }
+
+    private sealed class ReferenceCapturingRenderer : IImageRenderer
+    {
+        public int ReferenceCount { get; private set; }
+
+        public Task<byte[]> RenderWebpAsync(Guid userId, string prompt, string aspectRatio, string modelAlias, CancellationToken ct) =>
+            Task.FromResult(SolidPng(64, 64, SKColors.Teal));
+
+        public Task<byte[]> RenderExactAsync(Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct) =>
+            Task.FromResult(SolidPng(width, height, SKColors.Teal));
+
+        public Task<byte[]> RenderExactAsync(
+            Guid userId, string prompt, int width, int height, string? modelAlias,
+            IReadOnlyList<ImageReference> references, CancellationToken ct)
+        {
+            ReferenceCount = references.Count;
+            return Task.FromResult(SolidPng(width, height, SKColors.Teal));
+        }
+    }
+
+    private sealed class FixedReferenceResolver : IImageReferenceResolver
+    {
+        public Task<IReadOnlyList<ImageReference>> ResolveAsync(
+            Castmill.Core.Campaign campaign, Castmill.Core.ImageSlot slot, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ImageReference>>(
+                [new ImageReference(Guid.NewGuid(), "product.png", "image/png", SolidPng(16, 16, SKColors.Blue), "product")]);
     }
 
     /// <summary>Keeps bytes so ReadAsync can serve the compositor its base image.</summary>
@@ -157,6 +257,40 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     // ---- Integration: the plan's whole lifecycle -------------------------------
+
+    [Fact]
+    public async Task Real_reference_images_travel_from_the_item_card_to_the_renderer()
+    {
+        var renderer = new ReferenceCapturingRenderer();
+        await using var app = factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.Replace(ServiceDescriptor.Scoped<IImageRenderer>(_ => renderer));
+            s.Replace(ServiceDescriptor.Scoped<IImageReferenceResolver>(_ => new FixedReferenceResolver()));
+            s.Replace(ServiceDescriptor.Singleton<IPublicContentStore>(new MemoryPublicStore()));
+        }));
+        var client = await AuthedClientAsync(app);
+        var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
+            new CampaignCreateRequest("References", null))).Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var artifact = (await (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaign.Id}/artifacts",
+            new ArtifactCreateRequest("social-x", "A post", """{"content":{"text":"A product post"}}""")))
+            .Content.ReadFromJsonAsync<ArtifactResponse>())!;
+        var slot = (await (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaign.Id}/image-slots",
+            new ImageSlotCreateRequest(artifact.Id, "A faithful product image", "Manual")))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>())!;
+        var emptyManual = (await (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaign.Id}/image-slots",
+            new ImageSlotCreateRequest(artifact.Id, null, "Manual")))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>())!;
+
+        var refused = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{emptyManual.Id}/generate", new { variants = 1 });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+        var generated = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{slot.Id}/generate", new { variants = 1 });
+
+        Assert.Equal(HttpStatusCode.OK, generated.StatusCode);
+        Assert.Equal(1, renderer.ReferenceCount);
+    }
 
     [Fact]
     public async Task Slot_lifecycle_reserve_prompt_generate_place_and_composite()
@@ -200,10 +334,12 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         Assert.Equal(1280, thumb.TargetWidth);
         Assert.Equal(720, thumb.TargetHeight);
 
-        // A slot with no prompt refuses to generate rather than burning a call.
+        // Auto mode can build a prompt from the owning context even when no manual prompt was
+        // saved. This legacy campaign-wide slot falls back to its typed slot label.
         var noPrompt = await client.PostAsJsonAsync(
             $"/api/v1/campaigns/{campaign.Id}/image-slots/{thumb.Id}/generate", new { variants = 2 });
-        Assert.Equal(HttpStatusCode.BadRequest, noPrompt.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, noPrompt.StatusCode);
+        renderer.Reset();
 
         var patched = await (await client.PatchAsJsonAsync(
             $"/api/v1/campaigns/{campaign.Id}/image-slots/{thumb.Id}",

@@ -3,14 +3,14 @@ using Castmill.Core.Resources;
 namespace Castmill.UI.State;
 
 /// <summary>
-/// The campaign as a topic cluster: one PILLAR (the primary blog) at the centre, every other
-/// artifact a supporting spoke, and the SEO targets and questions laid over the top so gaps
+/// The campaign as a topic cluster: one PILLAR (the primary blog) as the hierarchy root, every
+/// other artifact as supporting content, and the SEO targets and questions laid over it so gaps
 /// are visible. This is the model behind the cluster-map visualisation — it turns "a pile of
 /// artifacts" into "a pillar and the content that reinforces it", which is what makes a
 /// campaign an SEO campaign rather than a heap of one-offs.
 ///
 /// Pure projection over data the client already holds (artifacts + saved targets): no server
-/// round-trip, and deterministic so the layout never jumps between renders.
+/// round-trip, with stable IDs so ApexTree preserves a coherent hierarchy across renders.
 /// </summary>
 public sealed record ClusterNode(
     Guid ArtifactId,

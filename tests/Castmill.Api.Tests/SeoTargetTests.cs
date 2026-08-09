@@ -8,6 +8,7 @@ using Castmill.Core.Resources;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.AspNetCore.Hosting;
 
 namespace Castmill.Api.Tests;
 
@@ -86,6 +87,23 @@ public sealed class SeoTargetTests(CastmillApiFactory factory)
 
         // An empty steering heading is worse than none: it invites the model to fill it.
         Assert.DoesNotContain("Search and answer-engine targets", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Production_gate_refuses_content_before_analysis_and_approval()
+    {
+        await using var app = factory.WithWebHostBuilder(builder =>
+            builder.UseSetting("Seo:RequireAnalysisBeforeGeneration", "true"));
+        var client = await AuthedClientAsync(new WebApplicationFactoryLike(app));
+        var (campaignId, transcriptId) = await SeedAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/newsletter",
+            new { transcriptArtifactId = transcriptId });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("analysis", await response.Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
