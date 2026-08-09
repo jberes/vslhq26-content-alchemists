@@ -13,6 +13,7 @@
 @inject ImagesClient Images
 @using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient BrandsApi
+@inject HttpClient Http
 @inject StudioRunService StudioRun
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
@@ -402,16 +403,37 @@
                                 }
                                 else
                                 {
+                                    @* A picker, not a list of append-buttons: one face, one
+                                       background, one accent. Click the chosen one; click it
+                                       again to clear. Selections compose into the steering text
+                                       automatically, so what is selected and what the model is
+                                       told can never disagree. *@
                                     @foreach (var group in BrandKit)
                                     {
                                         <div class="cm-studio__kit">
-                                            <span class="cm-meta">@group.Key</span>
-                                            <div class="cm-studio__chips">
+                                            <span class="cm-meta">
+                                                @KindLabel(group.Key)
+                                                @if (_picked.TryGetValue(group.Key, out var chosen))
+                                                {
+                                                    <span class="cm-mono"> · @(chosen.Label ?? chosen.FileName)</span>
+                                                }
+                                            </span>
+                                            <div class="cm-studio__picks">
                                                 @foreach (var asset in group)
                                                 {
-                                                    <button type="button" class="cm-studio__chip"
-                                                            @onclick="() => AppendSteerChip(AssetPrompt(asset))">
-                                                        + @(asset.Label ?? asset.FileName)
+                                                    var isOn = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
+                                                    <button type="button"
+                                                            class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
+                                                            aria-pressed="@(isOn ? "true" : "false")"
+                                                            title="@(asset.Label ?? asset.FileName)"
+                                                            @onclick="() => TogglePick(group.Key, asset)">
+                                                        @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
+                                                        {
+                                                            <img src="@thumb" alt="" loading="lazy" />
+                                                        }
+                                                        <span class="cm-studio__pick-label">
+                                                            @(asset.Label ?? asset.FileName)
+                                                        </span>
                                                     </button>
                                                 }
                                             </div>
@@ -490,6 +512,13 @@
 </CampaignShell>
 
 @code {
+
+    /// <summary>
+    /// Where the client is actually pointed. The desktop shell and the web shell resolve the
+    /// API differently, so naming it turns "couldn't reach the API" into something a person
+    /// can check.
+    /// </summary>
+    private string ApiOrigin() => Http.BaseAddress?.ToString() ?? "the API";
     private static readonly int[] VariantChoices = [1, 2, 4, 6];
 
     // gpt-image-2 list price at 2026 rates for a single ~1-2 MP render; an estimate on the
@@ -559,20 +588,85 @@
     private string? _uploadError;
 
     /// <summary>Faces first — they are what the panel is reached for most.</summary>
-    private static readonly string[] KitOrder = ["face", "background", "logo", "other"];
+    private static readonly string[] KitOrder = ["face", "background", "accent", "logo", "other"];
 
     private IEnumerable<IGrouping<string, BrandAssetResponse>> BrandKit =>
         _brandAssets
             .GroupBy(a => a.Kind.ToLowerInvariant())
             .OrderBy(g => Array.IndexOf(KitOrder, g.Key) is var i && i >= 0 ? i : KitOrder.Length);
 
-    /// <summary>The steering line an asset contributes. Its label IS the prompt text.</summary>
-    private static string AssetPrompt(BrandAssetResponse asset)
+    /// <summary>At most one asset per kind — a picker, not a multi-select.</summary>
+    private readonly Dictionary<string, BrandAssetResponse> _picked = new(StringComparer.Ordinal);
+
+    /// <summary>Read-SAS thumbnails, so a background is chosen by looking at it.</summary>
+    private readonly Dictionary<Guid, string> _kitPreviews = [];
+
+    private static string KindLabel(string kind) => kind switch
     {
-        var text = asset.Label ?? asset.FileName;
-        return asset.Kind.Equals("background", StringComparison.OrdinalIgnoreCase)
-            ? $"set against {text}"
-            : $"include {text}";
+        "face" => "Face",
+        "background" => "Background",
+        "accent" => "Accent",
+        "logo" => "Logo",
+        _ => "Other",
+    };
+
+    /// <summary>The steering line an asset contributes. Its label IS the prompt text.</summary>
+    private static string AssetPrompt(BrandAssetResponse asset) =>
+        asset.Kind.ToLowerInvariant() switch
+        {
+            "background" => $"set against {asset.Label ?? asset.FileName}",
+            "accent" => $"accented with {asset.Label ?? asset.FileName}",
+            "logo" => $"carrying {asset.Label ?? asset.FileName}",
+            _ => $"featuring {asset.Label ?? asset.FileName}",
+        };
+
+    /// <summary>
+    /// Selecting replaces whatever was chosen for that kind; selecting the same one clears it.
+    /// The steering box is then rewritten from the selections, so the two cannot drift apart —
+    /// appending text on each click left stale mentions behind after a change of mind.
+    /// </summary>
+    private void TogglePick(string kind, BrandAssetResponse asset)
+    {
+        if (_picked.TryGetValue(kind, out var current) && current.Id == asset.Id)
+        {
+            _picked.Remove(kind);
+        }
+        else
+        {
+            _picked[kind] = asset;
+        }
+
+        SyncPickedSteering();
+    }
+
+    /// <summary>
+    /// Keeps the kit sentence at the END of the steering note, leaving anything the user typed
+    /// above it untouched.
+    /// </summary>
+    private void SyncPickedSteering()
+    {
+        const string marker = "From the brand kit: ";
+
+        var typed = _steerNote ?? string.Empty;
+        var at = typed.IndexOf(marker, StringComparison.Ordinal);
+        if (at >= 0)
+        {
+            typed = typed[..at].TrimEnd();
+        }
+
+        if (_picked.Count == 0)
+        {
+            _steerNote = typed;
+            return;
+        }
+
+        var parts = _picked
+            .OrderBy(p => Array.IndexOf(KitOrder, p.Key))
+            .Select(p => AssetPrompt(p.Value));
+
+        _steerNote = string.IsNullOrWhiteSpace(typed)
+            ? marker + string.Join(", ", parts) + "."
+            : typed + "\n" + marker + string.Join(", ", parts) + ".";
     }
 
     private async Task LoadBrandFacesAsync()
@@ -587,6 +681,20 @@
         {
             _brandAssets = [.. (await BrandsApi.ListAssetsAsync(brand.Id))
                 .Where(a => !string.IsNullOrWhiteSpace(a.Label ?? a.FileName))];
+
+            // Read SAS per asset so a background can be chosen by looking at it. Sequential
+            // and best-effort: a thumbnail that fails to mint leaves a labelled tile, which is
+            // still usable, rather than failing the whole panel.
+            foreach (var asset in _brandAssets.Where(a => !_kitPreviews.ContainsKey(a.AssetId)))
+            {
+                try
+                {
+                    _kitPreviews[asset.AssetId] = (await BrandsApi.MintReadSasAsync(asset.AssetId)).ReadUrl;
+                }
+                catch (ApiException)
+                {
+                }
+            }
         }
         catch (ApiException)
         {
@@ -614,16 +722,12 @@
             const long maxBytes = 20L * 1024 * 1024;
             var file = e.File;
             var asset = await BrandsApi.CreateLibraryAssetAsync(file.Name, file.ContentType, file.Size);
-            var sas = await BrandsApi.MintUploadSasAsync(asset.Id);
 
-            // A bare HttpClient on purpose: the SAS URL is pre-authorised storage, and sending
-            // our bearer token to it would leak the session to a third party.
-            using var http = new HttpClient();
-            using var content = new StreamContent(file.OpenReadStream(maxBytes));
-            content.Headers.TryAddWithoutValidation("Content-Type", file.ContentType);
-            using var request = new HttpRequestMessage(HttpMethod.Put, sas.UploadUrl) { Content = content };
-            request.Headers.TryAddWithoutValidation("x-ms-blob-type", "BlockBlob");
-            (await http.SendAsync(request)).EnsureSuccessStatusCode();
+            // Through the API, not straight to storage — see BrandsClient.UploadAssetContentAsync.
+            await using var stream = file.OpenReadStream(maxBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            await BrandsApi.UploadAssetContentAsync(asset.Id, buffer.ToArray(), file.ContentType);
 
             await BrandsApi.LinkAssetAsync(brand.Id, asset.Id, _uploadKind, _uploadLabel.Trim());
             _uploadLabel = string.Empty;
@@ -634,9 +738,14 @@
         {
             _uploadError = ex.Message;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            _uploadError = "The upload to storage failed. Is the storage account reachable?";
+            // NAME the failure. A bare "couldn't reach the API" is unactionable and sent us
+            // chasing storage CORS for three rounds while the real fault was elsewhere; the
+            // inner exception is the one thing that identifies it.
+            _uploadError = $"Upload failed talking to {ApiOrigin()} — "
+                + $"{ex.GetType().Name}: {ex.Message}"
+                + (ex.InnerException is { } inner ? $" ({inner.GetType().Name}: {inner.Message})" : "");
         }
         finally
         {

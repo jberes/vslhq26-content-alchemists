@@ -9,6 +9,7 @@
 @using Castmill.UI.State
 @using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient Brands
+@inject HttpClient Http
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -31,7 +32,67 @@
     }
     else
     {
+        @* Tabs, not one endless column: four unrelated jobs (identity, colours, assets,
+           templates) stacked into a single 72ch strip left half the window empty and put the
+           templates a full page-height below the fold. Same pattern as Settings. *@
+        <div class="cm-tabs" role="tablist" aria-label="Brand sections">
+            @foreach (var (id, label) in BrandTabs)
+            {
+                <button type="button" role="tab" class="cm-tabs__tab"
+                        aria-selected="@(_brandTab == id ? "true" : "false")"
+                        @onclick="() => SwitchTabAsync(id)">
+                    @label
+                </button>
+            }
+        </div>
+
         <div class="cm-brand">
+        @if (_brandTab == "identity")
+        {
+            @* Paste whatever the brand team actually gave you — a voice doc, a palette, an
+               email — and optionally a URL, and let the model fill the form from both. Pasted
+               material outranks the website server-side, because someone wrote it on purpose. *@
+            <section class="cm-brand__section">
+                <div class="cm-brand__context-head">
+                    <h2 class="cm-front__block-title">Add context</h2>
+                    <button type="button" class="cm-button cm-button--quiet"
+                            aria-expanded="@(_contextOpen ? "true" : "false")"
+                            @onclick="() => _contextOpen = !_contextOpen">
+                        @(_contextOpen ? "Hide" : "Paste brand material")
+                    </button>
+                </div>
+
+                @if (_contextOpen)
+                {
+                    <p class="cm-meta">
+                        Fills anything below that is still empty. Nothing you have already typed
+                        is overwritten.
+                    </p>
+                    <label class="cm-field">
+                        <span class="cm-field__label">Website (optional)</span>
+                        <input class="cm-input" type="url" placeholder="https://your-brand.com"
+                               @bind="_contextUrl" @bind:event="oninput" />
+                    </label>
+                    <label class="cm-field">
+                        <span class="cm-field__label">Anything the brand team gave you</span>
+                        <textarea class="cm-input cm-textarea cm-brand__context-body" rows="12"
+                                  placeholder="Brand voice guidelines, image direction, palette, words to avoid, positioning — paste it all."
+                                  @bind="_contextNotes" @bind:event="oninput"></textarea>
+                    </label>
+                    <div class="cm-form__actions">
+                        <button type="button" class="cm-button"
+                                disabled="@(_reading || (string.IsNullOrWhiteSpace(_contextUrl) && string.IsNullOrWhiteSpace(_contextNotes)))"
+                                @onclick="ApplyContextAsync">
+                            @(_reading ? "Reading…" : "Fill the brand from this")
+                        </button>
+                        @if (_contextError is { } contextError)
+                        {
+                            <span class="cm-form__error" role="alert">@contextError</span>
+                        }
+                    </div>
+                }
+            </section>
+
             <section class="cm-brand__section">
                 <h2 class="cm-front__block-title">Identity &amp; voice</h2>
                 <label class="cm-field">
@@ -59,6 +120,15 @@
                 </label>
             </section>
 
+            <div class="cm-form__actions">
+                <button type="button" class="cm-button" disabled="@_saving" @onclick="SaveAsync">
+                    @(_saving ? "Saving…" : "Save brand")
+                </button>
+                <span class="cm-meta">@_saveState</span>
+            </div>
+        }
+        @if (_brandTab == "style")
+        {
             <section class="cm-brand__section">
                 <h2 class="cm-front__block-title">Colour scheme</h2>
                 @foreach (var color in _colors)
@@ -66,8 +136,13 @@
                     <div class="cm-brand__color-row">
                         <input class="cm-input cm-brand__color-role" placeholder="role (primary, background…)"
                                maxlength="50" @bind="color.Role" />
-                        <input class="cm-brand__color-pick" type="color" @bind="color.Hex" />
-                        <span class="cm-mono cm-meta">@color.Hex</span>
+                        @* The OS colour panel itself cannot be styled — but the swatch that
+                           opens it can be a real target, and the hex is TYPED as often as it
+                           is picked, so it is an input rather than a caption. *@
+                        <input class="cm-brand__color-pick" type="color" @bind="color.Hex"
+                               aria-label="Pick @color.Role colour" />
+                        <input class="cm-input cm-mono cm-brand__color-hex" maxlength="7"
+                               aria-label="Hex for @color.Role" @bind="color.Hex" />
                         <button type="button" class="cm-tree__delete" aria-label="Remove colour"
                                 @onclick="() => _colors.Remove(color)">✕</button>
                     </div>
@@ -99,44 +174,64 @@
                 </button>
                 <span class="cm-meta">@_saveState</span>
             </div>
-
+        }
+        @if (_brandTab == "assets")
+        {
             <section class="cm-brand__section">
                 <h2 class="cm-front__block-title">Asset kit — logos, backgrounds, faces</h2>
                 <p class="cm-meta">
                     Labels double as prompt text: "the host, short dark hair" tells the image
                     model who may appear.
                 </p>
-                @if (_assets.Count > 0)
+                @* Square cards, label editable in place: the label IS the prompt text,
+                   and "20210920 Infragistics 005" steers an image model toward nothing. *@
+                @foreach (var group in GroupedAssets)
                 {
-                    <ul class="cm-brand__assets">
-                        @foreach (var asset in _assets)
-                        {
-                            <li class="cm-brand__asset">
-                                @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
-                                {
-                                    <img src="@url" alt="@(asset.Label ?? asset.FileName)" loading="lazy" />
-                                }
-                                <span class="cm-chip cm-mono">@asset.Kind</span>
-                                <span class="cm-brand__asset-label">@(asset.Label ?? asset.FileName)</span>
-                                <button type="button" class="cm-tree__delete" aria-label="Remove from kit"
-                                        @onclick="() => UnlinkAssetAsync(asset)">✕</button>
-                            </li>
-                        }
-                    </ul>
+                    <div class="cm-brand__asset-group">
+                        <span class="cm-kicker">@KindLabel(group.Key) · @group.Count()</span>
+                        <div class="cm-asset-grid">
+                            @foreach (var asset in group)
+                            {
+                                <figure class="cm-asset-card">
+                                    @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
+                                    {
+                                        <img src="@url" alt="@(asset.Label ?? asset.FileName)" loading="lazy" />
+                                    }
+                                    else
+                                    {
+                                        <span class="cm-asset-card__blank" aria-hidden="true"></span>
+                                    }
+                                    <button type="button" class="cm-tree__delete cm-asset-card__delete"
+                                            aria-label="Remove @(asset.Label ?? asset.FileName) from the kit"
+                                            @onclick="() => UnlinkAssetAsync(asset)">✕</button>
+                                    <input class="cm-input cm-asset-card__label"
+                                           value="@(asset.Label ?? asset.FileName)"
+                                           aria-label="Label — used as prompt text"
+                                           @onchange="e => RenameAssetHandlerAsync(asset, e)" />
+                                </figure>
+                            }
+                        </div>
+                    </div>
                 }
                 <div class="cm-brand__upload">
                     <select class="cm-input cm-brand__kind" @bind="_newAssetKind">
-                        <option value="logo">Logo</option>
-                        <option value="background">Background</option>
-                        <option value="face">Face</option>
-                        <option value="other">Other</option>
+                        @foreach (var kind in AssetKinds)
+                        {
+                            <option value="@kind">@KindLabel(kind)</option>
+                        }
                     </select>
                     <input class="cm-input" placeholder="Label (used in prompts)" maxlength="200"
                            @bind="_newAssetLabel" />
-                    <InputFile OnChange="UploadAsync" accept="image/*" disabled="@_uploading" />
+                    @* multiple: a brand has several faces and several backgrounds, and adding
+                       them one file at a time was the slowest part of setting a brand up. Each
+                       file keeps its own label so they stay tellable apart in the picker. *@
+                    <InputFile OnChange="UploadAsync" accept="image/*" multiple disabled="@_uploading" />
                     @if (_uploading)
                     {
-                        <span class="cm-meta"><span class="cm-ai-dot" aria-hidden="true"></span> uploading…</span>
+                        <span class="cm-meta">
+                            <span class="cm-ai-dot" aria-hidden="true"></span>
+                            uploading@(_uploadTotal > 1 ? $" {_uploadDone} of {_uploadTotal}" : "")…
+                        </span>
                     }
                 </div>
                 @if (_uploadError is { } uploadError)
@@ -145,86 +240,233 @@
                 }
             </section>
 
+        }
+        @if (_brandTab == "templates")
+        {
             <section class="cm-brand__section">
                 <h2 class="cm-front__block-title">Content templates</h2>
                 <p class="cm-meta">
-                    Per-kind steering — "our newsletter", "our launch blog". The default
-                    template for a kind is applied to every run for campaigns on this brand.
+                    One default template per content type, applied to every run for campaigns on
+                    this brand. Pick a type, edit — it saves when you click away.
                 </p>
-                @if (_templates.Count > 0)
-                {
-                    <ul class="cm-brand__templates">
-                        @foreach (var template in _templates)
-                        {
-                            <li class="cm-brand__template">
-                                <div class="cm-brand__template-head">
-                                    <span class="cm-chip cm-mono">@ArtifactDisplay.KindLabel(template.Kind)</span>
-                                    <strong>@template.Name</strong>
-                                    @if (template.IsDefault)
-                                    {
-                                        <span class="cm-badge cm-badge--done">DEFAULT</span>
-                                    }
-                                    else
-                                    {
-                                        <button type="button" class="cm-button cm-button--quiet"
-                                                @onclick="() => MakeDefaultAsync(template)">Make default</button>
-                                    }
-                                    <button type="button" class="cm-tree__delete" aria-label="Delete template"
-                                            @onclick="() => DeleteTemplateAsync(template)">✕</button>
-                                </div>
-                                <p class="cm-meta">@template.SteeringPrompt</p>
-                            </li>
-                        }
-                    </ul>
-                }
-                @* Nothing to copy from and a three-row box made this the least-used part of
-                   the brand. Every kind now ships a starter, and the editor is big enough to
-                   actually write in. *@
-                @if (MissingStarterKinds.Count > 0)
-                {
-                    <div class="cm-brand__starters">
-                        <span class="cm-meta">
-                            @MissingStarterKinds.Count of @TemplateKinds.Length content types have no
-                            template yet.
-                        </span>
-                        <button type="button" class="cm-button cm-button--quiet" disabled="@_seedingTemplates"
-                                @onclick="AddStarterTemplatesAsync">
-                            @(_seedingTemplates ? "Adding…" : $"Add {MissingStarterKinds.Count} starter templates")
-                        </button>
-                    </div>
-                }
 
-                <div class="cm-brand__new-template">
-                    <div class="cm-brand__template-row">
-                        <select class="cm-input cm-brand__kind" value="@_newTemplateKind"
-                                @onchange="OnTemplateKindChanged">
-                            @foreach (var kind in TemplateKinds)
-                            {
-                                <option value="@kind">@ArtifactDisplay.KindLabel(kind)</option>
-                            }
-                        </select>
-                        <input class="cm-input" placeholder="Template name" maxlength="200" @bind="_newTemplateName" />
-                        <button type="button" class="cm-button cm-button--quiet" @onclick="LoadStarter">
-                            Load starter
-                        </button>
-                    </div>
-                    <textarea class="cm-input cm-textarea cm-brand__template-body" rows="14" maxlength="4000"
-                              placeholder="Steering for this kind: structure, sections, calls to action, length…"
-                              @bind="_newTemplatePrompt"></textarea>
-                    <label class="cm-meta">
-                        <input type="checkbox" @bind="_newTemplateDefault" /> Use as the default for this kind
-                    </label>
-                    <button type="button" class="cm-button cm-button--quiet" @onclick="AddTemplateAsync"
-                            disabled="@(string.IsNullOrWhiteSpace(_newTemplateName) || string.IsNullOrWhiteSpace(_newTemplatePrompt))">
-                        + Add template
+                <div class="cm-brand__tpl-bar">
+                    <select class="cm-input cm-brand__kind" value="@_tplKind"
+                            @onchange="OnTemplateKindPicked">
+                        @foreach (var kind in TemplateKinds)
+                        {
+                            <option value="@kind">@ArtifactDisplay.KindLabel(kind)</option>
+                        }
+                    </select>
+                    <button type="button" class="cm-button cm-button--quiet" disabled="@_tplBusy"
+                            @onclick="ResetTemplateAsync">
+                        Reset to starter
                     </button>
+                    <span class="cm-meta" role="status">@_tplStatus</span>
                 </div>
+
+                @* The select changes WHICH template this editor shows, and the text always
+                   follows it — the previous design was an add-new form wearing an editor's
+                   clothes, where the select picked a kind for a future template and the box
+                   deliberately never changed under your typing. *@
+                <textarea class="cm-input cm-textarea cm-brand__template-body"
+                          aria-label="Template for @ArtifactDisplay.KindLabel(_tplKind)"
+                          maxlength="4000" disabled="@_tplBusy"
+                          @bind="_tplPrompt" @bind:event="oninput"
+                          @onblur="SaveTemplateAsync"></textarea>
+            </section>
+        }
+
+            @* Deleting lives on the page that shows what will be lost, behind the same strong
+               confirm every other destructive action uses — not only as a ✕ on an index card. *@
+            <section class="cm-brand__danger">
+                <div>
+                    <strong>Delete this brand</strong>
+                    <p class="cm-meta">
+                        The asset kit and every template go with it. Campaigns that use it keep
+                        working, brandless. This cannot be undone.
+                    </p>
+                </div>
+                <button type="button" class="cm-button cm-button--danger" @onclick="DeleteBrandAsync">
+                    Delete brand…
+                </button>
             </section>
         </div>
     }
 </div></div>
 
 @code {
+
+    /// <summary>
+    /// Where the client is actually pointed. The desktop shell and the web shell resolve the
+    /// API differently, so naming it turns "couldn't reach the API" into something a person
+    /// can check.
+    /// </summary>
+    private string ApiOrigin() => Http.BaseAddress?.ToString() ?? "the API";
+
+    // ---- Tabs ---------------------------------------------------------------------
+
+    private static readonly (string Id, string Label)[] BrandTabs =
+        [("identity", "Identity & voice"), ("style", "Colours & type"),
+         ("assets", "Asset kit"), ("templates", "Templates")];
+
+    private string _brandTab = "identity";
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _brandTab = tab;
+
+        // The template editor materialises its row lazily, on the tab that shows it — a page
+        // LOAD must not write to the database.
+        if (tab == "templates" && _tplTemplateId is null)
+        {
+            await SelectTemplateKindAsync(_tplKind);
+        }
+    }
+
+    // ---- Template editor ------------------------------------------------------------
+
+    private string _tplKind = "blog";
+    private string _tplPrompt = string.Empty;
+    private string _tplLoadedPrompt = string.Empty;
+    private Guid? _tplTemplateId;
+    private string _tplStatus = string.Empty;
+    private bool _tplBusy;
+
+    private Task OnTemplateKindPicked(ChangeEventArgs e) =>
+        SelectTemplateKindAsync(e.Value?.ToString() ?? "blog");
+
+    /// <summary>
+    /// Loads the kind's default template into the editor, creating it from the starter when
+    /// none exists — "always create the default" is the contract, so the editor never faces
+    /// an empty void. Unsaved edits to the previous kind are saved first: a select click blurs
+    /// the textarea, but relying on event order would be a race.
+    /// </summary>
+    private async Task SelectTemplateKindAsync(string kind)
+    {
+        await SaveTemplateAsync();
+
+        _tplKind = kind;
+        _tplBusy = true;
+        _tplStatus = string.Empty;
+        try
+        {
+            var existing = _templates.FirstOrDefault(t =>
+                t.IsDefault && string.Equals(t.Kind, kind, StringComparison.Ordinal));
+
+            if (existing is null)
+            {
+                var starter = Starters.GetValueOrDefault(kind, string.Empty);
+                var created = await Brands.CreateTemplateAsync(BrandId, new BrandTemplateRequest(
+                    kind, $"{ArtifactDisplay.KindLabel(kind)} default", starter, IsDefault: true));
+                _templates.Add(created);
+                existing = created;
+                _tplStatus = "Created from the starter — edit away.";
+            }
+
+            _tplTemplateId = existing.Id;
+            _tplPrompt = existing.SteeringPrompt;
+            _tplLoadedPrompt = existing.SteeringPrompt;
+        }
+        catch (ApiException ex)
+        {
+            _tplStatus = $"Couldn't load this template — {ex.Message}";
+            _tplTemplateId = null;
+        }
+        finally
+        {
+            _tplBusy = false;
+        }
+    }
+
+    /// <summary>Blur-save, the app's editing contract. A no-op when nothing changed, so
+    /// clicking around never burns writes.</summary>
+    private async Task SaveTemplateAsync()
+    {
+        if (_tplTemplateId is not { } id
+            || string.Equals(_tplPrompt, _tplLoadedPrompt, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(_tplPrompt))
+        {
+            return;
+        }
+
+        try
+        {
+            var updated = await Brands.UpdateTemplateAsync(BrandId, id, new BrandTemplateRequest(
+                _tplKind, $"{ArtifactDisplay.KindLabel(_tplKind)} default", _tplPrompt.Trim(), IsDefault: true));
+
+            _tplLoadedPrompt = _tplPrompt;
+            _templates.RemoveAll(t => t.Id == id);
+            _templates.Add(updated);
+            _tplStatus = $"Saved · {DateTime.Now:HH:mm:ss}";
+        }
+        catch (ApiException ex)
+        {
+            _tplStatus = $"Not saved — {ex.Message}";
+        }
+    }
+
+    private async Task ResetTemplateAsync()
+    {
+        _tplPrompt = Starters.GetValueOrDefault(_tplKind, string.Empty);
+        await SaveTemplateAsync();
+    }
+
+    // ---- Asset labels -----------------------------------------------------------------
+
+    /// <summary>
+    /// Rename in place, saved on blur. The label is the prompt text, so this is a content
+    /// decision, not housekeeping — and re-uploading a file to fix its name was absurd.
+    /// </summary>
+    private async Task RenameAssetHandlerAsync(BrandAssetResponse asset, ChangeEventArgs e)
+    {
+        var label = e.Value?.ToString()?.Trim();
+        if (string.Equals(label, asset.Label ?? asset.FileName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            await Brands.RenameAssetAsync(BrandId, asset.Id, label);
+            var index = _assets.FindIndex(a => a.Id == asset.Id);
+            if (index >= 0)
+            {
+                _assets[index] = asset with { Label = string.IsNullOrWhiteSpace(label) ? null : label };
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't rename that asset — {ex.Message}");
+        }
+    }
+
+    // ---- Danger zone --------------------------------------------------------------
+
+    private async Task DeleteBrandAsync()
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete {_name}?",
+            "This deletes the brand, its asset kit and every template. Campaigns that use it "
+            + "keep working, brandless. This cannot be undone.",
+            AcceptLabel: "Delete brand",
+            Destructive: true));
+        if (!accepted)
+        {
+            return;
+        }
+
+        try
+        {
+            await Brands.DeleteAsync(BrandId);
+            Notifier.ShowSuccess($"{_name} deleted.");
+            Navigation.NavigateTo("brands");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
     private sealed class ColorRow
     {
         public string Role { get; set; } = string.Empty;
@@ -259,7 +501,6 @@
 
     private string _newAssetKind = "background";
     private string _newAssetLabel = string.Empty;
-    private bool _seedingTemplates;
 
     /// <summary>
     /// A usable first draft per content type, so a new brand is steering generation within a
@@ -282,65 +523,6 @@
         ["seo-brief"] = "State the primary keyword and the search intent behind it.\nList the questions the page must answer, in order.\nName the competing pages and what each one misses.\nGive the meta title (<60 chars) and description (<155 chars).",
     };
 
-    /// <summary>Kinds with no template yet — what "add starters" would actually create.</summary>
-    private List<string> MissingStarterKinds =>
-        [.. TemplateKinds.Where(k =>
-            Starters.ContainsKey(k) && !_templates.Any(t => string.Equals(t.Kind, k, StringComparison.Ordinal)))];
-
-    private void OnTemplateKindChanged(ChangeEventArgs e)
-    {
-        _newTemplateKind = e.Value?.ToString() ?? "blog";
-
-        // Only when the author has not started writing — never clobber their text.
-        if (string.IsNullOrWhiteSpace(_newTemplatePrompt))
-        {
-            LoadStarter();
-        }
-    }
-
-    private void LoadStarter()
-    {
-        if (Starters.TryGetValue(_newTemplateKind, out var starter))
-        {
-            _newTemplatePrompt = starter;
-            if (string.IsNullOrWhiteSpace(_newTemplateName))
-            {
-                _newTemplateName = $"{ArtifactDisplay.KindLabel(_newTemplateKind)} starter";
-            }
-        }
-    }
-
-    /// <summary>
-    /// Creates a starter for every kind that has none. Sequential rather than parallel: these
-    /// are writes behind a per-user rate limiter, and a burst would trip it.
-    /// </summary>
-    private async Task AddStarterTemplatesAsync()
-    {
-        _seedingTemplates = true;
-        try
-        {
-            foreach (var kind in MissingStarterKinds)
-            {
-                await Brands.CreateTemplateAsync(BrandId, new BrandTemplateRequest(
-                    kind, $"{ArtifactDisplay.KindLabel(kind)} starter", Starters[kind], IsDefault: true));
-            }
-            await ReloadKitAsync();
-            Notifier.ShowSuccess("Starter templates added — edit them to match the brand.");
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-        finally
-        {
-            _seedingTemplates = false;
-        }
-    }
-
-    private string _newTemplateKind = "blog";
-    private string _newTemplateName = string.Empty;
-    private string _newTemplatePrompt = string.Empty;
-    private bool _newTemplateDefault = true;
 
     [Parameter] public Guid BrandId { get; set; }
 
@@ -456,48 +638,218 @@
 
     /// <summary>Upload rides the ordinary asset flow: metadata row → single-blob write SAS
     /// → direct PUT (no bearer header — the SAS is the credential) → link into the kit.</summary>
+    /// <summary>
+    /// Uploads every selected file into the kit. Sequential rather than parallel: each file is
+    /// a create + a SAS mint + a link, all behind the per-user write limiter, and firing ten
+    /// at once trips it.
+    ///
+    /// A partial failure keeps whatever already landed — re-picking the rest is far better
+    /// than losing nine good uploads to the tenth.
+    /// </summary>
     private async Task UploadAsync(InputFileChangeEventArgs e)
     {
         const long maxBytes = 20 * 1024 * 1024;
-        var file = e.File;
-        if (file.Size > maxBytes)
-        {
-            _uploadError = "Kit images are capped at 20 MB.";
-            return;
-        }
+        var files = e.GetMultipleFiles(20);
 
         _uploading = true;
         _uploadError = null;
+        _uploadTotal = files.Count;
+        _uploadDone = 0;
+        var added = 0;
+
         try
         {
-            var asset = await Brands.CreateLibraryAssetAsync(file.Name, file.ContentType, file.Size);
-            var sas = await Brands.MintUploadSasAsync(asset.Id);
+            foreach (var file in files)
+            {
+                if (file.Size > maxBytes)
+                {
+                    _uploadError = $"{file.Name} is over the 20 MB cap and was skipped.";
+                    continue;
+                }
 
-            using var http = new HttpClient();
-            using var content = new StreamContent(file.OpenReadStream(maxBytes));
-            content.Headers.TryAddWithoutValidation("Content-Type", file.ContentType);
-            using var request = new HttpRequestMessage(HttpMethod.Put, sas.UploadUrl) { Content = content };
-            request.Headers.TryAddWithoutValidation("x-ms-blob-type", "BlockBlob");
-            var response = await http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+                var asset = await Brands.CreateLibraryAssetAsync(file.Name, file.ContentType, file.Size);
 
-            var label = string.IsNullOrWhiteSpace(_newAssetLabel) ? null : _newAssetLabel.Trim();
-            await Brands.LinkAssetAsync(BrandId, asset.Id, _newAssetKind, label);
+                // Through the API, not straight to storage: the direct SAS PUT is cross-origin
+                // and so depends on the storage account's CORS rules, which differ between the
+                // web shell and the desktop WebView.
+                await Brands.UploadAssetContentAsync(
+                    asset.Id, await ReadAllAsync(file, maxBytes), file.ContentType);
+
+                await Brands.LinkAssetAsync(BrandId, asset.Id, _newAssetKind, LabelFor(file.Name, files.Count));
+                added++;
+                _uploadDone = added;
+                StateHasChanged();
+            }
+
             _newAssetLabel = string.Empty;
             await ReloadKitAsync();
-            Notifier.ShowSuccess($"Added {file.Name} to the kit.");
+            if (added > 0)
+            {
+                Notifier.ShowSuccess($"Added {added} {KindLabel(_newAssetKind).ToLowerInvariant()}"
+                    + $"{(added == 1 ? "" : "s")} to the kit.");
+            }
         }
         catch (ApiException ex)
         {
             _uploadError = ex.Message;
+            await ReloadKitAsync();
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            _uploadError = "The upload to storage failed. Is the storage account reachable?";
+            // NAME the failure. A bare "couldn't reach the API" is unactionable and sent us
+            // chasing storage CORS for three rounds while the real fault was elsewhere; the
+            // inner exception is the one thing that identifies it.
+            _uploadError = $"Upload failed talking to {ApiOrigin()} — "
+                + $"{ex.GetType().Name}: {ex.Message}"
+                + (ex.InnerException is { } inner ? $" ({inner.GetType().Name}: {inner.Message})" : "");
         }
         finally
         {
             _uploading = false;
+            _uploadTotal = 0;
+        }
+    }
+
+    /// <summary>
+    /// Reads an uploaded file fully into memory. The WebView hands these over JS interop as a
+    /// one-shot, non-seekable stream, and both the HTTP layer's refresh-replay and any retry
+    /// need to read the body more than once.
+    /// </summary>
+    private static async Task<byte[]> ReadAllAsync(IBrowserFile file, long maxBytes)
+    {
+        await using var stream = file.OpenReadStream(maxBytes);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        return buffer.ToArray();
+    }
+
+    private int _uploadTotal;
+    private int _uploadDone;
+
+    private static readonly string[] AssetKinds = ["face", "background", "accent", "logo", "other"];
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "face" => "Face",
+        "background" => "Background",
+        "accent" => "Accent",
+        "logo" => "Logo",
+        _ => "Other",
+    };
+
+    /// <summary>
+    /// One typed label cannot describe five files, and every asset needs its own — the label
+    /// IS the prompt text, and it is how they are told apart in the picker. With several files
+    /// the filename stem wins, because it is at least distinct.
+    /// </summary>
+    private string? LabelFor(string fileName, int fileCount)
+    {
+        var typed = _newAssetLabel.Trim();
+        if (fileCount == 1)
+        {
+            return string.IsNullOrWhiteSpace(typed) ? Path.GetFileNameWithoutExtension(fileName) : typed;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(fileName).Replace('-', ' ').Replace('_', ' ').Trim();
+        return string.IsNullOrWhiteSpace(typed) ? stem : $"{typed} — {stem}";
+    }
+
+    private IEnumerable<IGrouping<string, BrandAssetResponse>> GroupedAssets =>
+        _assets
+            .GroupBy(a => a.Kind.ToLowerInvariant())
+            .OrderBy(g => Array.IndexOf(AssetKinds, g.Key) is var i && i >= 0 ? i : AssetKinds.Length);
+
+    private bool _contextOpen;
+    private string _contextUrl = string.Empty;
+    private string _contextNotes = string.Empty;
+    private bool _reading;
+    private string? _contextError;
+
+    /// <summary>
+    /// Fills the form from pasted material and/or a URL. Only ever fills fields that are
+    /// EMPTY — the user's own words survive, which is what makes this safe to press twice.
+    /// Colours are appended rather than replaced for the same reason.
+    /// </summary>
+    private async Task ApplyContextAsync()
+    {
+        _reading = true;
+        _contextError = null;
+        try
+        {
+            var draft = await Brands.LookupAsync(
+                string.IsNullOrWhiteSpace(_contextUrl) ? null : _contextUrl.Trim(),
+                string.IsNullOrWhiteSpace(_contextNotes) ? null : _contextNotes);
+
+            var filled = new List<string>();
+            Fill(ref _name, draft.Name, "name", filled);
+
+            if (draft.StyleCard is { } card)
+            {
+                Fill(ref _tagline, card.Tagline, "tagline", filled);
+                Fill(ref _voice, card.Voice, "voice", filled);
+                Fill(ref _audience, card.Audience, "audience", filled);
+                Fill(ref _imageStyle, card.ImageStyle, "image style", filled);
+                Fill(ref _headingFont, card.HeadingFont, "heading font", filled);
+                Fill(ref _bodyFont, card.BodyFont, "body font", filled);
+
+                if (card.Colors is { Count: > 0 } colors)
+                {
+                    var added = 0;
+                    foreach (var colour in colors)
+                    {
+                        // Matched on hex: the model's role names differ run to run, and a
+                        // duplicate swatch is more confusing than a missing one.
+                        if (!_colors.Any(existing =>
+                                string.Equals(existing.Hex, colour.Hex, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _colors.Add(new ColorRow { Role = colour.Role, Hex = colour.Hex });
+                            added++;
+                        }
+                    }
+                    if (added > 0)
+                    {
+                        filled.Add($"{added} colour{(added == 1 ? "" : "s")}");
+                    }
+                }
+
+                if (card.BannedPhrases is { Count: > 0 } banned && string.IsNullOrWhiteSpace(_bannedText))
+                {
+                    _bannedText = string.Join("\n", banned);
+                    filled.Add("banned phrases");
+                }
+            }
+
+            foreach (var note in draft.Notes)
+            {
+                Notifier.ShowWarning(note);
+            }
+
+            Notifier.ShowSuccess(filled.Count == 0
+                ? "Nothing new to add — every field already had a value."
+                : $"Filled {string.Join(", ", filled)}. Review, then Save.");
+
+            _contextOpen = false;
+        }
+        catch (ApiException ex)
+        {
+            _contextError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _contextError = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _reading = false;
+        }
+
+        static void Fill(ref string field, string? value, string label, List<string> filled)
+        {
+            if (string.IsNullOrWhiteSpace(field) && !string.IsNullOrWhiteSpace(value))
+            {
+                field = value.Trim();
+                filled.Add(label);
+            }
         }
     }
 
@@ -507,60 +859,6 @@
         {
             await Brands.UnlinkAssetAsync(BrandId, asset.Id);
             _assets.RemoveAll(a => a.Id == asset.Id);
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-    }
-
-    private async Task AddTemplateAsync()
-    {
-        try
-        {
-            await Brands.CreateTemplateAsync(BrandId, new BrandTemplateRequest(
-                _newTemplateKind, _newTemplateName.Trim(), _newTemplatePrompt.Trim(), _newTemplateDefault));
-            _newTemplateName = string.Empty;
-            _newTemplatePrompt = string.Empty;
-            await ReloadKitAsync();
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-    }
-
-    private async Task MakeDefaultAsync(BrandTemplateResponse template)
-    {
-        try
-        {
-            await Brands.UpdateTemplateAsync(BrandId, template.Id, new BrandTemplateRequest(
-                template.Kind, template.Name, template.SteeringPrompt, IsDefault: true));
-            await ReloadKitAsync();
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-    }
-
-    private async Task DeleteTemplateAsync(BrandTemplateResponse template)
-    {
-        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
-            $"Delete template \"{template.Name}\"?",
-            "Runs for this brand stop applying it immediately.",
-            AcceptLabel: "Delete",
-            Destructive: true));
-
-        if (!accepted)
-        {
-            return;
-        }
-
-        try
-        {
-            await Brands.DeleteTemplateAsync(BrandId, template.Id);
-            _templates.RemoveAll(t => t.Id == template.Id);
         }
         catch (ApiException ex)
         {

@@ -19,6 +19,7 @@
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject Microsoft.JSInterop.IJSRuntime Js
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Mill Floor</PageTitle>
 
@@ -28,6 +29,17 @@
             <header class="cm-source__head">
                 <span class="cm-kicker">Source master</span>
                 <span class="cm-meta">@(Campaign.Transcript?.Source ?? "no source")</span>
+                @* The transcript is the campaign's raw material; being able to READ it as
+                   text and paste it elsewhere should never require exporting an artifact. *@
+                @if (Campaign.Transcript is { Segments.Count: > 0 })
+                {
+                    <span class="cm-source__tools">
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="() => _transcriptOpen = true">View</button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="CopyTranscriptAsync">Copy</button>
+                    </span>
+                }
             </header>
 
             @if (Campaign.Transcript is { Segments.Count: > 0 } transcript)
@@ -76,36 +88,84 @@
             {
                 @* The press panel: the run narrated in full, not a footer whisper. Every
                    row is a requested kind; state comes from real completions (ADR-F13). *@
-                <div class="cm-press">
-                    <span class="cm-kicker">Press run</span>
-                    <h2 class="cm-press__line">@PressLine</h2>
+                <div class="cm-press @(PressRun.IsRunning ? null : "cm-press--finished")">
+                    <div class="cm-press__head">
+                        <div>
+                            <span class="cm-kicker">Press run</span>
+                            <h2 class="cm-press__line">@PressLine</h2>
+                        </div>
+                        @if (!PressRun.IsRunning)
+                        {
+                            <button type="button" class="cm-button" @onclick="DismissRun">
+                                Done — back to the board
+                            </button>
+                        }
+                    </div>
+
+                    @* A determinate bar (ADR-F13): the count is known, so this is real
+                       progress, not a spinner standing in for the unknown. *@
+                    <div class="cm-press__bar" role="progressbar"
+                         aria-valuenow="@DoneCount" aria-valuemin="0" aria-valuemax="@PressRun.Kinds.Count"
+                         aria-label="Artifacts printed">
+                        <span class="cm-press__bar-fill" style="inline-size: @(PercentDone)%"></span>
+                    </div>
+
                     @if (PressRun.Error is { } runError)
                     {
                         <p class="cm-form__error" role="alert">@runError</p>
                     }
-                    <ul class="cm-press__items">
-                        @foreach (var kind in PressRun.Kinds)
-                        {
-                            var item = PressRun.Progress?.Items.FirstOrDefault(i => i.Kind == kind);
-                            <li class="cm-press__item @(item is null ? "" : item.Success ? "cm-press__item--done" : "cm-press__item--failed")">
-                                <span class="cm-press__mark cm-mono">
-                                    @(item is null ? "…" : item.Success ? "✓" : "✕")
-                                </span>
-                                <span class="cm-press__kind">@ArtifactDisplay.KindLabel(kind)</span>
-                                <span class="cm-meta">
-                                    @(item is null
-                                        ? "queued"
-                                        : item.Success
-                                            ? $"printed · {item.DurationMs / 1000.0:0.0}s"
-                                            : item.Error)
-                                </span>
-                                @if (item?.ValidationWarnings is { Count: > 0 } warnings)
-                                {
-                                    <span class="cm-meta cm-press__audit">audit: @string.Join(" · ", warnings.Take(2))</span>
-                                }
-                            </li>
-                        }
-                    </ul>
+
+                    @* On completion the list rolls up to its summary. grid-template-rows
+                       1fr -> 0fr is the one collapse that animates from auto height. *@
+                    <div class="cm-press__roll @(_rolledUp ? "cm-press__roll--up" : null)">
+                        <ul class="cm-press__items">
+                            @foreach (var kind in PressRun.Kinds)
+                            {
+                                var item = PressRun.Progress?.Items.FirstOrDefault(i => i.Kind == kind);
+                                var printing = item is null && kind == CurrentKind;
+                                <li class="cm-press__item @(item is null ? (printing ? "cm-press__item--printing" : null) : item.Success ? "cm-press__item--done" : "cm-press__item--failed")">
+                                    <span class="cm-press__mark" aria-hidden="true">
+                                        @if (item is null)
+                                        {
+                                            @(printing ? "" : "·")
+                                        }
+                                        else
+                                        {
+                                            @(item.Success ? "✓" : "✕")
+                                        }
+                                    </span>
+                                    <span class="cm-press__kind">@ArtifactDisplay.KindLabel(kind)</span>
+                                    <span class="cm-meta">
+                                        @if (item is not null)
+                                        {
+                                            @(item.Success ? $"printed · {item.DurationMs / 1000.0:0.0}s" : item.Error)
+                                        }
+                                        else if (printing)
+                                        {
+                                            @* Elapsed seconds tick every second, so the row is
+                                               visibly alive even on a two-minute generator. *@
+                                            <text>printing… @CurrentElapsed</text>
+                                        }
+                                        else
+                                        {
+                                            <text>queued</text>
+                                        }
+                                    </span>
+                                    @if (printing)
+                                    {
+                                        <span class="cm-press__track" aria-hidden="true">
+                                            <span class="cm-press__track-run"></span>
+                                        </span>
+                                    }
+                                    @if (item?.ValidationWarnings is { Count: > 0 } warnings)
+                                    {
+                                        <span class="cm-meta cm-press__audit">audit: @string.Join(" · ", warnings.Take(2))</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </div>
+
                     @if (PressRun.IsRunning)
                     {
                         <p class="cm-meta">
@@ -115,9 +175,14 @@
                     }
                     else
                     {
-                        <button type="button" class="cm-button cm-button--quiet" @onclick="DismissRun">
-                            Done — back to the board
-                        </button>
+                        <p class="cm-press__summary">
+                            <span class="cm-press__mark cm-press__mark--done" aria-hidden="true">✓</span>
+                            @DoneCount of @PressRun.Kinds.Count printed@(FailedCount > 0 ? $" · {FailedCount} failed" : "")
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="() => _rolledUp = !_rolledUp">
+                                @(_rolledUp ? "Show each item" : "Hide the list")
+                            </button>
+                        </p>
                     }
                 </div>
             }
@@ -286,6 +351,33 @@
             }
         </section>
 
+        @if (_transcriptOpen && Campaign.Transcript is { } fullTranscript)
+        {
+            <div class="cm-modal" role="presentation" @onclick="() => _transcriptOpen = false">
+                <div class="cm-modal__panel cm-transcript-modal" role="dialog" aria-modal="true"
+                     aria-label="Transcript" @onclick:stopPropagation>
+                    <header class="cm-transcript-modal__head">
+                        <h2>Transcript</h2>
+                        <span class="cm-meta">@fullTranscript.Segments.Count segments · @fullTranscript.Source</span>
+                    </header>
+                    @* Flowing text, not the rail's timestamped slivers: this view exists for
+                       reading and for select-all, and timestamps in the middle of sentences
+                       defeat both. *@
+                    <div class="cm-transcript-modal__body">
+                        @foreach (var chunk in TranscriptParagraphs())
+                        {
+                            <p>@chunk</p>
+                        }
+                    </div>
+                    <footer class="cm-form__actions">
+                        <button type="button" class="cm-button" @onclick="CopyTranscriptAsync">Copy all</button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="() => _transcriptOpen = false">Close</button>
+                    </footer>
+                </div>
+            </div>
+        }
+
         <ProvenanceOverlay Container="_canvas"
                            ActiveArtifactId="ActiveId"
                            Citations="ActiveCitations"
@@ -433,8 +525,11 @@
         }
     }
 
+    /// <summary>Cited ids, resolved against the transcript — see ArtifactDisplay.ResolveCitations.</summary>
     private IReadOnlyList<string> CitationsOf(Guid artifactId) =>
-        Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Citations ?? [];
+        ArtifactDisplay.ResolveCitations(
+            Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Citations,
+            Campaign.Transcript?.Segments);
 
     private string ArtifactTitle(Guid artifactId) =>
         Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Title ?? "…";
@@ -450,9 +545,18 @@
     /// On-demand menu entries; "social" fans out to the six real platform kinds. Image
     /// prompts are deliberately absent — the Image Studio owns seeding its own prompts.
     /// </summary>
+    /// <summary>
+    /// Derived from the kind registry, NOT hand-listed. A separate list is how "youtube"
+    /// shipped as a generator and a lane and still could not be requested from the board —
+    /// the same drift ArtifactDisplay's own comment warns about. "social" stays as the one
+    /// synthetic entry because it fans out to the six platform kinds.
+    /// </summary>
     private static readonly string[] AllKinds =
-        ["blog", "social", "email-sequence", "newsletter", "landing-page", "show-notes",
-         "clip-suggestions", "seo-brief"];
+        [.. new[] { "blog", "social" }
+            .Concat(ArtifactDisplay.Known
+                .Where(k => k.OnBoard && k.Lane != "Social" && k.Kind != "blog"
+                            && k.Kind != "seo-keyword-plan")
+                .Select(k => k.Kind))];
 
     private static readonly int[] CountChoices = [1, 2, 3, 5];
 
@@ -599,12 +703,122 @@
         return Task.CompletedTask;
     }, Notifier, StateHasChanged, "Refreshing the floor"));
 
-    private void OnPressRunChanged() => InvokeAsync(StateHasChanged);
     // The board reload on completion lives in PressRunService now, so the floor refreshes
     // even when this view is not mounted; here only the render needs to happen.
+    private void OnPressRunChanged() => InvokeAsync(() => StoreEvents.GuardedAsync(() =>
+    {
+        var current = CurrentKind;
+        if (current != _timedKind)
+        {
+            // A new generator started: restart the elapsed clock for the row.
+            _timedKind = current;
+            _kindStartedAt = DateTimeOffset.UtcNow;
+        }
+
+        if (!PressRun.IsRunning && PressRun.Progress is not null)
+        {
+            StopTicking();
+            // Rolled up a beat after the last row turns green, so the completion is SEEN
+            // before the list collapses. Rolling up instantly just looks like the list
+            // vanished.
+            _ = RollUpSoonAsync();
+        }
+        else if (PressRun.IsRunning)
+        {
+            StartTicking();
+        }
+
+        return Task.CompletedTask;
+    }, Notifier, StateHasChanged, "Updating the press run"));
+
+    /// <summary>
+    /// The generators run in order, so the one printing is the first requested kind with no
+    /// result yet. There is no server field for "in flight" — this is derived, which is why it
+    /// stays correct even if a generator fails and the run moves on.
+    /// </summary>
+    private string? CurrentKind => !PressRun.IsRunning
+        ? null
+        : PressRun.Kinds.FirstOrDefault(k =>
+            PressRun.Progress?.Items.All(i => i.Kind != k) ?? true);
+
+    private int DoneCount => PressRun.Progress?.Items.Count(i => i.Success) ?? 0;
+
+    private int FailedCount => PressRun.Progress?.Items.Count(i => !i.Success) ?? 0;
+
+    private int PercentDone => PressRun.Kinds.Count == 0
+        ? 0
+        : (int)Math.Round(100.0 * (PressRun.Progress?.Items.Count ?? 0) / PressRun.Kinds.Count);
+
+    private string CurrentElapsed
+    {
+        get
+        {
+            var seconds = (int)(DateTimeOffset.UtcNow - _kindStartedAt).TotalSeconds;
+            return seconds < 60 ? $"{Math.Max(seconds, 0)}s" : $"{seconds / 60}m {seconds % 60:00}s";
+        }
+    }
+
+    private bool _rolledUp;
+    private string? _timedKind;
+    private DateTimeOffset _kindStartedAt = DateTimeOffset.MinValue;
+    private System.Threading.Timer? _tick;
+
+    /// <summary>
+    /// The store only raises Changed on a poll, and a long generator can sit on one row for
+    /// two minutes. Without a local tick the elapsed number would freeze and the row would
+    /// look stuck — which is exactly the "is anything happening?" question this answers.
+    /// </summary>
+    private void StartTicking() =>
+        _tick ??= new System.Threading.Timer(
+            _ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+
+    private void StopTicking()
+    {
+        _tick?.Dispose();
+        _tick = null;
+    }
+
+    private async Task RollUpSoonAsync()
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+        _rolledUp = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private bool _transcriptOpen;
+
+    /// <summary>
+    /// Segments regrouped into readable paragraphs (~5 segments each): the rail's
+    /// one-row-per-segment layout is right for tracing citations and wrong for reading.
+    /// </summary>
+    private IEnumerable<string> TranscriptParagraphs()
+    {
+        var segments = Campaign.Transcript?.Segments ?? [];
+        for (var i = 0; i < segments.Count; i += 5)
+        {
+            yield return string.Join(" ", segments.Skip(i).Take(5).Select(s => s.Text.Trim()));
+        }
+    }
+
+    private async Task CopyTranscriptAsync()
+    {
+        var text = string.Join("\n\n", TranscriptParagraphs());
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Notifier.ShowSuccess($"Transcript copied — {text.Length:N0} characters.");
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            // Clipboard access can be denied (permissions, non-secure context). The modal
+            // still allows manual select-all, so say that instead of failing silently.
+            Notifier.ShowError("The clipboard was blocked here — open View and copy manually.");
+        }
+    }
 
     public void Dispose()
     {
+        StopTicking();
         Campaign.Changed -= OnCampaignChanged;
         PressRun.Changed -= OnPressRunChanged;
     }

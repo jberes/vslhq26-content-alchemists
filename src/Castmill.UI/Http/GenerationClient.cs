@@ -41,6 +41,18 @@ public sealed record RunFinished(Guid RunId, int Succeeded, int Failed, IReadOnl
 /// <summary>Typed client for <c>/api/v1/ai/*</c> — ingest, generation and run progress.</summary>
 public sealed class GenerationClient(ApiClient api)
 {
+    /// <summary>Reads the campaign brief off the transcript so step 3 is a review, not a form.</summary>
+    public Task<BriefSuggestionResponse> SuggestBriefAsync(
+        Guid campaignId, Guid transcriptArtifactId, string? title, CancellationToken ct = default)
+    {
+        var url = $"api/v1/ai/campaigns/{campaignId}/brief?transcriptArtifactId={transcriptArtifactId}";
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            url += $"&title={Uri.EscapeDataString(title)}";
+        }
+        return api.PostAsync<object, BriefSuggestionResponse>(url, new { }, anonymous: false, ct);
+    }
+
     public Task<IngestResult> IngestTranscriptAsync(
         Guid campaignId, string text, string source = "pasted",
         IReadOnlyList<TranscriptSegment>? segments = null, CancellationToken ct = default) =>

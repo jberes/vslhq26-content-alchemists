@@ -166,7 +166,9 @@ public static class ImageSlotEndpoints
 
         var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
         var brand = await brands.ResolveAsync(campaign, ct);
-        var effectivePrompt = ComposeEffectivePrompt(slot.Prompt!, brand.ImageStyleBlock, steeringNote: null);
+        var effectivePrompt = ComposeEffectivePrompt(
+            slot.Prompt!, brand.ImageStyleBlock, steeringNote: null,
+            CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
@@ -402,14 +404,26 @@ public static class ImageSlotEndpoints
         - Keep text on an area of flat, contrasting tone so it stays legible.
         """;
 
-    /// <summary>slot prompt/base prompt + brand image style + the user's adjustment.</summary>
-    internal static string ComposeEffectivePrompt(string basePrompt, string? imageStyleBlock, string? steeringNote)
+    /// <summary>slot prompt/base prompt + brand image style + campaign keyword + the user's adjustment.</summary>
+    internal static string ComposeEffectivePrompt(
+        string basePrompt, string? imageStyleBlock, string? steeringNote, string? primaryKeyword = null)
     {
         var prompt = basePrompt.Trim();
         if (!string.IsNullOrWhiteSpace(imageStyleBlock))
         {
             prompt = $"{prompt}\n{imageStyleBlock}";
         }
+
+        // The campaign's primary keyword steers any TEXT the image carries (thumbnail
+        // headlines especially): a thumbnail that says what people search for is the SEO
+        // surface YouTube actually shows. Phrasing only — the model must not paint keyword
+        // lists into scenery.
+        if (!string.IsNullOrWhiteSpace(primaryKeyword))
+        {
+            prompt = $"{prompt}\nIf the image contains any text, prefer wording that uses "
+                + $"\"{primaryKeyword.Trim()}\" naturally. Never render a list of keywords.";
+        }
+
         if (!string.IsNullOrWhiteSpace(steeringNote))
         {
             prompt = $"{prompt}\nAdjustment: {steeringNote.Trim()}";

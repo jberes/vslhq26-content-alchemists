@@ -1,3 +1,4 @@
+using Castmill.Core.Resources;
 using System.Text.Json.Serialization;
 
 namespace Castmill.UI.Http;
@@ -30,6 +31,24 @@ public sealed class SeoClient(ApiClient api)
     /// Runs the two-leg plan: AI SEO brief from the transcript, then DataForSEO metrics and
     /// suggestions, merged and ranked by opportunity. Live provider — takes ~10-20 s.
     /// </summary>
+    /// <summary>
+    /// Keyword + question research BEFORE generation. Persists nothing — the result is a
+    /// proposal the user edits on the Targets step.
+    /// </summary>
+    public Task<SeoResearchResponse> ResearchAsync(
+        Guid campaignId, Guid transcriptArtifactId, CancellationToken ct = default) =>
+        api.PostAsync<SeoResearchRequest, SeoResearchResponse>(
+            "api/v1/seo/research", new SeoResearchRequest(campaignId, transcriptArtifactId),
+            anonymous: false, ct);
+
+    public Task<SeoTargetsResponse> GetTargetsAsync(Guid campaignId, CancellationToken ct = default) =>
+        api.GetAsync<SeoTargetsResponse>($"api/v1/campaigns/{campaignId}/seo-targets", ct);
+
+    public Task<SeoTargetsResponse> SaveTargetsAsync(
+        Guid campaignId, SeoTargetsRequest request, CancellationToken ct = default) =>
+        api.PutAsync<SeoTargetsRequest, SeoTargetsResponse>(
+            $"api/v1/campaigns/{campaignId}/seo-targets", request, etag: null, ct);
+
     public Task<object> CreateKeywordPlanAsync(
         Guid campaignId, Guid transcriptArtifactId, string? focus, CancellationToken ct = default) =>
         api.PostAsync<object, object>(

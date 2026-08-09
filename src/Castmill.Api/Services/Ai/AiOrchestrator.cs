@@ -39,6 +39,7 @@ public sealed class AiOrchestrator(
     IImagePlanService imagePlan,
     IBrandContextService brands,
     IKnowledgeBaseClient knowledge,
+    IWorkspaceLinks workspaceLinks,
     CastmillDbContext db,
     ITenantProvider tenant,
     IPromptLog promptLog,
@@ -69,6 +70,19 @@ public sealed class AiOrchestrator(
         var brand = await brands.ResolveAsync(campaign, ct);
 
         var results = new List<GenerationResult>();
+
+        // The YouTube package prints FIRST — before the blog pipeline. It is the app's
+        // founding deliverable, and parking it behind a minute of outline→draft→audit made
+        // the most important artifact the one you waited longest for. Everything else keeps
+        // registry order, and image-prompts still lands after the blog it seeds against.
+        foreach (var spec in wanted.Where(w => w.Kind == "youtube"))
+        {
+            results.Add(await RunGeneratorCoreAsync(userId, campaign, transcript, brief, spec, brand, ct));
+            await RecordProgressAsync(runId, results, ct);
+        }
+
+        wanted = [.. wanted.Where(w => w.Kind != "youtube")];
+
         // The blog this run's image prompts belong to. A run that adds a second blog seeds
         // that blog's own slots rather than finding the first blog's already filled and
         // silently seeding nothing.
@@ -193,6 +207,12 @@ public sealed class AiOrchestrator(
             // Markers like [s03][s08] are for grounding, not for the copy someone
             // publishes; provenance stays in the citations array.
             var json = CitationMarkers.Strip(ParseModelJson(response));
+
+            // Real URLs are substituted here, never written by the model. The prompt asks for
+            // a {{LINKS}} placeholder precisely so a hallucinated link is impossible by
+            // construction rather than by instruction.
+            json = await SubstituteLinksAsync(userId, json, ct);
+
             // Deterministic pass before validation — clip in/out points are computed from
             // the transcript rather than taken from numbers the model wrote.
             if (spec.Transform is { } transform)
@@ -488,7 +508,8 @@ public sealed class AiOrchestrator(
     /// <summary>
     /// The ONE place prompt text is assembled. Order matters and is deliberate: contract →
     /// generator instructions → per-brand template steering (rides WITH the instructions) →
-    /// campaign brief → brand style block → campaign context links → source transcript.
+    /// campaign brief → brand style block → campaign context links → SEO/AEO targets →
+    /// source transcript.
     /// Labeled sections let the model distinguish contract vs steering vs facts.
     /// </summary>
     private static string BuildPrompt(
@@ -504,18 +525,45 @@ public sealed class AiOrchestrator(
             ? string.Empty
             : $"{brand!.CampaignContextBlock}\n";
 
+        // LAST of the steering blocks, immediately before the transcript: these are the
+        // targets the piece is being written to hit, and the nearest instruction to the
+        // source is the one a model weights most heavily.
+        var seoBlock = string.IsNullOrWhiteSpace(brand?.SeoTargetBlock)
+            ? string.Empty
+            : $"{brand!.SeoTargetBlock}\n";
+
         return $"""
         {Generators.CommonContract}
 
         {instructions}
         {steering}
         {(string.IsNullOrWhiteSpace(brief) ? "" : $"Campaign brief: {brief}\n")}
-        {styleBlock}{contextBlock}
+        {styleBlock}{contextBlock}{seoBlock}
         Source transcript. Ground every claim in it and list the ids you used in the
         "citations" array — but NEVER write those ids into the prose itself: the body is
         published copy, and "[s03][s08]" in the middle of a sentence is a defect.
         {TranscriptService.ToPromptText(transcript)}
         """;
+    }
+
+    /// <summary>
+    /// Replaces the <c>{{LINKS}}</c> placeholder with the workspace's configured URLs. When no
+    /// links are set the placeholder is removed rather than left in the copy — a visible
+    /// "{{LINKS}}" in a published YouTube description would be worse than no link block.
+    /// </summary>
+    private async Task<JsonElement> SubstituteLinksAsync(Guid userId, JsonElement json, CancellationToken ct)
+    {
+        var raw = json.GetRawText();
+        if (!raw.Contains("{{LINKS}}", StringComparison.Ordinal))
+        {
+            return json;
+        }
+
+        var block = await workspaceLinks.RenderBlockAsync(userId, ct);
+
+        // Substituted on the ENCODED text so newlines in the block stay valid JSON.
+        var encoded = JsonEncodedText.Encode(block).ToString();
+        return ParseModelJson(raw.Replace("{{LINKS}}", encoded, StringComparison.Ordinal));
     }
 
     private async Task<string> CallModelAsync(Guid userId, string modelAlias, string kind, string prompt, CancellationToken ct)

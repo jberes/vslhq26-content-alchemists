@@ -131,6 +131,43 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
         Assert.Null(reloaded!.BrandId);
     }
 
+    /// <summary>
+    /// The label is the prompt text, so renaming is a content decision — and it must not
+    /// require re-uploading the file it describes. Blank clears back to the filename.
+    /// </summary>
+    [Fact]
+    public async Task An_asset_label_renames_in_place_and_blank_clears_it()
+    {
+        var client = await AuthedClientAsync();
+        var brand = await CreateBrandAsync(client);
+
+        var asset = await (await client.PostAsJsonAsync("/api/v1/assets",
+            new AssetCreateRequest("face.png", "image/png", 100))).Content
+            .ReadFromJsonAsync<AssetResponse>();
+        var link = await (await client.PostAsJsonAsync($"/api/v1/brands/{brand.Id}/assets",
+            new BrandAssetLinkRequest(asset!.Id, "face", "old label"))).Content
+            .ReadFromJsonAsync<BrandAssetResponse>();
+
+        var rename = await client.PatchAsJsonAsync(
+            $"/api/v1/brands/{brand.Id}/assets/{link!.Id}",
+            new BrandAssetLabelRequest("the host, short dark hair"));
+        Assert.Equal(HttpStatusCode.NoContent, rename.StatusCode);
+
+        var kit = await client.GetFromJsonAsync<List<BrandAssetResponse>>($"/api/v1/brands/{brand.Id}/assets");
+        Assert.Equal("the host, short dark hair", Assert.Single(kit!).Label);
+
+        (await client.PatchAsJsonAsync($"/api/v1/brands/{brand.Id}/assets/{link.Id}",
+            new BrandAssetLabelRequest("   "))).EnsureSuccessStatusCode();
+        kit = await client.GetFromJsonAsync<List<BrandAssetResponse>>($"/api/v1/brands/{brand.Id}/assets");
+        Assert.Null(Assert.Single(kit!).Label);
+
+        // Another brand's link id is a plain 404 — the tenant filter plus the brand check.
+        var foreign = await client.PatchAsJsonAsync(
+            $"/api/v1/brands/{brand.Id}/assets/{Guid.NewGuid()}",
+            new BrandAssetLabelRequest("x"));
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
     [Fact]
     public async Task Brand_voice_template_and_context_links_reach_the_generation_prompt()
     {

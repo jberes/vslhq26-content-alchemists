@@ -25,7 +25,7 @@ public sealed class BrandLookupTests
         var lookup = new BrandLookup(new NeverCalledFactory(), new NeverCalledRegistry());
 
         var ex = await Assert.ThrowsAsync<BrandLookupException>(
-            () => lookup.LookupAsync(Guid.NewGuid(), url, CancellationToken.None));
+            () => lookup.LookupAsync(Guid.NewGuid(), url, notes: null, CancellationToken.None));
 
         // Refused before any socket is opened — the factory throws if it is ever used.
         Assert.Contains("private address", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -40,7 +40,7 @@ public sealed class BrandLookupTests
         var lookup = new BrandLookup(new NeverCalledFactory(), new NeverCalledRegistry());
 
         var ex = await Assert.ThrowsAsync<BrandLookupException>(
-            () => lookup.LookupAsync(Guid.NewGuid(), url, CancellationToken.None));
+            () => lookup.LookupAsync(Guid.NewGuid(), url, notes: null, CancellationToken.None));
 
         Assert.Contains("http", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -51,7 +51,32 @@ public sealed class BrandLookupTests
         var lookup = new BrandLookup(new NeverCalledFactory(), new NeverCalledRegistry());
 
         await Assert.ThrowsAsync<BrandLookupException>(
-            () => lookup.LookupAsync(Guid.NewGuid(), "not a url at all", CancellationToken.None));
+            () => lookup.LookupAsync(Guid.NewGuid(), "not a url at all", notes: null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Neither_a_url_nor_notes_is_refused_before_anything_is_called()
+    {
+        var lookup = new BrandLookup(new NeverCalledFactory(), new NeverCalledRegistry());
+
+        var ex = await Assert.ThrowsAsync<BrandLookupException>(
+            () => lookup.LookupAsync(Guid.NewGuid(), url: null, notes: "   ", CancellationToken.None));
+
+        Assert.Contains("URL", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A private URL must still be refused when pasted context is supplied alongside it —
+    /// otherwise "add some notes" would be a trivial bypass of the SSRF guard.
+    /// </summary>
+    [Fact]
+    public async Task Notes_do_not_excuse_a_private_url()
+    {
+        var lookup = new BrandLookup(new NeverCalledFactory(), new NeverCalledRegistry());
+
+        await Assert.ThrowsAsync<BrandLookupException>(
+            () => lookup.LookupAsync(
+                Guid.NewGuid(), "http://169.254.169.254/", "our voice is direct", CancellationToken.None));
     }
 
     [Fact]

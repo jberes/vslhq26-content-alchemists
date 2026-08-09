@@ -85,9 +85,9 @@
     --cm-text-h2: 2rem;
     --cm-text-h3: 1.5625rem;
     --cm-text-h4: 1.25rem;
-    --cm-text-body: 0.9375rem;
-    --cm-text-meta: 0.71875rem;
-    --cm-text-kicker: 0.625rem;
+    --cm-text-body: 1rem;          /* 15 → 16px: the app's default reading size */
+    --cm-text-meta: 0.8125rem;     /* 11.5 → 13px: captions were sub-legible on a laptop */
+    --cm-text-kicker: 0.6875rem;   /* 10 → 11px */
 
     --cm-leading-tight: 1.15;
     --cm-leading-body: 1.55;
@@ -96,9 +96,11 @@
     --cm-tracking-wordmark: 0.18em;
 
     /* ---- Space --------------------------------------------------------------- */
-    /* The handoff's 3.4px unit. Density rides the unit, so every gap in the app
-       scales from one number (roadmap E3.6). */
-    --cm-space-unit: 3.4px;
+    /* 4px base — the handoff drew on a 3.4px unit, but its 1440×880 is a ratio convention
+       (ADR-F10), and 3.4 rendered visibly tight on a real laptop ("everything is so small",
+       owner 2026-08-08). Density rides this one number (roadmap E3.6); Compact keeps the
+       tighter option. */
+    --cm-space-unit: 4px;
     --cm-space-1: calc(var(--cm-space-unit) * 1);
     --cm-space-2: calc(var(--cm-space-unit) * 2);
     --cm-space-3: calc(var(--cm-space-unit) * 3);
@@ -116,7 +118,7 @@
 
 /* Compact density: one number, whole app (E3.6). */
 :root[data-cm-density="compact"] {
-    --cm-space-unit: 2.8px;
+    --cm-space-unit: 3.4px;
     --cm-leading-body: 1.45;
 }
 

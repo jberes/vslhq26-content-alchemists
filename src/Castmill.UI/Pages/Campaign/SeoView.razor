@@ -12,6 +12,7 @@
 @using Castmill.UI.Design
 @using Castmill.UI.Http
 @using Castmill.UI.State
+@using Castmill.UI.Canvas
 @implements IDisposable
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
@@ -20,6 +21,7 @@
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
 @inject Microsoft.JSInterop.IJSRuntime Js
+@inject NavigationManager Navigation
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — SEO analysis</PageTitle>
 
@@ -30,6 +32,58 @@
                 <strong>Projected, not measured.</strong> This campaign hasn't published yet, so
                 positions and share-of-voice are projections from search metrics — not rankings.
             </p>
+
+            @* What the content was actually WRITTEN to hit, as opposed to the analysis below,
+               which is about what it might rank for. Without this the two are easy to confuse. *@
+            @if (_targets is { } targets
+                 && (targets.Keywords.Count > 0 || targets.Questions.Count > 0))
+            {
+                <section class="cm-seo__targets">
+                    <span class="cm-kicker">Written to these targets</span>
+                    <div class="cm-chips">
+                        @if (!string.IsNullOrWhiteSpace(targets.PrimaryKeyword))
+                        {
+                            <span class="cm-chip cm-chip--on">@targets.PrimaryKeyword</span>
+                        }
+                        @foreach (var keyword in targets.Keywords.Where(k =>
+                            !string.Equals(k.Term, targets.PrimaryKeyword, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            <span class="cm-chip">@keyword.Term</span>
+                        }
+                    </div>
+                    @if (targets.Questions.Count > 0)
+                    {
+                        <span class="cm-meta">
+                            Answering @targets.Questions.Count
+                            @(targets.Questions.Count == 1 ? "question" : "questions"):
+                            @string.Join(" · ", targets.Questions.Take(3).Select(q => q.Question))
+                        </span>
+                    }
+                </section>
+            }
+
+            @* The campaign AS a cluster: the pillar blog at the centre, everything else
+               reinforcing it, and the open channels as one-click drafts against the same
+               keywords. This is what makes a run a campaign and not a pile. *@
+            @{
+                var cluster = ContentCluster.Build(Campaign.Artifacts, _targets, ArtifactDisplay.KindLabel);
+            }
+            @if (!cluster.IsEmpty)
+            {
+                <section class="cm-seo__cluster">
+                    <div class="cm-seo__cluster-head">
+                        <span class="cm-kicker">Content cluster</span>
+                        @if (_drafting is { } d)
+                        {
+                            <span class="cm-meta">
+                                <span class="cm-ai-dot" aria-hidden="true"></span>
+                                Drafting @ArtifactDisplay.KindLabel(d)…
+                            </span>
+                        }
+                    </div>
+                    <ClusterMap Cluster="cluster" OnOpen="OpenArtifact" OnDraft="DraftKindAsync" />
+                </section>
+            }
 
             @if (_plan is null)
             {
@@ -345,7 +399,67 @@
         };
     }
 
-    protected override void OnParametersSet() => LoadPlanFromState();
+    protected override async Task OnParametersSetAsync()
+    {
+        LoadPlanFromState();
+        await LoadTargetsAsync();
+    }
+
+    private SeoTargetsResponse? _targets;
+
+    private void OpenArtifact(Guid artifactId) =>
+        Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifactId}");
+
+    /// <summary>
+    /// Drafts a missing cluster kind against the campaign's saved targets. The angle carries
+    /// the primary keyword so a supporting piece is written to reinforce the pillar, not to
+    /// wander off on its own topic — which is the whole point of a cluster.
+    /// </summary>
+    private async Task DraftKindAsync(string kind)
+    {
+        if (_drafting is not null || Campaign.TranscriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _drafting = kind;
+        StateHasChanged();
+        try
+        {
+            var angle = _targets?.PrimaryKeyword is { } kw
+                ? $"Support the pillar content targeting \"{kw}\". Reinforce and link back to that topic rather than introducing a new one."
+                : "Support the campaign's primary blog; reinforce its topic rather than starting a new one.";
+
+            await Generation.GenerateOneAsync(CampaignId, kind, transcriptId, angle);
+            await Campaign.RefreshAsync(CampaignId);
+            Notifier.ShowSuccess($"{ArtifactDisplay.KindLabel(kind)} drafted into the cluster.");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError($"Couldn't draft that piece — {(ex as ApiException)?.Message ?? "the API was unreachable."}");
+        }
+        finally
+        {
+            _drafting = null;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Loaded separately from the plan: targets are what the content was written to hit, the
+    /// plan is what it might rank for. A campaign can have either without the other.
+    /// </summary>
+    private async Task LoadTargetsAsync()
+    {
+        try
+        {
+            _targets = await Seo.GetTargetsAsync(CampaignId);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _targets = null;
+        }
+    }
 
     private void OnChanged() => InvokeAsync(() =>
         StoreEvents.GuardedAsync(() =>

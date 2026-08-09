@@ -43,6 +43,9 @@ public static class AiEndpoints
         group.MapPost("/campaigns/{campaignId:guid}/artifacts/{artifactId:guid}/tech-edit", TechEditAsync)
             .Validate<TechEditRequest>().RequireRateLimiting("ai");
         // The Content Scout (E4): an agent loop, so it is on the "ai" partition.
+        group.MapPost("/campaigns/{campaignId:guid}/brief", SuggestBriefAsync)
+            .RequireRateLimiting("ai");
+
         group.MapPost("/campaigns/{campaignId:guid}/scout", ScoutAsync)
             .Validate<ScoutRequest>().RequireRateLimiting("ai");
         // B9.8: Press Run progress. A plain read, so it is not on the "ai" partition —
@@ -280,9 +283,21 @@ public static class AiEndpoints
         var runId = await orchestrator.StartRunAsync(campaignId, request.Kinds, ct, request.Count);
         response.Headers.Append("Castmill-Run-Id", runId.ToString());
 
+        // The fan-out is deliberately NOT cancelled when the request is. A run used to live
+        // and die with this HTTP call, so a client timeout, a closed laptop, a navigation or
+        // a dropped connection silently truncated it part-way — "13 items promised, fewer
+        // made", with the paid model calls already spent. The client recovers by polling the
+        // run row; the only things that stop a run now are the app shutting down and the
+        // 30-minute cap, which exists so an orphaned run cannot burn model spend forever.
+        using var runScope = CancellationTokenSource.CreateLinkedTokenSource(
+            response.HttpContext.RequestServices
+                .GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()
+                .ApplicationStopping);
+        runScope.CancelAfter(TimeSpan.FromMinutes(30));
+
         var results = await orchestrator.RunFanOutAsync(
-            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds, ct,
-            runId, request.Count);
+            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds,
+            runScope.Token, runId, request.Count);
 
         // Per-phase costs for the Press Run UI (G7).
         response.Headers.Append("Server-Timing",
@@ -407,6 +422,45 @@ public static class AiEndpoints
     }
 
     // ---- Shared ----------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the brief off the transcript. Reports failure as a RESULT rather than a 500, the
+    /// same contract as every other generation call here — a brief that could not be drafted
+    /// must leave the user typing it themselves, not staring at an error page.
+    /// </summary>
+    private static async Task<IResult> SuggestBriefAsync(
+        Guid campaignId,
+        Guid transcriptArtifactId,
+        string? title,
+        ClaimsPrincipal principal,
+        IBriefSuggester suggester,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var loaded = await LoadAsync(campaignId, transcriptArtifactId, db, ct);
+        if (loaded is not { } pair)
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            var brief = await suggester.SuggestAsync(
+                AuthEndpoints.GetUserId(principal), pair.Transcript, title, ct);
+
+            return Results.Ok(new BriefSuggestionResponse(
+                brief.Title, brief.Audience, brief.BrandVoice, brief.Angle,
+                brief.Summary, brief.KeyPoints));
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 409);
+        }
+        catch (JsonException)
+        {
+            return Results.Problem("The model's brief could not be read.", statusCode: 502);
+        }
+    }
 
     private static async Task<(Campaign Campaign, TranscriptContent Transcript)?> LoadAsync(
         Guid campaignId, Guid transcriptArtifactId, CastmillDbContext db, CancellationToken ct)

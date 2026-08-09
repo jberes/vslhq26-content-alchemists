@@ -409,6 +409,13 @@
     color: var(--cm-on-surface-muted);
 }
 
+.cm-chip--on {
+    background: var(--cm-accent-strong);
+    border-color: var(--cm-accent-strong);
+    color: var(--cm-on-accent);
+    font-weight: 600;
+}
+
 /* ---- Campaigns index ----------------------------------------------------------- */
 
 .cm-campaign-grid {
@@ -1180,15 +1187,33 @@
 
 /* ---- Selection bubble menu (F4) --------------------------------------------------- */
 
+/* Hidden until there is a selection. It is appended into the editor host in normal flow, so
+   without this it sat under every artifact permanently — a formatting bar for text nobody had
+   selected. Collapsed rather than display:none so showing it does not jump the layout. */
 .cm-editor__bubble {
     display: flex;
     align-items: center;
     gap: var(--cm-space-1);
+    max-block-size: 0;
+    margin-block-start: 0;
+    padding-block: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--cm-motion), max-block-size var(--cm-motion);
     padding: var(--cm-space-1);
     border: 1px solid var(--cm-rule-strong);
     border-radius: var(--cm-radius-sm);
     background: var(--cm-surface-raised);
     box-shadow: var(--cm-shadow-lg);
+}
+
+.cm-editor__bubble--on {
+    max-block-size: 4rem;
+    margin-block-start: var(--cm-space-2);
+    padding-block: var(--cm-space-1);
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .cm-editor__bubble-button {
@@ -1765,12 +1790,19 @@
     border-block-end: 1px solid var(--cm-rule);
 }
 
+/* A fixed-size disc, so a row never shifts as "·" becomes "✓". */
 .cm-press__mark {
+    inline-size: 1.35rem;
+    block-size: 1.35rem;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--cm-surface-sunken);
     color: var(--cm-on-surface-subtle);
-}
-
-.cm-press__item--done .cm-press__mark {
-    color: var(--cm-status-published);
+    font-size: var(--cm-text-meta);
+    line-height: 1;
 }
 
 .cm-press__item--failed .cm-press__mark,
@@ -2260,11 +2292,17 @@
 
 /* ---- Brands (workspace scope): the steering kits ------------------------------- */
 
+/* No page-wide cap: the 72ch strip left half the window empty (owner, 2026-08-08). The
+   prose-shaped controls cap themselves; grids (assets, templates) take the room. */
 .cm-brand {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-8);
-    max-inline-size: 72ch;
+    gap: var(--cm-space-6);
+    margin-block-start: var(--cm-space-4);
+}
+
+.cm-brand .cm-field {
+    max-inline-size: 84ch;
 }
 
 .cm-brand__section {
@@ -2289,8 +2327,8 @@
 }
 
 .cm-brand__color-pick {
-    inline-size: 2.4rem;
-    block-size: 2rem;
+    inline-size: 3rem;
+    block-size: 3rem;
     padding: 0;
     border: 1px solid var(--cm-rule-strong);
     border-radius: var(--cm-radius-sm);
@@ -3283,4 +3321,592 @@
     font-size: var(--cm-text-meta);
     line-height: var(--cm-leading-body);
     resize: vertical;
+}
+
+/* ---- Run flow: the AI-drafted brief ----------------------------------------------- */
+
+.cm-brief__reading {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    margin-block-end: var(--cm-space-4);
+    padding: var(--cm-space-4);
+    border: 1px dashed var(--cm-accent);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-accent-wash);
+}
+
+/* The summary is the only place the user sees what the machine understood before committing
+   to a full fan-out, so it reads as a quote from the source rather than as form furniture. */
+.cm-brief__summary {
+    margin-block-end: var(--cm-space-6);
+    padding: var(--cm-space-4);
+    border-inline-start: 3px solid var(--cm-accent);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-brief__summary-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-2);
+}
+
+.cm-brief__points {
+    margin-block: var(--cm-space-3) 0;
+    padding-inline-start: var(--cm-space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface-muted);
+}
+
+/* ---- Brand: the paste-in context panel -------------------------------------------- */
+
+.cm-brand__context-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+}
+
+/* Brand guides arrive as pages, not sentences — a three-row box would make this useless. */
+.cm-brand__context-body {
+    min-block-size: 14rem;
+    max-inline-size: 84ch;
+    resize: vertical;
+}
+
+/* ---- Image studio: the brand kit picker ------------------------------------------- */
+
+.cm-studio__picks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+    gap: var(--cm-space-2);
+}
+
+.cm-studio__pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    text-align: start;
+    cursor: pointer;
+    transition: border-color var(--cm-motion), background var(--cm-motion);
+}
+
+.cm-studio__pick img {
+    inline-size: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+/* Two signals, not one: the ring reads at a glance, the wash survives a greyscale or
+   colour-blind view where a hue change alone would not. */
+.cm-studio__pick--on {
+    border-color: var(--cm-accent);
+    outline: 2px solid var(--cm-accent);
+    outline-offset: -2px;
+    background: var(--cm-accent-wash);
+}
+
+.cm-studio__pick-label {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: var(--cm-leading-tight);
+}
+
+/* ---- Brands: the grouped asset kit ------------------------------------------------ */
+
+.cm-brand__asset-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    margin-block-end: var(--cm-space-4);
+}
+
+/* ---- Press run: per-item progress, the green check, and the roll-up ---------------- */
+
+.cm-press__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
+}
+
+/* Determinate (ADR-F13): the denominator is known, so this is progress, not decoration. */
+.cm-press__bar {
+    block-size: 4px;
+    margin-block: var(--cm-space-3);
+    border-radius: 999px;
+    background: var(--cm-surface-sunken);
+    overflow: hidden;
+}
+
+.cm-press__bar-fill {
+    display: block;
+    block-size: 100%;
+    border-radius: inherit;
+    background: var(--cm-accent);
+    transition: inline-size 400ms ease;
+}
+
+.cm-press__item--done .cm-press__mark,
+.cm-press__mark--done {
+    background: var(--cm-success);
+    color: var(--cm-surface);
+    font-weight: 700;
+    /* A short pop, so a completion registers even in peripheral vision. */
+    animation: cm-press-pop 320ms ease-out;
+}
+
+.cm-press__item--failed .cm-press__mark {
+    background: var(--cm-danger);
+    color: var(--cm-surface);
+    font-weight: 700;
+}
+
+@keyframes cm-press-pop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    60%  { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(1); }
+}
+
+/* The row being generated: named, timed, and moving. */
+.cm-press__item--printing {
+    background: var(--cm-accent-wash);
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-press__item--printing .cm-press__kind {
+    font-weight: 600;
+}
+
+.cm-press__item--printing .cm-press__mark {
+    border: 2px solid var(--cm-accent);
+    border-block-start-color: transparent;
+    background: transparent;
+    animation: cm-spin 900ms linear infinite;
+}
+
+/* An indeterminate SLIVER on a determinate list: the row is one known unit of work whose
+   duration is genuinely unknown, and the count above it carries the real progress. */
+.cm-press__track {
+    grid-column: 1 / -1;
+    block-size: 2px;
+    border-radius: 999px;
+    background: var(--cm-rule);
+    overflow: hidden;
+}
+
+.cm-press__track-run {
+    display: block;
+    inline-size: 35%;
+    block-size: 100%;
+    border-radius: inherit;
+    background: var(--cm-accent);
+    animation: cm-press-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes cm-press-sweep {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(340%); }
+}
+
+/* Roll-up. Animating to height:0 from `auto` is not possible; grid-template-rows 1fr -> 0fr
+   is, and it needs the inner element to own the overflow. */
+.cm-press__roll {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 420ms ease, opacity 420ms ease;
+}
+
+.cm-press__roll > * {
+    min-block-size: 0;
+    overflow: hidden;
+}
+
+.cm-press__roll--up {
+    grid-template-rows: 0fr;
+    opacity: 0;
+}
+
+.cm-press__summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-3);
+    font-weight: 600;
+}
+
+.cm-press--finished .cm-press__bar-fill {
+    background: var(--cm-success);
+}
+
+/* Motion is the signal here, so the reduced-motion fallback has to keep the MEANING: the
+   check and the colour still land, they just do not move. */
+@media (prefers-reduced-motion: reduce) {
+    .cm-press__mark,
+    .cm-press__track-run,
+    .cm-press__bar-fill,
+    .cm-press__roll {
+        animation: none;
+        transition: none;
+    }
+}
+
+.cm-settings__links-actions {
+    flex-wrap: wrap;
+    margin-block-start: var(--cm-space-4);
+}
+
+/* ---- Run flow: the Targets step ---------------------------------------------------- */
+
+.cm-targets {
+    list-style: none;
+    margin: 0 0 var(--cm-space-6);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cm-targets__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+/* Chosen rows read as chosen at a glance — this list is scanned, not read. */
+.cm-targets__row--on {
+    background: var(--cm-accent-wash);
+    box-shadow: inset 2px 0 0 var(--cm-accent);
+}
+
+.cm-targets__pick {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    min-inline-size: 0;
+    cursor: pointer;
+}
+
+.cm-targets__pick span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 60rem) {
+    .cm-targets__row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        row-gap: var(--cm-space-1);
+    }
+}
+
+.cm-seo__targets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-6);
+    padding: var(--cm-space-4);
+    border-inline-start: 3px solid var(--cm-accent);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+/* ---- Run flow: context links + the primary-keyword pick ---------------------------- */
+
+/* Links get their own grid; they were borrowing the colour-picker's row, which is why the
+   URL box stopped half-way across the page. The URL column takes everything the label and
+   the delete button leave, so it ends where "+ Add link" ends. */
+.cm-links__row {
+    display: grid;
+    grid-template-columns: minmax(10rem, 18rem) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-2);
+}
+
+/* The primary pick is a real control, not a caption-sized chip. The selected state fills
+   with the strong accent — the previous chip variant lost a specificity fight with
+   `button.cm-chip` and rendered grey-on-grey. */
+.cm-primary-pick {
+    padding: var(--cm-space-1) var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: 999px;
+    background: var(--cm-surface);
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--cm-motion), border-color var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-primary-pick:hover {
+    border-color: var(--cm-accent);
+    color: var(--cm-accent);
+}
+
+.cm-primary-pick--on,
+.cm-primary-pick--on:hover {
+    background: var(--cm-accent-strong);
+    border-color: var(--cm-accent-strong);
+    color: var(--cm-on-accent);
+    font-weight: 600;
+}
+
+/* ---- Brand editor: colour row, asset cards, template editor, danger zone ----------- */
+
+.cm-brand__color-hex {
+    inline-size: 8.5ch;
+    flex: 0 0 auto;
+}
+
+/* Square cards in a grid: ten portrait rows was a page of scrolling that said nothing a
+   thumbnail wouldn't. The label is an input because it IS the prompt text. */
+.cm-asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: var(--cm-space-3);
+}
+
+.cm-asset-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    margin: 0;
+    padding: var(--cm-space-2);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+}
+
+.cm-asset-card img,
+.cm-asset-card__blank {
+    inline-size: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-asset-card__delete {
+    position: absolute;
+    inset-block-start: var(--cm-space-1);
+    inset-inline-end: var(--cm-space-1);
+    background: var(--cm-surface-raised);
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-asset-card__label {
+    font-size: var(--cm-text-meta);
+    padding: var(--cm-space-1) var(--cm-space-2);
+}
+
+.cm-brand__tpl-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-2);
+}
+
+/* The one control that answers "how do I get rid of this brand" — quiet until read, loud
+   when acted on. Outside the tabs so it is findable from any of them. */
+.cm-brand__danger {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+    margin-block-start: var(--cm-space-8);
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-danger);
+    border-radius: var(--cm-radius-md);
+}
+
+/* ---- Transcript modal --------------------------------------------------------------- */
+
+.cm-source__tools {
+    display: inline-flex;
+    gap: var(--cm-space-1);
+    margin-inline-start: auto;
+}
+
+.cm-transcript-modal {
+    inline-size: min(72ch, 92vw);
+    max-block-size: 84vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+}
+
+.cm-transcript-modal__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+.cm-transcript-modal__body {
+    overflow-y: auto;
+    min-block-size: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    line-height: var(--cm-leading-body);
+    /* Reading and select-all are the point; user-select guards against an ancestor rule. */
+    user-select: text;
+}
+
+/* ---- Targets step: free-form add row ---------------------------------------------- */
+
+.cm-targets__add {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-block: var(--cm-space-2) var(--cm-space-6);
+}
+
+/* ---- SEO: content cluster map ----------------------------------------------------- */
+
+.cm-seo__cluster {
+    margin-block-end: var(--cm-space-8);
+}
+
+.cm-seo__cluster-head {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+    margin-block-end: var(--cm-space-2);
+}
+
+.cm-cluster__svg {
+    inline-size: 100%;
+    max-inline-size: 46rem;
+    block-size: auto;
+    display: block;
+    margin-inline: auto;
+}
+
+.cm-cluster__spoke {
+    stroke: var(--cm-rule-strong);
+    stroke-width: 1.5;
+}
+
+.cm-cluster__spoke--gap {
+    stroke: var(--cm-rule);
+    stroke-dasharray: 4 4;
+}
+
+.cm-cluster__pillar circle {
+    fill: var(--cm-accent-strong);
+}
+
+.cm-cluster__kicker {
+    fill: var(--cm-on-accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: var(--cm-tracking-kicker);
+    text-anchor: middle;
+}
+
+.cm-cluster__title {
+    fill: var(--cm-on-accent);
+    font-size: 13px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+
+.cm-cluster__kw {
+    fill: var(--cm-on-accent);
+    font-size: 11px;
+    font-style: italic;
+    text-anchor: middle;
+    opacity: 0.85;
+}
+
+.cm-cluster__node {
+    cursor: pointer;
+}
+
+.cm-cluster__node circle {
+    fill: var(--cm-surface-raised);
+    stroke: var(--cm-rule-strong);
+    stroke-width: 1.5;
+    transition: stroke var(--cm-motion), fill var(--cm-motion);
+}
+
+.cm-cluster__node:hover circle,
+.cm-cluster__node:focus-visible circle {
+    stroke: var(--cm-accent);
+    stroke-width: 2.5;
+}
+
+.cm-cluster__node:focus-visible {
+    outline: none;
+}
+
+/* Status colour lives on the ring, not the fill, so labels stay readable in both themes. */
+.cm-cluster__node--approved { stroke: var(--cm-success); }
+.cm-cluster__node--review { stroke: var(--cm-accent); }
+.cm-cluster__node--draft { stroke: var(--cm-rule-strong); }
+
+.cm-cluster__node--gap circle {
+    fill: transparent;
+    stroke: var(--cm-rule);
+    stroke-dasharray: 5 4;
+}
+
+.cm-cluster__node-kind {
+    fill: var(--cm-on-surface);
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+
+.cm-cluster__node-status {
+    fill: var(--cm-on-surface-muted);
+    font-size: 10px;
+    text-anchor: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.cm-cluster__node-add {
+    fill: var(--cm-accent);
+    font-size: 11px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+
+.cm-cluster__legend {
+    text-align: center;
+    margin-block-start: var(--cm-space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cm-cluster__node circle { transition: none; }
 }

@@ -27,9 +27,10 @@ public sealed class BrandsClient(ApiClient api)
             $"api/v1/brands/{id}", new BrandProfileUpsertRequest(name, styleCard), etag: null, ct);
 
     /// <summary>Drafts a style card from a public URL. Returns a draft — nothing is saved.</summary>
-    public Task<BrandLookupResponse> LookupAsync(string url, CancellationToken ct = default) =>
+    public Task<BrandLookupResponse> LookupAsync(
+        string? url, string? notes = null, CancellationToken ct = default) =>
         api.PostAsync<BrandLookupRequest, BrandLookupResponse>(
-            "api/v1/brands/lookup", new BrandLookupRequest(url), anonymous: false, ct);
+            "api/v1/brands/lookup", new BrandLookupRequest(url, notes), anonymous: false, ct);
 
     public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{id}", ct);
@@ -44,6 +45,9 @@ public sealed class BrandsClient(ApiClient api)
         api.PostAsync<BrandAssetLinkRequest, BrandAssetResponse>(
             $"api/v1/brands/{brandId}/assets", new BrandAssetLinkRequest(assetId, kind, label), anonymous: false, ct);
 
+    public Task RenameAssetAsync(Guid brandId, Guid brandAssetId, string? label, CancellationToken ct = default) =>
+        api.PatchAsync($"api/v1/brands/{brandId}/assets/{brandAssetId}", new BrandAssetLabelRequest(label), ct);
+
     public Task UnlinkAssetAsync(Guid brandId, Guid brandAssetId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{brandId}/assets/{brandAssetId}", ct);
 
@@ -56,6 +60,17 @@ public sealed class BrandsClient(ApiClient api)
 
     public Task<UploadSas> MintUploadSasAsync(Guid assetId, CancellationToken ct = default) =>
         api.PostAsync<object, UploadSas>($"api/v1/blob/assets/{assetId}/upload-sas", new { }, anonymous: false, ct);
+
+    /// <summary>
+    /// Uploads bytes THROUGH the API rather than straight to storage. The direct-to-storage
+    /// SAS path is a cross-origin request from the client, so it depends on the storage
+    /// account's CORS rules — which differ between the web shell and the desktop WebView and
+    /// are not controlled by this repo. This route is the same origin as every other API call,
+    /// so it works wherever the app already works.
+    /// </summary>
+    public Task UploadAssetContentAsync(
+        Guid assetId, byte[] content, string contentType, CancellationToken ct = default) =>
+        api.PostBytesAsync($"api/v1/blob/assets/{assetId}/content", content, contentType, ct);
 
     public Task<ReadSas> MintReadSasAsync(Guid assetId, CancellationToken ct = default) =>
         api.GetAsync<ReadSas>($"api/v1/blob/assets/{assetId}/read-sas", ct);

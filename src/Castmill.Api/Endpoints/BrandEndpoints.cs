@@ -25,7 +25,7 @@ public static partial class BrandEndpoints
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     /// <summary>The kinds a brand asset can be — small on purpose; "other" is the escape hatch.</summary>
-    private static readonly string[] AssetKinds = ["logo", "background", "face", "other"];
+    private static readonly string[] AssetKinds = ["logo", "background", "face", "accent", "other"];
 
     public static IEndpointRouteBuilder MapBrandEndpoints(this IEndpointRouteBuilder routes)
     {
@@ -44,6 +44,8 @@ public static partial class BrandEndpoints
         group.MapPost("/{id:guid}/assets", LinkAssetAsync)
             .Validate<BrandAssetLinkRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}/assets/{brandAssetId:guid}", UnlinkAssetAsync).RequireRateLimiting("writes");
+        group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}", RenameAssetAsync)
+            .Validate<BrandAssetLabelRequest>().RequireRateLimiting("writes");
 
         group.MapGet("/{id:guid}/templates", ListTemplatesAsync);
         group.MapPost("/{id:guid}/templates", CreateTemplateAsync)
@@ -120,7 +122,8 @@ public static partial class BrandEndpoints
     {
         try
         {
-            var result = await lookup.LookupAsync(AuthEndpoints.GetUserId(principal), request.Url, ct);
+            var result = await lookup.LookupAsync(
+                AuthEndpoints.GetUserId(principal), request.Url, request.Notes, ct);
             return Results.Ok(new BrandLookupResponse(
                 result.Name, result.StyleCard, result.SourceUrl, result.Notes));
         }
@@ -282,6 +285,26 @@ public static partial class BrandEndpoints
         return Results.Created($"/api/v1/brands/{id}/assets/{link.Id}", new BrandAssetResponse(
             link.Id, link.BrandId, link.AssetId, link.Kind, link.Label,
             asset.FileName, asset.ContentType, link.CreatedAt));
+    }
+
+    /// <summary>
+    /// The label doubles as prompt text ("the host, short dark hair"), so renaming an asset is
+    /// a real content decision — it changes what every future image prompt says.
+    /// </summary>
+    private static async Task<IResult> RenameAssetAsync(
+        Guid id, Guid brandAssetId, BrandAssetLabelRequest request,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var link = await db.BrandAssets.SingleOrDefaultAsync(
+            a => a.Id == brandAssetId && a.BrandId == id, ct);
+        if (link is null)
+        {
+            return Results.NotFound();
+        }
+
+        link.Label = string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim();
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> UnlinkAssetAsync(

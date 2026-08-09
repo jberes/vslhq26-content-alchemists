@@ -115,6 +115,28 @@ public sealed class ApiClient(HttpClient http)
         return await ReadAsync<TResponse>(response, ct);
     }
 
+    /// <summary>
+    /// PUT/PATCH whose success is a 204. The generic overloads throw on an empty body — which
+    /// is correct for reads and silently wrong for writes whose whole answer IS "no content":
+    /// saving a secret, saving the workspace links and renaming a brand asset all failed with
+    /// "The server returned an empty response." while the server had done the work.
+    /// </summary>
+    public async Task PutAsync<TRequest>(string url, TRequest body, CancellationToken ct = default)
+    {
+        using var response = await http.PutAsJsonAsync(url, body, Json, ct);
+        await ThrowIfFailedAsync(response, ct);
+    }
+
+    public async Task PatchAsync<TRequest>(string url, TRequest body, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, url)
+        {
+            Content = JsonContent.Create(body, options: Json),
+        };
+        using var response = await http.SendAsync(request, ct);
+        await ThrowIfFailedAsync(response, ct);
+    }
+
     public async Task DeleteAsync(string url, CancellationToken ct = default)
     {
         using var response = await http.DeleteAsync(url, ct);
@@ -163,6 +185,37 @@ public sealed class ApiClient(HttpClient http)
 
         using var response = await http.SendAsync(request, ct);
         return await ReadAsync<TResponse>(response, ct);
+    }
+
+    /// <summary>
+    /// POSTs file bytes. Goes through the same handler as everything else, so the bearer
+    /// token, correlation ID and typed errors are unchanged.
+    ///
+    /// The body is BUFFERED into a byte array rather than streamed, for two reasons that both
+    /// bite only outside the web shell:
+    ///
+    ///  1. A file stream from the WebView is not seekable and has no known length, so it is
+    ///     sent chunked and can be read exactly once. CastmillHttpHandler replays a request
+    ///     after a silent token refresh, and replaying re-reads the content — on a consumed
+    ///     one-shot stream that throws, which surfaces as "couldn't reach the API" even though
+    ///     the API answered perfectly.
+    ///  2. Blazor Hybrid reads an IBrowserFile over JS interop in chunks, so a streamed body
+    ///     is at the mercy of interop read timeouts mid-upload.
+    ///
+    /// Kit images are capped at 20 MB, so holding one in memory costs nothing next to being
+    /// able to retry it.
+    /// </summary>
+    public async Task PostBytesAsync(
+        string url, byte[] content, string contentType, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new ByteArrayContent(content),
+        };
+        request.Content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+
+        using var response = await http.SendAsync(request, ct);
+        await ThrowIfFailedAsync(response, ct);
     }
 
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken ct)

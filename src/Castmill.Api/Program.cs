@@ -82,6 +82,10 @@ builder.Services.AddSingleton<IImageComposer, ImageComposer>();
 builder.Services.AddScoped<IImagePlanService, ImagePlanService>();
 builder.Services.AddScoped<IImageRenderer, ImageRenderer>();
 builder.Services.AddScoped<IBrandLookup, BrandLookup>();
+builder.Services.AddScoped<IBriefSuggester, BriefSuggester>();
+builder.Services.AddScoped<IWorkspaceLinks, WorkspaceLinks>();
+builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoResearch, Castmill.Api.Services.Seo.SeoResearch>();
+builder.Services.AddHostedService<InterruptedRunSweeper>();
 // Its own client: a short timeout and no resilience retries, because re-fetching a slow
 // third-party site would only make the user wait longer for the same answer.
 builder.Services.AddHttpClient("brandlookup", c =>
@@ -117,10 +121,42 @@ builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
         client => client.Timeout = TimeSpan.FromSeconds(60))
     .AddStandardResilienceHandler();
 
+/// <summary>
+/// Azure SQL Serverless auto-pauses when idle, and the FIRST connection after that has to
+/// wake it — which routinely takes longer than the client's default 30-second connect
+/// timeout. The symptom is a pre-login TLS reset or
+/// "Connection Timeout Expired ... [Post-Login] complete=29602", which reads like a broken
+/// database and is really just a cold one.
+///
+/// Raising the timeout is done HERE rather than in the connection string because that string
+/// lives in gitignored dev config and in Key Vault in production: this way every environment
+/// gets the wake-up allowance without anyone editing a secret.
+/// </summary>
+static string WithResumeAllowance(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return connectionString ?? string.Empty;
+    }
+
+    var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+
+    // Only ever raises it — an explicit longer timeout is respected.
+    if (builder.ConnectTimeout < 60)
+    {
+        builder.ConnectTimeout = 60;
+    }
+
+    return builder.ConnectionString;
+}
+
 builder.Services.AddDbContext<CastmillDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("Castmill"),
-        // Transient-fault retries for Azure SQL (B8 reliability).
-        sql => sql.EnableRetryOnFailure(maxRetryCount: 5, TimeSpan.FromSeconds(10), errorNumbersToAdd: null)));
+    options.UseSqlServer(WithResumeAllowance(builder.Configuration.GetConnectionString("Castmill")),
+        // Transient-fault retries for Azure SQL (B8 reliability). The window is sized for a
+        // serverless resume, not a network blip: 8 tries backing off to 30s covers a cold
+        // start that a 5x10s budget gave up on.
+        sql => sql.EnableRetryOnFailure(
+            maxRetryCount: 8, TimeSpan.FromSeconds(30), errorNumbersToAdd: null)));
 
 // Telemetry (G7): registered only when a connection string is configured —
 // the v3 SDK refuses to start with an empty one.
@@ -268,7 +304,23 @@ if (app.Environment.IsDevelopment())
 
     // Development-only demo account, off unless Dev:SeedDemoUser is set. The seeder
     // refuses to run outside Development — see the security fence on DemoUserSeeder.
-    await DemoUserSeeder.SeedAsync(app);
+    //
+    // A database that is asleep, resuming or briefly unreachable must NOT stop the process
+    // from starting. Seeding a convenience account is not a startup invariant, and crashing
+    // here turned "Azure SQL is waking up" into a dead `dotnet run` with a 200-line stack
+    // trace. The app comes up, /health answers, and the seeder is retried on the next start.
+    try
+    {
+        await DemoUserSeeder.SeedAsync(app);
+    }
+    catch (Microsoft.Data.SqlClient.SqlException ex)
+    {
+        app.Logger.LogWarning(
+            "Demo user not seeded — the database did not answer ({Message}). If this is Azure "
+            + "SQL Serverless it is probably resuming from auto-pause; the API is up and the "
+            + "first request that reaches the database will wake it.",
+            ex.Message.Split('\n')[0]);
+    }
 
     // Dev-only: hands the seeded demo credentials to dev client builds so the sign-in
     // form can prefill. Same fence as the testbed: mapped ONLY in Development, and the
@@ -289,6 +341,34 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+
+// Liveness above says only "the process is up". This one asks the DATABASE, which is the
+// question that actually matters when Azure SQL Serverless is auto-paused: a green /health
+// beside a client full of errors is exactly how a sleeping database gets misdiagnosed as a
+// broken app.
+app.MapGet("/health/db", async (CastmillDbContext db, CancellationToken ct) =>
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        var ok = await db.Database.CanConnectAsync(ct);
+        return Results.Ok(new
+        {
+            status = ok ? "healthy" : "unreachable",
+            elapsedMs = stopwatch.ElapsedMilliseconds,
+        });
+    }
+    catch (Microsoft.Data.SqlClient.SqlException ex)
+    {
+        // 503, not 500: the database being asleep is a temporary condition with a retry, not
+        // a fault in this service.
+        return Results.Problem(
+            $"The database did not answer after {stopwatch.ElapsedMilliseconds} ms. "
+            + "If this is Azure SQL Serverless it is resuming from auto-pause — retry shortly. "
+            + ex.Message.Split('\n')[0],
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+}).AllowAnonymous();
 
 app.MapAuthEndpoints();
 app.MapCampaignEndpoints();

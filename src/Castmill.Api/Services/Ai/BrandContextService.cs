@@ -13,7 +13,9 @@ public sealed record BrandContext(
     string? StyleBlock,
     string? ImageStyleBlock,
     IReadOnlyDictionary<string, string> TemplateSteeringByKind,
-    string? CampaignContextBlock)
+    string? CampaignContextBlock,
+    /// <summary>The campaign's SEO/AEO targets as prompt text — see BuildSeoTargetBlock.</summary>
+    string? SeoTargetBlock = null)
 {
     public static readonly BrandContext Empty = new(null, null,
         new Dictionary<string, string>(StringComparer.Ordinal), null);
@@ -37,16 +39,25 @@ public sealed class BrandContextService(CastmillDbContext db) : IBrandContextSer
         ArgumentNullException.ThrowIfNull(campaign);
 
         var contextBlock = BuildCampaignContextBlock(CampaignEndpoints.ParseLinks(campaign.ContextJson));
+        var seoBlock = BuildSeoTargetBlock(CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson));
 
         if (campaign.BrandId is not { } brandId)
         {
-            return BrandContext.Empty with { CampaignContextBlock = contextBlock };
+            return BrandContext.Empty with
+            {
+                CampaignContextBlock = contextBlock,
+                SeoTargetBlock = seoBlock,
+            };
         }
 
         var brand = await db.BrandProfiles.SingleOrDefaultAsync(b => b.Id == brandId, ct);
         if (brand is null)
         {
-            return BrandContext.Empty with { CampaignContextBlock = contextBlock };
+            return BrandContext.Empty with
+            {
+                CampaignContextBlock = contextBlock,
+                SeoTargetBlock = seoBlock,
+            };
         }
 
         var card = BrandEndpoints.ParseStyleCard(brand.StyleCardJson);
@@ -66,7 +77,67 @@ public sealed class BrandContextService(CastmillDbContext db) : IBrandContextSer
             BuildStyleBlock(brand.Name, card),
             BuildImageStyleBlock(card, imageAssets.Select(a => (a.Kind, a.Label!))),
             templates,
-            contextBlock);
+            contextBlock,
+            seoBlock);
+    }
+
+    /// <summary>
+    /// The campaign's chosen SEO/AEO targets as prompt text.
+    ///
+    /// This is the whole point of researching BEFORE generating: without it the keyword plan
+    /// is a report about content that was already written, and nothing the writer produced was
+    /// aimed at anything. Rendered as INSTRUCTIONS rather than data, because a list of
+    /// keywords next to a transcript gets treated as more transcript.
+    ///
+    /// The question rules are the answer-engine half: an assistant asked about this topic
+    /// quotes a sentence, and a sentence that only makes sense in context cannot be quoted.
+    /// </summary>
+    internal static string? BuildSeoTargetBlock(SeoTargetsResponse? targets)
+    {
+        if (targets is null
+            || (string.IsNullOrWhiteSpace(targets.PrimaryKeyword)
+                && targets.Keywords.Count == 0 && targets.Questions.Count == 0))
+        {
+            return null;
+        }
+
+        var block = new StringBuilder();
+        block.AppendLine("Search and answer-engine targets for this campaign — write to these:");
+
+        if (!string.IsNullOrWhiteSpace(targets.PrimaryKeyword))
+        {
+            block.Append("- PRIMARY keyword: \"").Append(targets.PrimaryKeyword).AppendLine("\".");
+            block.AppendLine("  It must appear in the title, in the first heading, and within the "
+                + "first 100 words — worded naturally, never stuffed.");
+        }
+
+        var secondary = targets.Keywords
+            .Where(k => !string.Equals(k.Term, targets.PrimaryKeyword, StringComparison.OrdinalIgnoreCase))
+            .Take(8)
+            .ToList();
+
+        if (secondary.Count > 0)
+        {
+            block.Append("- Secondary keywords, used where they fit honestly: ")
+                 .Append(string.Join(", ", secondary.Select(k => k.Term)))
+                 .AppendLine(".");
+        }
+
+        if (targets.Questions.Count > 0)
+        {
+            block.AppendLine("- Answer these questions explicitly. Each answer must be a "
+                + "self-contained sentence that still makes sense quoted on its own, with no "
+                + "\"as mentioned above\" and no pronoun standing in for the subject:");
+            foreach (var question in targets.Questions.Take(10))
+            {
+                block.Append("  • ").AppendLine(question.Question);
+            }
+        }
+
+        block.AppendLine("- Never invent a statistic, a date or a claim to hit a keyword. If the "
+            + "source does not support it, leave it out.");
+
+        return block.ToString();
     }
 
     private static string? BuildStyleBlock(string brandName, BrandStyleCard? card)

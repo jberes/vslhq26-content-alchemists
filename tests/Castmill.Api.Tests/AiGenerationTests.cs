@@ -214,6 +214,12 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             {
                 return """{"title":"Landing","headline":"h","subheadline":"s","sectionsMarkdown":["m"],"cta":"go","citations":["S1"]}""";
             }
+            // Keyed on the schema field, not on prose: matching prose is how this fake went
+            // stale before, when a prompt was reworded and the generator silently fell through.
+            if (prompt.Contains("\"titleVariants\"", StringComparison.Ordinal))
+            {
+                return """{"title":"Ship it","titleVariants":["a","b","c"],"description":"Line one.\n\nChapters:\n0:00 Intro\n\n{{LINKS}}","chapters":[{"startSeconds":0,"title":"Intro"}],"tags":["react","grid"],"citations":["S1"]}""";
+            }
             if (prompt.Contains("show notes", StringComparison.Ordinal))
             {
                 return """{"title":"Notes","summaryMarkdown":"s","chapters":[{"startSeconds":0,"title":"Intro"}],"citations":["S1"]}""";

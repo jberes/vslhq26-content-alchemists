@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Claims;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
@@ -24,6 +25,12 @@ public static class CampaignEndpoints
         group.MapGet("/{id:guid}/preview", PreviewAsync);
         group.MapPost("/", CreateAsync).Validate<CampaignCreateRequest>().RequireRateLimiting("writes");
         group.MapPut("/{id:guid}", UpdateAsync).Validate<CampaignUpdateRequest>().RequireRateLimiting("writes");
+
+        // The chosen SEO/AEO targets. Separate from the campaign PUT because they are written
+        // by a different step, by a different decision, and read by every generator.
+        group.MapGet("/{id:guid}/seo-targets", GetSeoTargetsAsync);
+        group.MapPut("/{id:guid}/seo-targets", SetSeoTargetsAsync)
+            .Validate<SeoTargetsRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
         return routes;
     }
@@ -33,6 +40,77 @@ public static class CampaignEndpoints
 
     internal static CampaignResponse ToResponse(Campaign c) =>
         new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId, ParseLinks(c.ContextJson));
+
+    private static readonly JsonSerializerOptions TargetsJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Stored JSON that predates the schema, or was hand-edited, must read back as "no
+    /// targets" rather than 500 — the same forgiving contract ParseLinks already uses.
+    /// </summary>
+    internal static SeoTargetsResponse ParseSeoTargets(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new SeoTargetsResponse(null, [], []);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<SeoTargetsResponse>(json, TargetsJson)
+                   ?? new SeoTargetsResponse(null, [], []);
+        }
+        catch (JsonException)
+        {
+            return new SeoTargetsResponse(null, [], []);
+        }
+    }
+
+    private static async Task<IResult> GetSeoTargetsAsync(
+        Guid id, CastmillDbContext db, CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
+        return campaign is null
+            ? Results.NotFound()
+            : Results.Ok(ParseSeoTargets(campaign.SeoTargetsJson));
+    }
+
+    private static async Task<IResult> SetSeoTargetsAsync(
+        Guid id,
+        SeoTargetsRequest request,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var keywords = request.Keywords ?? [];
+        var questions = request.Questions ?? [];
+
+        // The primary must be one of the chosen keywords, or the steering block would name a
+        // target the rest of the brief never mentions.
+        var primary = string.IsNullOrWhiteSpace(request.PrimaryKeyword)
+            ? (keywords.Count > 0 ? keywords[0].Term : null)
+            : request.PrimaryKeyword.Trim();
+
+        if (primary is not null
+            && !keywords.Any(k => string.Equals(k.Term, primary, StringComparison.OrdinalIgnoreCase)))
+        {
+            keywords = [new SeoTarget(primary), .. keywords];
+        }
+
+        var stored = new SeoTargetsResponse(primary, keywords, questions);
+        campaign.SeoTargetsJson = keywords.Count == 0 && questions.Count == 0
+            ? null   // clearing is a real action, not an empty object
+            : JsonSerializer.Serialize(stored, TargetsJson);
+        campaign.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(stored);
+    }
 
     internal static IReadOnlyList<CampaignLink>? ParseLinks(string? contextJson)
     {

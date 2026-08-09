@@ -107,6 +107,46 @@
         }
     }
 
+    @* ---- Links: the workspace's public destinations ---- *@
+    @if (_tab == "links")
+    {
+        <p class="cm-meta">
+            Your website and social profiles. Generated content that needs a link block — a
+            YouTube description especially — gets these <strong>verbatim</strong>: the model is
+            never asked to write a URL, so it cannot invent one.
+        </p>
+
+        <div class="cm-settings__grid">
+            @foreach (var link in _links)
+            {
+                <article class="cm-settings__card">
+                    <div class="cm-settings__edit">
+                        <input class="cm-input" placeholder="Label — e.g. Website, X, LinkedIn"
+                               aria-label="Link label" @bind="link.Label" @bind:event="oninput" />
+                    </div>
+                    <div class="cm-settings__edit">
+                        <input class="cm-input" type="url" placeholder="https://…"
+                               aria-label="URL" @bind="link.Url" @bind:event="oninput" />
+                        <button type="button" class="cm-button cm-button--quiet"
+                                aria-label="Remove @link.Label"
+                                @onclick="() => _links.Remove(link)">Remove</button>
+                    </div>
+                </article>
+            }
+        </div>
+
+        <div class="cm-form__actions cm-settings__links-actions">
+            <button type="button" class="cm-button cm-button--quiet" @onclick="AddLink">+ Add a link</button>
+            <button type="button" class="cm-button" disabled="@_savingLinks" @onclick="SaveLinksAsync">
+                @(_savingLinks ? "Saving…" : "Save links")
+            </button>
+            @if (_links.Count == 0)
+            {
+                <span class="cm-meta">Nothing yet — add your site and socials.</span>
+            }
+        </div>
+    }
+
     @* ---- Readiness ---- *@
     @if (_tab == "readiness")
     {
@@ -182,9 +222,63 @@
 
     /// <summary>Credentials first: it is the panel people navigate here to change.</summary>
     private static readonly (string Id, string Label)[] Tabs =
-        [("credentials", "Credentials"), ("readiness", "Readiness"), ("models", "Model aliases")];
+        [("credentials", "Credentials"), ("links", "Links"),
+         ("readiness", "Readiness"), ("models", "Model aliases")];
 
     private string _tab = "credentials";
+
+    /// <summary>
+    /// Mutable rows so the inputs can two-way bind; the record in the client is immutable and
+    /// is only used at the API boundary.
+    /// </summary>
+    private sealed class LinkRow
+    {
+        public string Label { get; set; } = string.Empty;
+
+        public string Url { get; set; } = string.Empty;
+    }
+
+    private readonly List<LinkRow> _links = [];
+    private bool _savingLinks;
+
+    /// <summary>The destinations almost every workspace has, in the order people expect.</summary>
+    private static readonly string[] SuggestedLabels =
+        ["Website", "YouTube", "X", "LinkedIn", "Instagram", "Facebook", "GitHub", "Newsletter"];
+
+    private void AddLink() =>
+        _links.Add(new LinkRow
+        {
+            // Pre-fill the next label nobody has used yet: typing "LinkedIn" eight times is
+            // not the part of this worth a human.
+            Label = SuggestedLabels.FirstOrDefault(
+                l => !_links.Any(x => string.Equals(x.Label, l, StringComparison.OrdinalIgnoreCase)))
+                ?? string.Empty,
+        });
+
+    private async Task SaveLinksAsync()
+    {
+        _savingLinks = true;
+        try
+        {
+            // Blank rows are dropped rather than stored — a half-filled row would render as a
+            // dangling label in a published description.
+            var complete = _links
+                .Where(l => !string.IsNullOrWhiteSpace(l.Label) && !string.IsNullOrWhiteSpace(l.Url))
+                .Select(l => new WorkspaceLink(l.Label.Trim(), l.Url.Trim()))
+                .ToList();
+
+            await SettingsApi.SaveLinksAsync(complete);
+            Notifier.ShowSuccess($"Saved {complete.Count} link{(complete.Count == 1 ? "" : "s")}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't save links — {ex.Message}");
+        }
+        finally
+        {
+            _savingLinks = false;
+        }
+    }
 
     /// <summary>"4/7 stored" on the tab itself, so the state is visible without opening it.</summary>
     private RenderFragment? TabBadge(string id) => id == "credentials" && _secrets is { } secrets
@@ -207,6 +301,10 @@
             // Readiness and credentials are independent reads; one failing should not blank
             // the other, but a first-load failure needs to be visible rather than silent.
             _secrets = await SettingsApi.SecretsAsync();
+
+            _links.Clear();
+            _links.AddRange((await SettingsApi.GetLinksAsync())
+                .Select(l => new LinkRow { Label = l.Label, Url = l.Url }));
             _status = await Images.GetAiStatusAsync();
         }
         catch (ApiException ex)

@@ -115,7 +115,16 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
 
         // EVERY on-demand kind is offered, including ones the campaign already has: a
         // campaign with a blog is exactly the one that wants a second blog on another angle.
-        Assert.Equal(8, chips.Length);
+        //
+        // Derived from the registry, not a literal. A hard-coded count is what let "youtube"
+        // ship as a generator AND a lane while still being unrequestable from the board — the
+        // board's kind list had drifted from the registry and nothing said so.
+        var expected = 2 + ArtifactDisplay.Known.Count(k =>
+            k.OnBoard && k.Lane != "Social" && k.Kind != "blog" && k.Kind != "seo-keyword-plan");
+        Assert.Equal(expected, chips.Length);
+
+        // The one that was missing, named explicitly so this cannot pass vacuously.
+        Assert.Contains(chips, c => c.TextContent.Contains("YouTube package", StringComparison.Ordinal));
         Assert.All(chips, chip =>
         {
             Assert.NotNull(chip.QuerySelector(".cm-print-chip__plus"));

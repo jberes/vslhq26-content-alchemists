@@ -7,6 +7,7 @@ using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Seo;
+using Castmill.Core.Resources;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Microsoft.EntityFrameworkCore;
@@ -34,6 +35,10 @@ public static class SeoEndpoints
 
         group.MapPost("/analyze", AnalyzeAsync).Validate<SeoAnalyzeRequest>().RequireRateLimiting("searches");
         group.MapPost("/keyword-plan", KeywordPlanAsync).Validate<KeywordPlanRequest>().RequireRateLimiting("ai");
+        // Research runs BEFORE generation and persists nothing: it is a proposal the user
+        // edits. /keyword-plan stays as the post-hoc report that creates an artifact.
+        group.MapPost("/research", ResearchAsync).Validate<SeoResearchRequest>().RequireRateLimiting("ai");
+
         group.MapGet("/reports/{artifactId:guid}", GetReportAsync);
         group.MapPost("/reports/{artifactId:guid}/share", ShareAsync).RequireRateLimiting("writes");
         return routes;
@@ -44,6 +49,43 @@ public static class SeoEndpoints
     /// → DataForSEO metrics for those keywords + related suggestions → ranked
     /// keyword plan persisted as a "seo-keyword-plan" artifact.
     /// </summary>
+    private static async Task<IResult> ResearchAsync(
+        SeoResearchRequest request,
+        System.Security.Claims.ClaimsPrincipal principal,
+        ISeoResearch research,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == request.CampaignId, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var transcriptArtifact = await db.Artifacts.SingleOrDefaultAsync(
+            a => a.Id == request.TranscriptArtifactId
+                 && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
+        var transcript = transcriptArtifact is null
+            ? null
+            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+        if (transcript is null)
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            return Results.Ok(await research.ResearchAsync(
+                AuthEndpoints.GetUserId(principal), transcript, campaign.Name, ct));
+        }
+        catch (AiNotConfiguredException ex)
+        {
+            // Same contract as the generation endpoints: a missing credential is a reported
+            // condition, not a 500.
+            return Results.Problem(ex.Message, statusCode: 409);
+        }
+    }
+
     private static async Task<IResult> KeywordPlanAsync(
         KeywordPlanRequest request,
         System.Security.Claims.ClaimsPrincipal principal,

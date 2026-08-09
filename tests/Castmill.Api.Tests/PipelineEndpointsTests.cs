@@ -59,6 +59,9 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
             Task.FromResult<IReadOnlyList<SeoKeyword>>(
                 [new SeoKeyword($"{seedKeyword} tutorial", 5400, 22, 0.3, 0.8)]);
 
+        public Task<IReadOnlyList<string>> GetQuestionsAsync(string keyword, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<string>>(["What is a react data grid?"]);
+
         public Task<SeoAnalysis> AnalyzeAsync(string keyword, string? targetUrl, CancellationToken ct)
         {
             using var doc = JsonDocument.Parse("""{"provider":"fake"}""");

@@ -102,9 +102,12 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
                         // no view is mounted (the user may be on another tab). Guarded on
                         // the store still holding THIS campaign — a forced load of the
                         // run's campaign would otherwise hijack a user who switched away.
+                        // RefreshAsync, not LoadAsync(force): a forced load blanks the store
+                        // and raises IsLoading, so the board flashed through its empty state
+                        // once per completed artifact.
                         if (latest.Completed > previouslyCompleted && campaign.CampaignId == campaignId)
                         {
-                            await campaign.LoadAsync(campaignId, force: true);
+                            await campaign.RefreshAsync(campaignId);
                         }
                     }
                 }
@@ -131,7 +134,14 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         }
         catch (HttpRequestException)
         {
-            Error = "Couldn't reach the Castmill API while generating.";
+            // The POST died — but since the server no longer ties the run to the request, the
+            // run itself is very likely still printing. Re-attach through the run row instead
+            // of declaring everything lost: this is exactly the failure that used to truncate
+            // a 13-item run to whatever had landed when the connection blinked.
+            if (!await ReattachAsync(campaignId, ct))
+            {
+                Error = "Lost the connection while generating — the board will show whatever printed.";
+            }
         }
         finally
         {
@@ -144,16 +154,78 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
                 // final reload guarantees the board matches the server. Same hijack guard.
                 if (campaign.CampaignId == campaignId)
                 {
-                    try
-                    {
-                        await campaign.LoadAsync(campaignId, force: true);
-                    }
-                    catch (HttpRequestException)
-                    {
-                        // The board will catch up on its next natural load.
-                    }
+                    // Also a refresh: the run is over, but tearing the board down at the very
+                    // moment the user starts reading it is the worst possible time to flash.
+                    await campaign.RefreshAsync(campaignId);
                 }
             }
         }
     }
+
+    /// <summary>
+    /// Follows a run the request lost by polling its row until it reaches a terminal state.
+    /// A stall guard (no new completions for 5 minutes) stops this from polling a row that
+    /// died with the server process — the startup sweep marks those "Interrupted".
+    /// </summary>
+    private async Task<bool> ReattachAsync(Guid campaignId, CancellationToken ct)
+    {
+        if (Progress is null)
+        {
+            return false; // the POST died before the run row was ever seen — nothing to follow
+        }
+
+        var lastCompleted = Progress.Completed;
+        var lastMovement = DateTimeOffset.UtcNow;
+
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(PollInterval, ct);
+
+            RunProgress latest;
+            try
+            {
+                latest = await generation.GetLatestRunAsync(campaignId, "content", ct);
+            }
+            catch (Exception ex) when (ex is ApiException or HttpRequestException)
+            {
+                if (DateTimeOffset.UtcNow - lastMovement > TimeSpan.FromMinutes(5))
+                {
+                    return false;
+                }
+                continue;
+            }
+
+            if (latest.Id != Progress.Id)
+            {
+                return false; // a newer run superseded this one; let it own the panel
+            }
+
+            Progress = latest;
+            Changed?.Invoke();
+
+            if (latest.Completed > lastCompleted)
+            {
+                lastCompleted = latest.Completed;
+                lastMovement = DateTimeOffset.UtcNow;
+                if (campaign.CampaignId == campaignId)
+                {
+                    await campaign.RefreshAsync(campaignId);
+                }
+            }
+
+            if (latest.Status is "Completed" or "Interrupted")
+            {
+                return true;
+            }
+
+            if (DateTimeOffset.UtcNow - lastMovement > TimeSpan.FromMinutes(5))
+            {
+                Error = "The run stopped reporting progress — the board shows what printed.";
+                return true;
+            }
+        }
+
+        return true;
+    }
+
 }

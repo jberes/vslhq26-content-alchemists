@@ -186,3 +186,52 @@ public sealed record SettingWriteRequest(
     [property: Required, MaxLength(4000)] string Value);
 
 public sealed record SettingResponse(string Key, string Value, DateTimeOffset UpdatedAt);
+
+// ---- SEO/AEO targets: research BEFORE generation, then steering for every generator ----
+
+/// <summary>
+/// One keyword under consideration. Metrics are nullable because the research step must work
+/// with no DataForSEO credential at all — a model-proposed keyword with no volume is still a
+/// usable target, and pretending it has a volume of 0 would be a lie.
+/// </summary>
+public sealed record SeoTarget(
+    [property: Required, MinLength(1), MaxLength(200)] string Term,
+    long? Volume = null,
+    double? Difficulty = null,
+    /// <summary>volume / (difficulty + 10) — the existing ranking heuristic.</summary>
+    double? Opportunity = null,
+    /// <summary>"provider" when DataForSEO returned it, "model" when only the model proposed it.</summary>
+    string Source = "model");
+
+/// <summary>What the research step proposes. Nothing here is persisted until the user picks.</summary>
+public sealed record SeoResearchResponse(
+    IReadOnlyList<SeoTarget> Keywords,
+    /// <summary>Real questions to answer — People-Also-Ask, the knowledge gateway, the transcript.</summary>
+    IReadOnlyList<SeoQuestion> Questions,
+    /// <summary>False when no SEO provider is configured: the keywords are the model's alone.</summary>
+    bool HasProviderMetrics,
+    /// <summary>Anything the user should know about how thin the data is.</summary>
+    IReadOnlyList<string> Notes);
+
+public sealed record SeoQuestion(
+    [property: Required, MinLength(1), MaxLength(300)] string Question,
+    /// <summary>"paa" (Google People also ask), "knowledge-base", or "transcript".</summary>
+    string Source = "transcript");
+
+public sealed record SeoResearchRequest(
+    [property: Required] Guid CampaignId,
+    [property: Required] Guid TranscriptArtifactId);
+
+/// <summary>
+/// The chosen targets, saved on the CAMPAIGN so every later run — including content added
+/// weeks afterwards — is written against the same keywords.
+/// </summary>
+public sealed record SeoTargetsRequest(
+    [property: MaxLength(200)] string? PrimaryKeyword,
+    IReadOnlyList<SeoTarget>? Keywords = null,
+    IReadOnlyList<SeoQuestion>? Questions = null);
+
+public sealed record SeoTargetsResponse(
+    string? PrimaryKeyword,
+    IReadOnlyList<SeoTarget> Keywords,
+    IReadOnlyList<SeoQuestion> Questions);

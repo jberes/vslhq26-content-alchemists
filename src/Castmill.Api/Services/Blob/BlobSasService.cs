@@ -29,6 +29,13 @@ public interface IBlobSasService
     Task<bool> ProbeAsync(CancellationToken ct);
     /// <summary>Server-side read for processing (e.g. transcription). Returns null if the blob doesn't exist.</summary>
     Task<(Stream Stream, long Length)?> OpenReadAsync(string blobPath, CancellationToken ct);
+
+    /// <summary>
+    /// Writes bytes to a private blob from the SERVER. The SAS path puts the browser in direct
+    /// contact with storage, which drags in cross-origin rules that differ per shell; this does
+    /// not, so it works identically from the web client, the desktop shell and a test.
+    /// </summary>
+    Task WriteAsync(string blobPath, Stream content, string contentType, CancellationToken ct);
 }
 
 public sealed class BlobSasService : IBlobSasService
@@ -104,6 +111,22 @@ public sealed class BlobSasService : IBlobSasService
         var properties = await blob.GetPropertiesAsync(cancellationToken: ct);
         var stream = await blob.OpenReadAsync(cancellationToken: ct);
         return (stream, properties.Value.ContentLength);
+    }
+
+    public async Task WriteAsync(string blobPath, Stream content, string contentType, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        var blob = _client.GetBlobContainerClient(_options.PrivateContainer).GetBlobClient(blobPath);
+        await blob.UploadAsync(
+            content,
+            new Azure.Storage.Blobs.Models.BlobUploadOptions
+            {
+                HttpHeaders = new Azure.Storage.Blobs.Models.BlobHttpHeaders { ContentType = contentType },
+            },
+            ct);
     }
 
     public async Task<bool> ProbeAsync(CancellationToken ct)

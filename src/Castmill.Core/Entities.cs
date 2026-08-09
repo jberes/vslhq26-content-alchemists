@@ -30,6 +30,14 @@ public sealed class Campaign : ITenantScoped
     /// No FK constraint; brand delete detaches campaigns explicitly (house style).</summary>
     public Guid? BrandId { get; set; }
 
+    /// <summary>
+    /// The chosen SEO/AEO targets as typed JSON (ADR-003): primary keyword, secondary
+    /// keywords with their metrics, and the questions the content must answer. Lives on the
+    /// campaign rather than the run so a piece added later is written against the same
+    /// targets as the original fan-out.
+    /// </summary>
+    public string? SeoTargetsJson { get; set; }
+
     /// <summary>JSON array of <c>CampaignLink</c> — home page, GitHub pages, docs — that
     /// inform generation. Validated at the boundary (ADR-003 typed-JSON precedent).</summary>
     public string? ContextJson { get; set; }

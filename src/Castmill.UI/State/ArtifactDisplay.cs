@@ -39,7 +39,9 @@ public static class ArtifactDisplay
     public sealed record KindInfo(string Kind, string Label, string Lane, bool Editable, bool OnBoard);
 
     /// <summary>Board lanes in display order. "Other" catches kinds this build doesn't know.</summary>
-    public static readonly string[] LaneOrder = ["Blog", "Social", "Email", "Clips", "Page/SEO", "Other"];
+    // YouTube on top: the package this app exists to produce reads first on the board.
+    public static readonly string[] LaneOrder =
+        ["YouTube", "Blog", "Social", "Email", "Clips", "Page/SEO", "Other"];
 
     /// <summary>
     /// The registry, in display order (in-lane sub-groups follow this order). Images are
@@ -50,6 +52,9 @@ public static class ArtifactDisplay
     public static readonly KindInfo[] Known =
     [
         new("blog", "Blog post", "Blog", Editable: true, OnBoard: true),
+        // Directly after blog so derived choice lists (fan-out, print-more chips) offer it
+        // second; its lane position comes from LaneOrder, not from this row's position.
+        new("youtube", "YouTube package", "YouTube", Editable: true, OnBoard: true),
         new("show-notes", "Show notes", "Blog", Editable: true, OnBoard: true),
         new("social-x", "X post", "Social", Editable: true, OnBoard: true),
         new("social-linkedin", "LinkedIn post", "Social", Editable: true, OnBoard: true),
@@ -140,4 +145,36 @@ public static class ArtifactDisplay
             "Inline " + kind.Replace("inline-", string.Empty, StringComparison.Ordinal),
         _ => KindLabel(kind),
     };
+
+    /// <summary>
+    /// Resolves cited segment ids to the ids the transcript ACTUALLY uses, dropping any that
+    /// match nothing.
+    ///
+    /// Load-bearing, not tidiness. Segment ids are lower-case and zero-padded ("s02") when a
+    /// transcript comes from transcription, but a model routinely cites them as "S02" — and
+    /// ValidateCitations compares case-INsensitively, so that passes validation and is stored
+    /// verbatim. The provenance overlay then looks the row up with [data-seg="S02"], and CSS
+    /// attribute selectors ARE case-sensitive, so every thread found nothing and the connector
+    /// lines silently stopped drawing.
+    /// </summary>
+    public static IReadOnlyList<string> ResolveCitations(
+        IReadOnlyList<string>? cited, IReadOnlyList<Castmill.Core.Ai.TranscriptSegment>? segments)
+    {
+        if (cited is null || cited.Count == 0 || segments is null || segments.Count == 0)
+        {
+            return cited ?? [];
+        }
+
+        var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var segment in segments)
+        {
+            canonical[segment.Id] = segment.Id;
+        }
+
+        // A thread to a segment that does not exist would be a line pointing at nothing.
+        return [.. cited
+            .Select(c => canonical.TryGetValue(c, out var real) ? real : null)
+            .Where(id => id is not null)
+            .Select(id => id!)];
+    }
 }

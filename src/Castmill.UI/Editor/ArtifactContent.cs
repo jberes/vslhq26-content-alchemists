@@ -130,7 +130,11 @@ public static class StructuredContent
     public static bool IsStructured(string kind) =>
         kind.StartsWith("social-", StringComparison.Ordinal)
         || kind is "email-sequence" or "newsletter" or "landing-page" or "show-notes"
-                or "seo-brief" or "seo-keyword-plan" or "keyword-plan" or "clips" or "clip-suggestions";
+                or "seo-brief" or "seo-keyword-plan" or "keyword-plan" or "clips" or "clip-suggestions"
+                // youtube is a PACKAGE (title + alternates + description + chapters + tags),
+                // not a prose body. Without this it fell through to the markdown path, found no
+                // "markdown" field, and Focus rendered the raw JSON envelope on screen.
+                or "youtube";
 
     /// <summary>Formats a structured payload as display markdown. Falls back to pretty JSON.</summary>
     public static string ToDisplayMarkdown(string kind, string? contentJson)
@@ -217,6 +221,65 @@ public static class StructuredContent
                         var t = TimeSpan.FromSeconds(ch.TryGetProperty("startSeconds", out var s) ? s.GetDouble() : 0);
                         md.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"- **{(int)t.TotalMinutes}:{t.Seconds:00}** {Str(ch, "title")}");
                     }
+                }
+            }
+            else if (kind == "youtube")
+            {
+                // Laid out in the order it gets used: the title you paste, the alternates you
+                // A/B, then the description exactly as it must be pasted.
+                md.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"# {Str(c, "title")}");
+                md.AppendLine();
+
+                if (c.TryGetProperty("titleVariants", out var variants) && variants.GetArrayLength() > 0)
+                {
+                    md.AppendLine("## Title options to A/B test");
+                    md.AppendLine();
+
+                    var n = 0;
+                    foreach (var variant in variants.EnumerateArray())
+                    {
+                        var text = variant.GetString();
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            continue;
+                        }
+
+                        n++;
+                        // The character count is the actionable part: past ~60 YouTube truncates
+                        // the title in search, so a writer needs to see it without counting.
+                        md.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                            $"{n}. {text}  *({text.Length} chars)*");
+                    }
+
+                    md.AppendLine();
+                }
+
+                md.AppendLine("## Description");
+                md.AppendLine();
+                md.AppendLine(Str(c, "description"));
+                md.AppendLine();
+
+                if (c.TryGetProperty("chapters", out var ytChapters) && ytChapters.GetArrayLength() > 0)
+                {
+                    md.AppendLine("## Chapters");
+                    md.AppendLine();
+                    foreach (var ch in ytChapters.EnumerateArray())
+                    {
+                        var t = TimeSpan.FromSeconds(ch.TryGetProperty("startSeconds", out var s2) ? s2.GetDouble() : 0);
+                        md.AppendLine(System.Globalization.CultureInfo.InvariantCulture,
+                            $"- **{(int)t.TotalMinutes}:{t.Seconds:00}** {Str(ch, "title")}");
+                    }
+
+                    md.AppendLine();
+                }
+
+                if (c.TryGetProperty("tags", out var ytTags) && ytTags.GetArrayLength() > 0)
+                {
+                    md.AppendLine("## Tags");
+                    md.AppendLine();
+                    md.AppendLine(string.Join(", ", ytTags.EnumerateArray()
+                        .Select(t => t.GetString())
+                        .Where(t => !string.IsNullOrWhiteSpace(t))));
                 }
             }
             else if (kind == "seo-brief")

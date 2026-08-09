@@ -20,4 +20,14 @@ public sealed class RefreshToken
     public DateTimeOffset? RevokedAt { get; set; }
 
     public bool IsActive(DateTimeOffset now) => RevokedAt is null && UsedAt is null && now < ExpiresAt;
+
+    /// <summary>
+    /// Consumed moments ago, and nothing worse: eligible for the reuse grace. Distinct from
+    /// revoked or expired, which never get grace — only the crash/race/retry shape does.
+    /// </summary>
+    public bool IsWithinReuseGrace(DateTimeOffset now, TimeSpan grace) =>
+        RevokedAt is null
+        && now < ExpiresAt
+        && UsedAt is { } used
+        && now - used <= grace;
 }

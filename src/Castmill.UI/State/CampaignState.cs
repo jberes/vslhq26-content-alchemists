@@ -166,6 +166,52 @@ public sealed class CampaignState(CampaignsClient campaigns)
         return _inFlight;
     }
 
+    /// <summary>
+    /// Re-reads the SAME campaign in place: fetch first, then swap. Nothing is blanked and
+    /// IsLoading is never raised, so no view flickers through its loading state.
+    ///
+    /// This exists because <see cref="LoadAsync"/> deliberately clears the store before
+    /// fetching — right when SWITCHING campaigns, where showing the previous campaign's
+    /// artifacts under the new name would be a lie, and wrong when refreshing the one already
+    /// on screen. A press run refreshed after every completed artifact, so a 13-item run tore
+    /// the whole board down and rebuilt it 13 times: that is the flashing.
+    ///
+    /// Silent by design — a refresh that fails leaves the last good board up, because the
+    /// press run's final reconciliation will correct it anyway.
+    /// </summary>
+    public async Task RefreshAsync(Guid campaignId)
+    {
+        if (CampaignId != campaignId)
+        {
+            return;
+        }
+
+        try
+        {
+            var preview = await campaigns.GetPreviewAsync(campaignId);
+
+            // The user may have switched campaigns while this was in flight.
+            if (CampaignId != campaignId)
+            {
+                return;
+            }
+
+            Campaign = preview.Campaign;
+            Brand = preview.Brand;
+            Artifacts = preview.Artifacts;
+            ImageSlots = preview.ImageSlots;
+            ImagesFilled = preview.ImagesFilled;
+            ImagesTotal = preview.ImagesTotal;
+
+            // The transcript does not change during a run, so it is not re-fetched here —
+            // that request was pure cost on every single completion.
+            RaiseChanged();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+        }
+    }
+
     private async Task LoadCoreAsync(Guid campaignId)
     {
         try

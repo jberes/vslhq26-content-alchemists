@@ -25,8 +25,14 @@ public sealed record BrandStyleCard(
 
 /// <summary>Draft a brand from its public website. The result is never saved automatically —
 /// it populates the editor for the user to accept or change.</summary>
+/// <summary>
+/// At least one of <c>Url</c> and <c>Notes</c> must be supplied. Notes is whatever the user
+/// pastes — a brand guide, a voice doc, an email from marketing — and is treated as more
+/// authoritative than the website, because it was written on purpose.
+/// </summary>
 public sealed record BrandLookupRequest(
-    [property: Required, MinLength(4), MaxLength(2000)] string Url);
+    [property: MaxLength(2000)] string? Url = null,
+    [property: MaxLength(60000)] string? Notes = null);
 
 public sealed record BrandLookupResponse(
     string Name, BrandStyleCard StyleCard, string SourceUrl, IReadOnlyList<string> Notes);
@@ -47,6 +53,10 @@ public sealed record BrandAssetLinkRequest(
     [property: Required] Guid AssetId,
     [property: Required, MaxLength(20)] string Kind,
     [property: MaxLength(200)] string? Label);
+
+/// <summary>Rename only — the label IS the prompt text, so it must be editable in place
+/// without re-uploading the file it describes.</summary>
+public sealed record BrandAssetLabelRequest([property: MaxLength(200)] string? Label);
 
 public sealed record BrandAssetResponse(
     Guid Id, Guid BrandId, Guid AssetId, string Kind, string? Label,

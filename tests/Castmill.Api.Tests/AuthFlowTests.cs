@@ -82,21 +82,32 @@ public sealed class AuthFlowTests(CastmillApiFactory factory)
     [Fact]
     public async Task Refresh_rotates_and_reuse_revokes_the_whole_family()
     {
-        var (_, first) = await RegisterAsync();
+        // Grace zero: this test is specifically about the STRICT reuse-detection path. The
+        // 60-second grace (RefreshReuseGraceTests) turns an immediate replay into a second
+        // rotation on purpose — which is a different, deliberately-tested behaviour, not a
+        // regression of this one.
+        await using var app = factory.WithWebHostBuilder(b =>
+            b.UseSetting("Jwt:RefreshReuseGraceSeconds", "0"));
+        var client = app.CreateClient();
+
+        var user = NewUser();
+        (await client.PostAsJsonAsync("/api/v1/auth/register", user)).EnsureSuccessStatusCode();
+        var first = await (await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest(user.Email, user.Password))).Content.ReadFromJsonAsync<AuthResponse>();
 
         // Legitimate rotation succeeds.
-        var rotate = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first.RefreshToken));
+        var rotate = await client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first!.RefreshToken));
         Assert.Equal(HttpStatusCode.OK, rotate.StatusCode);
         var second = await rotate.Content.ReadFromJsonAsync<AuthResponse>();
         Assert.NotNull(second);
-        Assert.NotEqual(first.RefreshToken, second.RefreshToken);
+        Assert.NotEqual(first.RefreshToken, second!.RefreshToken);
 
         // Replaying the already-used token is reuse → 401 …
-        var replay = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first.RefreshToken));
+        var replay = await client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(first.RefreshToken));
         Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
 
         // … and the reuse revoked the descendant token too (family revocation).
-        var descendant = await _client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(second.RefreshToken));
+        var descendant = await client.PostAsJsonAsync("/api/v1/auth/refresh", new RefreshRequest(second.RefreshToken));
         Assert.Equal(HttpStatusCode.Unauthorized, descendant.StatusCode);
     }
 

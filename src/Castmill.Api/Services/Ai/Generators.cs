@@ -46,6 +46,54 @@ public static class Generators
     {
         var specs = new List<GeneratorSpec>();
 
+        // YouTube is its own category, not a social post: the description is a long-form SEO
+        // surface with its own conventions (front-loaded keywords, chapters, a link block),
+        // and the title is A/B tested, so one title is not enough.
+        specs.Add(new GeneratorSpec(
+            "youtube",
+            """
+            Write the YouTube package for this video.
+            JSON schema: {
+              "title": string,
+              "titleVariants": [ string ],
+              "description": string,
+              "chapters": [ { "startSeconds": number, "title": string } ],
+              "tags": [ string ],
+              "citations": string[]
+            }
+
+            Produce ONE package — the single best description you can write. The only thing
+            there are alternatives of is the title.
+
+            "title" is the recommended title. "titleVariants" holds EXACTLY 3 further titles to
+            A/B test — genuinely different angles (outcome, curiosity, problem), not rewordings
+            of one another. Every title, including "title", must:
+            - be under 60 characters, or search truncates it;
+            - carry the primary keyword in the first half, where it is weighted and always
+              visible;
+            - read as a phrase a person would actually type or ask.
+
+            Answer-engine optimisation matters as much as search here: the description is what
+            an AI assistant quotes when asked about this topic. So state the answer plainly
+            somewhere in the first two paragraphs — a direct, self-contained sentence that makes
+            sense lifted out of context, with no "in this video" preamble. Prefer the concrete
+            noun over the clever one.
+
+            "description":
+            - The first 2 lines are the only ones shown before "...more" — put the payoff and
+              the primary keyword there, and never open with a greeting.
+            - Then 2-4 short paragraphs, written for a reader, that naturally carry the terms
+              someone would search for. No keyword stuffing.
+            - Then a "Chapters:" section listing each chapter as "M:SS Title", starting at 0:00
+              (YouTube only creates chapters when the first is 0:00 and there are 3 or more).
+            - Then leave the exact line {{LINKS}} on its own where the link block belongs. Do
+              not invent URLs; that placeholder is replaced with the real ones.
+
+            "chapters" must be in ascending order, start at 0, and come from real transcript
+            moments. "tags" is 8-15 specific search terms, no hashes.
+            """,
+            (json, t) => ValidateCommon(json, t, requireArray: "chapters", minItems: 1)));
+
         foreach (var platform in SocialPlatforms)
         {
             var cap = PlatformLimits.MaxChars[platform];

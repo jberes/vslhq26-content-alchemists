@@ -519,3 +519,49 @@
         animation: none;
     }
 }
+
+/* ---- File inputs ------------------------------------------------------------------ */
+
+/* The browser's default "Choose Files" chrome is the one control in the app that ignored the
+   design system — wrong size, wrong colour, wrong font, different on every OS. It cannot be
+   restyled from the outside, only through ::file-selector-button, so the values here mirror
+   .cm-button rather than reusing it. Keep the two in step. */
+input[type="file"] {
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-meta);
+    color: var(--cm-on-surface-muted);
+}
+
+input[type="file"]::file-selector-button {
+    margin-inline-end: var(--cm-space-3);
+    padding: var(--cm-space-2) var(--cm-space-4);
+    border: 1px solid transparent;
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-accent-strong);
+    color: var(--cm-on-accent);
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-body);
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background var(--cm-motion), border-color var(--cm-motion), color var(--cm-motion);
+}
+
+input[type="file"]::file-selector-button:hover {
+    background: var(--cm-accent-hover);
+}
+
+/* Focus lands on the input, but the BUTTON is what the user sees — so the ring has to be
+   drawn there or keyboard focus appears to vanish. */
+input[type="file"]:focus-visible::file-selector-button {
+    /* Same ring the global :focus-visible rule in base.css draws. */
+    outline: 2px solid var(--cm-accent-strong);
+    outline-offset: 2px;
+}
+
+input[type="file"]:disabled::file-selector-button {
+    background: var(--cm-surface-sunken);
+    color: var(--cm-on-surface-muted);
+    border-color: var(--cm-rule);
+    cursor: not-allowed;
+}

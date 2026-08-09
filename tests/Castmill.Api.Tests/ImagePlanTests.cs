@@ -417,6 +417,29 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     /// <summary>
+    /// The thumbnail is the SEO surface YouTube actually shows, so text in it should carry
+    /// the campaign's primary keyword — as phrasing, never as a painted keyword list. Riding
+    /// on ComposeEffectivePrompt puts it on every slot generation, after the brand style and
+    /// before the user's adjustment.
+    /// </summary>
+    [Fact]
+    public void The_primary_keyword_steers_image_text_without_being_stuffed()
+    {
+        var prompt = Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt(
+            "a bold thumbnail", "Brand style: terracotta.", "warmer light", "react data grid");
+
+        Assert.Contains("\"react data grid\"", prompt, StringComparison.Ordinal);
+        Assert.Contains("Never render a list of keywords", prompt, StringComparison.Ordinal);
+        // The user's adjustment stays the LAST word.
+        Assert.True(prompt.IndexOf("react data grid", StringComparison.Ordinal)
+            < prompt.IndexOf("Adjustment:", StringComparison.Ordinal));
+
+        // And a campaign without targets composes exactly as before.
+        Assert.DoesNotContain("keyword", Castmill.Api.Endpoints.ImageSlotEndpoints
+            .ComposeEffectivePrompt("a bold thumbnail", null, null, null), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Blog image slots hang off a specific blog, so a test that wants them needs a blog to
     /// hang them from — reserving campaign-wide no longer creates any.
     /// </summary>

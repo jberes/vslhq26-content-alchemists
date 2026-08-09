@@ -36,6 +36,13 @@ public interface ISeoProvider
     Task<IReadOnlyList<SeoKeyword>> GetSuggestionsAsync(string seedKeyword, int limit, CancellationToken ct);
     /// <summary>One-keyword analysis used by /seo/analyze + the share snapshot.</summary>
     Task<SeoAnalysis> AnalyzeAsync(string keyword, string? targetUrl, CancellationToken ct);
+
+    /// <summary>
+    /// The questions Google shows for a keyword — "People also ask", plus any
+    /// related_searches phrased as a question. This is the answer-engine half of the
+    /// research: real questions people type, not questions a model imagined.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetQuestionsAsync(string keyword, CancellationToken ct);
 }
 
 /// <summary>
@@ -117,6 +124,86 @@ public sealed class DataForSeoProvider(
             suggestions,
             [.. suggestions.OrderByDescending(Opportunity).Take(5).Select(s => s.Term)],
             raw.RootElement.Clone());
+    }
+
+    public async Task<IReadOnlyList<string>> GetQuestionsAsync(string keyword, CancellationToken ct)
+    {
+        // Advanced, not regular: the "people_also_ask" and "related_searches" blocks only
+        // appear in the advanced SERP payload. depth 20 is one page — enough for the PAA box,
+        // and every extra page is billed.
+        using var doc = await PostAsync("v3/serp/google/organic/live/advanced", new[]
+        {
+            new
+            {
+                keyword,
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+                depth = 20,
+            },
+        }, ct);
+
+        var questions = new List<string>();
+
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var type = Str(item, "type");
+
+            if (type == "people_also_ask" && item.TryGetProperty("items", out var paa)
+                && paa.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in paa.EnumerateArray())
+                {
+                    Add(Str(entry, "title"));
+                }
+            }
+            else if (type == "related_searches" && item.TryGetProperty("items", out var related)
+                     && related.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in related.EnumerateArray())
+                {
+                    // Related searches are mostly phrases, not questions. Only the ones that
+                    // ARE questions belong in an answer-engine brief.
+                    var text = entry.ValueKind == JsonValueKind.String ? entry.GetString() : null;
+                    if (LooksLikeQuestion(text))
+                    {
+                        Add(text);
+                    }
+                }
+            }
+        }
+
+        return questions;
+
+        void Add(string? text)
+        {
+            var trimmed = text?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed)
+                && !questions.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+            {
+                questions.Add(trimmed);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A question by shape, not by punctuation: Google's related searches routinely drop the
+    /// question mark ("how to build a react data grid").
+    /// </summary>
+    internal static bool LooksLikeQuestion(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (text.Contains('?', StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var first = text.TrimStart().Split(' ', 2)[0].ToLowerInvariant();
+        return first is "how" or "what" or "why" or "when" or "where" or "which"
+            or "who" or "can" or "does" or "do" or "is" or "are" or "should";
     }
 
     /// <summary>Ranking heuristic: reward volume, punish difficulty.</summary>

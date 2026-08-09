@@ -12,7 +12,12 @@ public sealed record BrandLookupResult(
 
 public interface IBrandLookup
 {
-    Task<BrandLookupResult> LookupAsync(Guid userId, string url, CancellationToken ct);
+    /// <summary>
+    /// Drafts a style card from a website, from pasted material, or from both. At least one
+    /// must be present. When both are, the pasted material wins any disagreement — someone
+    /// wrote it deliberately, whereas a home page is marketing copy we are reverse-engineering.
+    /// </summary>
+    Task<BrandLookupResult> LookupAsync(Guid userId, string? url, string? notes, CancellationToken ct);
 }
 
 /// <summary>
@@ -31,10 +36,26 @@ public sealed partial class BrandLookup(
     /// <summary>Enough of a page to characterise a brand; far short of a download.</summary>
     private const int MaxBytes = 512 * 1024;
 
-    public async Task<BrandLookupResult> LookupAsync(Guid userId, string url, CancellationToken ct)
+    public async Task<BrandLookupResult> LookupAsync(
+        Guid userId, string? url, string? notes, CancellationToken ct)
     {
-        var target = await ValidateAsync(url, ct);
-        var notes = new List<string>();
+        var hasUrl = !string.IsNullOrWhiteSpace(url);
+        var hasNotes = !string.IsNullOrWhiteSpace(notes);
+        if (!hasUrl && !hasNotes)
+        {
+            throw new BrandLookupException("Give a URL, some pasted context, or both.");
+        }
+
+        // Notes alone is a complete request: a marketing team's voice doc is better material
+        // than a home page, and requiring a URL for it would be arbitrary.
+        if (!hasUrl)
+        {
+            var fromNotes = await DraftAsync(userId, EmptyPage, notes, ct);
+            return new BrandLookupResult(fromNotes.Name, fromNotes.StyleCard, "pasted context", []);
+        }
+
+        var target = await ValidateAsync(url!, ct);
+        var remarks = new List<string>();
 
         using var client = httpClientFactory.CreateClient("brandlookup");
         using var request = new HttpRequestMessage(HttpMethod.Get, target);
@@ -54,17 +75,17 @@ public sealed partial class BrandLookup(
 
         if (string.IsNullOrWhiteSpace(page.Text))
         {
-            notes.Add("The page had almost no readable text — it may be script-rendered.");
+            remarks.Add("The page had almost no readable text — it may be script-rendered.");
         }
         if (page.Colors.Count == 0)
         {
-            notes.Add("No palette was declared in the page's markup; colours are the model's reading.");
+            remarks.Add("No palette was declared in the page's markup; colours are the model's reading.");
         }
 
-        var card = await DraftAsync(userId, page, ct);
+        var card = await DraftAsync(userId, page, notes, ct);
         return new BrandLookupResult(
             string.IsNullOrWhiteSpace(card.Name) ? page.SiteName ?? target.Host : card.Name,
-            card.StyleCard, target.ToString(), notes);
+            card.StyleCard, target.ToString(), remarks);
     }
 
     /// <summary>
@@ -231,7 +252,12 @@ public sealed partial class BrandLookup(
 
     private sealed record Draft(string Name, BrandStyleCard StyleCard);
 
-    private async Task<Draft> DraftAsync(Guid userId, PageSignals page, CancellationToken ct)
+    /// <summary>Stands in for a page when only pasted material was supplied.</summary>
+    private static readonly PageSignals EmptyPage =
+        new(null, null, null, [], [], string.Empty, "(no website supplied)");
+
+    private async Task<Draft> DraftAsync(
+        Guid userId, PageSignals page, string? notes, CancellationToken ct)
     {
         var prompt = $$"""
             You are drafting a brand style card for a marketing tool, from one page of the
@@ -265,7 +291,8 @@ public sealed partial class BrandLookup(
             Declared fonts: {{(page.Fonts.Count > 0 ? string.Join(", ", page.Fonts) : "(none found)")}}
 
             Page text:
-            {{page.Text}}
+            {{(string.IsNullOrWhiteSpace(page.Text) ? "(no website supplied)" : page.Text)}}
+            {{PastedBlock(notes)}}
             """;
 
         var client = await chatProviders.ResolveAsync(userId, "chat", ct);
@@ -322,6 +349,34 @@ public sealed partial class BrandLookup(
                 .ToList();
             return colors.Count > 0 ? colors : null;
         }
+    }
+
+    /// <summary>
+    /// Pasted material outranks the website, and the prompt has to say so explicitly —
+    /// otherwise the model averages a deliberate voice doc together with home-page copy.
+    /// Capped because a pasted brand guide can be enormous.
+    /// </summary>
+    private static string PastedBlock(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = notes.Trim();
+        if (trimmed.Length > 40_000)
+        {
+            trimmed = trimmed[..40_000];
+        }
+
+        return $"""
+
+            Material the brand's own team supplied. This is AUTHORITATIVE: where it disagrees
+            with the website, follow this. Where it states a voice, palette or image direction
+            outright, use it verbatim rather than paraphrasing.
+
+            {trimmed}
+            """;
     }
 
     [GeneratedRegex(@"<title[^>]*>(.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline)]

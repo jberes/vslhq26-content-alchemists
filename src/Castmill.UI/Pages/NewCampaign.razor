@@ -14,6 +14,7 @@
 @using Castmill.UI.Platform
 @using Castmill.UI.State
 @inject BrandsClient Brands
+@inject SeoClient Seo
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
 @inject WorkspaceState Workspace
@@ -26,7 +27,7 @@
 
 <div class="cm-page"><div class="cm-measure--dashboard cm-run">
     <header class="cm-front__head">
-        <span class="cm-kicker">Step @((int)_step + 1) of 3</span>
+        <span class="cm-kicker">Step @((int)_step + 1) of @(Enum.GetValues<Step>().Length)</span>
         <h1>@StepTitle</h1>
     </header>
 
@@ -134,9 +135,51 @@
             }
         </section>
     }
-    else
+    else if (_step == Step.Brief)
     {
         <section class="cm-run__panel">
+            @* The brief is drafted from the transcript the moment this step opens, so the
+               default state is "review what the machine understood" rather than "fill in four
+               empty boxes". Every field stays editable — this replaces the typing, not the
+               judgement. *@
+            @if (_briefing)
+            {
+                <div class="cm-brief__reading" role="status">
+                    <span class="cm-spinner" aria-hidden="true"></span>
+                    <span>Reading the transcript and drafting the brief…</span>
+                </div>
+            }
+            else if (_summary is { } summary)
+            {
+                <div class="cm-brief__summary">
+                    <div class="cm-brief__summary-head">
+                        <span class="cm-kicker">What this source says</span>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
+                            Re-read
+                        </button>
+                    </div>
+                    <p>@summary</p>
+                    @if (_keyPoints.Count > 0)
+                    {
+                        <ul class="cm-brief__points">
+                            @foreach (var point in _keyPoints)
+                            {
+                                <li>@point</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+            else if (_briefError is { } briefError)
+            {
+                <p class="cm-form__error" role="alert">
+                    Couldn't draft the brief — @briefError
+                    <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
+                        Try again
+                    </button>
+                </p>
+            }
+
             <div class="cm-brief">
                 <label class="cm-field">
                     <span class="cm-field__label">Title</span>
@@ -176,8 +219,8 @@
             </p>
             @foreach (var link in _links)
             {
-                <div class="cm-brand__color-row">
-                    <input class="cm-input cm-brand__color-role" placeholder="Label (Home page…)"
+                <div class="cm-links__row">
+                    <input class="cm-input" placeholder="Label (Home page…)"
                            maxlength="100" @bind="link.Label" />
                     <input class="cm-input" placeholder="https://…" maxlength="2000" @bind="link.Url" />
                     <button type="button" class="cm-tree__delete" aria-label="Remove link"
@@ -207,10 +250,144 @@
             }
 
             <div class="cm-form__actions">
-                <button type="button" class="cm-button" disabled="@_busy" @onclick="PressRunAsync">
-                    @(_busy ? "Starting the run…" : "Press Run")
+                <button type="button" class="cm-button" disabled="@_busy" @onclick="GoToTargetsAsync">
+                    Next — search targets
                 </button>
                 <span class="cm-meta">@_fanOut.Count(f => f.Selected) of @_fanOut.Count selected</span>
+            </div>
+        </section>
+    }
+    else if (_step == Step.Targets)
+    {
+        <section class="cm-run__panel">
+            @* Research BEFORE the fan-out, so every generator is written to a target instead of
+               being analysed afterwards. The top three are pre-selected and "Press Run" is one
+               click away — the careful path is available, not compulsory. *@
+            @if (_researching)
+            {
+                <div class="cm-brief__reading" role="status">
+                    <span class="cm-spinner" aria-hidden="true"></span>
+                    <span>Researching keywords and the questions people ask…</span>
+                </div>
+            }
+            else
+            {
+                @if (_researchNotes.Count > 0)
+                {
+                    @foreach (var note in _researchNotes)
+                    {
+                        <p class="cm-meta">@note</p>
+                    }
+                }
+
+                <h2 class="cm-front__block-title">
+                    Keywords
+                    <span class="cm-mono cm-meta">(@_targets.Count(t => t.Selected) selected)</span>
+                </h2>
+                <p class="cm-meta">
+                    The primary keyword goes in the title, the first heading and the opening
+                    paragraph of everything printed.
+                    @if (!_hasMetrics)
+                    {
+                        <text>No volume data — these are the model's reading of your source.</text>
+                    }
+                </p>
+
+                @if (_targets.Count == 0)
+                {
+                    <p class="cm-meta">No keywords came back. You can run without targets.</p>
+                }
+                else
+                {
+                    <ul class="cm-targets">
+                        @foreach (var target in _targets)
+                        {
+                            <li class="cm-targets__row @(target.Selected ? "cm-targets__row--on" : null)">
+                                <label class="cm-targets__pick">
+                                    <input type="checkbox" checked="@target.Selected"
+                                           @onchange="e => Toggle(target, e)" />
+                                    <span>@target.Term</span>
+                                </label>
+                                <button type="button"
+                                        class="cm-primary-pick @(IsPrimary(target) ? "cm-primary-pick--on" : null)"
+                                        aria-pressed="@(IsPrimary(target) ? "true" : "false")"
+                                        title="Make this the primary keyword"
+                                        @onclick="() => MakePrimary(target)">
+                                    @(IsPrimary(target) ? "★ Primary" : "Set primary")
+                                </button>
+                                <span class="cm-mono cm-meta">
+                                    @(target.Volume is { } v ? $"{v:N0}/mo" : "—")
+                                </span>
+                                <span class="cm-mono cm-meta">
+                                    @(target.Difficulty is { } d ? $"KD {d:0}" : "—")
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                @* Free-form entry: research proposes, but you know your product — a keyword the
+                   transcript never says out loud is often the one worth targeting. Added with a
+                   source of "manual" and no metrics, honestly. *@
+                <div class="cm-links__row cm-targets__add">
+                    <input class="cm-input" placeholder="Add a keyword of your own…"
+                           aria-label="Add a keyword"
+                           @bind="_manualKeyword" @bind:event="oninput"
+                           @onkeydown="@(e => { if (e.Key == "Enter") AddManualKeyword(); })" />
+                    <button type="button" class="cm-button cm-button--quiet"
+                            disabled="@string.IsNullOrWhiteSpace(_manualKeyword)"
+                            @onclick="AddManualKeyword">+ Add keyword</button>
+                </div>
+
+                <h2 class="cm-front__block-title">
+                    Questions to answer
+                    <span class="cm-mono cm-meta">(@_questions.Count(q => q.Selected) selected)</span>
+                </h2>
+                <p class="cm-meta">
+                    Each selected question is answered in a self-contained sentence — that is what
+                    an AI assistant can quote when someone asks.
+                </p>
+
+                @if (_questions.Count == 0)
+                {
+                    <p class="cm-meta">No questions found for this source.</p>
+                }
+                else
+                {
+                    <ul class="cm-targets">
+                        @foreach (var question in _questions)
+                        {
+                            <li class="cm-targets__row @(question.Selected ? "cm-targets__row--on" : null)">
+                                <label class="cm-targets__pick">
+                                    <input type="checkbox" checked="@question.Selected"
+                                           @onchange="e => ToggleQuestion(question, e)" />
+                                    <span>@question.Question</span>
+                                </label>
+                                <span class="cm-chip cm-mono">@QuestionSource(question.Source)</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+
+            @if (_error is not null)
+            {
+                <p class="cm-form__error" role="alert">@_error</p>
+            }
+
+            <div class="cm-form__actions">
+                <button type="button" class="cm-button" disabled="@(_busy || _researching)"
+                        @onclick="PressRunAsync">
+                    @(_busy ? "Starting the run…" : "Press Run")
+                </button>
+                <button type="button" class="cm-button cm-button--quiet" disabled="@_busy"
+                        @onclick="() => _step = Step.Brief">
+                    Back
+                </button>
+                <span class="cm-meta">
+                    @(_targets.Count(t => t.Selected)) keywords ·
+                    @(_questions.Count(q => q.Selected)) questions
+                </span>
             </div>
         </section>
     }
@@ -223,6 +400,7 @@
         Source,
         Transcribing,
         Brief,
+        Targets,
     }
 
     private sealed class FanOutItem(string kind, string label, bool selected = true)
@@ -244,20 +422,38 @@
     // "social" expands to the six real per-platform generator kinds at submit — the
     // orchestrator matches kinds exactly. Image slots are reserved automatically by any
     // run, so there is no image checkbox: pixels only ever come from the Image Studio.
-    private readonly List<FanOutItem> _fanOut =
-    [
-        new("blog", "Blog post"),
-        new("social", "Social set (6 platforms)", selected: false),
-        new("email-sequence", "Email sequence", selected: false),
-        new("newsletter", "Newsletter", selected: false),
-        new("landing-page", "Landing page", selected: false),
-        new("show-notes", "Show notes", selected: false),
-        new("clip-suggestions", "Clip suggestions", selected: false),
-        new("seo-brief", "SEO brief", selected: false),
-    ];
+    /// <summary>
+    /// Derived from the kind registry, never listed by hand — a hand-kept copy here is how
+    /// "youtube" shipped as a generator, a lane and a board chip while the ONE surface that
+    /// starts a full run never offered it. YouTube leads and is on by default: a perfect
+    /// YouTube package is the app's founding use case.
+    /// </summary>
+    private readonly List<FanOutItem> _fanOut = BuildFanOutChoices();
+
+    private static List<FanOutItem> BuildFanOutChoices()
+    {
+        var items = new List<FanOutItem>
+        {
+            new("youtube", "YouTube package"),
+            new("blog", "Blog post"),
+            new("social", "Social set (6 platforms)", selected: false),
+        };
+
+        items.AddRange(ArtifactDisplay.Known
+            .Where(k => k.OnBoard
+                        && k.Lane != "Social"
+                        && k.Kind is not ("blog" or "youtube" or "seo-keyword-plan"))
+            .Select(k => new FanOutItem(k.Kind, k.Label, selected: false)));
+
+        return items;
+    }
 
     private static string[] ExpandKinds(IEnumerable<string> kinds) =>
-        kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]).ToArray();
+        // image-prompts always rides along on the initial run: it is what seeds the reserved
+        // image slots, and omitting it here is why campaigns sat at 0/6 images until someone
+        // pressed "Seed all prompts" by hand.
+        [.. kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]),
+         "image-prompts"];
 
     private sealed class LinkRow
     {
@@ -283,6 +479,268 @@
     private PickedMedia? _picked;
 
     private bool CanStart => _name.Trim().Length > 0 && _transcript.Trim().Length > 40;
+
+    // ---- Targets step -----------------------------------------------------------------
+
+    private sealed class TargetRow
+    {
+        public required string Term { get; init; }
+
+        public long? Volume { get; init; }
+
+        public double? Difficulty { get; init; }
+
+        public double? Opportunity { get; init; }
+
+        public required string Source { get; init; }
+
+        public bool Selected { get; set; }
+    }
+
+    private sealed class QuestionRow
+    {
+        public required string Question { get; init; }
+
+        public required string Source { get; init; }
+
+        public bool Selected { get; set; }
+    }
+
+    private readonly List<TargetRow> _targets = [];
+    private string _manualKeyword = string.Empty;
+    private readonly List<QuestionRow> _questions = [];
+    private readonly List<string> _researchNotes = [];
+    private bool _researching;
+    private bool _hasMetrics;
+    private string? _primaryKeyword;
+
+    private bool IsPrimary(TargetRow row) =>
+        string.Equals(row.Term, _primaryKeyword, StringComparison.OrdinalIgnoreCase);
+
+    private static string QuestionSource(string source) => source switch
+    {
+        "paa" => "people also ask",
+        "knowledge-base" => "knowledge base",
+        _ => "from the source",
+    };
+
+    private void Toggle(TargetRow row, ChangeEventArgs e)
+    {
+        row.Selected = e.Value is true;
+
+        // Deselecting the primary must not leave a primary nothing else mentions.
+        if (!row.Selected && IsPrimary(row))
+        {
+            _primaryKeyword = _targets.FirstOrDefault(t => t.Selected)?.Term;
+        }
+        else if (row.Selected && _primaryKeyword is null)
+        {
+            _primaryKeyword = row.Term;
+        }
+    }
+
+    private void ToggleQuestion(QuestionRow row, ChangeEventArgs e) => row.Selected = e.Value is true;
+
+    /// <summary>
+    /// Adds a keyword the user typed. Deduplicated against what research already returned so a
+    /// hand-typed "react data grid" does not shadow the one that carries volume data. New
+    /// entries are pre-selected — you typed it because you want it.
+    /// </summary>
+    private void AddManualKeyword()
+    {
+        var term = _manualKeyword.Trim();
+        if (term.Length == 0)
+        {
+            return;
+        }
+
+        var existing = _targets.FirstOrDefault(t => string.Equals(t.Term, term, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            existing.Selected = true;
+        }
+        else
+        {
+            _targets.Insert(0, new TargetRow { Term = term, Source = "manual", Selected = true });
+        }
+
+        _primaryKeyword ??= term;
+        _manualKeyword = string.Empty;
+    }
+
+    private void MakePrimary(TargetRow row)
+    {
+        _primaryKeyword = row.Term;
+        // Being primary implies being chosen; the alternative is a silent no-op.
+        row.Selected = true;
+    }
+
+    /// <summary>
+    /// Moves to the Targets step and researches in the background. The step is shown
+    /// immediately rather than after the research: a blank wait with no context is worse than
+    /// a visible step that fills in.
+    /// </summary>
+    private async Task GoToTargetsAsync()
+    {
+        _step = Step.Targets;
+        _error = null;
+        await ResearchAsync();
+    }
+
+    private async Task ResearchAsync()
+    {
+        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _researching = true;
+        _targets.Clear();
+        _questions.Clear();
+        _researchNotes.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var research = await Seo.ResearchAsync(campaignId, transcriptId);
+
+            _hasMetrics = research.HasProviderMetrics;
+            _researchNotes.AddRange(research.Notes);
+
+            _targets.AddRange(research.Keywords.Select(k => new TargetRow
+            {
+                Term = k.Term,
+                Volume = k.Volume,
+                Difficulty = k.Difficulty,
+                Opportunity = k.Opportunity,
+                Source = k.Source,
+            }));
+
+            // The low-friction default: the three best are already chosen and the top one is
+            // primary, so "Press Run" is one click. Everything else is a refinement.
+            foreach (var row in _targets.Take(3))
+            {
+                row.Selected = true;
+            }
+
+            _primaryKeyword = _targets.FirstOrDefault()?.Term;
+
+            _questions.AddRange(research.Questions.Select(q => new QuestionRow
+            {
+                Question = q.Question,
+                Source = q.Source,
+            }));
+
+            foreach (var row in _questions.Take(5))
+            {
+                row.Selected = true;
+            }
+        }
+        catch (ApiException ex)
+        {
+            // Research failing must not block the run — targets are an improvement, not a gate.
+            _researchNotes.Add($"Keyword research is unavailable ({ex.Message}) — you can run without targets.");
+        }
+        catch (HttpRequestException)
+        {
+            _researchNotes.Add("Couldn't reach the Castmill API for keyword research — you can run without targets.");
+        }
+        finally
+        {
+            _researching = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Saves the chosen targets so every generator in the run — and any content added
+    /// later — reads them.</summary>
+    private async Task SaveTargetsAsync(Guid campaignId)
+    {
+        var keywords = _targets
+            .Where(t => t.Selected)
+            .Select(t => new SeoTarget(t.Term, t.Volume, t.Difficulty, t.Opportunity, t.Source))
+            .ToList();
+
+        var questions = _questions
+            .Where(q => q.Selected)
+            .Select(q => new SeoQuestion(q.Question, q.Source))
+            .ToList();
+
+        if (keywords.Count == 0 && questions.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await Seo.SaveTargetsAsync(campaignId, new SeoTargetsRequest(_primaryKeyword, keywords, questions));
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // Losing the targets is bad; losing the run because of it is worse.
+            _researchNotes.Add("The targets could not be saved — the run will proceed without them.");
+        }
+    }
+
+    private bool _briefing;
+    private string? _summary;
+    private string? _briefError;
+    private readonly List<string> _keyPoints = [];
+
+    /// <summary>
+    /// Drafts the brief from the transcript. Suggestions only fill fields the user has left
+    /// empty — re-reading must never overwrite something they typed, which is the difference
+    /// between a helpful default and a fight with the form.
+    /// </summary>
+    private async Task SuggestBriefAsync()
+    {
+        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        {
+            return;
+        }
+
+        _briefing = true;
+        _briefError = null;
+        StateHasChanged();
+
+        try
+        {
+            var brief = await Generation.SuggestBriefAsync(campaignId, transcriptId, _name);
+
+            // The title is the one field the user has already committed to, so it is only
+            // taken when they left it blank.
+            if (string.IsNullOrWhiteSpace(_name) && brief.Title is { } title)
+            {
+                _name = title;
+            }
+            if (string.IsNullOrWhiteSpace(_audience) && brief.Audience is { } audience)
+            {
+                _audience = audience;
+            }
+            if (string.IsNullOrWhiteSpace(_voice) && brief.BrandVoice is { } voice)
+            {
+                _voice = voice;
+            }
+            if (string.IsNullOrWhiteSpace(_angle) && brief.Angle is { } angle)
+            {
+                _angle = angle;
+            }
+
+            _summary = brief.Summary;
+            _keyPoints.Clear();
+            _keyPoints.AddRange(brief.KeyPoints);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // A failed draft leaves the form exactly as it was — typing it by hand still works.
+            _briefError = ex is ApiException api ? api.Message : "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _briefing = false;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -312,6 +770,7 @@
     {
         Step.Source => "Source",
         Step.Transcribing => "Transcript",
+        Step.Targets => "Targets",
         _ => "Brief",
     };
 
@@ -336,6 +795,7 @@
             await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
 
             _step = Step.Brief;
+            await SuggestBriefAsync();
         }
         catch (ApiException ex)
         {
@@ -426,6 +886,7 @@
 
             await NarrateAsync($"{ingest.Segments} timed segments · suggesting brief…", 100);
             _step = Step.Brief;
+            await SuggestBriefAsync();
         }
         catch (NotSupportedException ex)
         {
@@ -498,6 +959,10 @@
                 _error = "This campaign has no transcript to generate from.";
                 return;
             }
+
+            // Saved BEFORE the run: the orchestrator reads targets off the campaign when it
+            // builds each prompt, so a save that lands after the fan-out starts steers nothing.
+            await SaveTargetsAsync(campaignId);
 
             // Hand the run to the press-run service and go straight to the Mill Floor:
             // the reveal happens there, card by card, as completions land (ADR-F13).

@@ -111,3 +111,12 @@ public sealed record TechEditResult(
     IReadOnlyList<string> Changes,
     IReadOnlyList<string> Warnings,
     long DurationMs);
+
+/// <summary>
+/// The brief the model reads off a transcript, so step 3 of the run flow is a review rather
+/// than a form. Every field is nullable: a thin transcript should leave a box empty rather
+/// than fill it with invention.
+/// </summary>
+public sealed record BriefSuggestionResponse(
+    string? Title, string? Audience, string? BrandVoice, string? Angle,
+    string? Summary, IReadOnlyList<string> KeyPoints);

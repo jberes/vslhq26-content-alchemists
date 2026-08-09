@@ -1,0 +1,152 @@
+@* The content-cluster map: the pillar (primary blog) at the centre, supporting pieces on a
+   ring around it, and the gaps a healthy cluster still wants as dashed "add" nodes.
+
+   The point is to make a campaign READ as a campaign — one topic, reinforced from every
+   channel — rather than a list of unrelated artifacts. Geometry is computed here, not drawn
+   by hand, so it stays correct as pieces are added. No Math.random / DateTime: node angles
+   come from the index, so the layout is stable across renders. *@
+@using Castmill.UI.State
+
+@if (Cluster is { IsEmpty: false } cluster)
+{
+    <div class="cm-cluster">
+        <svg class="cm-cluster__svg" viewBox="0 0 @W @H" role="img"
+             aria-label="Content cluster around @(cluster.PrimaryKeyword ?? "the primary blog")">
+            @* Spokes first, so nodes paint over them. *@
+            @foreach (var node in Placed(cluster))
+            {
+                <line class="cm-cluster__spoke" x1="@Cx" y1="@Cy" x2="@node.X" y2="@node.Y" />
+            }
+            @foreach (var gap in PlacedGaps(cluster))
+            {
+                <line class="cm-cluster__spoke cm-cluster__spoke--gap" x1="@Cx" y1="@Cy" x2="@gap.X" y2="@gap.Y" />
+            }
+
+            @* Pillar. *@
+            <g class="cm-cluster__pillar" transform="translate(@Cx, @Cy)">
+                <circle r="58" />
+                <svg:text class="cm-cluster__kicker" y="-30">PILLAR</svg:text>
+                <svg:text class="cm-cluster__title" y="-8">@Wrap(cluster.Pillar?.Title ?? "No blog yet", 0)</svg:text>
+                <svg:text class="cm-cluster__title" y="10">@Wrap(cluster.Pillar?.Title ?? "", 1)</svg:text>
+                @if (cluster.PrimaryKeyword is { } kw)
+                {
+                    <svg:text class="cm-cluster__kw" y="34">@kw</svg:text>
+                }
+            </g>
+
+            @* Supporting nodes — click to open in Focus. *@
+            @foreach (var node in Placed(cluster))
+            {
+                <g class="cm-cluster__node" transform="translate(@node.X, @node.Y)"
+                   role="button" tabindex="0"
+                   @onclick="() => OnOpen.InvokeAsync(node.Node.ArtifactId)"
+                   @onkeydown="@(e => OpenOnKey(e, node.Node.ArtifactId))">
+                    <circle r="42" class="@StatusClass(node.Node.Status)" />
+                    <svg:text class="cm-cluster__node-kind" y="-4">@node.Node.KindLabel</svg:text>
+                    <svg:text class="cm-cluster__node-status" y="14">@node.Node.Status</svg:text>
+                </g>
+            }
+
+            @* Gaps — dashed, click to draft that kind against the same targets. *@
+            @foreach (var gap in PlacedGaps(cluster))
+            {
+                <g class="cm-cluster__node cm-cluster__node--gap" transform="translate(@gap.X, @gap.Y)"
+                   role="button" tabindex="0"
+                   @onclick="() => OnDraft.InvokeAsync(gap.Gap.Kind)"
+                   @onkeydown="@(e => DraftOnKey(e, gap.Gap.Kind))">
+                    <circle r="40" />
+                    <svg:text class="cm-cluster__node-kind" y="-2">@gap.Gap.KindLabel</svg:text>
+                    <svg:text class="cm-cluster__node-add" y="16">+ add</svg:text>
+                </g>
+            }
+        </svg>
+
+        <p class="cm-meta cm-cluster__legend">
+            @cluster.Supporting.Count supporting @(cluster.Supporting.Count == 1 ? "piece" : "pieces")
+            reinforce the pillar@(cluster.Gaps.Count > 0 ? $" · {cluster.Gaps.Count} channel{(cluster.Gaps.Count == 1 ? "" : "s")} still open" : "")@(cluster.Questions.Count > 0 ? $" · {cluster.Questions.Count} AEO questions targeted" : "").
+            Dashed nodes draft new content against the same keywords.
+        </p>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ContentCluster? Cluster { get; set; }
+
+    /// <summary>Opens an existing artifact (Focus mode).</summary>
+    [Parameter] public EventCallback<Guid> OnOpen { get; set; }
+
+    /// <summary>Drafts a missing kind against the campaign's targets.</summary>
+    [Parameter] public EventCallback<string> OnDraft { get; set; }
+
+    // Fixed drawing grid; CSS scales the SVG. Ratios, not pixels (ADR-F10).
+    private const int W = 720;
+    private const int H = 560;
+    private const int Cx = W / 2;
+    private const int Cy = H / 2;
+    private const double SupportRadius = 200;
+    private const double GapRadius = 200;
+
+    private sealed record Positioned(ClusterNode Node, double X, double Y);
+    private sealed record PositionedGap(ClusterGap Gap, double X, double Y);
+
+    /// <summary>
+    /// Supporting nodes ring the upper two-thirds of the circle; gaps fill the lower third, so
+    /// "what exists" and "what's missing" occupy visibly different arcs rather than
+    /// interleaving. Angle is a pure function of index — stable every render.
+    /// </summary>
+    private IEnumerable<Positioned> Placed(ContentCluster cluster)
+    {
+        var n = cluster.Supporting.Count;
+        for (var i = 0; i < n; i++)
+        {
+            // Spread across 260° starting top-left, leaving the bottom arc for gaps.
+            var angle = (-130 + (n == 1 ? 130 : 260.0 * i / (n - 1))) * Math.PI / 180.0;
+            yield return new Positioned(
+                cluster.Supporting[i],
+                Cx + SupportRadius * Math.Sin(angle),
+                Cy - SupportRadius * Math.Cos(angle));
+        }
+    }
+
+    private IEnumerable<PositionedGap> PlacedGaps(ContentCluster cluster)
+    {
+        var n = cluster.Gaps.Count;
+        for (var i = 0; i < n; i++)
+        {
+            // Bottom arc, 100° centred on due-south.
+            var angle = (180 + (n == 1 ? 0 : -50 + 100.0 * i / (n - 1))) * Math.PI / 180.0;
+            yield return new PositionedGap(
+                cluster.Gaps[i],
+                Cx + GapRadius * Math.Sin(angle),
+                Cy - GapRadius * Math.Cos(angle));
+        }
+    }
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Approved" or "Published" => "cm-cluster__node--approved",
+        "InReview" => "cm-cluster__node--review",
+        _ => "cm-cluster__node--draft",
+    };
+
+    /// <summary>Two-line title wrap for the pillar, by whole words.</summary>
+    private static string Wrap(string title, int line)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return string.Empty;
+        }
+
+        var words = title.Split(' ');
+        var mid = (int)Math.Ceiling(words.Length / 2.0);
+        var chunk = line == 0 ? words[..mid] : words[mid..];
+        var text = string.Join(' ', chunk);
+        return text.Length > 24 ? string.Concat(text.AsSpan(0, 23), "…") : text;
+    }
+
+    private Task OpenOnKey(KeyboardEventArgs e, Guid id) =>
+        e.Key is "Enter" or " " ? OnOpen.InvokeAsync(id) : Task.CompletedTask;
+
+    private Task DraftOnKey(KeyboardEventArgs e, string kind) =>
+        e.Key is "Enter" or " " ? OnDraft.InvokeAsync(kind) : Task.CompletedTask;
+}

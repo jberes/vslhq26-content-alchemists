@@ -98,6 +98,7 @@ public static class AuthEndpoints
         UserManager<CastmillUser> users,
         CastmillDbContext db,
         ITokenService tokens,
+        Microsoft.Extensions.Options.IOptions<JwtOptions> jwt,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -109,7 +110,10 @@ public static class AuthEndpoints
             return Results.Unauthorized();
         }
 
-        if (!stored.IsActive(now))
+        var grace = TimeSpan.FromSeconds(Math.Max(0, jwt.Value.RefreshReuseGraceSeconds));
+        var withinGrace = !stored.IsActive(now) && stored.IsWithinReuseGrace(now, grace);
+
+        if (!stored.IsActive(now) && !withinGrace)
         {
             // Reuse of a rotated/revoked token means the token may be stolen:
             // revoke the entire family so neither party can continue the session.
@@ -130,7 +134,18 @@ public static class AuthEndpoints
             return Results.Unauthorized();
         }
 
-        stored.UsedAt = now; // rotation: each refresh token is single-use
+        // Within the grace, a replay of a just-consumed token rotates AGAIN rather than
+        // revoking the family. That converts the crash-mid-rotation, the two-window race and
+        // the retried request from "your session has expired" into a non-event, at the cost
+        // of a thief who replays within the window ALSO getting a token — after which the
+        // next collision falls outside the grace and trips reuse detection as before. The
+        // audit row keeps the event observable either way.
+        if (withinGrace)
+        {
+            await AuditAsync(db, user.TenantId, user.Id, "auth.refresh.reused-within-grace", now, ct);
+        }
+
+        stored.UsedAt ??= now; // rotation: each refresh token is single-use (grace keeps the original stamp)
         var response = await IssueTokensAsync(user, stored.FamilyId, db, tokens, now, ct);
         return Results.Ok(response);
     }

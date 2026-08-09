@@ -70,6 +70,16 @@ export function bubbleExtension(getEditor) {
             button.classList.toggle('cm-editor__bubble-button--on', editor.isActive(mark));
         }
         link.classList.toggle('cm-editor__bubble-button--on', editor.isActive('link'));
+
+        // Visibility is ours, not the plugin's. The element is appended into the editor host
+        // in normal flow, so with nothing hiding it the "bubble" was a bar permanently parked
+        // under every artifact — visible for every content type whether or not anything was
+        // selected. It belongs on screen only while there IS a selection to format.
+        const selection = editor.state.selection;
+        const shown = !selection.empty
+            && !editor.isActive('codeBlock')
+            && !editor.isActive('image');
+        bubble.classList.toggle('cm-editor__bubble--on', shown);
     }
 
     return {
