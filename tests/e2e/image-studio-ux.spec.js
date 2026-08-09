@@ -273,6 +273,12 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-studio__content-title', { hasText: 'Launch post' }))
             .toBeVisible();
         await expect(page.getByText('Internal campaign summary', { exact: true })).toHaveCount(0);
+
+        // ADR-F43: the sheet opens with the drawer closed — coverage first, editor on demand.
+        await expect(page.locator('.cm-studio__drawer')).toHaveCount(0);
+        await page.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
+        await expect(page.locator('.cm-studio__drawer')).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`slot=${slotId}`));
         await expect(page.locator('.cm-studio__context'))
             .toContainText('A concise product launch post.');
         const loadedPreviewRequests = previewRequests;

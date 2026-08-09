@@ -225,6 +225,12 @@ public sealed class ImageVariantTests(CastmillApiFactory factory)
 
         public bool IsConfigured => true;
 
+        public Task DeleteAsync(string path, CancellationToken ct)
+        {
+            _blobs.TryRemove(path, out _);
+            return Task.CompletedTask;
+        }
+
         public Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct)
         {
             _blobs[path] = bytes.ToArray();

@@ -1,8 +1,10 @@
 using Bunit;
 using Castmill.Core;
 using Castmill.Core.Resources;
+using Castmill.UI.Design;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -42,6 +44,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     public async Task The_gallery_lists_persisted_takes_with_thumbnails()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
 
@@ -54,6 +57,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     public async Task Clicking_a_tile_opens_the_dialog_with_the_full_size_image_and_escape_closes_it()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
 
@@ -72,6 +76,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     public async Task Discarding_a_take_patches_state_and_removes_it_from_the_gallery()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
 
@@ -82,7 +87,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         await view.Find(".cm-gallery__tile").ClickAsync();
         var discard = view.FindAll(".cm-lightbox button")
-            .First(b => b.TextContent.Contains("Throw away", StringComparison.Ordinal));
+            .First(b => b.TextContent.Trim().StartsWith("Discard", StringComparison.Ordinal));
         await discard.ClickAsync();
 
         Assert.Contains(Http.Requests, r =>
@@ -95,6 +100,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     public async Task Placing_goes_by_variant_id_not_url()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
 
@@ -121,6 +127,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
         Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}", Slot(promptMode: "Manual"));
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-studio__mode").Count == 2, TimeSpan.FromSeconds(5));
         var previewRequests = PreviewRequestCount();
@@ -143,6 +150,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
         Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}", Slot(prompt: "High contrast"));
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-studio__chip").Count > 0, TimeSpan.FromSeconds(5));
 
@@ -207,6 +215,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
                 ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForAssertionAsync(() =>
             Assert.Contains(supportingCopy, view.Find(".cm-studio__context").TextContent,
                 StringComparison.Ordinal));
@@ -216,7 +225,75 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Deleting_a_take_forever_asks_for_confirmation_then_removes_row_and_tile()
+    {
+        var confirm = new AutoConfirm(accept: true);
+        Services.AddScoped<IConfirmService>(_ => confirm);
+        Http.OnStatus(HttpMethod.Delete,
+            $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}",
+            System.Net.HttpStatusCode.NoContent);
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
+
+        await view.Find(".cm-gallery__tile").ClickAsync();
+        await view.FindAll(".cm-lightbox button")
+            .First(b => b.TextContent.Contains("Delete forever", StringComparison.Ordinal))
+            .ClickAsync();
+
+        Assert.Contains(confirm.Requests, r => r.Destructive
+            && r.Message.Contains("no undo", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(Http.Requests, r => r.Method == HttpMethod.Delete
+            && r.RequestUri!.AbsolutePath.EndsWith($"variants/{TakeId}", StringComparison.Ordinal));
+        Assert.Empty(view.FindAll(".cm-lightbox"));
+        Assert.Empty(view.FindAll(".cm-gallery__tile"));
+    }
+
+    [Fact]
+    public async Task A_declined_confirm_deletes_nothing()
+    {
+        var confirm = new AutoConfirm(accept: false);
+        Services.AddScoped<IConfirmService>(_ => confirm);
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
+
+        await view.Find(".cm-gallery__tile").ClickAsync();
+        await view.FindAll(".cm-lightbox button")
+            .First(b => b.TextContent.Contains("Delete forever", StringComparison.Ordinal))
+            .ClickAsync();
+
+        Assert.DoesNotContain(Http.Requests, r => r.Method == HttpMethod.Delete);
+        Assert.Single(view.FindAll(".cm-gallery__tile"));
+    }
+
     // ---- helpers ---------------------------------------------------------------
+
+    private sealed class AutoConfirm(bool accept) : IConfirmService
+    {
+        public List<ConfirmRequest> Requests { get; } = [];
+
+        public Task<bool> ConfirmAsync(ConfirmRequest request)
+        {
+            Requests.Add(request);
+            return Task.FromResult(accept);
+        }
+    }
+
+
+    /// <summary>The drawer is closed until a tile is chosen — open the first real slot tile.</summary>
+    private static async Task OpenFirstSlotAsync(IRenderedComponent<ImageStudioView> view)
+    {
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count > 0,
+            TimeSpan.FromSeconds(5));
+        await view.Find(".cm-studio__card:not(.cm-studio__card--add)").ClickAsync();
+    }
 
     private void StubGallery(params ImageVariantResponse[] takes) =>
         Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants", takes.ToList());

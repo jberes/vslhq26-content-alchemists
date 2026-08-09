@@ -16,7 +16,7 @@ Status legend:
 
 Current delivery snapshot (verified 2026-08-09):
 
-- [x] ✅ **Completed:** 1–4, 6–16, 22–28, 47, and additions N1–N3 and N6–N21.
+- [x] ✅ **Completed:** 1–4, 6–16, 22–28, 47, and additions N1–N3 and N6–N22.
 - [ ] **Still open:** 5, 17–21, 29–46 (except 47), and additions N4–N5. Partially
   implemented items remain open until their complete acceptance criteria are delivered.
 
@@ -265,6 +265,22 @@ incremental work.*
   take dialog show the actual artifact text the selected image supports, alongside—not replaced
   by—the AI visual description. Inline blog images prefer prose surrounding their image marker;
   selection-race guards prevent a slower previous artifact fetch from showing stale context.
+- [x] ✅ 🆕 **N22. Contact-sheet Image Studio** (ADR-F43) — the studio canvas is the image plan
+  itself: each content piece renders its slots as tiles at their true aspect ratios (published
+  image when filled, dashed hole when empty, `Rendering` while a run is live), with a per-piece
+  fill count and a ghost "add image" tile in the piece's own row. Selecting a tile opens the
+  slot editor as a closable drawer beside the sheet (close button and Escape dismiss it; the
+  take lightbox stacks above it unchanged), and the open slot is mirrored to `?slot=` so deep
+  links and refreshes restore it. Nothing auto-opens on entry — the default view is the whole
+  campaign's coverage, which was the point: state reads from the tiles, not from text badges.
+  Iteration: wider drawer / narrower tiles; brand-kit references moved out of the drawer into
+  a master–detail picker dialog (grouped list left, preview + select right, chips for current
+  picks); campaign cards on the Campaigns index show the most recently placed image in the
+  media band via `CampaignCounts.HeroImageUrl` (duotone placeholder when none). Slots with
+  generated-but-unplaced work preview their best take (kept first, then newest) on the sheet
+  tile with an "In takes" state and on the card band, via `ImageSlotResponse.LatestTakeThumbUrl`;
+  the studio page adopted the fill pattern (sheet and drawer each own their scrollbar), and the
+  brand kit loads on studio entry rather than only on a state-change event.
 
 ---
 

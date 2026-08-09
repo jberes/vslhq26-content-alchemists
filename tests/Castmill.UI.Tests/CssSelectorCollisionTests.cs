@@ -30,7 +30,6 @@ public sealed class CssSelectorCollisionTests
         "cm-focus",
         "cm-focus__outline",
         "cm-focus__manuscript",
-        "cm-studio",
     };
 
     [Fact]

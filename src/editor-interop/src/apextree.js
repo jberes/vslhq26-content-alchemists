@@ -68,13 +68,21 @@ export function initContentClusterTree(element, data, dotnet) {
 
     const tree = new ApexTree(element, {
         width: '100%',
-        height: 520,
+        // Sized to content: with grouped leaves the cluster is tall and narrow, and a
+        // fixed viewport forced it behind zoom/pan. At natural size the page scrolls
+        // and every card is readable at 1:1.
+        height: 'auto',
         direction: 'top',
         contentKey: 'data',
         nodeWidth: 218,
         nodeHeight: 108,
         siblingSpacing: 28,
         childrenSpacing: 72,
+        // A pillar fans out to ~a dozen supporting pieces; spread horizontally they render
+        // as one unreadably wide row. Grouping stacks leaf nodes vertically under the
+        // pillar instead (the apextree "group leaf nodes" layout).
+        groupLeafNodes: true,
+        groupLeafNodesSpacing: 14,
         paddingX: 44,
         paddingY: 54,
         edgeStyle: 'curved',
@@ -107,11 +115,29 @@ export function initContentClusterTree(element, data, dotnet) {
         },
     });
 
+    // A 100%-width svg with a narrow-tall viewBox (the grouped-leaf layout) upscales to
+    // fill the container — giant cards. Pin the svg to its natural content size instead,
+    // shrinking only when the cluster is wider than the container, never enlarging.
+    const sizeToContent = () => requestAnimationFrame(() => {
+        const svg = element.querySelector('svg');
+        const viewBox = svg?.getAttribute('viewBox')?.split(' ').map(Number);
+        if (!svg || !viewBox || viewBox.length !== 4 || !viewBox[2] || !viewBox[3]) {
+            return;
+        }
+        const scale = Math.min(1, (element.clientWidth || viewBox[2]) / viewBox[2]);
+        svg.setAttribute('width', Math.round(viewBox[2] * scale));
+        svg.setAttribute('height', Math.round(viewBox[3] * scale));
+        svg.style.display = 'block';
+        svg.style.margin = '0 auto';
+    });
+
     tree.render(toApexNode(data));
+    sizeToContent();
 
     return {
         update(next) {
             tree.render(toApexNode(next));
+            sizeToContent();
         },
         destroy() {
             tree.destroy();

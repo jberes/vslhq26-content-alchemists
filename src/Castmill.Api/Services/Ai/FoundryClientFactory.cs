@@ -118,3 +118,8 @@ public sealed class FoundryClientFactory(
 }
 
 public sealed class AiNotConfiguredException(string message) : InvalidOperationException(message);
+
+/// <summary>The provider's safety system refused the render. The message is written for the
+/// producer — it travels into the run's failure list verbatim, unlike other exceptions,
+/// which surface only as a type name.</summary>
+public sealed class ImageModerationException(string message) : InvalidOperationException(message);

@@ -22,12 +22,16 @@
 @inject Castmill.UI.Http.GenerationClient Generation
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject IConfirmService Confirm
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
 
 <CampaignShell CampaignId="CampaignId" View="CampaignView.ImageStudio">
-    <div class="cm-page">
-        <div class="cm-measure--dashboard">
+    @* Fill-pattern page (the shell rule: main never scrolls, each surface owns its
+       scrollbar). The sheet and the drawer are independent scroll regions, so the drawer's
+       bottom is always reachable regardless of the shell chrome above it. *@
+    <div class="cm-page cm-page--fill">
+        <div class="cm-measure--dashboard cm-studio-fill">
             @if (!ImageContentItems.Any() && Campaign.ImageSlots.Count == 0)
             {
                 <EmptyState Kicker="Image studio"
@@ -36,84 +40,77 @@
             }
             else
             {
-                <div class="cm-studio">
-                    <aside class="cm-studio__nav" aria-label="Content image cards">
-                        <header class="cm-studio__nav-head">
-                            <span class="cm-kicker">Content</span>
-                            <span class="cm-meta">@Campaign.ImagesFilled/@Campaign.ImagesTotal images filled</span>
-                        </header>
+                @* The contact sheet (Alt B of the F5-F7 iteration): the canvas IS the image
+                   plan. Each content piece is a row of tiles at their true aspect ratios —
+                   empty tiles are the visible holes in the sheet. Selecting a tile opens the
+                   editor as a drawer beside the sheet, so the plan never leaves view. *@
+                <div class="cm-studio @(Selected is not null ? "cm-studio--open" : null)">
+                    <div class="cm-studio__sheet" aria-label="Campaign image plan">
                         @foreach (var item in ImageContentItems)
                         {
                             var slots = SlotsFor(item.Id).ToList();
-                            <section class="cm-studio__content-group">
-                                <header class="cm-studio__content-head">
-                                    <div>
-                                        <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
-                                        <p class="cm-studio__content-title">@item.Title</p>
-                                    </div>
-                                    <span class="cm-studio__count cm-mono">@slots.Count</span>
+                            <section class="cm-studio__group">
+                                <header class="cm-studio__group-head">
+                                    <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                    <p class="cm-studio__content-title">@item.Title</p>
+                                    <span class="cm-studio__fill cm-mono">@slots.Count(s => s.State == "Filled")/@slots.Count</span>
                                 </header>
-                                <ul class="cm-studio__slots">
-                            @foreach (var slot in slots)
-                            {
-                                <li>
-                                    <button type="button"
-                                            class="cm-studio__slot @(slot.Id == _selectedId ? "cm-studio__slot--active" : null)"
-                                            @onclick="() => SelectSlotAsync(slot)">
-                                        <span>@ArtifactDisplay.SlotLabel(slot.Kind)</span>
-                                        @if (slot.State == "Filled")
-                                        {
-                                            <span class="cm-studio__badge">Done</span>
-                                        }
-                                        <span class="cm-studio__slot-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
-                                    </button>
-                                </li>
-                                }
-                                </ul>
-                                <footer class="cm-studio__content-actions">
-                                    <button type="button" class="cm-button cm-button--quiet"
+                                <div class="cm-studio__tiles">
+                                    @foreach (var slot in slots)
+                                    {
+                                        @SheetCard(slot)
+                                    }
+                                    @* Add lives where it lands: a ghost tile at the end of the
+                                       content piece's own row, not an orphaned button. *@
+                                    <button type="button" class="cm-studio__card cm-studio__card--add"
                                             disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
-                                        @(_addingFor == item.Id ? "Adding…" : "+ Add image")
+                                        <span class="cm-studio__card-plus" aria-hidden="true">+</span>
+                                        <span>@(_addingFor == item.Id ? "Adding…" : "Add image")</span>
                                     </button>
-                                </footer>
+                                </div>
                             </section>
                         }
                         @if (LegacySlots.Any())
                         {
-                            <section class="cm-studio__content-group">
-                                <header class="cm-studio__content-head"><span class="cm-kicker">Legacy campaign images</span></header>
-                                <ul class="cm-studio__slots">
+                            <section class="cm-studio__group">
+                                <header class="cm-studio__group-head">
+                                    <span class="cm-kicker">Legacy campaign images</span>
+                                    <span class="cm-studio__fill cm-mono">@LegacySlots.Count(s => s.State == "Filled")/@LegacySlots.Count()</span>
+                                </header>
+                                <div class="cm-studio__tiles">
                                     @foreach (var slot in LegacySlots)
                                     {
-                                        <li>
-                                            <button type="button"
-                                                    class="cm-studio__slot @(slot.Id == _selectedId ? "cm-studio__slot--active" : null)"
-                                                    @onclick="() => SelectSlotAsync(slot)">
-                                                <span>@ArtifactDisplay.SlotLabel(slot.Kind)</span>
-                                                <span class="cm-studio__slot-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
-                                            </button>
-                                        </li>
+                                        @SheetCard(slot)
                                     }
-                                </ul>
+                                </div>
                             </section>
                         }
-                    </aside>
+                    </div>
 
                     @if (Selected is { } slot2)
                     {
-                        <section class="cm-studio__pane">
-                            <div>
-                                <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
-                                <p class="cm-meta">
-                                    Generated at exactly @slot2.TargetWidth×@slot2.TargetHeight — the slot's published
-                                    size, no client-side cropping.
-                                    @if (ProvenanceLine(slot2) is { } prov)
-                                    {
-                                        <br />
-                                        <span>Prompt seeded from @prov</span>
-                                    }
-                                </p>
-                            </div>
+                        @* The editor drawer: everything about ONE slot, beside the sheet so the
+                           campaign's coverage stays in view while editing. Escape closes it;
+                           the take lightbox stacks above it (modal z 70 > drawer z 60). *@
+                        <section class="cm-studio__drawer" aria-label="Image editor" tabindex="-1"
+                                 @ref="_drawerPanel" @onkeydown="OnDrawerKey">
+                            <header class="cm-studio__drawer-head">
+                                <div>
+                                    <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
+                                    <p class="cm-meta">
+                                        Generated at exactly @slot2.TargetWidth×@slot2.TargetHeight — the slot's published
+                                        size, no client-side cropping.
+                                        @if (ProvenanceLine(slot2) is { } prov)
+                                        {
+                                            <br />
+                                            <span>Prompt seeded from @prov</span>
+                                        }
+                                    </p>
+                                </div>
+                                <button type="button" class="cm-studio__drawer-close"
+                                        aria-label="Close the editor" title="Close (Esc)"
+                                        @onclick="CloseSlot">✕</button>
+                            </header>
 
                             @if (_supportingContextLoading)
                             {
@@ -206,42 +203,37 @@
 
                             @if (Campaign.Brand is not null)
                             {
+                                @* Selections only, not the whole kit: every face and background
+                                   inline made the drawer mostly other people's assets. The kit
+                                   itself lives in a master–detail dialog behind one button. *@
                                 <div>
                                     <span class="cm-kicker">Reference images</span>
                                     @if (ProductAssets.Count > 0)
                                     {
-                                        <p class="cm-meta">Up to three product screenshots are attached automatically for product fidelity.</p>
-                                        <div class="cm-studio__picks">
-                                            @foreach (var asset in ProductAssets.Take(3))
-                                            {
-                                                <span class="cm-studio__pick cm-studio__pick--on">
-                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var productThumb))
-                                                    {
-                                                        <img src="@productThumb" alt="" loading="lazy" />
-                                                    }
-                                                    <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName) · automatic</span>
-                                                </span>
-                                            }
-                                        </div>
+                                        <p class="cm-meta">Up to three product screenshots (@string.Join(", ", ProductAssets.Take(3).Select(a => a.Label ?? a.FileName))) attach automatically for product fidelity.</p>
                                     }
-                                    @foreach (var group in ReferenceKit)
+                                    <div class="cm-studio__refbar">
+                                        @foreach (var pick in _picked.OrderBy(p => Array.IndexOf(KitOrder, p.Key)).ToList())
+                                        {
+                                            <button type="button" class="cm-studio__refchip"
+                                                    title="Remove @(pick.Value.Label ?? pick.Value.FileName)"
+                                                    @onclick="() => TogglePickAsync(pick.Key, pick.Value)">
+                                                @if (_kitPreviews.TryGetValue(pick.Value.AssetId, out var chipThumb))
+                                                {
+                                                    <img src="@chipThumb" alt="" loading="lazy" />
+                                                }
+                                                <span>@KindLabel(pick.Key) · @(pick.Value.Label ?? pick.Value.FileName)</span>
+                                                <span class="cm-studio__refchip-x" aria-hidden="true">✕</span>
+                                            </button>
+                                        }
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                disabled="@(!ReferenceKit.Any())" @onclick="OpenKitPicker">
+                                            @(_picked.Count == 0 ? "Choose references…" : "Change…")
+                                        </button>
+                                    </div>
+                                    @if (!ReferenceKit.Any())
                                     {
-                                        <span class="cm-meta">@KindLabel(group.Key)</span>
-                                        <div class="cm-studio__picks">
-                                            @foreach (var asset in group)
-                                            {
-                                                var isOn = _picked.Values.Any(a => a.Id == asset.Id);
-                                                <button type="button" class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
-                                                        aria-pressed="@(isOn ? "true" : "false")"
-                                                        @onclick="() => TogglePickAsync(group.Key, asset)">
-                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
-                                                    {
-                                                        <img src="@thumb" alt="" loading="lazy" />
-                                                    }
-                                                    <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
-                                                </button>
-                                            }
-                                        </div>
+                                        <p class="cm-meta">Nothing in @Campaign.Brand.Name's kit yet — add faces and backgrounds on the Brands page.</p>
                                     }
                                 </div>
                             }
@@ -369,7 +361,7 @@
                                 }
                                 else if (_gallery.Count == 0)
                                 {
-                                    <p class="cm-meta">No takes yet. Generate some — every take is kept here until you discard it.</p>
+                                    <p class="cm-meta">No takes yet. Generate some — every take stays here until you discard or delete it.</p>
                                 }
                                 <div class="cm-gallery">
                                     @if (IsGenerating)
@@ -399,7 +391,7 @@
                                                 <span class="cm-mono">@variant.Model</span>
                                                 @if (variant.State == "Kept")
                                                 {
-                                                    <span class="cm-badge cm-badge--done">KEPT</span>
+                                                    <span class="cm-badge cm-badge--done">KEEPER</span>
                                                 }
                                                 @if (variant.SteeringNote is not null)
                                                 {
@@ -426,8 +418,9 @@
                                          alt="Placed @ArtifactDisplay.SlotLabel(slot2.Kind)" />
                                     <div class="cm-studio__row">
                                         <button type="button" class="cm-button cm-button--quiet" @onclick="ClearAsync">
-                                            Clear and redo
+                                            Remove from slot
                                         </button>
+                                        <span class="cm-meta">The slot goes back to empty; your takes are untouched.</span>
                                     </div>
                                 </div>
 
@@ -639,10 +632,14 @@
                                 }
 
                                 <button type="button" class="cm-button cm-button--quiet"
-                                        disabled="@(string.IsNullOrWhiteSpace(_steerNote) || IsGenerating)"
+                                        disabled="@(!CanSteer || IsGenerating)"
                                         @onclick="() => SteerAsync(take)">
                                     New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
                                 </button>
+                                @if (!CanSteer)
+                                {
+                                    <p class="cm-meta">Pick a reference or type an adjustment — either is enough.</p>
+                                }
                             </section>
 
                             <footer class="cm-lightbox__actions">
@@ -653,21 +650,107 @@
                                 @if (take.State != "Kept")
                                 {
                                     <button type="button" class="cm-button cm-button--quiet"
-                                            @onclick='() => SetStateAsync(take, "Kept")'>Keep</button>
+                                            title="Keepers sort first in the takes strip"
+                                            @onclick='() => SetStateAsync(take, "Kept")'>Mark as keeper</button>
                                 }
                                 @if (take.State != "Discarded")
                                 {
                                     <button type="button" class="cm-button cm-button--quiet"
-                                            @onclick='() => SetStateAsync(take, "Discarded")'>Throw away</button>
+                                            title="Hides the take — recoverable from “Show discarded takes”"
+                                            @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
                                 }
                                 else
                                 {
                                     <button type="button" class="cm-button cm-button--quiet"
                                             @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
                                 }
+                                <button type="button" class="cm-button cm-button--quiet cm-button--danger"
+                                        @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
                                 <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
                             </footer>
                         </div>
+                    </div>
+                </div>
+            }
+
+            @if (_kitPickerOpen && Campaign.Brand is { } kitBrand)
+            {
+                @* The kit picker: master–detail over the brand's reference assets. Left lists
+                   the kit grouped by type, right previews the selection at a judgeable size.
+                   Same .cm-modal chrome as the take lightbox — Escape closes, backdrop closes. *@
+                <div class="cm-modal" role="presentation" @onclick="CloseKitPicker">
+                    <div class="cm-kitpicker" role="dialog" aria-modal="true"
+                         aria-label="Choose reference images" tabindex="-1"
+                         @ref="_kitPickerPanel"
+                         @onclick:stopPropagation
+                         @onkeydown="OnKitPickerKey">
+                        <header class="cm-kitpicker__head">
+                            <div>
+                                <h2>Reference images</h2>
+                                <p class="cm-meta">From @kitBrand.Name's kit — one per type. A selection is a real image input to the model, not prompt text.</p>
+                            </div>
+                            <button type="button" class="cm-studio__drawer-close"
+                                    aria-label="Close" title="Close (Esc)" @onclick="CloseKitPicker">✕</button>
+                        </header>
+                        <div class="cm-kitpicker__body">
+                            <nav class="cm-kitpicker__list" aria-label="Kit assets by type">
+                                @foreach (var group in ReferenceKit)
+                                {
+                                    <span class="cm-kicker">@KindLabel(group.Key)</span>
+                                    <ul>
+                                        @foreach (var asset in group)
+                                        {
+                                            var isPicked = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
+                                            var isCurrent = _kitPreviewAsset?.Id == asset.Id;
+                                            <li>
+                                                <button type="button"
+                                                        class="cm-kitpicker__item @(isCurrent ? "cm-kitpicker__item--current" : null)"
+                                                        aria-current="@(isCurrent ? "true" : "false")"
+                                                        @onclick="() => _kitPreviewAsset = asset">
+                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var listThumb))
+                                                    {
+                                                        <img src="@listThumb" alt="" loading="lazy" />
+                                                    }
+                                                    <span class="cm-kitpicker__item-label">@(asset.Label ?? asset.FileName)</span>
+                                                    @if (isPicked)
+                                                    {
+                                                        <span class="cm-kitpicker__tick" aria-label="Selected">✓</span>
+                                                    }
+                                                </button>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </nav>
+                            <section class="cm-kitpicker__preview" aria-label="Preview">
+                                @if (_kitPreviewAsset is { } previewAsset)
+                                {
+                                    var previewKind = previewAsset.Kind.ToLowerInvariant();
+                                    var previewOn = _picked.TryGetValue(previewKind, out var chosenNow) && chosenNow.Id == previewAsset.Id;
+                                    @if (_kitPreviews.TryGetValue(previewAsset.AssetId, out var big))
+                                    {
+                                        <img src="@big" alt="@(previewAsset.Label ?? previewAsset.FileName)" />
+                                    }
+                                    <strong>@(previewAsset.Label ?? previewAsset.FileName)</strong>
+                                    <span class="cm-meta">@KindLabel(previewKind)</span>
+                                    <button type="button" class="cm-button"
+                                            @onclick="() => TogglePickAsync(previewKind, previewAsset)">
+                                        @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
+                                    </button>
+                                    @if (!previewOn && _picked.ContainsKey(previewKind))
+                                    {
+                                        <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
+                                    }
+                                }
+                                else
+                                {
+                                    <p class="cm-meta">Pick an asset on the left to preview it here.</p>
+                                }
+                            </section>
+                        </div>
+                        <footer class="cm-kitpicker__actions">
+                            <button type="button" class="cm-button" @onclick="CloseKitPicker">Done</button>
+                        </footer>
                     </div>
                 </div>
             }
@@ -717,7 +800,7 @@
     private string? _activeConceptName;
     private AiStatusResponse? _status;
     private string? _pickedAlias;
-    private int _variantCount = 2;
+    private int _variantCount = 1;
     private Guid? _addingFor;
     private bool _seeding;
     private bool _placing;
@@ -955,6 +1038,12 @@
     private string _steerNote = string.Empty;
     private ElementReference _dialogPanel;
     private bool _dialogNeedsFocus;
+    private ElementReference _drawerPanel;
+    private bool _drawerNeedsFocus;
+    private ElementReference _kitPickerPanel;
+    private bool _kitPickerNeedsFocus;
+    private bool _kitPickerOpen;
+    private BrandAssetResponse? _kitPreviewAsset;
     private readonly List<ThumbnailConcept> _thumbnailConcepts = [];
     private Guid? _conceptArtifactId;
 
@@ -969,9 +1058,13 @@
     [SupplyParameterFromQuery(Name = "slot")]
     private Guid? RequestedSlot { get; set; }
 
+    // Same canonical ordering as the Mill Floor lanes and the Focus rail (ADR-F40): lane
+    // first, then kind, then age — the three views must present content in one order.
     private IEnumerable<ArtifactPreviewResponse> ImageContentItems => Campaign.Artifacts
         .Where(a => ArtifactKinds.IsDistributionContent(a.Kind))
-        .OrderBy(a => ArtifactDisplay.KindOrder(a.Kind))
+        .OrderBy(a => Array.IndexOf(ArtifactDisplay.LaneOrder, ArtifactDisplay.Lane(a.Kind))
+            is var lane && lane >= 0 ? lane : ArtifactDisplay.LaneOrder.Length)
+        .ThenBy(a => ArtifactDisplay.KindOrder(a.Kind))
         .ThenBy(a => a.CreatedAt);
 
     private IEnumerable<ImageSlotResponse> SlotsFor(Guid artifactId) =>
@@ -1061,6 +1154,16 @@
     protected override async Task OnParametersSetAsync()
     {
         await SyncSelectionAsync();
+
+        // Load the brand kit here too, not only from Campaign.Changed: entering the studio
+        // from another campaign view finds the state already loaded, so no Changed event
+        // ever fires and the reference picker sat disabled with "nothing in the kit".
+        if (Campaign.Brand?.Id is { } brandId && _facesLoadedFor != brandId)
+        {
+            _facesLoadedFor = brandId;
+            await LoadBrandFacesAsync();
+        }
+
         // Never let provider readiness escape a lifecycle method: an unhandled exception
         // here blanks the studio rather than greying out a model.
         try
@@ -1079,6 +1182,25 @@
         {
             _dialogNeedsFocus = false;
             await _dialogPanel.FocusAsync();
+        }
+
+        if (_drawerNeedsFocus)
+        {
+            _drawerNeedsFocus = false;
+            // Focus makes Escape-to-close work without a click into the drawer first.
+            if (_selectedId is not null && _openVariant is null && !_kitPickerOpen)
+            {
+                await _drawerPanel.FocusAsync();
+            }
+        }
+
+        if (_kitPickerNeedsFocus)
+        {
+            _kitPickerNeedsFocus = false;
+            if (_kitPickerOpen)
+            {
+                await _kitPickerPanel.FocusAsync();
+            }
         }
     }
 
@@ -1116,7 +1238,9 @@
             }
             else if (StudioRun.Result is { } result)
             {
-                _failures = [.. (result.Failures ?? []).Select(f => $"Take {f} failed — the rest are fine.")];
+                // The server's failure strings are already sentences for refusals
+                // (moderation) and type names otherwise — present them as-is per take.
+                _failures = [.. (result.Failures ?? []).Select(f => $"Take {f}")];
                 if (result.Variants.Count == 0 && _failures.Count > 0)
                 {
                     _generateError = "No takes came back. Try again, or a simpler prompt.";
@@ -1146,9 +1270,11 @@
         {
             await SelectSlotAsync(requested);
         }
-        else if (_selectedId is null || Campaign.ImageSlots.All(s => s.Id != _selectedId))
+        else if (_selectedId is { } current && Campaign.ImageSlots.All(s => s.Id != current))
         {
-            await SelectSlotAsync(Campaign.ImageSlots[0]);
+            // The open slot no longer exists — back to the sheet, never a blank drawer.
+            _selectedId = null;
+            _openVariant = null;
         }
     }
 
@@ -1201,6 +1327,35 @@
     private void ToggleSteerChip(string chip) =>
         _steerNote = ToggleConstraint(_steerNote, chip);
 
+    /// <summary>Hard delete after an explicit confirm. Discard is the reversible path; this
+    /// removes the row and the blobs, so the dialog says exactly that.</summary>
+    private async Task DeleteTakeAsync(ImageVariantResponse variant)
+    {
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            "Delete this take forever?",
+            "The image and its thumbnail are removed from storage. This is not the same as "
+            + "discarding — there is no restore and no undo.",
+            AcceptLabel: "Delete forever",
+            CancelLabel: "Keep it",
+            Destructive: true));
+        if (!accepted)
+        {
+            return;
+        }
+
+        try
+        {
+            await Images.DeleteVariantAsync(CampaignId, variant.SlotId, variant.Id);
+            _gallery = [.. _gallery.Where(v => v.Id != variant.Id)];
+            CloseVariant();
+            Notifier.ShowSuccess("Take deleted.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+    }
+
     private async Task SetStateAsync(ImageVariantResponse variant, string state)
     {
         try
@@ -1223,9 +1378,13 @@
         }
     }
 
+    /// <summary>A typed note OR a picked reference justifies a new take: references are real
+    /// image inputs, so "use this face" needs no accompanying text.</summary>
+    private bool CanSteer => !string.IsNullOrWhiteSpace(_steerNote) || _picked.Count > 0;
+
     private void SteerAsync(ImageVariantResponse source)
     {
-        if (Selected is not { } slot || string.IsNullOrWhiteSpace(_steerNote))
+        if (Selected is not { } slot || !CanSteer)
         {
             return;
         }
@@ -1270,8 +1429,116 @@
                 _picked[asset.Kind.ToLowerInvariant()] = asset;
             }
         }
+        _drawerNeedsFocus = true;
         await Task.WhenAll(ReloadGalleryAsync(), LoadSupportingContextAsync(slot));
     }
+
+    /// <summary>
+    /// A tile click: select the slot AND put it in the URL, so the drawer state survives a
+    /// refresh and a later campaign refresh can't snap the selection back to a stale
+    /// <c>?slot=</c> deep link from before the click.
+    /// </summary>
+    private async Task OpenSlotAsync(ImageSlotResponse slot)
+    {
+        RequestedArtifact = slot.ArtifactId;
+        RequestedSlot = slot.Id;
+        await SelectSlotAsync(slot);
+        Navigation.NavigateTo(
+            $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}", replace: true);
+    }
+
+    private void CloseSlot()
+    {
+        _selectedId = null;
+        _openVariant = null;
+        // Strip the deep link too, or the next parameter sync would reopen the drawer.
+        RequestedSlot = null;
+        RequestedArtifact = null;
+        Navigation.NavigateTo(CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio), replace: true);
+    }
+
+    private void OnDrawerKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && _openVariant is null && !_kitPickerOpen)
+        {
+            CloseSlot();
+        }
+    }
+
+    private void OpenKitPicker()
+    {
+        _kitPickerOpen = true;
+        // Start on what is already chosen, so "Change…" lands on the thing being changed.
+        _kitPreviewAsset = _picked.Values.FirstOrDefault()
+            ?? ReferenceKit.FirstOrDefault()?.FirstOrDefault();
+        _kitPickerNeedsFocus = true;
+    }
+
+    private void CloseKitPicker() => _kitPickerOpen = false;
+
+    private void OnKitPickerKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseKitPicker();
+        }
+    }
+
+    /// <summary>
+    /// One slot on the contact sheet, at the slot's true aspect ratio. State reads from the
+    /// tile itself — a filled slot shows its published image, an empty one is a dashed hole —
+    /// with the shared status encoding on top (ADR-F12: no surface invents its own).
+    /// </summary>
+    private RenderFragment SheetCard(ImageSlotResponse slot) => __builder =>
+    {
+        var active = slot.Id == _selectedId;
+        var rendering = StudioRun.IsActiveFor(slot.Id);
+        var filled = slot.State == "Filled" && slot.PublishedUrl is not null;
+        // A slot with generated-but-unplaced takes previews its best take: work exists,
+        // it just hasn't been placed — an empty dashed hole would misreport that.
+        var takeThumb = !filled ? slot.LatestTakeThumbUrl : null;
+        <button type="button"
+                class="cm-studio__card @(filled || takeThumb is not null ? "cm-studio__card--filled" : null) @(active ? "cm-studio__card--active" : null)"
+                style="aspect-ratio: @slot.TargetWidth / @slot.TargetHeight; flex-basis: @(TileBasis(slot))px;"
+                aria-pressed="@(active ? "true" : "false")"
+                @onclick="() => OpenSlotAsync(slot)">
+            @if (filled)
+            {
+                <img src="@(slot.PublishedUrl + "?v=" + slot.UpdatedAt.ToUnixTimeSeconds())"
+                     alt="" loading="lazy" decoding="async" />
+            }
+            else if (takeThumb is not null)
+            {
+                <img src="@takeThumb" alt="" loading="lazy" decoding="async" />
+            }
+            <span class="cm-studio__card-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+            <span class="cm-studio__card-foot">
+                @if (rendering)
+                {
+                    <span class="cm-status cm-status--queued cm-studio__card-state">Rendering</span>
+                }
+                else if (slot.State == "Filled")
+                {
+                    <span class="cm-status cm-status--published cm-studio__card-state">Done</span>
+                }
+                else if (takeThumb is not null)
+                {
+                    <span class="cm-status cm-status--review cm-studio__card-state">In takes</span>
+                }
+                else
+                {
+                    <span class="cm-status cm-studio__card-state">Empty</span>
+                }
+                <span class="cm-studio__card-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
+            </span>
+        </button>
+    };
+
+    /// <summary>Tile width scaled from the slot's real published width, clamped to stay
+    /// usable — a 1600-wide header reads visibly wider than a 1280-wide thumbnail. The floor
+    /// is what keeps the status + dimensions foot from clipping on 1200-wide slots.</summary>
+    private static int TileBasis(ImageSlotResponse slot) =>
+        Math.Clamp(slot.TargetWidth / 8, 160, 200);
 
     /// <summary>
     /// Loads only the selected owner, so the Studio can show the real copy that the image is

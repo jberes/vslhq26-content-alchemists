@@ -243,6 +243,19 @@ public static class CampaignEndpoints
             .ToList();
         var slots = await db.ImageSlots.Where(s => s.CampaignId == id).ToListAsync(ct);
 
+        // Best take per slot for the sheet's tile preview: kept beats candidate (it's the
+        // one a person chose), then newest. Discarded takes never resurface.
+        var latestTakeBySlot = (await db.ImageVariants
+                .Where(v => v.CampaignId == id && v.State != "Discarded")
+                .Select(v => new { v.SlotId, v.ThumbUrl, v.State, v.CreatedAt })
+                .ToListAsync(ct))
+            .GroupBy(v => v.SlotId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(v => v.State == "Kept" ? 0 : 1)
+                    .ThenByDescending(v => v.CreatedAt)
+                    .First().ThumbUrl);
+
         var brand = campaign.BrandId is { } brandId
             ? await db.BrandProfiles
                 .Where(b => b.Id == brandId)
@@ -257,7 +270,10 @@ public static class CampaignEndpoints
             artifacts,
             imageSlots = slots
                 .OrderBy(s => Array.FindIndex(Services.Images.ImagePlanService.Templates, t => t.Kind == s.Kind))
-                .Select(ImageSlotEndpoints.ToResponse)
+                .Select(s => ImageSlotEndpoints.ToResponse(s) with
+                {
+                    LatestTakeThumbUrl = latestTakeBySlot.GetValueOrDefault(s.Id),
+                })
                 .ToList(),
             imagesFilled = slots.Count(s => s.State == "Filled"),
             imagesTotal = slots.Count,
@@ -331,11 +347,47 @@ public static class CampaignEndpoints
             .Distinct()
             .ToListAsync(ct);
 
+        // One placed image per campaign for the card's media band. Published blob paths are
+        // reused across placements, so the URL is cache-busted with the slot's UpdatedAt —
+        // same convention the studio uses.
+        var heroSlots = await db.ImageSlots
+            .Where(s => s.State == "Filled" && s.PublishedUrl != null)
+            .Select(s => new { s.CampaignId, s.PublishedUrl, s.UpdatedAt })
+            .ToListAsync(ct);
+        var heroByCampaign = heroSlots
+            .GroupBy(s => s.CampaignId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(s => s.UpdatedAt)
+                    .Select(s => $"{s.PublishedUrl}?v={s.UpdatedAt.ToUnixTimeSeconds()}")
+                    .First());
+
+        // Campaigns with generated takes but nothing placed yet still get a band image —
+        // the best take (kept first, then newest) beats a blank placeholder for reference.
+        var takesByCampaign = (await db.ImageVariants
+                .Where(v => v.State != "Discarded")
+                .Select(v => new { v.CampaignId, v.ThumbUrl, v.State, v.CreatedAt })
+                .ToListAsync(ct))
+            .GroupBy(v => v.CampaignId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(v => v.State == "Kept" ? 0 : 1)
+                    .ThenByDescending(v => v.CreatedAt)
+                    .First());
+        foreach (var (campaignId, take) in takesByCampaign)
+        {
+            if (!heroByCampaign.ContainsKey(campaignId))
+            {
+                heroByCampaign[campaignId] = $"{take.ThumbUrl}?v={take.CreatedAt.ToUnixTimeSeconds()}";
+            }
+        }
+
         var counts = campaigns.Select(c =>
         {
             var a = artifactCounts.FirstOrDefault(x => x.CampaignId == c.Id);
             var s = slotCounts.FirstOrDefault(x => x.CampaignId == c.Id);
-            return new CampaignCounts(c.Id, a?.Total ?? 0, a?.InReview ?? 0, s?.Filled ?? 0, s?.Total ?? 0);
+            return new CampaignCounts(c.Id, a?.Total ?? 0, a?.InReview ?? 0, s?.Filled ?? 0, s?.Total ?? 0,
+                heroByCampaign.GetValueOrDefault(c.Id));
         }).ToList();
 
         var withEmpty = slotCounts.Where(s => s.Total > s.Filled).Select(s => s.CampaignId).ToHashSet();

@@ -45,9 +45,19 @@
                 var summary = _summaries.GetValueOrDefault(campaign.Id);
                 <li>
                     <button type="button" class="cm-campaign-card" @onclick="() => Open(campaign)">
-                        @* Duotone placeholder band — the design's treatment, with no real
-                           media to show yet. *@
-                        <span class="cm-campaign-card__band cm-duotone" aria-hidden="true"></span>
+                        @if (summary?.HeroImageUrl is { } hero)
+                        {
+                            @* The campaign's most recently placed image — reference only, so
+                               cover-cropping into the band is fine. *@
+                            <img class="cm-campaign-card__band cm-campaign-card__band--image"
+                                 src="@hero" alt="" loading="lazy" decoding="async" />
+                        }
+                        else
+                        {
+                            @* Duotone placeholder band — the design's treatment when the
+                               campaign has no placed image yet. *@
+                            <span class="cm-campaign-card__band cm-duotone" aria-hidden="true"></span>
+                        }
                         <span class="cm-campaign-card__body">
                             <span class="cm-kicker">
                                 @CampaignContentType.DisplayLabel(campaign.ContentType)
@@ -74,7 +84,7 @@
 </div>
 
 @code {
-    private sealed record Summary(int Artifacts, int Review, int Filled, int Slots);
+    private sealed record Summary(int Artifacts, int Review, int Filled, int Slots, string? HeroImageUrl);
 
     private readonly Dictionary<Guid, Summary> _summaries = [];
 
@@ -96,7 +106,8 @@
             foreach (var counts in dashboard.Campaigns)
             {
                 _summaries[counts.CampaignId] = new Summary(
-                    counts.Artifacts, counts.InReview, counts.ImagesFilled, counts.ImagesTotal);
+                    counts.Artifacts, counts.InReview, counts.ImagesFilled, counts.ImagesTotal,
+                    counts.HeroImageUrl);
             }
         }
         catch (ApiException)

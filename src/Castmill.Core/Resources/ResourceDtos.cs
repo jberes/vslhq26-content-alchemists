@@ -34,7 +34,9 @@ public sealed record DashboardArtifact(
 
 /// <summary>Per-campaign counters for the campaigns index cards.</summary>
 public sealed record CampaignCounts(
-    Guid CampaignId, int Artifacts, int InReview, int ImagesFilled, int ImagesTotal);
+    Guid CampaignId, int Artifacts, int InReview, int ImagesFilled, int ImagesTotal,
+    /// <summary>Most recently placed image, cache-busted — the card's media band. Null keeps the duotone placeholder.</summary>
+    string? HeroImageUrl = null);
 
 /// <summary>
 /// The workspace dashboard in ONE call. The front page and the campaigns index previously
@@ -112,7 +114,10 @@ public sealed record ImageSlotResponse(
     /// <summary>Auto | Manual.</summary>
     string PromptMode = "Auto",
     /// <summary>Explicitly selected brand-kit reference rows. Product references attach automatically.</summary>
-    IReadOnlyList<Guid>? ReferenceAssetIds = null);
+    IReadOnlyList<Guid>? ReferenceAssetIds = null,
+    /// <summary>Thumb of the best un-discarded take (kept first, then newest) — lets the sheet
+    /// preview a slot that has generated work but nothing placed yet. Null when no takes.</summary>
+    string? LatestTakeThumbUrl = null);
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,
@@ -146,7 +151,9 @@ public sealed record VariantStateRequest(
 
 /// <summary>Steer a new take from an existing one: original prompt + the adjustment.</summary>
 public sealed record SteerVariantRequest(
-    [property: Required, MinLength(1), MaxLength(1000)] string Note,
+    /// <summary>Optional: references are real image inputs (ADR-025), so a new take steered
+    /// only by a selected face or background needs no typed adjustment.</summary>
+    [property: MaxLength(1000)] string? Note,
     [property: Range(1, 3)] int Variants = 1);
 
 /// <summary>Result envelope for generate/steer: the run id (pollable) + persisted takes.</summary>

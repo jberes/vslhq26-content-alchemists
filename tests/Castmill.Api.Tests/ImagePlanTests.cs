@@ -235,6 +235,12 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         public ConcurrentDictionary<string, byte[]> Blobs { get; } = new();
         public bool IsConfigured => true;
 
+        public Task DeleteAsync(string path, CancellationToken ct)
+        {
+            Blobs.TryRemove(path, out _);
+            return Task.CompletedTask;
+        }
+
         public Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct)
         {
             Blobs[path] = bytes.ToArray();

@@ -152,14 +152,29 @@ public sealed class FoundryImageProvider(
         using var response = await httpClients.CreateClient("foundry-images").SendAsync(request, ct);
         if (!response.IsSuccessStatusCode)
         {
+            // Carry the provider's own error text: a bare status code sent a real session
+            // guessing at prompts while the actual fault was the safety system.
+            var detail = await response.Content.ReadAsStringAsync(ct);
+            if (detail.Contains("moderation_blocked", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ImageModerationException(
+                    "Azure's safety system declined this render (moderation_blocked). "
+                    + "Photorealistic faces of real people often trigger it — try a different "
+                    + "reference, remove the face, or request modified content filters for the "
+                    + "Azure OpenAI resource.");
+            }
             throw new InvalidOperationException(
-                $"Foundry reference-image generation returned {(int)response.StatusCode}.");
+                $"Foundry reference-image generation returned {(int)response.StatusCode}: "
+                + $"{Truncate(detail, 600)}");
         }
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
         var b64 = doc.RootElement.GetProperty("data")[0].GetProperty("b64_json").GetString()
             ?? throw new InvalidOperationException("Foundry returned no reference-image result.");
         return Convert.FromBase64String(b64);
     }
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max].TrimEnd() + "…";
 
     private static string SizeFor(string aspectRatio) => aspectRatio.Trim() switch
     {

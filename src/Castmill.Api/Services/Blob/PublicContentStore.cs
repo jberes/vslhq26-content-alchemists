@@ -21,6 +21,12 @@ public interface IPublicContentStore
     /// would make an internal operation depend on internet egress.
     /// </summary>
     Task<byte[]?> ReadAsync(string path, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a published blob. Deleting a blob that is already gone succeeds silently —
+    /// the caller's row is the source of truth and blob cleanup must be repeatable.
+    /// </summary>
+    Task DeleteAsync(string path, CancellationToken ct);
 }
 
 public sealed class PublicContentStore : IPublicContentStore
@@ -85,5 +91,16 @@ public sealed class PublicContentStore : IPublicContentStore
         }
         var download = await blob.DownloadContentAsync(ct);
         return download.Value.Content.ToArray();
+    }
+
+    public async Task DeleteAsync(string path, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        await _client.GetBlobContainerClient(_options.PublicContainer)
+            .GetBlobClient(path)
+            .DeleteIfExistsAsync(cancellationToken: ct);
     }
 }

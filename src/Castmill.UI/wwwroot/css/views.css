@@ -432,6 +432,13 @@
     block-size: 104px;
 }
 
+/* A real placed image in the band: cover-cropped, reference only. */
+.cm-campaign-card__band--image {
+    display: block;
+    inline-size: 100%;
+    object-fit: cover;
+}
+
 /* The design's duotone media plate. A placeholder treatment until real source media is
    modelled on the campaign — hatched bands, as in the handoff's own prototype. */
 .cm-duotone {
@@ -739,20 +746,7 @@
     border-color: var(--cm-danger);
 }
 
-/* ---- Image plan (F10 builds the studio pane) ----------------------------------- */
-
-.cm-studio {
-    display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
-    gap: var(--cm-space-8);
-    align-items: start;
-}
-
-@media (max-width: 899.98px) {
-    .cm-studio {
-        grid-template-columns: minmax(0, 1fr);
-    }
-}
+/* ---- Image plan (Focus view's slot list) ---------------------------------------- */
 
 .cm-plan__slots {
     list-style: none;
@@ -2362,133 +2356,202 @@
 
 }
 
-/* ---- Image studio (F10) ----------------------------------------------------------- */
+/* ---- Image studio (F10; contact sheet + drawer) ------------------------------------ */
 
+/* Height chain from .cm-page--fill down to the two scroll columns. */
+.cm-studio-fill {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-block-size: 0;
+}
+
+/* The sheet IS the page; the drawer column exists only while a slot is open. Both columns
+   scroll independently — sizing the drawer against the viewport was wrong, because the
+   studio's region is the viewport MINUS the shell chrome, so a 100dvh drawer could never
+   reveal its bottom. */
 .cm-studio {
     display: grid;
-    grid-template-columns: minmax(18rem, 20rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--cm-space-6);
-    align-items: start;
+    min-block-size: 0;
 }
 
-@media (max-width: 60rem) {
-    .cm-studio {
-        grid-template-columns: minmax(0, 1fr);
-    }
+.cm-studio--open {
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 34rem);
 }
 
-.cm-studio__nav {
+.cm-studio__sheet {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-4);
-    padding: var(--cm-space-3);
-    border: 1px solid var(--cm-rule);
-    border-radius: var(--cm-radius-md);
-    background: var(--cm-surface-sunken);
+    gap: var(--cm-space-6);
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-y: auto;
+    padding-inline-end: var(--cm-space-2);
 }
 
-.cm-studio__nav-head,
-.cm-studio__content-group > .cm-studio__content-head {
+/* Groups are made by typography and a hairline, not boxed sub-panels. */
+.cm-studio__group-head {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    align-items: baseline;
     gap: var(--cm-space-3);
-}
-
-.cm-studio__nav-head {
-    padding: var(--cm-space-1) var(--cm-space-1) 0;
-}
-
-.cm-studio__content-group {
-    overflow: hidden;
-    border: 1px solid var(--cm-rule);
-    border-radius: var(--cm-radius-md);
-    background: var(--cm-surface-raised);
-}
-
-.cm-studio__content-head {
-    padding: var(--cm-space-3);
+    padding-block-end: var(--cm-space-2);
+    margin-block-end: var(--cm-space-3);
     border-block-end: 1px solid var(--cm-rule);
 }
 
 .cm-studio__content-title {
-    margin: var(--cm-space-1) 0 0;
-    color: var(--cm-on-surface-muted);
+    flex: 1;
+    min-inline-size: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--cm-on-surface);
     font-size: var(--cm-text-meta);
     line-height: var(--cm-leading-tight);
 }
 
-.cm-studio__count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-inline-size: 1.75rem;
-    min-block-size: 1.75rem;
-    padding-inline: var(--cm-space-1);
-    border-radius: 999px;
-    background: var(--cm-surface-sunken);
-    color: var(--cm-on-surface-muted);
+.cm-studio__fill {
     font-size: var(--cm-text-kicker);
+    color: var(--cm-on-surface-muted);
+    font-variant-numeric: tabular-nums;
 }
 
-.cm-studio__content-actions {
-    padding: var(--cm-space-3);
-    border-block-start: 1px dashed var(--cm-rule);
+.cm-studio__tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-3);
 }
 
-.cm-studio__content-actions .cm-button {
-    inline-size: 100%;
-    justify-content: center;
-}
-
-.cm-studio__slots {
-    list-style: none;
-    margin: 0;
+/* One slot at its true aspect ratio — the inline style carries aspect-ratio and the
+   slot's scaled width as flex-basis, so a 1600-wide header reads wider than a 1280
+   thumbnail. An empty slot is a dashed hole; a filled one shows its published image. */
+.cm-studio__card {
+    position: relative;
+    flex: 0 1 auto;
+    overflow: hidden;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--cm-space-1);
-    padding: var(--cm-space-2);
-}
-
-.cm-studio__slot {
-    display: flex;
-    align-items: center;
-    gap: var(--cm-space-2);
-    width: 100%;
-    text-align: left;
-    padding: var(--cm-space-2) var(--cm-space-3);
-    background: transparent;
-    border: 1px solid transparent;
+    border: 1.5px dashed var(--cm-rule-strong);
     border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
     color: var(--cm-on-surface);
     font: inherit;
+    text-align: left;
     cursor: pointer;
 }
 
-.cm-studio__slot--active {
+.cm-studio__card:hover:not(:disabled) {
+    border-color: var(--cm-accent);
+}
+
+.cm-studio__card--filled {
+    border-style: solid;
+    border-color: var(--cm-rule);
+}
+
+.cm-studio__card--active {
+    border-style: solid;
     border-color: var(--cm-accent-strong);
-    background: var(--cm-accent-wash);
-    box-shadow: inset 3px 0 0 var(--cm-accent-strong);
+    outline: 2px solid var(--cm-accent-strong);
+    outline-offset: 1px;
 }
 
-.cm-studio__slot-size {
-    margin-left: auto;
-    font-size: var(--cm-text-kicker);
-    color: var(--cm-on-surface-muted);
+.cm-studio__card img {
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
 }
 
-.cm-studio__badge {
+/* Legibility scrim over an unpredictable generated image — derived from the token
+   layer, no literal colours (ADR-F09). */
+.cm-studio__card--filled::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg,
+        color-mix(in srgb, var(--cm-surface-inverse) 45%, transparent),
+        transparent 38%,
+        transparent 58%,
+        color-mix(in srgb, var(--cm-surface-inverse) 55%, transparent));
+}
+
+.cm-studio__card-name {
+    position: absolute;
+    inset-block-start: var(--cm-space-2);
+    inset-inline: var(--cm-space-2);
+    z-index: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--cm-text-meta);
+    font-weight: 600;
+}
+
+.cm-studio__card-foot {
+    position: absolute;
+    inset-block-end: var(--cm-space-2);
+    inset-inline: var(--cm-space-2);
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+}
+
+.cm-studio__card-state {
     font-size: var(--cm-text-kicker);
     letter-spacing: var(--cm-tracking-kicker);
     text-transform: uppercase;
-    padding: 0 var(--cm-space-1);
-    border-radius: var(--cm-radius-sm);
-    background: var(--cm-success);
+}
+
+.cm-studio__card-size {
+    font-size: var(--cm-text-kicker);
+    color: var(--cm-on-surface-muted);
+    white-space: nowrap;
+}
+
+.cm-studio__card--filled .cm-studio__card-name,
+.cm-studio__card--filled .cm-studio__card-size,
+.cm-studio__card--filled .cm-studio__card-state {
     color: var(--cm-on-inverse);
 }
 
-.cm-studio__pane {
+/* "The next slot, not created yet": add is a ghost tile in the content piece's own row. */
+.cm-studio__card--add {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--cm-space-1);
+    flex-basis: 9rem;
+    min-block-size: 5.5rem;
+    border-color: var(--cm-rule);
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-meta);
+}
+
+.cm-studio__card--add:hover:not(:disabled) {
+    color: var(--cm-accent);
+}
+
+.cm-studio__card--add:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.cm-studio__card-plus {
+    font-size: var(--cm-text-h4);
+    line-height: 1;
+}
+
+/* The editor drawer: its own scroll column beside the sheet on wide screens, an edge
+   overlay on narrow ones (fluid — ADR-F10). Sits BELOW the take lightbox (.cm-modal, z 70). */
+.cm-studio__drawer {
+    min-block-size: 0;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-4);
@@ -2496,6 +2559,231 @@
     background: var(--cm-surface-raised);
     border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-md);
+    box-shadow: var(--cm-shadow-md);
+    /* prefers-reduced-motion collapses --cm-motion-duration, so this obeys it for free. */
+    animation: cm-studio-drawer-in var(--cm-motion-duration) var(--cm-motion-ease);
+}
+
+@keyframes cm-studio-drawer-in {
+    from {
+        opacity: 0;
+        transform: translateX(var(--cm-space-3));
+    }
+}
+
+.cm-studio__drawer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+.cm-studio__drawer-head h2 {
+    margin: 0;
+}
+
+.cm-studio__drawer-close {
+    flex: none;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.cm-studio__drawer-close:hover {
+    color: var(--cm-on-surface);
+    border-color: var(--cm-rule-strong);
+}
+
+/* Current reference selections as removable chips; the kit itself opens in the dialog. */
+.cm-studio__refbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-2);
+}
+
+.cm-studio__refchip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: 999px;
+    background: var(--cm-surface);
+    color: var(--cm-on-surface);
+    font-size: var(--cm-text-meta);
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.cm-studio__refchip img {
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.cm-studio__refchip-x {
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-studio__refchip:hover {
+    border-color: var(--cm-danger);
+}
+
+.cm-studio__refchip:hover .cm-studio__refchip-x {
+    color: var(--cm-danger);
+}
+
+/* The kit picker dialog: master–detail. List left (grouped by type), preview right. */
+.cm-kitpicker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    inline-size: min(56rem, 100%);
+    max-block-size: min(38rem, 90dvh);
+    padding: var(--cm-space-4);
+    background: var(--cm-surface-raised);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-md);
+    box-shadow: var(--cm-shadow-lg);
+}
+
+.cm-kitpicker__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+.cm-kitpicker__head h2 {
+    margin: 0;
+}
+
+.cm-kitpicker__body {
+    display: grid;
+    grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+    gap: var(--cm-space-4);
+    min-block-size: 0;
+    flex: 1;
+}
+
+.cm-kitpicker__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    overflow-y: auto;
+    padding-inline-end: var(--cm-space-2);
+    border-inline-end: 1px solid var(--cm-rule);
+}
+
+.cm-kitpicker__list ul {
+    list-style: none;
+    margin: 0 0 var(--cm-space-2);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cm-kitpicker__item {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    inline-size: 100%;
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border: 1px solid transparent;
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+    color: var(--cm-on-surface);
+    font: inherit;
+    font-size: var(--cm-text-meta);
+    text-align: left;
+    cursor: pointer;
+}
+
+.cm-kitpicker__item:hover {
+    background: var(--cm-surface-sunken);
+}
+
+.cm-kitpicker__item--current {
+    border-color: var(--cm-accent-strong);
+    background: var(--cm-accent-wash);
+}
+
+.cm-kitpicker__item img {
+    inline-size: 2rem;
+    block-size: 2rem;
+    border-radius: var(--cm-radius-sm);
+    object-fit: cover;
+    flex: none;
+}
+
+.cm-kitpicker__item-label {
+    flex: 1;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cm-kitpicker__tick {
+    color: var(--cm-success);
+    font-weight: 700;
+}
+
+.cm-kitpicker__preview {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--cm-space-2);
+    min-block-size: 0;
+    overflow-y: auto;
+}
+
+.cm-kitpicker__preview img {
+    max-inline-size: 100%;
+    max-block-size: 22rem;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    object-fit: contain;
+}
+
+.cm-kitpicker__actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+@media (max-width: 48rem) {
+    .cm-kitpicker__body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .cm-kitpicker__list {
+        border-inline-end: none;
+        max-block-size: 12rem;
+    }
+}
+
+@media (max-width: 60rem) {
+    .cm-studio--open {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .cm-studio__drawer {
+        position: fixed;
+        inset: 0 0 0 auto;
+        z-index: 60;
+        inline-size: min(28rem, 100%);
+        max-block-size: none;
+        border-radius: 0;
+        box-shadow: var(--cm-shadow-lg);
+    }
 }
 
 .cm-studio__context {
@@ -2631,42 +2919,6 @@
 
 .cm-studio__model--off {
     color: var(--cm-on-surface-subtle);
-}
-
-.cm-studio__grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
-    gap: var(--cm-space-3);
-}
-
-.cm-studio__tile {
-    display: flex;
-    flex-direction: column;
-    gap: var(--cm-space-1);
-    padding: 0;
-    border: 2px solid var(--cm-rule);
-    border-radius: var(--cm-radius-sm);
-    background: var(--cm-surface);
-    cursor: pointer;
-    overflow: hidden;
-    font: inherit;
-    text-align: left;
-}
-
-.cm-studio__tile:hover {
-    border-color: var(--cm-accent);
-}
-
-.cm-studio__tile img {
-    display: block;
-    width: 100%;
-    height: auto;
-}
-
-.cm-studio__tile-label {
-    padding: var(--cm-space-1) var(--cm-space-2);
-    font-size: var(--cm-text-kicker);
-    color: var(--cm-on-surface-muted);
 }
 
 /* Skeleton while variants render — motion, not a spinner (ADR-F13). */

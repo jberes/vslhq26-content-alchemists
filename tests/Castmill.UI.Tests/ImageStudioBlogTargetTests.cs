@@ -111,9 +111,19 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
 
     // ---- helpers ---------------------------------------------------------------
 
+    /// <summary>The drawer is closed until a tile is chosen — open the first real slot tile.</summary>
+    private static async Task OpenFirstSlotAsync(IRenderedComponent<ImageStudioView> view)
+    {
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count > 0,
+            TimeSpan.FromSeconds(5));
+        await view.Find(".cm-studio__card:not(.cm-studio__card--add)").ClickAsync();
+    }
+
     private async Task<IRenderedComponent<ImageStudioView>> OpenTakeAsync()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
         await view.Find(".cm-gallery__tile").ClickAsync();

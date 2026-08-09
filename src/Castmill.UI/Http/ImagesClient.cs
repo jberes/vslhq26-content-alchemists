@@ -89,6 +89,10 @@ public sealed class ImagesClient(ApiClient api)
     public Task DeleteAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}", ct);
 
+    /// <summary>Hard-deletes a take — row and blobs. Discard is the recoverable path.</summary>
+    public Task DeleteVariantAsync(Guid campaignId, Guid slotId, Guid variantId, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}", ct);
+
     /// <summary>Re-composites the thumbnail headline over the placed base image — no model call.</summary>
     public Task<PlaceResult> CompositeAsync(
         Guid campaignId, Guid slotId, string headline, bool safeArea,

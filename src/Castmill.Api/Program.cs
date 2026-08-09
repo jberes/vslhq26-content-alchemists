@@ -127,10 +127,24 @@ builder.Services.AddHttpClient("seo", client => client.Timeout = TimeSpan.FromMi
         options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(5);
     });
-builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(3))
-    .AddStandardResilienceHandler();
-builder.Services.AddHttpClient("foundry-images", client => client.Timeout = TimeSpan.FromMinutes(5))
-    .AddStandardResilienceHandler();
+// Image renders run for 1–3 minutes. The standard handler's default 10-second attempt
+// timeout (30s total) aborted every take before the model could answer — and each retry
+// of a slow-but-succeeding render is a paid model call, so retries stay at the default
+// transient-only conditions with an attempt window sized for a real render.
+builder.Services.AddHttpClient("imageprovider", client => client.Timeout = TimeSpan.FromMinutes(6))
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(4);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(8);
+    });
+builder.Services.AddHttpClient("foundry-images", client => client.Timeout = TimeSpan.FromMinutes(6))
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(4);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(8);
+    });
 builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
         client => client.Timeout = TimeSpan.FromSeconds(60))
     .AddStandardResilienceHandler();

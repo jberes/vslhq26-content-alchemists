@@ -65,6 +65,8 @@ public sealed class ImageRenderingTests(CastmillApiFactory factory)
             Task.FromResult(new Uri($"https://public.example/{path}"));
 
         public Task<byte[]?> ReadAsync(string path, CancellationToken ct) => Task.FromResult<byte[]?>(null);
+
+        public Task DeleteAsync(string path, CancellationToken ct) => Task.CompletedTask;
     }
 
     [Fact]

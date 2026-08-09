@@ -74,6 +74,8 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
     {
         public string? LastHtml { get; private set; }
         public bool IsConfigured => true;
+
+        public Task DeleteAsync(string path, CancellationToken ct) => Task.CompletedTask;
         public Task<Uri> PublishAsync(string path, ReadOnlyMemory<byte> bytes, string contentType, CancellationToken ct)
         {
             if (contentType.StartsWith("text/html", StringComparison.Ordinal))

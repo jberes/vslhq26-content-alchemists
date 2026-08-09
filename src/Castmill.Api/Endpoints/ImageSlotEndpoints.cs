@@ -30,6 +30,8 @@ public static class ImageSlotEndpoints
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
         group.MapPost("/{slotId:guid}/place", PlaceAsync).Validate<PlaceVariantRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}", ClearAsync).RequireRateLimiting("writes");
+        group.MapDelete("/{slotId:guid}/variants/{variantId:guid}", DeleteVariantAsync)
+            .RequireRateLimiting("writes");
 
         // Persisted takes: the gallery lists them, keep/discard flips state, steer
         // makes a new take from an old one. Blobs are never deleted (immutable cache).
@@ -279,6 +281,50 @@ public static class ImageSlotEndpoints
             resolvedReferences);
     }
 
+    /// <summary>
+    /// Hard delete: the row AND its blobs. Discard is the soft, recoverable path; this is
+    /// for a take the user never wants to see again. The take whose blob is the slot's
+    /// current base image is refused — the published image and overlay re-compositing
+    /// read that blob, so it must be removed from the slot first.
+    /// </summary>
+    private static async Task<IResult> DeleteVariantAsync(
+        Guid campaignId, Guid slotId, Guid variantId,
+        IPublicContentStore publicStore, CastmillDbContext db, CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        var variant = await db.ImageVariants.SingleOrDefaultAsync(
+            v => v.Id == variantId && v.SlotId == slotId && v.CampaignId == campaignId, ct);
+        if (variant is null)
+        {
+            return Results.NotFound();
+        }
+        if (slot.State == "Filled" && slot.BaseImagePath == variant.BlobPath)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "This take is the image currently placed in the slot. "
+                    + "Remove it from the slot first, then delete it.");
+        }
+
+        db.ImageVariants.Remove(variant);
+        await db.SaveChangesAsync(ct);
+
+        // Blobs after the row: repeating a delete for a missing blob is harmless,
+        // resurrecting a row because a blob call hiccupped is not.
+        if (publicStore.IsConfigured)
+        {
+            await publicStore.DeleteAsync(variant.BlobPath, ct);
+            if (!string.IsNullOrEmpty(variant.ThumbBlobPath))
+            {
+                await publicStore.DeleteAsync(variant.ThumbBlobPath, ct);
+            }
+        }
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> ListVariantsAsync(
         Guid campaignId, Guid slotId, CastmillDbContext db, CancellationToken ct,
         bool includeDiscarded = false)
@@ -362,15 +408,17 @@ public static class ImageSlotEndpoints
         }
 
         // The source's persisted prompt already carries brand steering — append only
-        // the adjustment, so lineage is honest and reproducible.
-        var effectivePrompt = ComposeEffectivePrompt(source.Prompt, imageStyleBlock: null, request.Note);
+        // the adjustment, so lineage is honest and reproducible. The note is optional:
+        // steering by reference alone (ADR-025's real image inputs) is a complete request.
+        var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
+        var effectivePrompt = ComposeEffectivePrompt(source.Prompt, imageStyleBlock: null, note);
         var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
         effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
         effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
 
         return await RenderBatchAsync(
-            slot, effectivePrompt, request.Variants, request.Note, source.Id,
+            slot, effectivePrompt, request.Variants, note, source.Id,
             principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
             resolvedReferences);
     }
@@ -465,8 +513,17 @@ public static class ImageSlotEndpoints
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                failures.Add($"v{i}: {ex.GetType().Name}"); // partial failure never sinks the set
-                items.Add(new { kind = $"v{i}", success = false, error = ex.GetType().Name, durationMs = stopwatch.ElapsedMilliseconds });
+                // NAME the failure in the server log. The client only ever sees the exception
+                // type, and a bare "no takes came back" sent a real session chasing prompts
+                // when the actual fault was a 10-second resilience timeout on the HTTP client.
+                http.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("Castmill.ImageSlots")
+                    .LogError(ex, "Image render v{Take}/{Count} for slot {SlotId} failed", i, count, slot.Id);
+                // Moderation refusals carry a producer-facing message; everything else stays
+                // a type name so provider internals never reach the client.
+                var reason = ex is ImageModerationException ? ex.Message : ex.GetType().Name;
+                failures.Add($"v{i}: {reason}"); // partial failure never sinks the set
+                items.Add(new { kind = $"v{i}", success = false, error = reason, durationMs = stopwatch.ElapsedMilliseconds });
             }
 
             run.ItemsJson = System.Text.Json.JsonSerializer.Serialize(items, JsonWeb);
