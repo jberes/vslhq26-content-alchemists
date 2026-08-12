@@ -169,6 +169,20 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
 
         await page.goto(`/campaigns/${campaignId}/floor`);
         await expect(page.locator('.cm-campaign-header__meta')).toContainText('Webinar');
+
+        const renamedCampaignName = `${campaignName} renamed`;
+        const renameResponse = page.waitForResponse(response =>
+            response.url().endsWith(`/api/v1/campaigns/${campaignId}`)
+            && response.request().method() === 'PUT');
+        await page.getByRole('button', { name: 'Rename', exact: true }).click();
+        await page.getByLabel('Campaign name').fill(renamedCampaignName);
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        expect((await renameResponse).ok()).toBeTruthy();
+        await expect(page.locator('.cm-campaign-header__name')).toHaveText(renamedCampaignName);
+        await expect(workspaceRail.locator('.cm-rail__campaign-name'))
+            .toHaveText(renamedCampaignName);
+        campaignName = renamedCampaignName;
+
         const printKinds = page.locator('.cm-print-chip');
         await expect(printKinds).toHaveCount(8);
         await expect(printKinds).toContainText([
@@ -260,6 +274,22 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
             .find(item => item.kind === 'youtube' && item.isDefault);
         expect(storedYoutube.steeringPrompt).toBe(longYoutubeTemplate);
 
+        await page.goto('/settings');
+        await page.getByRole('tab', { name: 'Models', exact: true }).click();
+        const defaultModel = page.getByLabel('Default image generator');
+        const firstReadyModel = defaultModel.locator('option:not([disabled])').first();
+        const defaultAlias = await firstReadyModel.getAttribute('value');
+        expect(defaultAlias).toBeTruthy();
+        await defaultModel.selectOption(defaultAlias);
+        const saveDefault = page.waitForResponse(response =>
+            response.url().endsWith('/api/v1/settings/images.default-model')
+            && response.request().method() === 'PUT');
+        await page.getByRole('button', { name: 'Save default' }).click();
+        const savedDefault = await saveDefault;
+        expect(savedDefault.ok()).toBeTruthy();
+        expect(savedDefault.request().postDataJSON().value).toBe(defaultAlias);
+        await expect(page.locator('.cm-settings__default-model')).toContainText('SAVED');
+
         let previewRequests = 0;
         page.on('request', current => {
             if (current.method() === 'GET'
@@ -267,6 +297,42 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
                 previewRequests += 1;
             }
         });
+
+        // Exercise take-state UX without spending against an image model. The browser still
+        // drives the real authenticated client, drawer, dialog and PATCH reconciliation; only
+        // the metered image pixels are represented by a deterministic fixture.
+        const takeId = crypto.randomUUID();
+        let takeState = 'Candidate';
+        const takeFixture = () => ({
+            id: takeId,
+            slotId,
+            url: 'http://localhost:5084/favicon.png',
+            thumbUrl: 'http://localhost:5084/favicon.png',
+            model: 'gpt-image-2',
+            state: takeState,
+            steeringNote: null,
+            sourceVariantId: null,
+            width: 1280,
+            height: 720,
+            createdAt: new Date().toISOString(),
+        });
+        await page.route(url =>
+            url.pathname.endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/variants`)
+            && url.searchParams.get('includeDiscarded')?.toLowerCase() === 'true',
+        async route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([takeFixture()]),
+        }));
+        await page.route(`**/api/v1/campaigns/${campaignId}/image-slots/${slotId}/variants/${takeId}`,
+            async route => {
+                takeState = route.request().postDataJSON().state;
+                await route.fulfill({
+                    status: 200,
+                    contentType: 'application/json',
+                    body: JSON.stringify(takeFixture()),
+                });
+            });
         await page.goto(`/campaigns/${campaignId}/images`);
         await expect(page.getByRole('tab', { name: 'Image studio' }))
             .toHaveAttribute('aria-selected', 'true');
@@ -282,6 +348,23 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-studio__context'))
             .toContainText('A concise product launch post.');
         const loadedPreviewRequests = previewRequests;
+
+        const compactModel = page.locator('.cm-studio__models');
+        await expect(compactModel).toContainText('DEFAULT');
+        await expect(compactModel.locator('input[type="radio"]')).toHaveCount(0);
+        await compactModel.getByRole('button', { name: 'Change…' }).click();
+        await expect(page.locator('.cm-modelpicker')).toBeVisible();
+        await expect(page.locator('.cm-modelpicker__choice').first())
+            .toContainText('Workspace default');
+        await page.locator('.cm-modelpicker').getByRole('button', { name: 'Cancel' }).click();
+
+        await expect(page.locator('.cm-gallery__tile')).toHaveCount(1);
+        await expect(page.getByRole('button', { name: 'Show discarded takes' })).toHaveCount(0);
+        await page.locator('.cm-gallery__tile').click();
+        await page.getByRole('button', { name: 'Mark as keeper' }).click();
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await expect(page.locator('.cm-gallery__tile')).toHaveClass(/cm-gallery__tile--keeper/);
+        await expect(page.locator('.cm-gallery__keeper')).toHaveText('✓ Keeper');
 
         const manual = page.getByRole('button', { name: /Manual Use this prompt verbatim/ });
         const patch = page.waitForResponse(response =>

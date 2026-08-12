@@ -33,10 +33,11 @@ public sealed class ImagesClient(ApiClient api)
         string? prompt = null, string? modelAlias = null, string? sourceSegmentId = null,
         string? headlineText = null, bool? safeArea = null,
         string? promptMode = null, IReadOnlyList<Guid>? referenceAssetIds = null,
+        bool? useDefaultModel = null,
         CancellationToken ct = default) =>
         api.PatchAsync<object, ImageSlotResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}",
-            new { prompt, modelAlias, sourceSegmentId, headlineText, safeArea, promptMode, referenceAssetIds },
+            new { prompt, modelAlias, sourceSegmentId, headlineText, safeArea, promptMode, referenceAssetIds, useDefaultModel },
             etag: null,
             ct);
 

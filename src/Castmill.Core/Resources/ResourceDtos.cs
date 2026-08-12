@@ -127,7 +127,9 @@ public sealed record ImageSlotPatchRequest(
     [property: MaxLength(32)] string? HeadlineText,
     bool? SafeArea,
     [property: MaxLength(10)] string? PromptMode = null,
-    IReadOnlyList<Guid>? ReferenceAssetIds = null);
+    IReadOnlyList<Guid>? ReferenceAssetIds = null,
+    /// <summary>Clears a card override so it inherits the workspace image-model default.</summary>
+    bool? UseDefaultModel = null);
 
 /// <summary>Adds an image card to a specific content artifact. The server chooses a
 /// platform-correct shape from the artifact kind unless explicit dimensions are supplied.</summary>

@@ -154,8 +154,30 @@ public static class ImageSlotEndpoints
                 });
             }
         }
+        if (request.UseDefaultModel == true && request.ModelAlias is not null)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["ModelAlias"] = ["Choose a model override or use the workspace default, not both."],
+            });
+        }
+        if (request.UseDefaultModel != true && request.ModelAlias is not null
+            && string.IsNullOrWhiteSpace(request.ModelAlias))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["ModelAlias"] = ["Model alias cannot be blank; use the workspace-default option instead."],
+            });
+        }
         slot.Prompt = request.Prompt ?? slot.Prompt;
-        slot.ModelAlias = request.ModelAlias ?? slot.ModelAlias;
+        if (request.UseDefaultModel == true)
+        {
+            slot.ModelAlias = null;
+        }
+        else if (request.ModelAlias is not null)
+        {
+            slot.ModelAlias = request.ModelAlias.Trim();
+        }
         slot.SourceSegmentId = request.SourceSegmentId ?? slot.SourceSegmentId;
         slot.HeadlineText = request.HeadlineText ?? slot.HeadlineText;
         slot.SafeArea = request.SafeArea ?? slot.SafeArea;

@@ -190,9 +190,47 @@
     @* ---- Model aliases ---- *@
     @if (_tab == "models")
     {
+        <article class="cm-settings__default-model">
+            <div>
+                <span class="cm-kicker">Default image generator</span>
+                <h2>Choose once for every new image card</h2>
+                <p class="cm-meta">
+                    Image Studio inherits this model unless you choose a different one for a
+                    specific image. Existing per-image overrides are not changed.
+                </p>
+            </div>
+            @if (_status is { } imageStatus && ImageModelCatalog.Choices(imageStatus) is { Count: > 0 } imageChoices)
+            {
+                <div class="cm-settings__default-model-control">
+                    <select class="cm-input" aria-label="Default image generator"
+                            @bind="_defaultImageModelDraft">
+                        @foreach (var choice in imageChoices)
+                        {
+                            <option value="@choice.Value" disabled="@(!choice.Ready)">
+                                @choice.Label · @(choice.Detail ?? choice.Value)@(!choice.Ready ? " — unavailable" : "")
+                            </option>
+                        }
+                    </select>
+                    <button type="button" class="cm-button"
+                            disabled="@(_savingDefaultModel || string.IsNullOrWhiteSpace(_defaultImageModelDraft))"
+                            @onclick="SaveDefaultImageModelAsync">
+                        @(_savingDefaultModel ? "Saving…" : "Save default")
+                    </button>
+                </div>
+                @if (_defaultImageModel is not null)
+                {
+                    <span class="cm-badge cm-badge--done">SAVED</span>
+                }
+            }
+            else
+            {
+                <p class="cm-meta">No image generators are configured yet.</p>
+            }
+        </article>
+
         <p class="cm-meta">
-            Set on the server, not here — generation asks for an alias and the server maps it to
-            a deployment, so a model can be swapped without touching the client.
+            Deployment aliases are configured on the server. The default above stores only the
+            alias—not credentials or deployment details.
         </p>
         @if (_status is { } modelStatus && modelStatus.Models.Count > 0)
         {
@@ -219,11 +257,14 @@
     private readonly Dictionary<string, string> _drafts = [];
     private string? _busy;
     private string? _loadError;
+    private string? _defaultImageModel;
+    private string? _defaultImageModelDraft;
+    private bool _savingDefaultModel;
 
     /// <summary>Credentials first: it is the panel people navigate here to change.</summary>
     private static readonly (string Id, string Label)[] Tabs =
         [("credentials", "Credentials"), ("links", "Links"),
-         ("readiness", "Readiness"), ("models", "Model aliases")];
+         ("readiness", "Readiness"), ("models", "Models")];
 
     private string _tab = "credentials";
 
@@ -302,10 +343,14 @@
             // the other, but a first-load failure needs to be visible rather than silent.
             _secrets = await SettingsApi.SecretsAsync();
 
+            var settings = await SettingsApi.ListAsync();
             _links.Clear();
-            _links.AddRange((await SettingsApi.GetLinksAsync())
+            _links.AddRange(SettingsClient.ReadLinks(settings)
                 .Select(l => new LinkRow { Label = l.Label, Url = l.Url }));
+            _defaultImageModel = SettingsClient.ReadDefaultImageModel(settings);
             _status = await Images.GetAiStatusAsync();
+            _defaultImageModelDraft = ImageModelCatalog.Resolve(
+                ImageModelCatalog.Choices(_status), _defaultImageModel)?.Value;
         }
         catch (ApiException ex)
         {
@@ -353,6 +398,30 @@
         finally
         {
             _busy = null;
+        }
+    }
+
+    private async Task SaveDefaultImageModelAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_defaultImageModelDraft))
+        {
+            return;
+        }
+
+        _savingDefaultModel = true;
+        try
+        {
+            await SettingsApi.SaveDefaultImageModelAsync(_defaultImageModelDraft);
+            _defaultImageModel = _defaultImageModelDraft;
+            Notifier.ShowSuccess("Default image generator saved.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't save the default image generator — {ex.Message}");
+        }
+        finally
+        {
+            _savingDefaultModel = false;
         }
     }
 

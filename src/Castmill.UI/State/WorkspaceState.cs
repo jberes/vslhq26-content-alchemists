@@ -133,4 +133,31 @@ public sealed class WorkspaceState(CampaignsClient campaigns)
         Active = campaign;
         Changed?.Invoke();
     }
+
+    /// <summary>
+    /// Reconciles a campaign mutation into the cross-campaign list without re-fetching the
+    /// whole workspace. Rename/status edits return the authoritative server row, so the rail
+    /// can update its title, metadata and active item in the same render as the header.
+    /// </summary>
+    public void Synchronize(CampaignResponse campaign)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+
+        var index = _campaigns.FindIndex(item => item.Id == campaign.Id);
+        if (index >= 0)
+        {
+            _campaigns[index] = campaign;
+        }
+        else
+        {
+            _campaigns.Add(campaign);
+        }
+
+        if (Active?.Id == campaign.Id)
+        {
+            Active = campaign;
+        }
+
+        Changed?.Invoke();
+    }
 }

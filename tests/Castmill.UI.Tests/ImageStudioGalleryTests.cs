@@ -51,6 +51,104 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
         var img = view.Find(".cm-gallery__tile img");
         Assert.Contains("thumbs", img.GetAttribute("src"), StringComparison.Ordinal);
         Assert.Equal("lazy", img.GetAttribute("loading"));
+        Assert.DoesNotContain(view.FindAll("button"), button =>
+            button.TextContent.Contains("discarded takes", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(Http.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.RequestUri!.AbsolutePath.EndsWith($"image-slots/{SlotId}/variants", StringComparison.Ordinal)
+            && request.RequestUri.Query.Contains("includeDiscarded=true", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Marking_a_take_as_keeper_updates_the_take_card_immediately()
+    {
+        StubPatchResult(Take(TakeId, "Kept"));
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
+
+        Assert.Empty(view.FindAll(".cm-gallery__keeper"));
+        await view.Find(".cm-gallery__tile").ClickAsync();
+        await view.FindAll(".cm-lightbox button")
+            .First(button => button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal))
+            .ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("cm-gallery__tile--keeper", view.Find(".cm-gallery__tile").ClassList);
+            Assert.Equal("✓ Keeper", view.Find(".cm-gallery__keeper").TextContent.Trim());
+            Assert.DoesNotContain(view.FindAll(".cm-lightbox button"), button =>
+                button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public async Task Model_is_compact_and_a_dialog_can_override_or_restore_the_workspace_default()
+    {
+        var slot = new ImageSlotResponse(
+            SlotId, CampaignId, "youtube-thumbnail", 1280, 720,
+            "a bold thumbnail", null, null, null, true,
+            "Empty", null, null, DateTimeOffset.UtcNow);
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
+            new CampaignPreview(Campaign(), [], [slot], 0, 6));
+        Http.OnGet("api/v1/settings", new List<SettingRow>
+        {
+            new(SettingsClient.DefaultImageModelKey, "image"),
+        });
+        Http.OnGet("api/v1/ai/status", new Castmill.Core.Ai.AiStatusResponse(
+            "config", true,
+            new Dictionary<string, string>
+            {
+                ["image"] = "foundry-resource:gpt-image-2",
+                ["image-alt"] = "foundry-resource:mai-image-2.5-pro",
+            },
+            false, null,
+            [new Castmill.Core.Ai.ImageProviderReadiness(
+                "foundry", true, null, SupportsReferenceImages: true)]));
+        Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}",
+            slot with { ModelAlias = "image-alt" });
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await OpenFirstSlotAsync(view);
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("gpt-image-2", view.Find(".cm-studio__models").TextContent,
+                StringComparison.Ordinal);
+            Assert.Contains("DEFAULT", view.Find(".cm-studio__models").TextContent,
+                StringComparison.Ordinal);
+            Assert.Empty(view.Find(".cm-studio__models").QuerySelectorAll("input[type='radio']"));
+        });
+
+        await view.Find(".cm-studio__models button").ClickAsync();
+        var choices = view.FindAll(".cm-modelpicker__choice");
+        Assert.Equal(3, choices.Count); // workspace default + two per-image choices
+        var alternate = choices.Single(choice =>
+            choice.TextContent.Contains("mai-image-2.5-pro", StringComparison.Ordinal));
+        await alternate.QuerySelector("input")!.ChangeAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs
+        {
+            Value = true,
+        });
+        await view.FindAll(".cm-modelpicker button")
+            .Single(button => button.TextContent.Contains("Use model", StringComparison.Ordinal))
+            .ClickAsync();
+        Assert.Contains("THIS IMAGE", view.Find(".cm-studio__models").TextContent,
+            StringComparison.Ordinal);
+        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Patch
+            && body.Body.Contains("\"modelAlias\":\"image-alt\"", StringComparison.Ordinal));
+
+        Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}",
+            slot with { ModelAlias = null });
+        await view.Find(".cm-studio__models button").ClickAsync();
+        await view.Find(".cm-modelpicker__choice input").ChangeAsync(
+            new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = true });
+        await view.FindAll(".cm-modelpicker button")
+            .Single(button => button.TextContent.Contains("Use model", StringComparison.Ordinal))
+            .ClickAsync();
+        Assert.Contains("DEFAULT", view.Find(".cm-studio__models").TextContent,
+            StringComparison.Ordinal);
+        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Patch
+            && body.Body.Contains("\"useDefaultModel\":true", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -94,6 +192,23 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
             r.Method == HttpMethod.Patch
             && r.RequestUri!.AbsolutePath.EndsWith($"variants/{TakeId}", StringComparison.Ordinal));
         Assert.Empty(view.FindAll(".cm-lightbox")); // dialog closed with the discard
+        Assert.Empty(view.FindAll(".cm-gallery__tile"));
+
+        var showDiscarded = view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Show discarded takes", StringComparison.Ordinal));
+        await showDiscarded.ClickAsync();
+        Assert.Single(view.FindAll(".cm-gallery__tile"));
+        Assert.Contains("Hide discarded takes", view.FindAll("button")
+            .Single(button => button.TextContent.Contains("discarded takes", StringComparison.OrdinalIgnoreCase))
+            .TextContent, StringComparison.Ordinal);
+
+        StubPatchResult(Take(TakeId, "Candidate"));
+        await view.Find(".cm-gallery__tile").ClickAsync();
+        await view.FindAll(".cm-lightbox button")
+            .Single(button => button.TextContent.Contains("Restore", StringComparison.Ordinal))
+            .ClickAsync();
+        Assert.DoesNotContain(view.FindAll("button"), button =>
+            button.TextContent.Contains("discarded takes", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

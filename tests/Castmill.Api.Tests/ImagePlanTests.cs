@@ -234,6 +234,41 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task A_card_model_override_can_be_cleared_back_to_the_workspace_default()
+    {
+        await using var app = factory.WithWebHostBuilder(_ => { });
+        var client = await AuthedClientAsync(app);
+        var campaign = (await (await client.PostAsJsonAsync("/api/v1/campaigns",
+            new CampaignCreateRequest("Model inheritance", null)))
+            .Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var artifact = (await (await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/artifacts",
+            new ArtifactCreateRequest("social-x", "Model test", """{"content":{"text":"Test"}}""")))
+            .Content.ReadFromJsonAsync<ArtifactResponse>())!;
+        var slot = (await (await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots",
+            new ImageSlotCreateRequest(artifact.Id)))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>())!;
+
+        var overridden = await (await client.PatchAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{slot.Id}",
+            new { modelAlias = "image-alt" }))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>();
+        Assert.Equal("image-alt", overridden!.ModelAlias);
+
+        var inherited = await (await client.PatchAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{slot.Id}",
+            new { useDefaultModel = true }))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>();
+        Assert.Null(inherited!.ModelAlias);
+
+        var ambiguous = await client.PatchAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{slot.Id}",
+            new { modelAlias = "image", useDefaultModel = true });
+        Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+    }
+
+    [Fact]
     public async Task Slot_lifecycle_reserve_prompt_generate_place_and_composite()
     {
         var renderer = new PngRenderer();

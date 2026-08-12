@@ -43,6 +43,11 @@
     color: var(--cm-on-accent);
 }
 
+.cm-button--compact {
+    padding: var(--cm-space-1) var(--cm-space-2);
+    font-size: var(--cm-text-meta);
+}
+
 .cm-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;

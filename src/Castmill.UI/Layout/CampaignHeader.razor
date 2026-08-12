@@ -9,6 +9,7 @@
 @using Castmill.UI.Design
 @implements IDisposable
 @inject CampaignState Campaign
+@inject WorkspaceState Workspace
 @inject PressRunService PressRun
 @inject NavigationManager Navigation
 @inject CampaignsClient Campaigns
@@ -127,8 +128,12 @@
         _saving = true;
         try
         {
-            await Campaigns.UpdateAsync(campaign.Id, name, campaign.Brief, campaign.BrandId,
+            var updated = await Campaigns.UpdateAsync(campaign.Id, name, campaign.Brief, campaign.BrandId,
                 campaign.Links, status, campaign.ContentType);
+            // CampaignState owns this view; WorkspaceState owns the persistent campaign
+            // switcher. The API response is authoritative for both, so reconcile the rail
+            // immediately rather than leaving its cached name stale until a page reload.
+            Workspace.Synchronize(updated);
             await Campaign.RefreshAsync(campaign.Id);
             Notifier.ShowSuccess(status == campaign.Status ? "Campaign renamed." : $"Campaign marked {status.ToLowerInvariant()}.");
         }

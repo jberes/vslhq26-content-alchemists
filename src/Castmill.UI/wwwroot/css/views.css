@@ -2907,7 +2907,32 @@
 .cm-studio__models {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-1);
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-studio__model-head {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    justify-content: space-between;
+}
+
+.cm-studio__model-current {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    min-inline-size: 0;
+    flex-wrap: wrap;
+}
+
+.cm-studio__model-current strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cm-studio__model {
@@ -2919,6 +2944,53 @@
 
 .cm-studio__model--off {
     color: var(--cm-on-surface-subtle);
+}
+
+.cm-modelpicker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-4);
+    max-block-size: min(80vh, 46rem);
+    overflow: auto;
+}
+
+.cm-modelpicker__choices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+}
+
+.cm-modelpicker__choice {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+    cursor: pointer;
+}
+
+.cm-modelpicker__choice:has(input:checked) {
+    border-color: var(--cm-accent);
+    box-shadow: inset 0 0 0 1px var(--cm-accent);
+}
+
+.cm-modelpicker__choice > span:not(.cm-badge) {
+    display: flex;
+    flex-direction: column;
+    min-inline-size: 0;
+}
+
+.cm-modelpicker__choice small {
+    color: var(--cm-on-surface-muted);
+}
+
+.cm-modelpicker__choice--off {
+    color: var(--cm-on-surface-subtle);
+    cursor: not-allowed;
+    opacity: 0.68;
 }
 
 /* Skeleton while variants render — motion, not a spinner (ADR-F13). */
@@ -3106,6 +3178,7 @@
 }
 
 .cm-gallery__tile {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-1);
@@ -3114,11 +3187,35 @@
     border-radius: var(--cm-radius-sm);
     background: var(--cm-surface-raised);
     cursor: pointer;
-    transition: border-color var(--cm-motion);
+    transition: border-color var(--cm-motion), box-shadow var(--cm-motion);
 }
 
 .cm-gallery__tile:hover {
     border-color: var(--cm-accent);
+}
+
+.cm-gallery__tile--keeper {
+    border-color: var(--cm-success);
+    box-shadow: inset 0 0 0 1px var(--cm-success);
+}
+
+.cm-gallery__keeper {
+    position: absolute;
+    inset-block-start: var(--cm-space-2);
+    inset-inline-end: var(--cm-space-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-1);
+    padding: var(--cm-space-1) var(--cm-space-2);
+    border: 1px solid var(--cm-success);
+    border-radius: var(--cm-radius-lg);
+    background: var(--cm-surface-raised);
+    color: var(--cm-success);
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-meta);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .cm-gallery__tile img {
@@ -3800,6 +3897,39 @@
 
 .cm-settings__row--pair {
     grid-template-columns: minmax(10rem, 20rem) minmax(0, 1fr);
+}
+
+.cm-settings__default-model {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 28rem) auto;
+    align-items: center;
+    gap: var(--cm-space-4);
+    margin-block: var(--cm-space-4);
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+}
+
+.cm-settings__default-model h2 {
+    margin-block: var(--cm-space-1);
+    font-size: var(--cm-text-h4);
+}
+
+.cm-settings__default-model-control {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-settings__default-model-control .cm-input {
+    min-inline-size: 0;
+}
+
+@media (max-width: 60rem) {
+    .cm-settings__default-model {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 /* ---- Front page: pinned actions and per-item controls ----------------------------- */

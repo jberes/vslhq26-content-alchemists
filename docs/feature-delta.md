@@ -14,9 +14,9 @@ Status legend:
 - [ ] **Backlog** — not yet complete. A note may describe a partial implementation.
 - 🆕 **ADDED TO BACKLOG** — a Castmill requirement added after the original delta review.
 
-Current delivery snapshot (verified 2026-08-09):
+Current delivery snapshot (verified 2026-08-11):
 
-- [x] ✅ **Completed:** 1–4, 6–16, 22–28, 47, and additions N1–N3 and N6–N22.
+- [x] ✅ **Completed:** 1–4, 6–16, 22–28, 47, and additions N1–N3 and N6–N25.
 - [ ] **Still open:** 5, 17–21, 29–46 (except 47), and additions N4–N5. Partially
   implemented items remain open until their complete acceptance criteria are delivered.
 
@@ -281,6 +281,20 @@ incremental work.*
   tile with an "In takes" state and on the card band, via `ImageSlotResponse.LatestTakeThumbUrl`;
   the studio page adopted the fill pattern (sheet and drawer each own their scrollbar), and the
   brand kit loads on studio entry rather than only on a state-change event.
+- [x] ✅ 🆕 **N23. Immediate campaign rename synchronization** — a successful header Rename
+  reconciles the authoritative server response into both campaign-local state and the persistent
+  workspace Campaigns list. The header, active rail row, tooltip/initial and updated timestamp
+  now change in the same interaction without a page reload or redundant full-list request.
+- [x] ✅ 🆕 **N24. Honest image-take state controls** — Mark as Keeper immediately gives the
+  exact generated-image card a prominent Keeper badge and selected border treatment. Image
+  Studio loads the slot's recoverable take inventory once, hides discarded rows by default,
+  and renders Show discarded takes only when at least one persisted discarded take actually
+  exists; restoring the last one removes the control again.
+- [x] ✅ 🆕 **N25. Default-first compact image-model selection** — Settings → Models persists
+  one workspace default from the same readiness-aware generator catalog used by Image Studio.
+  Cards without an override inherit later default changes; the drawer shows only the current
+  model and its Default/This image scope, while Change opens a focused selector dialog. Choosing
+  Workspace default clears a prior per-card override instead of copying a transient alias.
 
 ---
 

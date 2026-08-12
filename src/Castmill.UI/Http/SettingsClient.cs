@@ -44,9 +44,20 @@ public sealed class SettingsClient(ApiClient api)
     /// </summary>
     public const string LinksKey = "workspace.links";
 
+    /// <summary>Workspace-level generator inherited by image cards with no model override.</summary>
+    public const string DefaultImageModelKey = "images.default-model";
+
+    public Task<List<SettingRow>> ListAsync(CancellationToken ct = default) =>
+        api.GetAsync<List<SettingRow>>("api/v1/settings", ct);
+
     public async Task<List<WorkspaceLink>> GetLinksAsync(CancellationToken ct = default)
     {
-        var rows = await api.GetAsync<List<SettingRow>>("api/v1/settings", ct);
+        var rows = await ListAsync(ct);
+        return ReadLinks(rows);
+    }
+
+    public static List<WorkspaceLink> ReadLinks(IReadOnlyList<SettingRow> rows)
+    {
         var raw = rows.FirstOrDefault(r => r.Key == LinksKey)?.Value;
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -66,4 +77,17 @@ public sealed class SettingsClient(ApiClient api)
     public Task SaveLinksAsync(IReadOnlyList<WorkspaceLink> links, CancellationToken ct = default) =>
         api.PutAsync($"api/v1/settings/{LinksKey}",
             new SettingWrite(System.Text.Json.JsonSerializer.Serialize(links, Json)), ct);
+
+    public async Task<string?> GetDefaultImageModelAsync(CancellationToken ct = default)
+    {
+        var rows = await ListAsync(ct);
+        return ReadDefaultImageModel(rows);
+    }
+
+    public static string? ReadDefaultImageModel(IReadOnlyList<SettingRow> rows) =>
+        rows.FirstOrDefault(row => row.Key == DefaultImageModelKey)?.Value;
+
+    public Task SaveDefaultImageModelAsync(string modelAlias, CancellationToken ct = default) =>
+        api.PutAsync($"api/v1/settings/{DefaultImageModelKey}",
+            new SettingWrite(modelAlias), ct);
 }

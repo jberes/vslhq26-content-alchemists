@@ -15,6 +15,7 @@
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject ImagesClient Images
+@inject SettingsClient SettingsApi
 @using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient BrandsApi
 @inject HttpClient Http
@@ -239,42 +240,39 @@
                             }
 
                             <div class="cm-studio__models">
-                                <span class="cm-kicker">Model</span>
+                                <div class="cm-studio__model-head">
+                                    <span class="cm-kicker">Model</span>
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                            disabled="@(_status is null || ModelChoices.Count == 0)"
+                                            @onclick="OpenModelPicker">
+                                        Change…
+                                    </button>
+                                </div>
                                 @if (_status is null)
                                 {
                                     <p class="cm-meta">Checking provider readiness…</p>
                                 }
+                                else if (CurrentModel is { } currentModel)
+                                {
+                                    <div class="cm-studio__model-current">
+                                        <strong>@currentModel.Label</strong>
+                                        <span class="cm-badge @(UsesWorkspaceDefault ? "cm-badge--done" : "cm-badge--empty")">
+                                            @(UsesWorkspaceDefault ? "DEFAULT" : "THIS IMAGE")
+                                        </span>
+                                        <span class="cm-meta">@currentModel.Detail</span>
+                                    </div>
+                                    @if (!currentModel.Ready)
+                                    {
+                                        <p class="cm-form__error">Unavailable — @(currentModel.Reason ?? "not configured")</p>
+                                    }
+                                    else if (HasReferences && !currentModel.SupportsReferences)
+                                    {
+                                        <p class="cm-form__error">This model cannot use the selected reference images.</p>
+                                    }
+                                }
                                 else
                                 {
-                                    @* Every model this workspace can actually reach: each Foundry
-                                       image alias, then each alternate provider. The choice applies
-                                       to the NEXT batch — it is also remembered on the card, but a
-                                       failed save never silently renders with the old model. *@
-                                    @foreach (var choice in ModelChoices)
-                                    {
-                                        var usable = choice.Ready && (!HasReferences || choice.SupportsReferences);
-                                        <label class="cm-studio__model @(usable ? null : "cm-studio__model--off")">
-                                            <input type="radio" name="cm-studio-model"
-                                                   disabled="@(!usable)"
-                                                   checked="@(EffectiveAlias == choice.Value)"
-                                                   @onchange="() => PickModelAsync(choice.Value)" />
-                                            <span>@choice.Label</span>
-                                            <span class="cm-meta">@choice.Detail</span>
-                                            @if (!choice.Ready)
-                                            {
-                                                <span class="cm-meta">— unavailable: @(choice.Reason ?? "not configured")</span>
-                                            }
-                                            else if (HasReferences && !choice.SupportsReferences)
-                                            {
-                                                <span class="cm-meta">— unavailable for cards with reference images</span>
-                                            }
-                                        </label>
-                                    }
-                                    <label class="cm-studio__model cm-studio__model--off">
-                                        <input type="radio" name="cm-studio-model" disabled />
-                                        <span>video frame reference</span>
-                                        <span class="cm-meta">— unavailable: the clip worker isn't deployed yet</span>
-                                    </label>
+                                    <p class="cm-meta">No image generators are configured.</p>
                                 }
                             </div>
 
@@ -365,9 +363,13 @@
                                                 @onclick="ReloadGalleryAsync">Try again</button>
                                     </p>
                                 }
-                                else if (_gallery.Count == 0)
+                                else if (!OrderedGallery.Any())
                                 {
-                                    <p class="cm-meta">No takes yet. Generate some — every take stays here until you discard or delete it.</p>
+                                    <p class="cm-meta">
+                                        @(_gallery.Count == 0
+                                            ? "No takes yet. Generate some — every take stays here until you discard or delete it."
+                                            : "No active takes. Your discarded takes are still recoverable below.")
+                                    </p>
                                 }
                                 <div class="cm-gallery">
                                     @if (IsGenerating)
@@ -389,16 +391,20 @@
                                     }
                                     @foreach (var variant in OrderedGallery)
                                     {
-                                        <button type="button" class="cm-gallery__tile" @onclick="() => OpenVariant(variant)">
+                                        <button @key="variant.Id" type="button"
+                                                class="@GalleryTileClass(variant)"
+                                                @onclick="() => OpenVariant(variant)">
                                             <img src="@variant.ThumbUrl" width="@variant.Width" height="@variant.Height"
                                                  loading="lazy" decoding="async"
                                                  alt="Take for @ArtifactDisplay.SlotLabel(slot2.Kind)" />
+                                            @if (variant.State == "Kept")
+                                            {
+                                                <span class="cm-gallery__keeper" aria-label="Keeper take">
+                                                    <span aria-hidden="true">✓</span> Keeper
+                                                </span>
+                                            }
                                             <span class="cm-gallery__meta">
                                                 <span class="cm-mono">@variant.Model</span>
-                                                @if (variant.State == "Kept")
-                                                {
-                                                    <span class="cm-badge cm-badge--done">KEEPER</span>
-                                                }
                                                 @if (variant.SteeringNote is not null)
                                                 {
                                                     <span class="cm-meta" title="@variant.SteeringNote">steered</span>
@@ -411,9 +417,12 @@
                                 {
                                     <p class="cm-form__error">@failure</p>
                                 }
-                                <button type="button" class="cm-button cm-button--quiet" @onclick="ToggleDiscardedAsync">
-                                    @(_showDiscarded ? "Hide discarded takes" : "Show discarded takes")
-                                </button>
+                                @if (HasDiscardedTakes)
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet" @onclick="ToggleDiscarded">
+                                        @(_showDiscarded ? "Hide discarded takes" : "Show discarded takes")
+                                    </button>
+                                }
                             </div>
 
                             @if (slot2.State == "Filled" && slot2.PublishedUrl is { } published)
@@ -456,6 +465,79 @@
                             }
                         </section>
                     }
+                </div>
+            }
+
+            @if (_modelPickerOpen)
+            {
+                <div class="cm-modal" role="presentation" @onclick="CloseModelPicker">
+                    <div class="cm-modal__panel cm-modelpicker" role="dialog" aria-modal="true"
+                         aria-labelledby="cm-modelpicker-title" tabindex="-1"
+                         @ref="_modelPickerPanel" @onclick:stopPropagation @onkeydown="OnModelPickerKey">
+                        <header>
+                            <span class="cm-kicker">Image generator</span>
+                            <h2 id="cm-modelpicker-title" class="cm-modal__title">Choose a model</h2>
+                            <p class="cm-modal__message">
+                                This choice applies only to this image. Keep Workspace default
+                                selected to follow Settings automatically.
+                            </p>
+                        </header>
+
+                        @if (DefaultModel is { } defaultModel)
+                        {
+                            var defaultUsable = IsUsable(defaultModel);
+                            <label class="cm-modelpicker__choice @(!defaultUsable ? "cm-modelpicker__choice--off" : null)">
+                                <input type="radio" name="cm-modelpicker-model"
+                                       disabled="@(!defaultUsable)"
+                                       checked="@(_modelDraft == WorkspaceDefaultModel)"
+                                       @onchange="() => _modelDraft = WorkspaceDefaultModel" />
+                                <span>
+                                    <strong>Workspace default · @defaultModel.Label</strong>
+                                    <small>@(defaultModel.Detail ?? defaultModel.Value)</small>
+                                </span>
+                                <span class="cm-badge">DEFAULT</span>
+                            </label>
+                        }
+
+                        <div class="cm-modelpicker__choices">
+                            @foreach (var choice in ModelChoices)
+                            {
+                                var usable = IsUsable(choice);
+                                <label class="cm-modelpicker__choice @(!usable ? "cm-modelpicker__choice--off" : null)">
+                                    <input type="radio" name="cm-modelpicker-model"
+                                           disabled="@(!usable)"
+                                           checked="@(_modelDraft == choice.Value)"
+                                           @onchange="() => _modelDraft = choice.Value" />
+                                    <span>
+                                        <strong>@choice.Label</strong>
+                                        <small>@(choice.Detail ?? choice.Value)</small>
+                                        @if (!choice.Ready)
+                                        {
+                                            <small>Unavailable · @(choice.Reason ?? "not configured")</small>
+                                        }
+                                        else if (HasReferences && !choice.SupportsReferences)
+                                        {
+                                            <small>Cannot use this image's references</small>
+                                        }
+                                    </span>
+                                </label>
+                            }
+                        </div>
+
+                        @if (_modelPickerError is { } modelError)
+                        {
+                            <p class="cm-form__error" role="alert">@modelError</p>
+                        }
+                        <footer class="cm-modal__actions">
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    disabled="@_modelPickerBusy" @onclick="CloseModelPicker">Cancel</button>
+                            <button type="button" class="cm-button"
+                                    disabled="@(_modelPickerBusy || !CanApplyModel)"
+                                    @onclick="ApplyModelAsync">
+                                @(_modelPickerBusy ? "Saving…" : "Use model")
+                            </button>
+                        </footer>
+                    </div>
                 </div>
             }
 
@@ -805,7 +887,14 @@
     private bool _changingPromptMode;
     private string? _activeConceptName;
     private AiStatusResponse? _status;
-    private string? _pickedAlias;
+    private string? _defaultImageModel;
+    private bool _defaultModelLoaded;
+    private readonly Dictionary<Guid, string?> _sessionModelOverrides = [];
+    private const string WorkspaceDefaultModel = "__workspace_default__";
+    private bool _modelPickerOpen;
+    private bool _modelPickerBusy;
+    private string? _modelPickerError;
+    private string? _modelDraft;
     private int _variantCount = 1;
     private Guid? _addingFor;
     private bool _seeding;
@@ -1059,6 +1148,8 @@
     private bool _kitPickerNeedsFocus;
     private bool _kitPickerOpen;
     private BrandAssetResponse? _kitPreviewAsset;
+    private ElementReference _modelPickerPanel;
+    private bool _modelPickerNeedsFocus;
     private readonly List<ThumbnailConcept> _thumbnailConcepts = [];
     private Guid? _conceptArtifactId;
 
@@ -1122,71 +1213,28 @@
     private static bool IsBlogSlot(string kind) =>
         kind.StartsWith("blog-", StringComparison.Ordinal);
 
-    private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
+    private IReadOnlyList<ImageModelChoice> ModelChoices => ImageModelCatalog.Choices(_status);
 
-    /// <summary>
-    /// One selectable model. A Foundry entry names an ALIAS ("image", "image-alt") so the
-    /// two deployments behind the alias table are distinct choices; a provider entry names
-    /// the provider itself, which is what the registry routes on.
-    /// </summary>
-    private sealed record ModelChoice(
-        string Value, string Label, string? Detail, bool Ready, string? Reason, bool SupportsReferences);
-
-    private IReadOnlyList<ModelChoice> ModelChoices
+    /// <summary>Null is meaningful: it means this card follows the workspace preference.
+    /// The dictionary distinguishes an explicit session clear from a stale preview row.</summary>
+    private string? ExplicitModelAlias
     {
         get
         {
-            if (_status is null)
+            if (Selected is not { } slot)
             {
-                return [];
+                return null;
             }
-            var choices = new List<ModelChoice>();
-            var foundry = _status.ImageProviders.FirstOrDefault(p =>
-                string.Equals(p.Name, "foundry", StringComparison.OrdinalIgnoreCase));
-
-            foreach (var (alias, deployment) in _status.Models
-                .Where(m => m.Key.StartsWith("image", StringComparison.OrdinalIgnoreCase)
-                    && !string.IsNullOrWhiteSpace(m.Value))
-                .OrderBy(m => m.Key, StringComparer.Ordinal))
-            {
-                choices.Add(new ModelChoice(
-                    alias, DeploymentLabel(deployment), $"Foundry · {alias}",
-                    foundry?.Ready == true, foundry?.Reason,
-                    foundry?.SupportsReferenceImages == true));
-            }
-
-            // No alias table (a fresh workspace) still needs one Foundry entry to pick.
-            if (choices.Count == 0 && foundry is not null)
-            {
-                choices.Add(new ModelChoice(
-                    "foundry", "foundry", null, foundry.Ready, foundry.Reason,
-                    foundry.SupportsReferenceImages));
-            }
-
-            foreach (var provider in _status.ImageProviders.Where(p =>
-                !string.Equals(p.Name, "foundry", StringComparison.OrdinalIgnoreCase)))
-            {
-                choices.Add(new ModelChoice(
-                    provider.Name, provider.Name, ProviderDetail(provider.Name),
-                    provider.Ready, provider.Reason, provider.SupportsReferenceImages));
-            }
-            return choices;
+            return _sessionModelOverrides.TryGetValue(slot.Id, out var sessionAlias)
+                ? sessionAlias
+                : slot.ModelAlias;
         }
     }
 
-    /// <summary>The alias table routes with a "resource:deployment" value; a producer picking a
-    /// model wants the model's name, not which Azure resource it happens to live on.</summary>
-    private static string DeploymentLabel(string configured) =>
-        configured.IndexOf(':', StringComparison.Ordinal) is var separator && separator > 0
-            ? configured[(separator + 1)..]
-            : configured;
+    private bool UsesWorkspaceDefault => string.IsNullOrWhiteSpace(ExplicitModelAlias);
 
-    private static string? ProviderDetail(string name) => name switch
-    {
-        "nano-banana" => "Google Gemini · own key",
-        "gpt-image" => "OpenAI direct · own key",
-        _ => "own key",
-    };
+    private ImageModelChoice? DefaultModel =>
+        ImageModelCatalog.Resolve(ModelChoices, _defaultImageModel);
 
     /// <summary>
     /// The alias this batch will actually render with. A card saved before providers were
@@ -1197,16 +1245,17 @@
     {
         get
         {
-            var choices = ModelChoices;
-            var alias = SelectedAlias;
-            if (alias is not null && choices.Any(c =>
-                string.Equals(c.Value, alias, StringComparison.OrdinalIgnoreCase)))
+            var requested = ExplicitModelAlias;
+            if (string.IsNullOrWhiteSpace(requested))
             {
-                return alias;
+                requested = _defaultImageModel;
             }
-            return choices.FirstOrDefault()?.Value;
+            return ImageModelCatalog.Resolve(ModelChoices, requested)?.Value;
         }
     }
+
+    private ImageModelChoice? CurrentModel =>
+        ImageModelCatalog.Resolve(ModelChoices, EffectiveAlias);
 
     private bool IsGenerating => _selectedId is { } id && StudioRun.IsActiveFor(id);
 
@@ -1227,6 +1276,21 @@
         }
     }
 
+    private bool IsUsable(ImageModelChoice choice) =>
+        choice.Ready && (!HasReferences || choice.SupportsReferences);
+
+    private bool CanApplyModel
+    {
+        get
+        {
+            var choice = _modelDraft == WorkspaceDefaultModel
+                ? DefaultModel
+                : ModelChoices.FirstOrDefault(model => string.Equals(
+                    model.Value, _modelDraft, StringComparison.OrdinalIgnoreCase));
+            return choice is not null && IsUsable(choice);
+        }
+    }
+
     /// <summary>"42s" under a minute, "2m 08s" after — renders run for minutes and a bare
     /// spinner gave no sense of whether anything was still moving.</summary>
     private static string ElapsedLabel(TimeSpan elapsed) =>
@@ -1237,11 +1301,20 @@
     private bool CanGenerate => (IsAutoPrompt || !string.IsNullOrWhiteSpace(_prompt)) &&
         _status?.ImageProviders.Any(p => p.Ready) == true && SelectedProviderSupportsReferences;
 
+    private bool HasDiscardedTakes =>
+        _gallery.Any(v => string.Equals(v.State, "Discarded", StringComparison.Ordinal));
+
     /// <summary>Kept takes lead, then candidates, then (when shown) discarded — newest first.</summary>
     private IEnumerable<ImageVariantResponse> OrderedGallery =>
         _gallery
+            .Where(v => _showDiscarded || !string.Equals(v.State, "Discarded", StringComparison.Ordinal))
             .OrderBy(v => v.State switch { "Kept" => 0, "Candidate" => 1, _ => 2 })
             .ThenByDescending(v => v.CreatedAt);
+
+    private static string GalleryTileClass(ImageVariantResponse variant) =>
+        string.Equals(variant.State, "Kept", StringComparison.Ordinal)
+            ? "cm-gallery__tile cm-gallery__tile--keeper"
+            : "cm-gallery__tile";
 
     protected override void OnInitialized()
     {
@@ -1252,6 +1325,21 @@
     protected override async Task OnParametersSetAsync()
     {
         await SyncSelectionAsync();
+
+        if (!_defaultModelLoaded)
+        {
+            _defaultModelLoaded = true;
+            try
+            {
+                _defaultImageModel = await SettingsApi.GetDefaultImageModelAsync();
+            }
+            catch (ApiException)
+            {
+                // The catalog still has a deterministic first-ready fallback. A settings
+                // outage must not blank Image Studio or prevent an explicit model choice.
+                _defaultImageModel = null;
+            }
+        }
 
         // Load the brand kit here too, not only from Campaign.Changed: entering the studio
         // from another campaign view finds the state already loaded, so no Changed event
@@ -1286,7 +1374,7 @@
         {
             _drawerNeedsFocus = false;
             // Focus makes Escape-to-close work without a click into the drawer first.
-            if (_selectedId is not null && _openVariant is null && !_kitPickerOpen)
+            if (_selectedId is not null && _openVariant is null && !_kitPickerOpen && !_modelPickerOpen)
             {
                 await _drawerPanel.FocusAsync();
             }
@@ -1298,6 +1386,15 @@
             if (_kitPickerOpen)
             {
                 await _kitPickerPanel.FocusAsync();
+            }
+        }
+
+        if (_modelPickerNeedsFocus)
+        {
+            _modelPickerNeedsFocus = false;
+            if (_modelPickerOpen)
+            {
+                await _modelPickerPanel.FocusAsync();
             }
         }
     }
@@ -1384,7 +1481,10 @@
         }
         try
         {
-            _gallery = await Images.ListVariantsAsync(CampaignId, slotId, _showDiscarded);
+            // Load the complete persisted inventory once. The UI can only make an honest
+            // "Show discarded" decision when it knows whether discarded rows exist; active
+            // takes are filtered locally so the control never appears speculatively.
+            _gallery = await Images.ListVariantsAsync(CampaignId, slotId, includeDiscarded: true);
             _galleryError = null;
         }
         catch (ApiException ex)
@@ -1396,11 +1496,7 @@
         }
     }
 
-    private async Task ToggleDiscardedAsync()
-    {
-        _showDiscarded = !_showDiscarded;
-        await ReloadGalleryAsync();
-    }
+    private void ToggleDiscarded() => _showDiscarded = !_showDiscarded;
 
     private void OpenVariant(ImageVariantResponse variant)
     {
@@ -1462,12 +1558,17 @@
             _gallery = [.. _gallery.Select(v => v.Id == updated.Id ? updated : v)];
             if (!_showDiscarded && state == "Discarded")
             {
-                _gallery = [.. _gallery.Where(v => v.Id != updated.Id)];
                 CloseVariant();
             }
             else if (_openVariant?.Id == updated.Id)
             {
                 _openVariant = updated;
+            }
+
+            // Restoring the last discarded take removes the need for a discarded view.
+            if (_showDiscarded && !HasDiscardedTakes)
+            {
+                _showDiscarded = false;
             }
         }
         catch (ApiException ex)
@@ -1510,8 +1611,8 @@
         _prompt = slot.Prompt ?? string.Empty;
         _savedPrompt = slot.Prompt;
         _promptMode = slot.PromptMode;
+        _showDiscarded = false;
         _activeConceptName = null;
-        _pickedAlias = null;
         _gallery = [];
         _failures = [];
         _generateError = null;
@@ -1549,6 +1650,7 @@
     {
         _selectedId = null;
         _openVariant = null;
+        _modelPickerOpen = false;
         // Strip the deep link too, or the next parameter sync would reopen the drawer.
         RequestedSlot = null;
         RequestedArtifact = null;
@@ -1557,7 +1659,7 @@
 
     private void OnDrawerKey(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape" && _openVariant is null && !_kitPickerOpen)
+        if (e.Key == "Escape" && _openVariant is null && !_kitPickerOpen && !_modelPickerOpen)
         {
             CloseSlot();
         }
@@ -1929,20 +2031,65 @@
         return string.Join(", ", new[] { before, after }.Where(part => part.Length > 0));
     }
 
-    private async Task PickModelAsync(string alias)
+    private void OpenModelPicker()
     {
-        if (Selected is not { } slot)
+        _modelDraft = UsesWorkspaceDefault ? WorkspaceDefaultModel : EffectiveAlias;
+        _modelPickerError = null;
+        _modelPickerOpen = true;
+        _modelPickerNeedsFocus = true;
+    }
+
+    private void CloseModelPicker()
+    {
+        if (_modelPickerBusy)
         {
             return;
         }
-        _pickedAlias = alias;
+        _modelPickerOpen = false;
+        _modelPickerError = null;
+    }
+
+    private void OnModelPickerKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseModelPicker();
+        }
+    }
+
+    private async Task ApplyModelAsync()
+    {
+        if (Selected is not { } slot || !CanApplyModel)
+        {
+            return;
+        }
+
+        _modelPickerBusy = true;
+        _modelPickerError = null;
         try
         {
-            await Images.PatchAsync(CampaignId, slot.Id, modelAlias: alias);
+            if (_modelDraft == WorkspaceDefaultModel)
+            {
+                await Images.PatchAsync(CampaignId, slot.Id, useDefaultModel: true);
+                _sessionModelOverrides[slot.Id] = null;
+            }
+            else
+            {
+                await Images.PatchAsync(CampaignId, slot.Id, modelAlias: _modelDraft);
+                _sessionModelOverrides[slot.Id] = _modelDraft;
+            }
+            _modelPickerOpen = false;
+            Notifier.ShowSuccess(UsesWorkspaceDefault
+                ? "This image now follows the workspace default model."
+                : "Image model updated for this image.");
         }
         catch (ApiException ex)
         {
-            Notifier.ShowError(ex.Message);
+            _modelPickerError = ex.Message;
+        }
+        finally
+        {
+            _modelPickerBusy = false;
         }
     }
 
