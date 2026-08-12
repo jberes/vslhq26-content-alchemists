@@ -1,6 +1,7 @@
 @* ApexTree renders the campaign as an actual hierarchy: the pillar owns the channel pieces
    that reinforce it, while missing channels remain actionable "+ add" leaves. The component
    owns the semantic model and callbacks; JS owns only layout, pan/zoom, and node rendering. *@
+@using Castmill.Core
 @using Castmill.UI.State
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
@@ -76,9 +77,7 @@
 
     internal static TreeNode BuildTree(ContentCluster cluster)
     {
-        var children = cluster.Supporting.Select(ArtifactNode)
-            .Concat(cluster.Gaps.Select(GapNode))
-            .ToArray();
+        var children = CategoryNodes(cluster);
 
         if (cluster.Pillar is { } pillar)
         {
@@ -105,6 +104,59 @@
             "default",
             children);
     }
+
+    /// <summary>
+    /// One level of channel-family nodes between the pillar and the pieces. A dozen supporting
+    /// artifacts hung directly off the pillar rendered as one undifferentiated vertical run —
+    /// legible per card but shapeless as a whole, and it read as a list rather than a cluster.
+    /// Grouped, the map answers the question the SEO view is actually for: which channels this
+    /// pillar reaches, and how deeply. Empty families are omitted, and open channels (the "+
+    /// add" affordances) collect under one node so a gap can never hide between real pieces.
+    /// </summary>
+    private static IReadOnlyList<TreeNode> CategoryNodes(ContentCluster cluster)
+    {
+        var groups = cluster.Supporting
+            .GroupBy(node => ArtifactKinds.CategoryOf(node.Kind))
+            .OrderBy(group => ArtifactKinds.CategoryOrder(group.Key))
+            .ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Select(CategoryNode)
+            .ToList();
+
+        if (cluster.Gaps.Count > 0)
+        {
+            groups.Add(new TreeNode(
+                "category-gaps",
+                "Open channels",
+                Pieces(cluster.Gaps.Count),
+                "Draft from the approved strategy",
+                "Add",
+                "none",
+                string.Empty,
+                "gap",
+                [.. cluster.Gaps.Select(GapNode)]));
+        }
+
+        return groups;
+    }
+
+    private static TreeNode CategoryNode(IGrouping<string, ClusterNode> group)
+    {
+        var pending = group.Count(node => Tone(node.Status) != "success");
+        return new TreeNode(
+            $"category-{group.Key}",
+            ArtifactKinds.CategoryLabel(group.Key),
+            Pieces(group.Count()),
+            pending == 0 ? "All approved" : $"{pending} still in draft",
+            // A family whose pieces are all approved is itself done — the same status
+            // encoding the cards use, one level up, so there is no new vocabulary.
+            pending == 0 ? "Ready" : "In progress",
+            "none",
+            string.Empty,
+            pending == 0 ? "success" : "default",
+            [.. group.OrderBy(node => node.KindLabel, StringComparer.Ordinal).Select(ArtifactNode)]);
+    }
+
+    private static string Pieces(int count) => count == 1 ? "1 piece" : $"{count} pieces";
 
     private static TreeNode ArtifactNode(ClusterNode node) => new(
         node.ArtifactId.ToString("D"),

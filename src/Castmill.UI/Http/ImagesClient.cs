@@ -43,10 +43,11 @@ public sealed class ImagesClient(ApiClient api)
     /// <summary>Generates N variants against the slot's model. Live call — costs money.
     /// The result carries persisted variants + a run id pollable at <c>runs/{id}</c>.</summary>
     public Task<VariantBatchResponse> GenerateAsync(
-        Guid campaignId, Guid slotId, int variants, CancellationToken ct = default) =>
+        Guid campaignId, Guid slotId, int variants, string? modelAlias = null,
+        CancellationToken ct = default) =>
         api.PostAsync<object, VariantBatchResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
-            new { variants },
+            new { variants, modelAlias },
             anonymous: false,
             ct);
 
@@ -66,10 +67,10 @@ public sealed class ImagesClient(ApiClient api)
     /// <summary>New take(s) steered from an existing one ("add a face", "warmer background").</summary>
     public Task<VariantBatchResponse> SteerAsync(
         Guid campaignId, Guid slotId, Guid variantId, string note, int variants = 1,
-        CancellationToken ct = default) =>
+        string? modelAlias = null, CancellationToken ct = default) =>
         api.PostAsync<object, VariantBatchResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/steer",
-            new { note, variants },
+            new { note, variants, modelAlias },
             anonymous: false,
             ct);
 

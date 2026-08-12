@@ -92,13 +92,20 @@ public sealed class ContentClusterTests
         Assert.Equal("What is a data grid?", cluster.Questions[0].Question);
     }
 
+    /// <summary>
+    /// Pillar → channel family → pieces. The pillar used to own every supporting artifact
+    /// directly, which drew a dozen cards as one undifferentiated vertical run: legible per
+    /// card, shapeless as a map, and no answer to "which channels does this pillar reach".
+    /// </summary>
     [Fact]
-    public void ApexTree_hierarchy_puts_supporting_content_and_gaps_under_the_pillar()
+    public void ApexTree_groups_supporting_content_by_channel_family_under_the_pillar()
     {
         var blog = Artifact("blog", "Enterprise data grids", "Approved");
         var linkedIn = Artifact("social-linkedin", "The practical rollout", "Draft");
+        var x = Artifact("social-x", "Launch thread", "Draft");
+        var newsletter = Artifact("newsletter", "This month in grids", "Approved");
         var cluster = Build(
-            [blog, linkedIn],
+            [blog, linkedIn, x, newsletter],
             new SeoTargetsResponse("react data grid", [], []));
 
         var tree = ClusterMap.BuildTree(cluster);
@@ -108,14 +115,48 @@ public sealed class ContentClusterTests
         Assert.Equal("open", tree.Action);
         Assert.Equal("success", tree.Tone);
 
-        var supporting = Assert.Single(tree.Children, child => child.Id == linkedIn.Id.ToString("D"));
-        Assert.Equal("open", supporting.Action);
-        Assert.Equal(linkedIn.Id.ToString("D"), supporting.Value);
+        // A family node is a label, not a destination: clicking it must do nothing.
+        var social = Assert.Single(tree.Children, child => child.Id == "category-social");
+        Assert.Equal("Social", social.Name);
+        Assert.Equal("2 pieces", social.Title);
+        Assert.Equal("none", social.Action);
+        Assert.Equal("In progress", social.Badge); // both still drafts
+        Assert.Equal(2, social.Children.Count);
 
-        var gap = Assert.Single(tree.Children, child => child.Id == "gap-youtube");
+        var piece = Assert.Single(social.Children, child => child.Id == linkedIn.Id.ToString("D"));
+        Assert.Equal("open", piece.Action);
+        Assert.Equal(linkedIn.Id.ToString("D"), piece.Value);
+
+        var owned = Assert.Single(tree.Children, child => child.Id == "category-owned");
+        Assert.Equal("1 piece", owned.Title);
+        Assert.Equal("Ready", owned.Badge); // the only piece is approved
+        Assert.Equal("success", owned.Tone);
+
+        // Long-form leads, then video, then social, then owned audience — reading order.
+        Assert.Equal(
+            ["category-social", "category-owned", "category-gaps"],
+            tree.Children.Select(child => child.Id).ToArray());
+
+        // Gaps collect under one node, so an open channel can never hide between real pieces.
+        var gaps = Assert.Single(tree.Children, child => child.Id == "category-gaps");
+        Assert.Equal("gap", gaps.Tone);
+        var gap = Assert.Single(gaps.Children, child => child.Id == "gap-youtube");
         Assert.Equal("draft", gap.Action);
         Assert.Equal("youtube", gap.Value);
         Assert.Equal("gap", gap.Tone);
+    }
+
+    /// <summary>An empty family is omitted rather than drawn as a zero — a card that says
+    /// "0 pieces" is noise the map has to be scanned past.</summary>
+    [Fact]
+    public void ApexTree_omits_channel_families_with_nothing_in_them()
+    {
+        var blog = Artifact("blog", "Enterprise data grids", "Approved");
+        var tree = ClusterMap.BuildTree(Build([blog, Artifact("social-x", "Launch thread")]));
+
+        Assert.Contains(tree.Children, child => child.Id == "category-social");
+        Assert.DoesNotContain(tree.Children, child => child.Id == "category-video");
+        Assert.DoesNotContain(tree.Children, child => child.Id == "category-owned");
     }
 
     [Fact]
@@ -126,6 +167,7 @@ public sealed class ContentClusterTests
 
         Assert.Equal("campaign-root", tree.Id);
         Assert.Equal("none", tree.Action);
-        Assert.Contains(tree.Children, child => child.Id == social.Id.ToString("D"));
+        var family = Assert.Single(tree.Children, child => child.Id == "category-social");
+        Assert.Contains(family.Children, child => child.Id == social.Id.ToString("D"));
     }
 }

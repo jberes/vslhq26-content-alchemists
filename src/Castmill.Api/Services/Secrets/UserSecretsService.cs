@@ -11,8 +11,16 @@ public enum SecretKind
     FoundryEndpoint,
     FoundryKey,
     BrokerToken,
-    /// <summary>Credential for an optional non-Foundry image provider (ADR-015).</summary>
+    /// <summary>
+    /// Legacy shared credential for a non-Foundry image provider (ADR-015). Kept as a
+    /// fallback for workspaces that stored a key before each vendor had its own slot —
+    /// new keys go in <see cref="NanoBananaKey"/> / <see cref="OpenAiImageKey"/>.
+    /// </summary>
     ImageProviderKey,
+    /// <summary>Google AI Studio (Gemini) API key — the "Nano Banana" image models.</summary>
+    NanoBananaKey,
+    /// <summary>OpenAI API key for the gpt-image family, called directly rather than through Foundry.</summary>
+    OpenAiImageKey,
     /// <summary>Credential for the non-Foundry second-pass text provider (ADR-020).</summary>
     TechEditKey,
     /// <summary>Bearer token for the customer knowledge-base gateway the Tech Edit consults.</summary>

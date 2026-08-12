@@ -194,7 +194,10 @@
                                 <figure class="cm-asset-card" @key="asset.Id">
                                     @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
                                     {
-                                        <img src="@url" alt="@(asset.Label ?? asset.FileName)" loading="lazy" />
+                                        @* decoding=async keeps a large decode off the UI thread —
+                                           a grid of faces otherwise stalls the first paint. *@
+                                        <img src="@url" alt="@(asset.Label ?? asset.FileName)"
+                                             loading="lazy" decoding="async" />
                                     }
                                     else
                                     {
@@ -618,23 +621,33 @@
         _templates.Clear();
         _templates.AddRange(templates);
 
-        // Read SAS per image, best effort — storage may be unconfigured in some dev setups.
-        foreach (var asset in assets.Where(a => a.ContentType.StartsWith("image/", StringComparison.Ordinal)))
+        // Previews for the whole grid in ONE call, pointing at cached small derivatives.
+        // This used to be a sequential SAS mint per asset against the full-size original:
+        // nine faces meant nine round trips before the first tile could appear, then tens of
+        // megabytes of photography to draw 140 px cards. Best effort — storage may be
+        // unconfigured in some dev setups, and a kit with no previews still edits fine.
+        var wanted = assets
+            .Where(a => a.ContentType.StartsWith("image/", StringComparison.Ordinal))
+            .Select(a => a.AssetId)
+            .Where(id => !_assetPreviews.ContainsKey(id))
+            .Distinct()
+            .ToList();
+        if (wanted.Count == 0)
         {
-            if (_assetPreviews.ContainsKey(asset.AssetId))
-            {
-                continue;
-            }
+            return;
+        }
 
-            try
+        try
+        {
+            foreach (var thumb in await Brands.MintThumbsAsync(wanted))
             {
-                var sas = await Brands.MintReadSasAsync(asset.AssetId);
-                _assetPreviews[asset.AssetId] = sas.ReadUrl;
+                _assetPreviews[thumb.AssetId] = thumb.ReadUrl;
             }
-            catch (ApiException)
-            {
-                break; // storage unconfigured: skip previews entirely rather than N failures
-            }
+        }
+        catch (ApiException)
+        {
+            // Storage unconfigured, or the derivative pass is unavailable: leave the cards
+            // blank rather than firing N per-asset requests that would fail the same way.
         }
     }
 

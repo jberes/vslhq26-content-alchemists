@@ -6,6 +6,9 @@ public sealed record UploadSas(string UploadUrl, string BlobPath);
 
 public sealed record ReadSas(string ReadUrl);
 
+/// <summary>A preview URL for one asset; <c>Thumb</c> is false when it is the full-size original.</summary>
+public sealed record AssetThumb(Guid AssetId, string ReadUrl, bool Thumb);
+
 /// <summary>Typed client for the brand kit: profile + style card, assets, templates —
 /// plus the asset-library/SAS calls the kit uploader needs.</summary>
 public sealed class BrandsClient(ApiClient api)
@@ -80,6 +83,16 @@ public sealed class BrandsClient(ApiClient api)
 
     public Task<ReadSas> MintReadSasAsync(Guid assetId, CancellationToken ct = default) =>
         api.GetAsync<ReadSas>($"api/v1/blob/assets/{assetId}/read-sas", ct);
+
+    /// <summary>
+    /// Preview URLs for a whole grid in ONE call, pointing at cached small derivatives rather
+    /// than the originals. Per-asset minting was N sequential round trips before the first
+    /// tile could draw, and then downloaded full-resolution photography to fill 140 px cards.
+    /// </summary>
+    public Task<List<AssetThumb>> MintThumbsAsync(
+        IReadOnlyList<Guid> assetIds, CancellationToken ct = default) =>
+        api.PostAsync<object, List<AssetThumb>>(
+            "api/v1/blob/assets/thumbs", new { assetIds }, anonymous: false, ct);
 
     // ---- Templates --------------------------------------------------------------
 

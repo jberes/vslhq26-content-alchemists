@@ -29,4 +29,34 @@ public static class ArtifactKinds
 
     public static bool IsDistributionContent(string kind) =>
         DistributionContent.Contains(kind, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The channel family a kind belongs to, in the order a cluster reads: the long-form
+    /// surface that carries the search intent, then video, then the social distribution, then
+    /// owned audience. Lives in Core rather than a view because the same grouping labels the
+    /// content hierarchy, and anything that lists kinds by family should agree with it.
+    /// </summary>
+    public static readonly (string Key, string Label, string[] Kinds)[] Categories =
+    [
+        ("long-form", "Long-form", ["blog", "landing-page", "show-notes"]),
+        ("video", "Video", ["youtube", "clip-suggestions"]),
+        ("social", "Social", [
+            "social-x", "social-linkedin", "social-facebook", "social-instagram",
+            "social-threads", "social-bluesky"]),
+        ("owned", "Owned audience", ["newsletter", "email-sequence"]),
+    ];
+
+    /// <summary>Category key for a kind; "other" for anything not yet filed.</summary>
+    public static string CategoryOf(string kind) =>
+        Array.Find(Categories, c => c.Kinds.Contains(kind, StringComparer.Ordinal)).Key ?? "other";
+
+    public static string CategoryLabel(string categoryKey) =>
+        Array.Find(Categories, c => c.Key == categoryKey).Label ?? "Other";
+
+    /// <summary>Display order of a category — unfiled kinds sort last.</summary>
+    public static int CategoryOrder(string categoryKey)
+    {
+        var index = Array.FindIndex(Categories, c => c.Key == categoryKey);
+        return index < 0 ? Categories.Length : index;
+    }
 }

@@ -61,7 +61,10 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
 
     public byte[] ToSlotWebp(byte[] sourceImage, int width, int height)
     {
-        using var source = SKBitmap.Decode(sourceImage)
+        // TryDecode, not Decode: Skia THROWS for bytes it cannot read, so the null-coalescing
+        // guard this used to have never ran and a garbled provider response surfaced as an
+        // ArgumentNullException about a "codec" instead of saying what happened.
+        using var source = ImageReferenceResolver.TryDecode(sourceImage)
             ?? throw new InvalidOperationException("Model returned bytes that are not a decodable image.");
 
         using var cropped = CentreCrop(source, width, height);
@@ -73,7 +76,7 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
 
     public byte[] ToThumbWebp(byte[] webpImage, int maxEdge = 480)
     {
-        using var source = SKBitmap.Decode(webpImage)
+        using var source = ImageReferenceResolver.TryDecode(webpImage)
             ?? throw new InvalidOperationException("The image to thumbnail is not decodable.");
 
         var scale = Math.Min(1f, (float)maxEdge / Math.Max(source.Width, source.Height));
@@ -91,7 +94,7 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
 
     public CompositeResult ComposeHeadline(byte[] image, string headline, bool safeArea, string? backgroundColor = null)
     {
-        using var bitmap = SKBitmap.Decode(image)
+        using var bitmap = ImageReferenceResolver.TryDecode(image)
             ?? throw new InvalidOperationException("Bytes are not a decodable image.");
         using var surface = SKSurface.Create(new SKImageInfo(bitmap.Width, bitmap.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
         var canvas = surface.Canvas;

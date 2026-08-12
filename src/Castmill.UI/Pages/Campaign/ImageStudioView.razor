@@ -246,19 +246,25 @@
                                 }
                                 else
                                 {
-                                    @foreach (var provider in _status.ImageProviders)
+                                    @* Every model this workspace can actually reach: each Foundry
+                                       image alias, then each alternate provider. The choice applies
+                                       to the NEXT batch — it is also remembered on the card, but a
+                                       failed save never silently renders with the old model. *@
+                                    @foreach (var choice in ModelChoices)
                                     {
-                                        <label class="cm-studio__model @(provider.Ready && (!HasReferences || provider.SupportsReferenceImages) ? null : "cm-studio__model--off")">
+                                        var usable = choice.Ready && (!HasReferences || choice.SupportsReferences);
+                                        <label class="cm-studio__model @(usable ? null : "cm-studio__model--off")">
                                             <input type="radio" name="cm-studio-model"
-                                                   disabled="@(!provider.Ready || (HasReferences && !provider.SupportsReferenceImages))"
-                                                   checked="@(SelectedAlias == provider.Name)"
-                                                   @onchange="() => PickModelAsync(provider.Name)" />
-                                            <span>@provider.Name</span>
-                                            @if (!provider.Ready)
+                                                   disabled="@(!usable)"
+                                                   checked="@(EffectiveAlias == choice.Value)"
+                                                   @onchange="() => PickModelAsync(choice.Value)" />
+                                            <span>@choice.Label</span>
+                                            <span class="cm-meta">@choice.Detail</span>
+                                            @if (!choice.Ready)
                                             {
-                                                <span class="cm-meta">— unavailable: @(provider.Reason ?? "not configured")</span>
+                                                <span class="cm-meta">— unavailable: @(choice.Reason ?? "not configured")</span>
                                             }
-                                            else if (HasReferences && !provider.SupportsReferenceImages)
+                                            else if (HasReferences && !choice.SupportsReferences)
                                             {
                                                 <span class="cm-meta">— unavailable for cards with reference images</span>
                                             }
@@ -950,14 +956,23 @@
             _brandAssets = [.. (await BrandsApi.ListAssetsAsync(brand.Id))
                 .Where(a => !string.IsNullOrWhiteSpace(a.Label ?? a.FileName))];
 
-            // Read SAS per asset so a background can be chosen by looking at it. Sequential
-            // and best-effort: a thumbnail that fails to mint leaves a labelled tile, which is
-            // still usable, rather than failing the whole panel.
-            foreach (var asset in _brandAssets.Where(a => !_kitPreviews.ContainsKey(a.AssetId)))
+            // Preview URLs for the whole kit in one call, pointing at cached small
+            // derivatives. This was a sequential SAS mint per asset against the full-size
+            // original, so the picker's tiles filled in one slow row at a time. Best effort:
+            // a kit with no previews still shows labelled tiles, which remain usable.
+            var wanted = _brandAssets
+                .Select(a => a.AssetId)
+                .Where(id => !_kitPreviews.ContainsKey(id))
+                .Distinct()
+                .ToList();
+            if (wanted.Count > 0)
             {
                 try
                 {
-                    _kitPreviews[asset.AssetId] = (await BrandsApi.MintReadSasAsync(asset.AssetId)).ReadUrl;
+                    foreach (var thumb in await BrandsApi.MintThumbsAsync(wanted))
+                    {
+                        _kitPreviews[thumb.AssetId] = thumb.ReadUrl;
+                    }
                 }
                 catch (ApiException)
                 {
@@ -1109,6 +1124,90 @@
 
     private string? SelectedAlias => _pickedAlias ?? Selected?.ModelAlias;
 
+    /// <summary>
+    /// One selectable model. A Foundry entry names an ALIAS ("image", "image-alt") so the
+    /// two deployments behind the alias table are distinct choices; a provider entry names
+    /// the provider itself, which is what the registry routes on.
+    /// </summary>
+    private sealed record ModelChoice(
+        string Value, string Label, string? Detail, bool Ready, string? Reason, bool SupportsReferences);
+
+    private IReadOnlyList<ModelChoice> ModelChoices
+    {
+        get
+        {
+            if (_status is null)
+            {
+                return [];
+            }
+            var choices = new List<ModelChoice>();
+            var foundry = _status.ImageProviders.FirstOrDefault(p =>
+                string.Equals(p.Name, "foundry", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var (alias, deployment) in _status.Models
+                .Where(m => m.Key.StartsWith("image", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(m.Value))
+                .OrderBy(m => m.Key, StringComparer.Ordinal))
+            {
+                choices.Add(new ModelChoice(
+                    alias, DeploymentLabel(deployment), $"Foundry · {alias}",
+                    foundry?.Ready == true, foundry?.Reason,
+                    foundry?.SupportsReferenceImages == true));
+            }
+
+            // No alias table (a fresh workspace) still needs one Foundry entry to pick.
+            if (choices.Count == 0 && foundry is not null)
+            {
+                choices.Add(new ModelChoice(
+                    "foundry", "foundry", null, foundry.Ready, foundry.Reason,
+                    foundry.SupportsReferenceImages));
+            }
+
+            foreach (var provider in _status.ImageProviders.Where(p =>
+                !string.Equals(p.Name, "foundry", StringComparison.OrdinalIgnoreCase)))
+            {
+                choices.Add(new ModelChoice(
+                    provider.Name, provider.Name, ProviderDetail(provider.Name),
+                    provider.Ready, provider.Reason, provider.SupportsReferenceImages));
+            }
+            return choices;
+        }
+    }
+
+    /// <summary>The alias table routes with a "resource:deployment" value; a producer picking a
+    /// model wants the model's name, not which Azure resource it happens to live on.</summary>
+    private static string DeploymentLabel(string configured) =>
+        configured.IndexOf(':', StringComparison.Ordinal) is var separator && separator > 0
+            ? configured[(separator + 1)..]
+            : configured;
+
+    private static string? ProviderDetail(string name) => name switch
+    {
+        "nano-banana" => "Google Gemini · own key",
+        "gpt-image" => "OpenAI direct · own key",
+        _ => "own key",
+    };
+
+    /// <summary>
+    /// The alias this batch will actually render with. A card saved before providers were
+    /// aliased carries the literal "foundry", which names no entry in the list — it means
+    /// "the default image alias", so it resolves to the first Foundry choice.
+    /// </summary>
+    private string? EffectiveAlias
+    {
+        get
+        {
+            var choices = ModelChoices;
+            var alias = SelectedAlias;
+            if (alias is not null && choices.Any(c =>
+                string.Equals(c.Value, alias, StringComparison.OrdinalIgnoreCase)))
+            {
+                return alias;
+            }
+            return choices.FirstOrDefault()?.Value;
+        }
+    }
+
     private bool IsGenerating => _selectedId is { } id && StudioRun.IsActiveFor(id);
 
     private bool HasReferences => ProductAssets.Count > 0 || _picked.Count > 0;
@@ -1121,11 +1220,10 @@
             {
                 return true;
             }
-            var alias = SelectedAlias;
-            var provider = _status?.ImageProviders.FirstOrDefault(p =>
-                string.Equals(p.Name, alias, StringComparison.OrdinalIgnoreCase))
-                ?? _status?.ImageProviders.FirstOrDefault(p => p.Name == "foundry");
-            return provider?.SupportsReferenceImages == true;
+            var alias = EffectiveAlias;
+            var choice = ModelChoices.FirstOrDefault(c =>
+                string.Equals(c.Value, alias, StringComparison.OrdinalIgnoreCase));
+            return choice?.SupportsReferences == true;
         }
     }
 
@@ -1390,7 +1488,7 @@
         }
         _generateError = null;
         _failures = [];
-        StudioRun.StartSteer(CampaignId, slot.Id, source.Id, _steerNote.Trim());
+        StudioRun.StartSteer(CampaignId, slot.Id, source.Id, _steerNote.Trim(), modelAlias: EffectiveAlias);
         CloseVariant();
     }
 
@@ -1860,7 +1958,9 @@
 
         _generateError = null;
         _failures = [];
-        StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount);
+        // The model goes with the request. Reading it from the slot instead meant a save that
+        // failed (or simply hadn't landed) rendered with the previous model without saying so.
+        StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount, EffectiveAlias);
     }
 
     private async Task PlaceAsync(ImageVariantResponse variant)

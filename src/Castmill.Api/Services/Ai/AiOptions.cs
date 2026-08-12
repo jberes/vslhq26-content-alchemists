@@ -40,10 +40,79 @@ public sealed class AiOptions
 
     public sealed class ImageProviderOptions
     {
-        /// <summary>Feature flag — a provider that isn't explicitly enabled is never resolvable.</summary>
-        public bool Enabled { get; set; }
+        /// <summary>
+        /// Feature flag. A provider the config invents is never resolvable unless it says
+        /// Enabled=true; the built-in alternates default to on. Nullable so that a config
+        /// entry which pins only a model cannot read as "Enabled=false".
+        /// </summary>
+        public bool? Enabled { get; set; }
         public string Endpoint { get; set; } = string.Empty;
         public string Model { get; set; } = string.Empty;
+        /// <summary>
+        /// Wire protocol: "openai" (images/generations + images/edits) or "gemini"
+        /// (models/{model}:generateContent, Nano Banana). Not a style preference — the two
+        /// request/response shapes have nothing in common.
+        /// </summary>
+        public string Kind { get; set; } = "openai";
+        /// <summary>
+        /// Which encrypted per-user secret holds this provider's API key. One slot per
+        /// vendor so a workspace can hold a Gemini key AND an OpenAI key at once; the old
+        /// shared <see cref="Secrets.SecretKind.ImageProviderKey"/> stays as a fallback.
+        /// </summary>
+        public Secrets.SecretKind Credential { get; set; } = Secrets.SecretKind.ImageProviderKey;
+    }
+
+    /// <summary>
+    /// The alternates that ship with the product (ADR-015 addendum, ADR-026): Nano Banana
+    /// and OpenAI's gpt-image are named, first-class choices in the studio's model picker
+    /// rather than something to discover by hand-editing config. They are still inert until
+    /// a key is stored — the credential is the gate, not the flag — and config may override
+    /// any field or set Enabled=false to remove one entirely.
+    /// </summary>
+    public static IReadOnlyDictionary<string, ImageProviderOptions> MergeImageProviders(
+        IDictionary<string, ImageProviderOptions> configured)
+    {
+        var merged = new Dictionary<string, ImageProviderOptions>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["nano-banana"] = new()
+            {
+                Enabled = true,
+                Kind = "gemini",
+                Endpoint = "https://generativelanguage.googleapis.com/v1beta",
+                Model = "gemini-2.5-flash-image",
+                Credential = Secrets.SecretKind.NanoBananaKey,
+            },
+            ["gpt-image"] = new()
+            {
+                Enabled = true,
+                Kind = "openai",
+                Endpoint = "https://api.openai.com/v1",
+                Model = "gpt-image-1",
+                Credential = Secrets.SecretKind.OpenAiImageKey,
+            },
+        };
+
+        foreach (var (name, options) in configured)
+        {
+            if (!merged.TryGetValue(name, out var builtIn))
+            {
+                // An invented provider stays opt-in (ADR-015).
+                options.Enabled ??= false;
+                merged[name] = options;
+                continue;
+            }
+
+            // Field-level override: a config file that only pins a model must not blank the
+            // built-in endpoint, its credential slot, or its enabled state.
+            builtIn.Enabled = options.Enabled ?? builtIn.Enabled;
+            builtIn.Kind = string.IsNullOrWhiteSpace(options.Kind) ? builtIn.Kind : options.Kind;
+            builtIn.Endpoint = string.IsNullOrWhiteSpace(options.Endpoint) ? builtIn.Endpoint : options.Endpoint;
+            builtIn.Model = string.IsNullOrWhiteSpace(options.Model) ? builtIn.Model : options.Model;
+            builtIn.Credential = options.Credential == Secrets.SecretKind.ImageProviderKey
+                ? builtIn.Credential
+                : options.Credential;
+        }
+        return merged;
     }
 
     public sealed class TextProviderOptions

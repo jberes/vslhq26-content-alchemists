@@ -139,7 +139,13 @@ public sealed record ImageSlotCreateRequest(
     [property: Range(256, 4096)] int? TargetHeight = null);
 
 public sealed record GenerateVariantsRequest(
-    [property: Range(1, 6)] int Variants = 2);
+    [property: Range(1, 6)] int Variants = 2,
+    /// <summary>
+    /// Render THIS batch with a specific provider or Foundry alias, without changing the
+    /// slot's saved default. Comparing two models on the same prompt is the normal way to
+    /// work; making that comparison require a persisted settings change was not.
+    /// </summary>
+    [property: MaxLength(100)] string? ModelAlias = null);
 
 /// <summary>A persisted take for a slot. State: Candidate | Kept | Discarded.</summary>
 public sealed record ImageVariantResponse(
@@ -154,7 +160,9 @@ public sealed record SteerVariantRequest(
     /// <summary>Optional: references are real image inputs (ADR-025), so a new take steered
     /// only by a selected face or background needs no typed adjustment.</summary>
     [property: MaxLength(1000)] string? Note,
-    [property: Range(1, 3)] int Variants = 1);
+    [property: Range(1, 3)] int Variants = 1,
+    /// <summary>Per-batch model override, exactly as on generate. Null keeps the slot's default.</summary>
+    [property: MaxLength(100)] string? ModelAlias = null);
 
 /// <summary>Result envelope for generate/steer: the run id (pollable) + persisted takes.</summary>
 public sealed record VariantBatchResponse(

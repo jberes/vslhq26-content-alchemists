@@ -42,15 +42,20 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
 
     public bool IsActiveFor(Guid slotId) => SlotId == slotId && IsRunning;
 
-    /// <summary>Starts a fresh-generation run for the slot.</summary>
-    public void StartGenerate(Guid campaignId, Guid slotId, int variants) =>
+    /// <summary>
+    /// Starts a fresh-generation run for the slot. <paramref name="modelAlias"/> renders this
+    /// batch with a chosen model without changing the slot's saved default.
+    /// </summary>
+    public void StartGenerate(Guid campaignId, Guid slotId, int variants, string? modelAlias = null) =>
         Start(campaignId, slotId, variants,
-            ct => images.GenerateAsync(campaignId, slotId, variants, ct));
+            ct => images.GenerateAsync(campaignId, slotId, variants, modelAlias, ct));
 
     /// <summary>Starts a steered run from an existing take.</summary>
-    public void StartSteer(Guid campaignId, Guid slotId, Guid sourceVariantId, string note, int variants = 1) =>
+    public void StartSteer(
+        Guid campaignId, Guid slotId, Guid sourceVariantId, string note, int variants = 1,
+        string? modelAlias = null) =>
         Start(campaignId, slotId, variants,
-            ct => images.SteerAsync(campaignId, slotId, sourceVariantId, note, variants, ct));
+            ct => images.SteerAsync(campaignId, slotId, sourceVariantId, note, variants, modelAlias, ct));
 
     private void Start(Guid campaignId, Guid slotId, int variants, Func<CancellationToken, Task<VariantBatchResponse>> call)
     {

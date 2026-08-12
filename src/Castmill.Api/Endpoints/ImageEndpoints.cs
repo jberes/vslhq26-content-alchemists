@@ -132,6 +132,7 @@ public static class ImageEndpoints
         IPublicContentStore publicStore,
         CastmillDbContext db,
         TimeProvider clock,
+        ILogger<RenderImagesRequest> logger,
         CancellationToken ct)
     {
         if (!publicStore.IsConfigured)
@@ -179,9 +180,12 @@ public static class ImageEndpoints
             {
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                failures.Add($"{slot}: {ex.GetType().Name}"); // partial failure never sinks the run
+                // The reason, not the type name (see ImageSlotEndpoints.FailureReason), and a
+                // provider timeout is one slot's problem rather than the whole run's.
+                logger.LogError(ex, "Rendering image slot {Slot} failed", slot);
+                failures.Add($"{slot}: {ImageSlotEndpoints.FailureReason(ex)}");
             }
         }
 

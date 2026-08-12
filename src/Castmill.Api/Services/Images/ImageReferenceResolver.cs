@@ -67,17 +67,10 @@ public sealed class ImageReferenceResolver(
                 using var memory = new MemoryStream();
                 await source.CopyToAsync(memory, ct);
 
-                // Azure's edit endpoint accepts PNG/JPEG. Normalizing here means WebP brand
-                // assets work too and providers never need to guess a filename's true type.
-                using var bitmap = SKBitmap.Decode(memory.ToArray());
-                if (bitmap is null)
+                if (Normalize(item.Asset.Id, memory.ToArray(), item.Link.Kind) is { } reference)
                 {
-                    continue;
+                    result.Add(reference);
                 }
-                using var image = SKImage.FromBitmap(bitmap);
-                using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
-                result.Add(new ImageReference(
-                    item.Asset.Id, $"{item.Asset.Id:N}.png", "image/png", encoded.ToArray(), item.Link.Kind));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -88,6 +81,144 @@ public sealed class ImageReferenceResolver(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Longest edge of a reference image as sent to a model. Generated output is at most about
+    /// one megapixel, so a 4000-pixel source carries no extra information the model can use.
+    /// </summary>
+    internal const int MaxReferenceEdge = 1536;
+
+    /// <summary>
+    /// Hard ceiling per attachment. MAI's edits endpoint refuses anything over 20 MB, and the
+    /// gpt-image endpoint accepts 50 MB per image — which is how a card with eight references
+    /// quietly built a request of a quarter of a gigabyte.
+    /// </summary>
+    internal const int MaxReferenceBytes = 12 * 1024 * 1024;
+
+    /// <summary>
+    /// Decodes a brand asset and re-encodes it as something a model will actually accept:
+    /// downscaled to <see cref="MaxReferenceEdge"/>, and JPEG unless the image has transparency
+    /// (a cut-out logo must keep its alpha, so those stay PNG).
+    ///
+    /// This used to be "PNG at quality 100, original resolution", which turned a phone-sized
+    /// photograph into a ~35 MB attachment — over MAI's limit outright, and eight of those on
+    /// one card is a multi-hundred-megabyte upload before the model even starts. Returns null
+    /// when the bytes are not a decodable image.
+    /// </summary>
+    internal static ImageReference? Normalize(Guid assetId, byte[] bytes, string kind)
+    {
+        using var decoded = TryDecode(bytes);
+        if (decoded is null)
+        {
+            return null;
+        }
+
+        var opaque = !HasTransparency(decoded);
+        byte[]? smallest = null;
+
+        // PNG is lossless, so quality cannot shrink a transparent asset — only resolution can.
+        // Hence the outer loop over edge limits, with a JPEG quality step inside it for the
+        // opaque case where quality is the cheaper lever.
+        foreach (var edge in (int[])[MaxReferenceEdge, 1024, 768])
+        {
+            using var sized = Downscale(decoded, edge);
+            using var image = SKImage.FromBitmap(sized ?? decoded);
+
+            foreach (var quality in opaque ? (int[])[90, 70] : (int[])[100])
+            {
+                using var encoded = image.Encode(
+                    opaque ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png, quality);
+                if (encoded is null)
+                {
+                    continue;
+                }
+                var data = encoded.ToArray();
+                smallest = smallest is null || data.Length < smallest.Length ? data : smallest;
+                if (data.Length <= MaxReferenceBytes)
+                {
+                    return Reference(assetId, data, kind, opaque);
+                }
+            }
+        }
+
+        // Nothing fit. Send the smallest we managed anyway: the provider's size refusal is now a
+        // legible sentence, which beats silently dropping the reference the user chose.
+        return smallest is null ? null : Reference(assetId, smallest, kind, opaque);
+    }
+
+    private static ImageReference Reference(Guid assetId, byte[] data, string kind, bool opaque) =>
+        new(assetId,
+            opaque ? $"{assetId:N}.jpg" : $"{assetId:N}.png",
+            opaque ? "image/jpeg" : "image/png",
+            data,
+            kind);
+
+    /// <summary>
+    /// SkiaSharp does not return null for bytes it cannot read — it THROWS
+    /// <see cref="ArgumentNullException"/> from inside <c>Decode</c> when no codec matches. So
+    /// every `Decode(...) ?? throw`/null-check in this codebase was unreachable; this is the
+    /// null-returning decode those call sites assumed they had.
+    /// </summary>
+    internal static SKBitmap? TryDecode(byte[] bytes)
+    {
+        try
+        {
+            return SKBitmap.Decode(bytes);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the image actually has see-through pixels — not merely an alpha channel. PNG
+    /// screenshots routinely carry a fully opaque one, and treating those as transparent is
+    /// what kept a product screenshot on the lossless path and made it enormous. Sampled on a
+    /// stride plus the four corners, which is where a cut-out logo's transparency lives.
+    /// </summary>
+    private static bool HasTransparency(SKBitmap bitmap)
+    {
+        if (bitmap.Info.IsOpaque)
+        {
+            return false;
+        }
+
+        const byte threshold = 250;
+        var (right, bottom) = (bitmap.Width - 1, bitmap.Height - 1);
+        foreach (var (x, y) in ((int X, int Y)[])[(0, 0), (right, 0), (0, bottom), (right, bottom)])
+        {
+            if (bitmap.GetPixel(x, y).Alpha < threshold)
+            {
+                return true;
+            }
+        }
+
+        const int stride = 8;
+        for (var y = 0; y < bitmap.Height; y += stride)
+        {
+            for (var x = 0; x < bitmap.Width; x += stride)
+            {
+                if (bitmap.GetPixel(x, y).Alpha < threshold)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static SKBitmap? Downscale(SKBitmap source, int maxEdge)
+    {
+        var scale = Math.Min(1f, (float)maxEdge / Math.Max(source.Width, source.Height));
+        return scale >= 1f
+            ? null
+            : source.Resize(
+                new SKImageInfo(
+                    Math.Max(1, (int)MathF.Round(source.Width * scale)),
+                    Math.Max(1, (int)MathF.Round(source.Height * scale))),
+                new SKSamplingOptions(SKCubicResampler.Mitchell));
     }
 
     internal static IReadOnlySet<Guid> ParseIds(string? json)

@@ -278,7 +278,7 @@ public static class ImageSlotEndpoints
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
             principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
-            resolvedReferences);
+            resolvedReferences, request.ModelAlias);
     }
 
     /// <summary>
@@ -420,7 +420,7 @@ public static class ImageSlotEndpoints
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, note, source.Id,
             principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
-            resolvedReferences);
+            resolvedReferences, request.ModelAlias);
     }
 
     /// <summary>The shared render loop for generate and steer: run row first, then one
@@ -440,10 +440,14 @@ public static class ImageSlotEndpoints
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct,
-        IReadOnlyList<ImageReference>? references = null)
+        IReadOnlyList<ImageReference>? references = null,
+        string? modelOverride = null)
     {
         var userId = AuthEndpoints.GetUserId(principal);
         var now = clock.GetUtcNow();
+        // The batch's model: the caller's choice for this run, else the slot's saved default.
+        // Recorded on every variant, so a gallery of takes from two models stays readable.
+        var model = string.IsNullOrWhiteSpace(modelOverride) ? slot.ModelAlias : modelOverride.Trim();
 
         var run = new GenerationRun
         {
@@ -472,7 +476,7 @@ public static class ImageSlotEndpoints
             try
             {
                 var webp = await renderer.RenderExactAsync(
-                    userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, slot.ModelAlias,
+                    userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
                     references ?? [], ct);
                 var thumb = composer.ToThumbWebp(webp);
 
@@ -493,7 +497,7 @@ public static class ImageSlotEndpoints
                     BlobPath = blobPath,
                     ThumbUrl = thumbUrl.ToString(),
                     ThumbBlobPath = thumbPath,
-                    Model = slot.ModelAlias ?? "image",
+                    Model = model ?? "image",
                     Prompt = effectivePrompt,
                     SteeringNote = steeringNote,
                     SourceVariantId = sourceVariantId,
@@ -511,17 +515,22 @@ public static class ImageSlotEndpoints
                 await CompleteImageRunAsync(db, run, items, clock, ct);
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                // NAME the failure in the server log. The client only ever sees the exception
-                // type, and a bare "no takes came back" sent a real session chasing prompts
-                // when the actual fault was a 10-second resilience timeout on the HTTP client.
+                // Two rules, both learned the hard way:
+                //
+                // 1. The filter admits a provider-side TaskCanceledException (an HTTP timeout,
+                //    which IS an OperationCanceledException). Those used to escape this loop
+                //    and 500 the whole batch, leaving the run row stuck "Running" — while a
+                //    genuine client disconnect (ct signalled) still propagates as before.
+                // 2. The reason the client sees is the exception MESSAGE, not its type name.
+                //    A type name cannot be acted on: "InvalidOperationException" hid a
+                //    deterministic 400 ("this model does not support 'input_fidelity'") for
+                //    long enough to be re-diagnosed from scratch five times.
                 http.RequestServices.GetRequiredService<ILoggerFactory>()
                     .CreateLogger("Castmill.ImageSlots")
                     .LogError(ex, "Image render v{Take}/{Count} for slot {SlotId} failed", i, count, slot.Id);
-                // Moderation refusals carry a producer-facing message; everything else stays
-                // a type name so provider internals never reach the client.
-                var reason = ex is ImageModerationException ? ex.Message : ex.GetType().Name;
+                var reason = FailureReason(ex);
                 failures.Add($"v{i}: {reason}"); // partial failure never sinks the set
                 items.Add(new { kind = $"v{i}", success = false, error = reason, durationMs = stopwatch.ElapsedMilliseconds });
             }
@@ -537,6 +546,27 @@ public static class ImageSlotEndpoints
 
     private static readonly System.Text.Json.JsonSerializerOptions JsonWeb =
         new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// What a failed take tells the producer. Our own provider exceptions carry curated,
+    /// already-sanitised sentences (they never quote a request body, which could contain a
+    /// credential), so they pass through verbatim. Anything else is summarised without
+    /// leaking internals — but it is always logged in full first.
+    /// </summary>
+    internal const string TimedOutReason =
+        "The provider did not answer in time. Try again, or generate fewer takes at once.";
+
+    internal static string FailureReason(Exception ex) => ex switch
+    {
+        ImageModerationException or ImageProviderException or AiNotConfiguredException => ex.Message,
+        TaskCanceledException or TimeoutException => TimedOutReason,
+        HttpRequestException => "Could not reach the image provider (network or DNS failure). Try again.",
+        InvalidOperationException when ex.Message.Length is > 0 and < 400 => ex.Message,
+        // Polly's own timeout, matched by name so this endpoint needn't take a dependency
+        // on the resilience package just to phrase one sentence.
+        _ when ex.GetType().Name == "TimeoutRejectedException" => TimedOutReason,
+        _ => $"Unexpected {ex.GetType().Name} — see the server log for this run.",
+    };
 
     private static async Task CompleteImageRunAsync(
         CastmillDbContext db, GenerationRun run, List<object> items, TimeProvider clock, CancellationToken ct)

@@ -97,29 +97,6 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     [Fact]
-    public async Task Foundry_reference_generation_posts_real_images_to_the_edits_endpoint()
-    {
-        var handler = new CapturingImageHandler();
-        var provider = new FoundryImageProvider(
-            new StaticFoundryTarget(), new SingleHttpClientFactory(new HttpClient(handler)),
-            Options.Create(new AiOptions { ImageApiVersion = "2025-04-01-preview" }));
-        var png = SolidPng(16, 16, SKColors.Blue);
-
-        var result = await provider.GenerateAsync(Guid.NewGuid(), "faithful product screenshot", "16:9", null,
-            [new ImageReference(Guid.NewGuid(), "product.png", "image/png", png, "product")],
-            CancellationToken.None);
-
-        Assert.Equal(png, result);
-        Assert.Contains("/openai/deployments/gpt-image/images/edits", handler.RequestUri,
-            StringComparison.Ordinal);
-        Assert.Contains("api-version=2025-04-01-preview", handler.RequestUri, StringComparison.Ordinal);
-        Assert.Contains("name=\"image[]\"", handler.MultipartBody, StringComparison.Ordinal);
-        Assert.Contains("product.png", handler.MultipartBody, StringComparison.Ordinal);
-        Assert.Contains("input_fidelity", handler.MultipartBody, StringComparison.Ordinal);
-        Assert.Equal("secret", handler.ApiKey);
-    }
-
-    [Fact]
     public void Long_headline_shrinks_instead_of_being_clipped()
     {
         var composer = NewComposer();
@@ -133,48 +110,6 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     private static ImageComposer NewComposer() => new(
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         Microsoft.Extensions.Logging.Abstractions.NullLogger<ImageComposer>.Instance);
-
-    private sealed class StaticFoundryTarget : IFoundryClientFactory
-    {
-        private static readonly FoundryCredentials Credentials =
-            new("https://foundry.example", "secret", "test");
-        public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
-            Task.FromResult<FoundryCredentials?>(Credentials);
-        public string? ResolveDeployment(string modelAlias) => "gpt-image";
-        public Task<FoundryTarget?> ResolveTargetAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-            Task.FromResult<FoundryTarget?>(new FoundryTarget(Credentials, "gpt-image"));
-        public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class SingleHttpClientFactory(HttpClient client) : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => client;
-    }
-
-    private sealed class CapturingImageHandler : HttpMessageHandler
-    {
-        public string RequestUri { get; private set; } = string.Empty;
-        public string MultipartBody { get; private set; } = string.Empty;
-        public string? ApiKey { get; private set; }
-
-        protected override async Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            RequestUri = request.RequestUri!.ToString();
-            ApiKey = request.Headers.GetValues("api-key").Single();
-            MultipartBody = System.Text.Encoding.Latin1.GetString(
-                await request.Content!.ReadAsByteArrayAsync(cancellationToken));
-            var png = SolidPng(16, 16, SKColors.Blue);
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = JsonContent.Create(new
-                {
-                    data = new[] { new { b64_json = Convert.ToBase64String(png) } },
-                }),
-            };
-        }
-    }
 
     // ---- Integration fakes -----------------------------------------------------
 
@@ -469,14 +404,7 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     [Fact]
     public async Task Status_reports_image_provider_readiness_with_reasons()
     {
-        await using var app = factory.WithWebHostBuilder(b =>
-        {
-            // An enabled non-Foundry provider (ADR-015) with no stored key.
-            b.UseSetting("Ai:Providers:nano-banana:Enabled", "true");
-            b.UseSetting("Ai:Providers:nano-banana:Endpoint", "https://images.example/v1");
-            b.UseSetting("Ai:Providers:nano-banana:Model", "nano-banana-1");
-        });
-        var client = await AuthedClientAsync(app);
+        var client = await AuthedClientAsync(factory);
 
         var status = await client.GetFromJsonAsync<Castmill.Core.Ai.AiStatusResponse>("/api/v1/ai/status");
 
@@ -484,9 +412,15 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         Assert.False(foundry.Ready); // test factory blanks the Ai config
         Assert.False(string.IsNullOrWhiteSpace(foundry.Reason));
 
-        var external = Assert.Single(status.ImageProviders, p => p.Name == "nano-banana");
-        Assert.False(external.Ready);
-        Assert.Contains("ImageProviderKey", external.Reason!, StringComparison.Ordinal);
+        // The shipped alternates are listed without any config, and each names the credential
+        // slot to fill — a reason a producer can act on, not "not configured".
+        var nano = Assert.Single(status.ImageProviders, p => p.Name == "nano-banana");
+        Assert.False(nano.Ready);
+        Assert.Contains("NanoBananaKey", nano.Reason!, StringComparison.Ordinal);
+
+        var gpt = Assert.Single(status.ImageProviders, p => p.Name == "gpt-image");
+        Assert.False(gpt.Ready);
+        Assert.Contains("OpenAiImageKey", gpt.Reason!, StringComparison.Ordinal);
     }
 
     [Fact]

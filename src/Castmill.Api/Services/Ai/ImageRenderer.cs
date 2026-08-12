@@ -71,7 +71,7 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
     /// <summary>WebP re-encode (publish format, ADR/G list): smaller than PNG at publish quality.</summary>
     internal static byte[] EncodeWebp(byte[] sourceImage)
     {
-        using var bitmap = SKBitmap.Decode(sourceImage)
+        using var bitmap = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(sourceImage)
             ?? throw new InvalidOperationException("Model returned bytes that are not a decodable image.");
         using var image = SKImage.FromBitmap(bitmap);
         using var encoded = image.Encode(SKEncodedImageFormat.Webp, WebpQuality)

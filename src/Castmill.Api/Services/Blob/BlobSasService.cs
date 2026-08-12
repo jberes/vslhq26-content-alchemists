@@ -36,6 +36,12 @@ public interface IBlobSasService
     /// not, so it works identically from the web client, the desktop shell and a test.
     /// </summary>
     Task WriteAsync(string blobPath, Stream content, string contentType, CancellationToken ct);
+
+    /// <summary>
+    /// Cheap existence check — a HEAD, not a download. Used by the derived-thumbnail path,
+    /// which must not pull a multi-megabyte original just to discover it already has a thumb.
+    /// </summary>
+    Task<bool> ExistsAsync(string blobPath, CancellationToken ct);
 }
 
 public sealed class BlobSasService : IBlobSasService
@@ -127,6 +133,16 @@ public sealed class BlobSasService : IBlobSasService
                 HttpHeaders = new Azure.Storage.Blobs.Models.BlobHttpHeaders { ContentType = contentType },
             },
             ct);
+    }
+
+    public async Task<bool> ExistsAsync(string blobPath, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            return false;
+        }
+        return await _client.GetBlobContainerClient(_options.PrivateContainer)
+            .GetBlobClient(blobPath).ExistsAsync(ct);
     }
 
     public async Task<bool> ProbeAsync(CancellationToken ct)
