@@ -33,6 +33,28 @@ public sealed class AuthFlowTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task Web_shell_serves_root_and_deep_links_without_masking_api_404s()
+    {
+        var root = await _client.GetAsync("/");
+        var deepLink = await _client.GetAsync("/campaigns/new");
+        var missingApi = await _client.GetAsync("/api/v1/not-a-real-route");
+
+        Assert.Equal(HttpStatusCode.OK, root.StatusCode);
+        Assert.Equal("text/html", root.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("<title>Castmill</title>", await root.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, deepLink.StatusCode);
+        Assert.Equal("text/html", deepLink.Content.Headers.ContentType?.MediaType);
+
+        Assert.Equal(HttpStatusCode.NotFound, missingApi.StatusCode);
+        Assert.NotEqual("text/html", missingApi.Content.Headers.ContentType?.MediaType);
+
+        var bootstrap = await _client.GetAsync("/_framework/blazor.webassembly.js");
+        Assert.Equal(HttpStatusCode.OK, bootstrap.StatusCode);
+        Assert.Equal("text/javascript", bootstrap.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
     public async Task Register_then_me_roundtrip_returns_identity()
     {
         var (user, tokens) = await RegisterAsync();

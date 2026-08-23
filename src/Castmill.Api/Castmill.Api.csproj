@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Castmill.Core\Castmill.Core.csproj" />
+    <ProjectReference Include="..\Castmill.Web\Castmill.Web.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +28,7 @@
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="3.1.2" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
@@ -74,5 +76,27 @@
     <Content Remove="DevTestbed\**" />
     <None Include="DevTestbed\**" CopyToPublishDirectory="Never" />
   </ItemGroup>
+
+  <Target Name="CreateStableBlazorBootstrap" AfterTargets="Publish">
+    <ItemGroup>
+      <_BlazorBootstrap Include="$(PublishDir)wwwroot/_framework/blazor.webassembly.*.js" />
+    <_DotNetLoader Include="$(PublishDir)wwwroot/_framework/dotnet.*.js"
+           Exclude="$(PublishDir)wwwroot/_framework/dotnet.js;$(PublishDir)wwwroot/_framework/dotnet.native.*.js;$(PublishDir)wwwroot/_framework/dotnet.runtime.*.js" />
+    <_DotNetNative Include="$(PublishDir)wwwroot/_framework/dotnet.native.*.js"
+           Exclude="$(PublishDir)wwwroot/_framework/dotnet.native.js" />
+    <_DotNetRuntime Include="$(PublishDir)wwwroot/_framework/dotnet.runtime.*.js"
+            Exclude="$(PublishDir)wwwroot/_framework/dotnet.runtime.js" />
+    </ItemGroup>
+      <Error Condition="'@(_BlazorBootstrap)' == '' or '@(_DotNetLoader)' == '' or '@(_DotNetNative)' == '' or '@(_DotNetRuntime)' == ''"
+         Text="One or more published Blazor WebAssembly runtime assets were not found." />
+    <Copy SourceFiles="@(_BlazorBootstrap)"
+          DestinationFiles="@(_BlazorBootstrap->'$(PublishDir)wwwroot/_framework/blazor.webassembly.js')" />
+      <Copy SourceFiles="@(_DotNetLoader)"
+        DestinationFiles="@(_DotNetLoader->'$(PublishDir)wwwroot/_framework/dotnet.js')" />
+      <Copy SourceFiles="@(_DotNetNative)"
+        DestinationFiles="@(_DotNetNative->'$(PublishDir)wwwroot/_framework/dotnet.native.js')" />
+      <Copy SourceFiles="@(_DotNetRuntime)"
+        DestinationFiles="@(_DotNetRuntime->'$(PublishDir)wwwroot/_framework/dotnet.runtime.js')" />
+  </Target>
 
 </Project>

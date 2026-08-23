@@ -32,6 +32,22 @@ public sealed class AiOptions
     /// <summary>REST version used for multipart image edits (reference-image generation).</summary>
     public string ImageApiVersion { get; set; } = "2025-04-01-preview";
 
+    public void NormalizeAppServiceKeys()
+    {
+        AddHyphenatedAliases(Models);
+        AddHyphenatedAliases(Resources);
+        AddHyphenatedAliases(Providers);
+        AddHyphenatedAliases(TextProviders);
+    }
+
+    private static void AddHyphenatedAliases<T>(IDictionary<string, T> entries)
+    {
+        foreach (var (name, value) in entries.Where(entry => entry.Key.Contains('_')).ToArray())
+        {
+            entries.TryAdd(name.Replace('_', '-'), value);
+        }
+    }
+
     public sealed class FoundryOptions
     {
         public string Endpoint { get; set; } = string.Empty;

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "castmill"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "planSkuName": {
+      "value": "B1"
+    },
+    "existingResources": {
+      "value": {
+        "storageAccountName": "castmill",
+        "sqlServerFqdn": "jberes.database.windows.net",
+        "sqlDatabaseName": "castmill",
+        "applicationInsightsName": "appi-slingshotp-dev-1d1e",
+        "logAnalyticsWorkspaceName": "log-slingshotp-dev-1d1e"
+      }
+    }
+  }
+}

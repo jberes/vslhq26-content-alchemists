@@ -2,6 +2,7 @@ using Castmill.Desktop.Platform;
 using Castmill.UI;
 using Castmill.UI.Platform;
 using Microsoft.Extensions.Logging;
+using System.Reflection;
 
 namespace Castmill.Desktop;
 
@@ -12,12 +13,16 @@ public static class MauiProgram
     /// configuration value rather than a relative path. Points at the local dev API in a
     /// Debug build; Phase F9 replaces the Release value with the deployed App Service.
     /// </summary>
-    private static readonly Uri ApiBaseAddress =
+        private static readonly Uri ApiBaseAddress = new(
 #if DEBUG
-        new("http://localhost:5005/");
+        "http://localhost:5005/"
 #else
-        new("https://api.castmill.ai/");
+        typeof(MauiProgram).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(attribute => attribute.Key == "CastmillApiBaseAddress")
+            .Value ?? throw new InvalidOperationException("CastmillApiBaseAddress is not configured.")
 #endif
+        );
 
     public static MauiApp CreateMauiApp()
     {

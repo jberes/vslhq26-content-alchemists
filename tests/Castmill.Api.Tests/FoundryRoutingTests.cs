@@ -64,4 +64,22 @@ public sealed class FoundryRoutingTests
         var target = await CreateFactory().ResolveTargetAsync(Guid.NewGuid(), "chat-audit", TestContext.Current.CancellationToken);
         Assert.Equal("gpt-5.6-terra", target!.Deployment);
     }
+
+    [Fact]
+    public void App_service_safe_model_keys_restore_hyphenated_aliases()
+    {
+        var options = new AiOptions
+        {
+            Models = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["chat_audit"] = "gpt-audit",
+                ["image_alt"] = "mai-image",
+            },
+        };
+
+        options.NormalizeAppServiceKeys();
+
+        Assert.Equal("gpt-audit", options.Models["chat-audit"]);
+        Assert.Equal("mai-image", options.Models["image-alt"]);
+    }
 }

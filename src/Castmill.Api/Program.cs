@@ -65,6 +65,7 @@ builder.Services.AddSingleton<ISecretCipher>(secretCipher);
 builder.Services.AddScoped<IUserSecretsService, UserSecretsService>();
 builder.Services.AddSingleton<IBlobSasService, BlobSasService>();
 builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
+builder.Services.PostConfigure<AiOptions>(options => options.NormalizeAppServiceKeys());
 builder.Services.AddSingleton<IPromptLog, PromptLog>();
 builder.Services.AddScoped<IFoundryClientFactory, FoundryClientFactory>();
 // Text-provider seam (ADR-020): Foundry serves every pass-1 generator; an optional
@@ -338,6 +339,25 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+var blazorBootstrap = app.Environment.WebRootFileProvider
+    .GetDirectoryContents("_framework")
+    .FirstOrDefault(file => file.Name.StartsWith("blazor.webassembly.", StringComparison.Ordinal)
+        && file.Name.EndsWith(".js", StringComparison.Ordinal))
+    ?.Name;
+app.Use(async (context, next) =>
+{
+    if (blazorBootstrap is not null
+        && context.Request.Path.Equals("/_framework/blazor.webassembly.js"))
+    {
+        context.Request.Path = $"/_framework/{blazorBootstrap}";
+    }
+
+    await next(context);
+});
+
+app.UseBlazorFrameworkFiles();
+app.UseStaticFiles();
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 // Before authentication: a rejected pre-flight must not depend on a token.
 app.UseCors(CorsPolicyName);
@@ -451,6 +471,9 @@ app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
             name));
     })
     .RequireAuthorization("TenantAllowed");
+
+app.Map("/api/{**path}", () => Results.NotFound());
+app.MapFallbackToFile("index.html");
 
 app.Run();
 

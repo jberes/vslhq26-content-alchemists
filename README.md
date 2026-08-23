@@ -13,7 +13,6 @@
 - **Primary:** Azure OpenAI/LLM app
 - **Secondary:** category-creative-application (Guys - I changed this at 9:30pm the category was wrong - Creative is the correct category - please don't DQ me!)
 
-
 ## What it does
 
 Marketing teams produce one great "master" asset a week, then spend days manually slicing it into channel content. Castmill is the mill between the master and the channels: drop a recording in and a fan-out of **14 AI generators** produces every downstream artifact. Provenance is the feature — each generator must cite real transcript segment IDs or its output never persists, and deterministic validators enforce platform character caps, blog word bands, and clip time ranges before anything reaches review. A keyword-planning flow chains an AI SEO brief into **DataForSEO** for real search volume/difficulty, producing opportunity-ranked keywords and 3 A/B-testable YouTube titles.
@@ -61,6 +60,32 @@ Tests: `dotnet test` (62 tests; spins up SQL Server in Docker via Testcontainers
 
 Everything is documented inline in [appsettings.Development.template.json](src/Castmill.Api/appsettings.Development.template.json): connection string (Entra auth — no password), JWT signing key, AES-256-GCM encryption key, storage account, Foundry endpoints/model aliases, DataForSEO. **No secrets are ever committed** — the repo's history is gitleaks-verified and CI re-scans every push.
 
+### Production desktop on Apple Silicon
+
+The Release desktop is a thin client of the deployed App Service. Every installed desktop
+uses the same API, Azure SQL data, Blob Storage, Foundry deployments, and server-held
+secrets as the web app. Azure credentials and connection strings are never shipped in the
+desktop bundle.
+
+```bash
+dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj \
+  -f net10.0-maccatalyst -c Release -r maccatalyst-arm64
+
+ditto \
+  src/Castmill.Desktop/bin/Release/net10.0-maccatalyst/maccatalyst-arm64/Castmill.app \
+  /Applications/Castmill.app
+
+open /Applications/Castmill.app
+```
+
+Release defaults to the current Castmill App Service. To build for another API environment:
+
+```bash
+dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj \
+  -f net10.0-maccatalyst -c Release -r maccatalyst-arm64 \
+  -p:CastmillApiBaseAddress=https://example.azurewebsites.net/
+```
+
 ## Demo (required)
 
 - Video link: [demo/demo-castmill.mp4](demo/demo-castmill.mp4)
@@ -68,10 +93,8 @@ Everything is documented inline in [appsettings.Development.template.json](src/C
 
 ## Known limitations
 
-
 - Publishing goes through a Buffer-class broker abstraction; the concrete broker isn't chosen yet, so `/publish` runs against config stubs.
 - Clip export needs the worker image pushed + Container Apps deployed (code and Bicep are in the repo).
-
 
 ## License
 
