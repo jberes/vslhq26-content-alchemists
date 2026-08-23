@@ -34,21 +34,30 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         public HashSet<string> Dropped { get; } = [];
         public bool FailNextSchedule { get; set; }
         public int Cancels { get; private set; }
+        public int ScheduleCalls { get; private set; }
+        public TaskCompletionSource? ScheduleEntered { get; set; }
+        public TaskCompletionSource? ReleaseSchedule { get; set; }
 
         public Task<IReadOnlyList<BrokerChannel>> ListChannelsAsync(string token, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<BrokerChannel>>([new BrokerChannel("ch-1", "Main X", "x")]);
 
-        public Task<BrokerPost> SchedulePostAsync(
+        public async Task<BrokerPost> SchedulePostAsync(
             string token, string channelId, string text, DateTimeOffset scheduledAt, string? mediaUrl, CancellationToken ct)
         {
+            ScheduleCalls++;
             if (FailNextSchedule)
             {
                 FailNextSchedule = false;
                 throw new HttpRequestException("broker down");
             }
+            ScheduleEntered?.TrySetResult();
+            if (ReleaseSchedule is not null)
+            {
+                await ReleaseSchedule.Task.WaitAsync(ct);
+            }
             var post = new BrokerPost($"post-{Posts.Count + 1}", channelId, text, scheduledAt, "scheduled");
             Posts[post.Id] = post;
-            return Task.FromResult(post);
+            return post;
         }
 
         public Task CancelPostAsync(string token, string postId, CancellationToken ct)
@@ -88,6 +97,25 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         var campaign = await CampaignAsync(client, "Wire local");
 
         var slot = DateTimeOffset.Parse("2026-08-06T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var arbitraryMedia = await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id,
+            channelId = "x",
+            text = "Local post",
+            mediaUrl = "https://unowned.example/clip.mp4",
+            scheduledAt = slot,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, arbitraryMedia.StatusCode);
+
+        var overLimit = await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id,
+            channelId = "x",
+            text = new string('x', 281),
+            scheduledAt = slot,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, overLimit.StatusCode);
+
         var created = await client.PostAsJsonAsync("/api/v1/schedule", new
         {
             campaignId = campaign.Id,
@@ -156,6 +184,10 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         Assert.Equal("Queued", entry.Status);
         Assert.NotNull(entry.BrokerPostId);
 
+        // Retrying a post that is still live at the broker would create a duplicate.
+        var duplicate = await client.PostAsync($"/api/v1/schedule/{entry.Id}/retry", null);
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+
         // Reconcile with the post still queued → nothing changes.
         using var noop = JsonDocument.Parse(
             await (await client.PostAsync("/api/v1/schedule/reconcile", null)).Content.ReadAsStringAsync());
@@ -200,6 +232,78 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         Assert.Contains("rejected", entry.Error!, StringComparison.OrdinalIgnoreCase);
         // The row exists so the user can retry from the strip.
         Assert.Single((await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!);
+
+        var retried = (await (await client.PostAsync($"/api/v1/schedule/{entry.Id}/retry", null))
+            .Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+        Assert.Equal("Queued", retried.Status);
+        Assert.Null(retried.Error);
+        Assert.NotNull(retried.BrokerPostId);
+    }
+
+    [Fact]
+    public async Task Failed_move_clears_the_cancelled_broker_id_and_can_retry_the_new_slot()
+    {
+        var broker = new TrackingBroker();
+        await using var app = factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Publish:BrokerBaseUrl", "https://broker.example");
+            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Scoped<IPublishBrokerClient>(_ => broker)));
+        });
+        var client = await AuthedClientAsync(app);
+        var campaign = await CampaignAsync(client, "Wire move failure");
+        (await client.PutAsJsonAsync("/api/v1/settings/secrets/BrokerToken", new { value = "t" })).EnsureSuccessStatusCode();
+
+        var slot = DateTimeOffset.Parse("2026-08-06T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var entry = (await (await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id, channelId = "ch-1", text = "Move me", scheduledAt = slot,
+        })).Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+
+        broker.FailNextSchedule = true;
+        var moved = (await (await client.PatchAsJsonAsync($"/api/v1/schedule/{entry.Id}",
+            new { scheduledAt = slot.AddDays(1) })).Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+        Assert.Equal("Error", moved.Status);
+        Assert.Null(moved.BrokerPostId);
+        Assert.Equal(slot.AddDays(1), moved.ScheduledAt);
+
+        var retried = (await (await client.PostAsync($"/api/v1/schedule/{entry.Id}/retry", null))
+            .Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+        Assert.Equal("Queued", retried.Status);
+        Assert.NotNull(retried.BrokerPostId);
+    }
+
+    [Fact]
+    public async Task Concurrent_retry_claims_the_failed_row_once()
+    {
+        var broker = new TrackingBroker { FailNextSchedule = true };
+        await using var app = factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Publish:BrokerBaseUrl", "https://broker.example");
+            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Scoped<IPublishBrokerClient>(_ => broker)));
+        });
+        var client = await AuthedClientAsync(app);
+        var campaign = await CampaignAsync(client, "Wire retry race");
+        (await client.PutAsJsonAsync("/api/v1/settings/secrets/BrokerToken", new { value = "t" })).EnsureSuccessStatusCode();
+
+        var entry = (await (await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id,
+            channelId = "ch-1",
+            text = "Retry once",
+            scheduledAt = DateTimeOffset.UtcNow.AddHours(1),
+        })).Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+        Assert.Equal("Error", entry.Status);
+
+        broker.ScheduleEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        broker.ReleaseSchedule = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = client.PostAsync($"/api/v1/schedule/{entry.Id}/retry", null);
+        await broker.ScheduleEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var second = await client.PostAsync($"/api/v1/schedule/{entry.Id}/retry", null);
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        broker.ReleaseSchedule.SetResult();
+        Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
+        Assert.Equal(2, broker.ScheduleCalls); // initial rejection + exactly one retry
     }
 
     // ---- B9.7 revisions --------------------------------------------------------

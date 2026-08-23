@@ -22,7 +22,7 @@ Marketing teams produce one great "master" asset a week, then spend days manuall
 
 - **API** — ASP.NET Core (net10.0) Minimal API: Identity auth (rotating refresh tokens with reuse detection), structural tenant isolation via EF global query filters, AES-256-GCM secret custody, user-delegation SAS (no storage keys exist anywhere), per-user rate limits. Full reference: [Backend-Architecture.md](Backend-Architecture.md).
 - **AI orchestration** — everything behind one `Microsoft.Extensions.AI` seam with a model-alias table; aliases can route to different Foundry resources (`"eastus2:gpt-image-2"`), so a model swap is config, never code.
-- **Media** — ≤25 MB Foundry transcription + Azure AI Speech for long media; ffmpeg clip export runs as a queue-scaled Azure Container Apps job ([infra/clipjob/](infra/clipjob/)), never on API instances.
+- **Media** — resumable private audio/video upload in both shells, focused voice notes, ≤25 MB Foundry transcription and managed-identity Azure AI Speech for long/diarized media; desktop retains offline ffmpeg/Whisper, while clip export runs as a queue-scaled Azure Container Apps job ([infra/clipjob/](infra/clipjob/)), never on API instances.
 - **Client (next phase)** — one Blazor codebase shipped as a .NET MAUI hybrid desktop app and Blazor WASM web app on Ignite UI for Blazor: [Frontend-Architecture.md](Frontend-Architecture.md) · [Roadmap-Blazor.md](Roadmap-Blazor.md).
 
 ## Tech stack

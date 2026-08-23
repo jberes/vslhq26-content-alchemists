@@ -128,7 +128,9 @@ public sealed class AiOptions
     public sealed class SpeechOptions
     {
         public string Region { get; set; } = string.Empty;
+        public string Endpoint { get; set; } = string.Empty;
         public string Key { get; set; } = string.Empty;
-        public bool IsConfigured => !string.IsNullOrWhiteSpace(Region) && !string.IsNullOrWhiteSpace(Key);
+        public bool IsConfigured => !string.IsNullOrWhiteSpace(Endpoint)
+            || (!string.IsNullOrWhiteSpace(Region) && !string.IsNullOrWhiteSpace(Key));
     }
 }

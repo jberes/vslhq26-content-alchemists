@@ -14,11 +14,18 @@ export default defineConfig({
         actionTimeout: 30_000,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
+        launchOptions: {
+            args: [
+                '--use-fake-device-for-media-stream',
+                '--use-fake-ui-for-media-stream',
+            ],
+        },
     },
     webServer: [
         {
             command: 'dotnet run --project src/Castmill.Api --no-build',
             cwd: '../..',
+            env: { ...process.env, RateLimits__AuthPerMinute: '1000' },
             url: 'http://localhost:5005/health/db',
             reuseExistingServer: true,
             timeout: 120_000,

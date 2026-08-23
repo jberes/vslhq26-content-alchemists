@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Castmill.Api.Services.Ai;
 using Castmill.Core.Ai;
 using Castmill.Core.Auth;
@@ -72,6 +73,16 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         Assert.Contains(previews, p => p.Kind == "social-x");
         Assert.Contains(previews, p => p.Kind == "image-prompts");
         Assert.DoesNotContain(previews, p => p.Kind == "seo-brief");
+
+        var source = Assert.Single((await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaignId}/sources"))!);
+        foreach (var citation in previews
+            .Where(preview => preview.Kind != "transcript")
+            .SelectMany(preview => preview.Citations ?? []))
+        {
+            Assert.True(CitationReferenceCodec.TryParse(citation, out var reference));
+            Assert.Equal(source.Id, reference.SourceAssetId);
+        }
     }
 
     /// <summary>
@@ -104,6 +115,75 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         Assert.Equal(3, posts.Count);
         // Three distinct rows, not one row saved three times.
         Assert.Equal(3, posts.Select(p => p.Id).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Generator_can_cite_a_second_approved_source_with_overlapping_local_ids()
+    {
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
+                _ => new PromptEvidenceFoundryFactory()))));
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var secondIngest = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/transcripts",
+            new
+            {
+                text = "A second source carries separate approved proof. It shares local segment ids.",
+                source = "second-source",
+            });
+        secondIngest.EnsureSuccessStatusCode();
+        var sources = (await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaignId}/sources"))!;
+        Assert.Equal(2, sources.Count);
+
+        var generation = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/social-x",
+            new { transcriptArtifactId = transcriptId });
+        generation.EnsureSuccessStatusCode();
+        var result = await generation.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(result!.Success, result.Error);
+
+        var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
+            $"/api/v1/campaigns/{campaignId}/artifacts");
+        var post = Assert.Single(previews!, preview => preview.Kind == "social-x");
+        var citation = Assert.Single(post.Citations!);
+        Assert.True(CitationReferenceCodec.TryParse(citation, out var reference));
+        Assert.Equal(sources[^1].Id, reference.SourceAssetId);
+    }
+
+    [Fact]
+    public async Task Clip_boundaries_and_citations_stay_on_the_selected_transcript_source()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+        var originalSource = Assert.Single((await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaignId}/sources"))!);
+        var secondIngest = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/transcripts",
+            new
+            {
+                text = "A second source reuses S1. It reuses S2. It reuses S3.",
+                source = "overlapping-source",
+            });
+        secondIngest.EnsureSuccessStatusCode();
+
+        var generation = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/clip-suggestions",
+            new { transcriptArtifactId = transcriptId });
+        var result = await generation.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(result!.Success, result.Error);
+
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var content = JsonDocument.Parse(artifact!.ContentJson);
+        var payload = content.RootElement.GetProperty("content");
+        var citation = Assert.Single(payload.GetProperty("citations").EnumerateArray()).GetString()!;
+        Assert.True(CitationReferenceCodec.TryParse(citation, out var reference));
+        Assert.Equal(originalSource.Id, reference.SourceAssetId);
+        var clip = Assert.Single(payload.GetProperty("clips").EnumerateArray());
+        Assert.Equal(0, clip.GetProperty("inSeconds").GetDouble());
+        Assert.True(clip.GetProperty("outSeconds").GetDouble() > 0);
     }
 
     [Fact]
@@ -158,6 +238,158 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         var revisions = await client.GetFromJsonAsync<List<ArtifactRevisionResponse>>(
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}/revisions");
         Assert.Contains(revisions!, revision => revision.Reason == "youtube-title-b");
+    }
+
+    [Fact]
+    public async Task Youtube_title_regeneration_merges_a_new_source_citation_into_the_package()
+    {
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
+                _ => new TitleEvidenceFoundryFactory()))));
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        var generated = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(generated!.Success, generated.Error);
+        var before = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{generated.ArtifactId}");
+        using var beforePackage = JsonDocument.Parse(before!.ContentJson);
+        var originalCitations = beforePackage.RootElement.GetProperty("content")
+            .GetProperty("citations")
+            .EnumerateArray()
+            .Select(citation => citation.GetString()!)
+            .ToList();
+
+        var secondIngest = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/transcripts",
+            new { text = "Second-source proof for a stronger title.", source = "title-source" });
+        secondIngest.EnsureSuccessStatusCode();
+        var sources = (await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaignId}/sources"))!;
+
+        var regenerate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{generated.ArtifactId}/youtube-titles/B/regenerate",
+            new YoutubeTitleRegenerationRequest("Use the new evidence"));
+        regenerate.EnsureSuccessStatusCode();
+
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{generated.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        var citations = package.RootElement.GetProperty("content").GetProperty("citations")
+            .EnumerateArray()
+            .Select(citation => citation.GetString()!)
+            .ToList();
+        Assert.All(originalCitations, citation => Assert.Contains(citation, citations));
+        Assert.Contains(citations, citation =>
+            CitationReferenceCodec.TryParse(citation, out var reference)
+            && reference.SourceAssetId == sources[^1].Id);
+    }
+
+    [Fact]
+    public async Task Imported_evidence_supports_generation_title_regeneration_and_tech_edit_without_transcript()
+    {
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
+                _ => new GeneralizedEvidenceFoundryFactory()))));
+        var (client, campaignId) = await SetUpCampaignWithoutTranscriptAsync(app);
+        var sourceArtifact = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/artifacts",
+            new ArtifactCreateRequest(
+                "campaign-summary",
+                "Imported proof",
+                """{"summary":"The rollout reduced recovery time by forty percent."}"""));
+        sourceArtifact.EnsureSuccessStatusCode();
+        var sourceArtifactBody = (await sourceArtifact.Content.ReadFromJsonAsync<ArtifactResponse>())!;
+        var imported = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/sources/import/artifact",
+            new ArtifactSourceImportRequest(sourceArtifactBody.Id));
+        imported.EnsureSuccessStatusCode();
+        var source = (await imported.Content.ReadFromJsonAsync<EvidenceRevisionResponse>())!.Source;
+
+        var youtube = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { brief = "Use approved evidence" });
+        youtube.EnsureSuccessStatusCode();
+        var youtubeResult = await youtube.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(youtubeResult!.Success, youtubeResult.Error);
+
+        var title = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{youtubeResult.ArtifactId}/youtube-titles/B/regenerate",
+            new YoutubeTitleRegenerationRequest("Use the measured result"));
+        title.EnsureSuccessStatusCode();
+
+        var social = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/social-x",
+            new { brief = "Use approved evidence" });
+        social.EnsureSuccessStatusCode();
+        var socialResult = await social.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(socialResult!.Success, socialResult.Error);
+
+        var edit = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{socialResult.ArtifactId}/tech-edit",
+            new { steering = "Be more specific", useKnowledgeBase = false });
+        edit.EnsureSuccessStatusCode();
+        var editResult = await edit.Content.ReadFromJsonAsync<TechEditResult>();
+        Assert.True(editResult!.Success, editResult.Error);
+
+        var clip = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/clip-suggestions",
+            new { brief = "Find a clip" });
+        clip.EnsureSuccessStatusCode();
+        var clipResult = await clip.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.False(clipResult!.Success);
+        Assert.Contains("transcript", clipResult.Error!, StringComparison.OrdinalIgnoreCase);
+
+        var previews = await client.GetFromJsonAsync<List<ArtifactPreviewResponse>>(
+            $"/api/v1/campaigns/{campaignId}/artifacts");
+        foreach (var citation in previews!
+            .Where(item => item.Kind is "youtube" or "social-x")
+            .SelectMany(item => item.Citations ?? []))
+        {
+            Assert.True(CitationReferenceCodec.TryParse(citation, out var reference));
+            Assert.Equal(source.Id, reference.SourceAssetId);
+        }
+    }
+
+    [Fact]
+    public async Task Fully_excluded_approved_source_does_not_fall_back_to_raw_text()
+    {
+        await using var app = WithFakeModel();
+        var (client, campaignId) = await SetUpCampaignWithoutTranscriptAsync(app);
+        var sourceArtifact = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/artifacts",
+            new ArtifactCreateRequest(
+                "campaign-summary",
+                "Excluded proof",
+                """{"summary":"This raw text must not return after exclusion."}"""));
+        sourceArtifact.EnsureSuccessStatusCode();
+        var sourceArtifactBody = (await sourceArtifact.Content.ReadFromJsonAsync<ArtifactResponse>())!;
+        var imported = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/sources/import/artifact",
+            new ArtifactSourceImportRequest(sourceArtifactBody.Id));
+        imported.EnsureSuccessStatusCode();
+        var revision = (await imported.Content.ReadFromJsonAsync<EvidenceRevisionResponse>())!;
+        var block = Assert.Single(revision.Blocks);
+        var exclude = await client.PatchAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/sources/{revision.Source.Id}/evidence/{block.StableId}",
+            new EvidenceBlockRevisionRequest(null, true));
+        exclude.EnsureSuccessStatusCode();
+        var draft = (await exclude.Content.ReadFromJsonAsync<EvidenceRevisionResponse>())!;
+        var approve = await client.PostAsync(
+            $"/api/v1/campaigns/{campaignId}/sources/{revision.Source.Id}/evidence/{draft.Revision}/approve",
+            null);
+        approve.EnsureSuccessStatusCode();
+        var approved = await approve.Content.ReadFromJsonAsync<EvidenceRevisionResponse>();
+        Assert.Empty(approved!.Blocks);
+
+        var generation = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/social-x",
+            new { brief = "Use approved evidence" });
+        generation.EnsureSuccessStatusCode();
+        var result = await generation.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.False(result!.Success);
+        Assert.Contains("unknown approved evidence", result.Error!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -217,6 +449,26 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     private sealed record FanOutResponse(int Succeeded, int Failed);
     private sealed record LogEntry(string Kind, bool Success);
 
+    private static async Task<(HttpClient Client, Guid CampaignId)> SetUpCampaignWithoutTranscriptAsync(
+        WebApplicationFactory<Program> app)
+    {
+        var client = app.CreateClient();
+        var register = await client.PostAsJsonAsync(
+            "/api/v1/auth/register",
+            new RegisterRequest(
+                $"evidence-only-{Guid.NewGuid():N}@example.com",
+                "correct-horse-battery-staple",
+                "Evidence-only tester"));
+        register.EnsureSuccessStatusCode();
+        var tokens = await register.Content.ReadFromJsonAsync<AuthResponse>();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens!.AccessToken);
+        var campaign = await client.PostAsJsonAsync(
+            "/api/v1/campaigns", new CampaignCreateRequest("Evidence-only campaign", null));
+        campaign.EnsureSuccessStatusCode();
+        return (client, (await campaign.Content.ReadFromJsonAsync<CampaignResponse>())!.Id);
+    }
+
     // ---- Fakes ---------------------------------------------------------------
 
     internal sealed class FakeFoundryFactory : IFoundryClientFactory
@@ -232,6 +484,202 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
         public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
             Task.FromResult<IChatClient>(new FakeChatClient());
+    }
+
+    private sealed class PromptEvidenceFoundryFactory : IFoundryClientFactory
+    {
+        public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
+            Task.FromResult<FoundryCredentials?>(
+                new FoundryCredentials("https://fake.local", "fake", "config"));
+
+        public string? ResolveDeployment(string modelAlias) => "fake-deployment";
+
+        public Task<FoundryTarget?> ResolveTargetAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<FoundryTarget?>(new FoundryTarget(
+                new FoundryCredentials("https://fake.local", "fake", "config"),
+                "fake-deployment"));
+
+        public Task<IChatClient> CreateChatClientAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<IChatClient>(new PromptEvidenceChatClient());
+    }
+
+    private sealed class TitleEvidenceFoundryFactory : IFoundryClientFactory
+    {
+        public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
+            Task.FromResult<FoundryCredentials?>(
+                new FoundryCredentials("https://fake.local", "fake", "config"));
+
+        public string? ResolveDeployment(string modelAlias) => "fake-deployment";
+
+        public Task<FoundryTarget?> ResolveTargetAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<FoundryTarget?>(new FoundryTarget(
+                new FoundryCredentials("https://fake.local", "fake", "config"),
+                "fake-deployment"));
+
+        public Task<IChatClient> CreateChatClientAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<IChatClient>(new TitleEvidenceChatClient());
+    }
+
+    internal sealed class GeneralizedEvidenceFoundryFactory : IFoundryClientFactory
+    {
+        public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
+            Task.FromResult<FoundryCredentials?>(
+                new FoundryCredentials("https://fake.local", "fake", "config"));
+
+        public string? ResolveDeployment(string modelAlias) => "fake-deployment";
+
+        public Task<FoundryTarget?> ResolveTargetAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<FoundryTarget?>(new FoundryTarget(
+                new FoundryCredentials("https://fake.local", "fake", "config"),
+                "fake-deployment"));
+
+        public Task<IChatClient> CreateChatClientAsync(
+            Guid userId, string modelAlias, CancellationToken ct) =>
+            Task.FromResult<IChatClient>(new GeneralizedEvidenceChatClient());
+    }
+
+    private sealed class GeneralizedEvidenceChatClient : IChatClient
+    {
+        private readonly FakeChatClient _fallback = new();
+
+        public async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var materialized = messages.ToList();
+            var prompt = string.Join("\n", materialized.Select(message => message.Text));
+            var citation = prompt.Split('\n')
+                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
+                .Select(line => line["Citation ID: ".Length..].Trim())
+                .FirstOrDefault();
+            if (prompt.Contains("technical editor on this artifact", StringComparison.Ordinal))
+            {
+                if (citation is null)
+                {
+                    throw new InvalidOperationException(
+                        "The generalized tech-edit prompt needs an approved citation ID.");
+                }
+                var edited = JsonSerializer.Serialize(new
+                {
+                    artifact = new
+                    {
+                        title = "Edited measured rollout",
+                        text = "The measured rollout reduced recovery time by forty percent.",
+                        hashtags = Array.Empty<string>(),
+                        citations = new[] { citation },
+                    },
+                    changes = new[]
+                    {
+                        new { what = "Added the measured result", why = "Approved evidence", sourceUrl = "" },
+                    },
+                });
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant, edited));
+            }
+
+            var response = await _fallback.GetResponseAsync(
+                materialized, options, cancellationToken);
+            var root = JsonNode.Parse(response.Text)?.AsObject()
+                ?? throw new JsonException("Fake response was not an object.");
+            if (root.ContainsKey("citations") && citation is not null)
+            {
+                root["citations"] = new JsonArray(citation);
+            }
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, root.ToJsonString()));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() => _fallback.Dispose();
+    }
+
+    private sealed class TitleEvidenceChatClient : IChatClient
+    {
+        private readonly FakeChatClient _fallback = new();
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var materialized = messages.ToList();
+            var prompt = string.Join("\n", materialized.Select(message => message.Text));
+            if (!prompt.Contains("Regenerate only title slot", StringComparison.Ordinal))
+            {
+                return _fallback.GetResponseAsync(materialized, options, cancellationToken);
+            }
+
+            var citation = prompt.Split('\n')
+                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
+                .Select(line => line["Citation ID: ".Length..].Trim())
+                .Last();
+            var json = JsonSerializer.Serialize(new
+            {
+                slot = "B",
+                title = "New Evidence, Stronger Deployment Title",
+                angle = "curiosity",
+                score = 91,
+                rationale = "Uses newly approved evidence.",
+                citations = new[] { citation },
+            });
+            return Task.FromResult(
+                new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() => _fallback.Dispose();
+    }
+
+    private sealed class PromptEvidenceChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var prompt = string.Join("\n", messages.Select(message => message.Text));
+            var citation = prompt.Split('\n')
+                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
+                .Select(line => line["Citation ID: ".Length..].Trim())
+                .Last();
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "Post",
+                text = "A post grounded in the second approved source.",
+                hashtags = Array.Empty<string>(),
+                citations = new[] { citation },
+            });
+            return Task.FromResult(
+                new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
     }
 
     /// <summary>Returns schema-valid canned JSON keyed off distinctive prompt text.</summary>
@@ -250,6 +698,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             if (prompt.Contains("Regenerate only title slot", StringComparison.Ordinal))
             {
                 return """{"slot":"B","title":"What Halved Our Deployment Time?","angle":"curiosity","score":89,"rationale":"A concrete knowledge gap tied to the source result.","citations":["S2"]}""";
+            }
+            if (prompt.Contains("Infer the specific audience an SEO/AEO analyst should research", StringComparison.Ordinal))
+            {
+                return """{"audience":"Platform engineering leaders evaluating deployment automation with measurable recovery-time goals"}""";
             }
             if (prompt.Contains("Plan a YouTube package", StringComparison.Ordinal))
             {
@@ -274,11 +726,11 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             }
             if (prompt.Contains("nurture sequence", StringComparison.Ordinal))
             {
-                return """{"title":"Emails","emails":[{"subject":"a","preview":"p","bodyMarkdown":"b"},{"subject":"b","preview":"p","bodyMarkdown":"b"},{"subject":"c","preview":"p","bodyMarkdown":"b"}],"citations":["S1"]}""";
+                return """{"title":"Emails","emails":[{"subject":"a","preview":"p","bodyMarkdown":"Watch: [YOUTUBE_VIDEO_URL]"},{"subject":"b","preview":"p","bodyMarkdown":"b"},{"subject":"c","preview":"p","bodyMarkdown":"b"}],"citations":["S1"]}""";
             }
             if (prompt.Contains("newsletter edition", StringComparison.Ordinal))
             {
-                return """{"title":"News","subject":"s","bodyMarkdown":"body","citations":["S2"]}""";
+                return """{"title":"News","subject":"s","bodyMarkdown":"Watch: [YOUTUBE_VIDEO_URL]","citations":["S2"]}""";
             }
             if (prompt.Contains("landing page copy", StringComparison.Ordinal))
             {

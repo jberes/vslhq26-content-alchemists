@@ -39,6 +39,21 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 // ---------------------------------------------------------------------------
+// Azure AI Speech (long media + diarization). App Service authenticates with
+// managed identity; no Speech key is copied into app settings.
+// ---------------------------------------------------------------------------
+resource speech 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: '${baseName}-speech'
+  location: location
+  kind: 'SpeechServices'
+  sku: { name: 'S0' }
+  properties: {
+    customSubDomainName: '${baseName}-speech'
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Storage (blob: private + public containers, queue: clip-jobs)
 // ---------------------------------------------------------------------------
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -152,6 +167,7 @@ resource api 'Microsoft.Web/sites@2023-12-01' = {
         { name: 'ASPNETCORE_ENVIRONMENT', value: 'Production' }
         { name: 'ApplicationInsights__ConnectionString', value: appInsights.properties.ConnectionString }
         { name: 'Storage__AccountName', value: storage.name }
+        { name: 'Ai__Speech__Endpoint', value: speech.properties.endpoint }
         {
           name: 'ConnectionStrings__Castmill'
           value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Database=castmill;Authentication=Active Directory Managed Identity;Encrypt=True;'
@@ -167,6 +183,8 @@ var blobDataContributor = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 var queueDataContributor = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+var cognitiveServicesUser = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')
 
 resource apiBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: storage
@@ -184,6 +202,16 @@ resource apiQueueRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   properties: {
     principalId: api.identity.principalId
     roleDefinitionId: queueDataContributor
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource apiSpeechRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: speech
+  name: guid(speech.id, api.id, cognitiveServicesUser)
+  properties: {
+    principalId: api.identity.principalId
+    roleDefinitionId: cognitiveServicesUser
     principalType: 'ServicePrincipal'
   }
 }

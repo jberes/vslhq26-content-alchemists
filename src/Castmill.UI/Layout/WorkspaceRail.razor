@@ -84,39 +84,49 @@
         <span class="cm-kicker" id="cm-rail-campaigns">Campaigns</span>
 
         <ul class="cm-rail__items" aria-labelledby="cm-rail-campaigns">
-            @foreach (var campaign in Workspace.RailCampaigns)
+            @if (!Workspace.IsLoaded)
             {
-                <li class="cm-rail__row">
-                    <button type="button"
-                            class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
-                            aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
-                            data-cm-tip="@campaign.Name"
-                            @onclick="() => SwitchTo(campaign)">
-                        @* Collapsed, the name is hidden and this initial is all that is left,
-                           so it has to be enough to tell two campaigns apart at a glance. *@
-                        <span class="cm-rail__glyph cm-rail__glyph--initial" aria-hidden="true">@Initial(campaign.Name)</span>
-                        <span class="cm-rail__campaign-copy cm-rail__label">
-                            <span class="cm-rail__campaign-name">@campaign.Name</span>
-                            <span class="cm-rail__campaign-meta">
-                                @CampaignContentType.DisplayLabel(campaign.ContentType)
-                                <span aria-hidden="true"> · </span>
-                                Added @campaign.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
-                                <span aria-hidden="true"> · </span>
-                                Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)
-                            </span>
-                        </span>
-                    </button>
-                    <button type="button" class="cm-rail__delete"
-                            title="Delete campaign" aria-label="Delete @campaign.Name"
-                            @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
-                        <span aria-hidden="true">🗑</span>
-                    </button>
+                <li class="cm-rail__empty cm-loading-line cm-meta" role="status">
+                    <span class="cm-ai-dot" aria-hidden="true"></span>
+                    Loading campaigns…
                 </li>
             }
-
-            @if (Workspace.Campaigns.Count == 0)
+            else
             {
-                <li class="cm-rail__empty cm-meta">No campaigns yet.</li>
+                @foreach (var campaign in Workspace.RailCampaigns)
+                {
+                    <li class="cm-rail__row">
+                        <button type="button"
+                                class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
+                                aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
+                                data-cm-tip="@campaign.Name"
+                                @onclick="() => SwitchTo(campaign)">
+                            @* Collapsed, the name is hidden and this initial is all that is left,
+                               so it has to be enough to tell two campaigns apart at a glance. *@
+                            <span class="cm-rail__glyph cm-rail__glyph--initial" aria-hidden="true">@Initial(campaign.Name)</span>
+                            <span class="cm-rail__campaign-copy cm-rail__label">
+                                <span class="cm-rail__campaign-name">@campaign.Name</span>
+                                <span class="cm-rail__campaign-meta">
+                                    @CampaignContentType.DisplayLabel(campaign.ContentType)
+                                    <span aria-hidden="true"> · </span>
+                                    Added @campaign.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                    <span aria-hidden="true"> · </span>
+                                    Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)
+                                </span>
+                            </span>
+                        </button>
+                        <button type="button" class="cm-rail__delete"
+                                title="Delete campaign" aria-label="Delete @campaign.Name"
+                                @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
+                            <span aria-hidden="true">🗑</span>
+                        </button>
+                    </li>
+                }
+
+                @if (Workspace.Campaigns.Count == 0)
+                {
+                    <li class="cm-rail__empty cm-meta">No campaigns yet.</li>
+                }
             }
         </ul>
     </div>

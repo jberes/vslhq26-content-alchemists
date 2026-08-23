@@ -44,6 +44,7 @@ public static class CastmillUiServices
         services.AddScoped<ConfirmService>();
         services.AddScoped<IConfirmService>(sp => sp.GetRequiredService<ConfirmService>());
         services.AddScoped<IClipboardService, ClipboardService>();
+        services.AddScoped<IVoiceCaptureService, BrowserVoiceCaptureService>();
 
         // ---- HTTP --------------------------------------------------------------
         // Every call goes through CastmillHttpHandler — the one chokepoint for the bearer
@@ -82,6 +83,9 @@ public static class CastmillUiServices
         services.AddScoped<IFileDownloader, FileDownloader>();
         services.AddScoped<BrandsClient>();
         services.AddScoped<ScheduleClient>();
+        services.AddScoped<PublishClient>();
+        services.AddScoped<EvidenceClient>();
+        services.AddScoped<MediaUploadClient>();
 
         // The dependency graph is genuinely circular: the token provider refreshes through
         // AuthClient, which resolves an HttpClient whose handler needs the token provider.

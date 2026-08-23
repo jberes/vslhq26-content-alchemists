@@ -206,6 +206,9 @@ namespace Castmill.Api.Migrations
                     b.Property<Guid>("ArtifactId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ContentDependencySnapshotId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ContentJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -230,6 +233,8 @@ namespace Castmill.Api.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ContentDependencySnapshotId");
 
                     b.HasIndex("TenantId", "ArtifactId", "Version");
 
@@ -430,16 +435,27 @@ namespace Castmill.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("Intent")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("OutputRecipeJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SeoTargetsJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("SkipSeoAnalysis")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -524,6 +540,177 @@ namespace Castmill.Api.Migrations
                     b.HasIndex("TenantId", "CreatedAt");
 
                     b.ToTable("ClipJobs");
+                });
+
+            modelBuilder.Entity("Castmill.Core.ContentDependencySnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ApprovedReportArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApprovedReportHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long?>("ApprovedReportVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ApprovedTargetStrategyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("ArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArtifactId");
+
+                    b.HasIndex("TenantId", "ArtifactId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_ContentDependencySnapshots_Current")
+                        .HasFilter("[IsCurrent] = 1");
+
+                    b.HasIndex("TenantId", "ArtifactId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "CampaignId", "ArtifactId", "IsCurrent");
+
+                    b.ToTable("ContentDependencySnapshots");
+                });
+
+            modelBuilder.Entity("Castmill.Core.ContentEvidenceDependency", b =>
+                {
+                    b.Property<Guid>("SnapshotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SourceAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Hash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RevisionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("SnapshotId", "SourceAssetId");
+
+                    b.HasIndex("TenantId", "CampaignId", "SourceAssetId", "RevisionId");
+
+                    b.ToTable("ContentEvidenceDependencies");
+                });
+
+            modelBuilder.Entity("Castmill.Core.EvidenceBlock", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApprovalState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("IsExcluded")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LocatorJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("LocatorKind")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RevisionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SourceAssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("StableId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceAssetId");
+
+                    b.HasIndex("TenantId", "SourceAssetId", "Revision", "StableId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "CampaignId", "SourceAssetId", "Revision", "Ordinal");
+
+                    b.ToTable("EvidenceBlocks", t =>
+                        {
+                            t.HasCheckConstraint("CK_EvidenceBlocks_ApprovalState", "[ApprovalState] IN ('Draft', 'Approved')");
+
+                            t.HasCheckConstraint("CK_EvidenceBlocks_Ordinal", "[Ordinal] >= 0");
+
+                            t.HasCheckConstraint("CK_EvidenceBlocks_Revision", "[Revision] >= 1");
+                        });
                 });
 
             modelBuilder.Entity("Castmill.Core.GenerationRun", b =>
@@ -864,6 +1051,69 @@ namespace Castmill.Api.Migrations
                     b.ToTable("ImageVariants");
                 });
 
+            modelBuilder.Entity("Castmill.Core.MediaUpload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BlockIdsJson")
+                        .IsRequired()
+                        .HasMaxLength(80000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("NextBlockIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TranscriptArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("UploadedBytes")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssetId");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("TenantId", "CampaignId", "UpdatedAt");
+
+                    b.ToTable("MediaUploads", t =>
+                        {
+                            t.HasCheckConstraint("CK_MediaUploads_Progress", "[UploadedBytes] >= 0 AND [NextBlockIndex] >= 0");
+
+                            t.HasCheckConstraint("CK_MediaUploads_Status", "[Status] IN ('Uploading', 'Committed', 'Transcribing', 'Completed', 'Cancelled')");
+                        });
+                });
+
             modelBuilder.Entity("Castmill.Core.ScheduleEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -920,6 +1170,109 @@ namespace Castmill.Api.Migrations
                     b.HasIndex("TenantId", "ScheduledAt");
 
                     b.ToTable("ScheduleEntries");
+                });
+
+            modelBuilder.Entity("Castmill.Core.SourceAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ApprovedEvidenceHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("ApprovedEvidenceRevision")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ApprovedEvidenceRevisionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BlobPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CurrentEvidenceRevision")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("CurrentEvidenceRevisionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<Guid?>("LegacyArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Modality")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("OriginalUri")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<long?>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SnapshotIdentity")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CampaignId");
+
+                    b.HasIndex("LegacyArtifactId");
+
+                    b.HasIndex("TenantId", "LegacyArtifactId")
+                        .IsUnique()
+                        .HasFilter("[LegacyArtifactId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "CampaignId", "Kind");
+
+                    b.HasIndex("TenantId", "CampaignId", "Kind", "SnapshotIdentity")
+                        .IsUnique();
+
+                    b.ToTable("SourceAssets", t =>
+                        {
+                            t.HasCheckConstraint("CK_SourceAssets_EvidenceRevision", "[CurrentEvidenceRevision] >= 1 AND (([ApprovedEvidenceRevision] IS NULL AND [ApprovedEvidenceRevisionId] IS NULL AND [ApprovedEvidenceHash] IS NULL AND [ApprovedAt] IS NULL) OR ([ApprovedEvidenceRevision] IS NOT NULL AND [ApprovedEvidenceRevisionId] IS NOT NULL AND [ApprovedEvidenceHash] IS NOT NULL AND [ApprovedAt] IS NOT NULL AND [ApprovedEvidenceRevision] <= [CurrentEvidenceRevision]))");
+
+                            t.HasCheckConstraint("CK_SourceAssets_SizeBytes", "[SizeBytes] IS NULL OR [SizeBytes] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Castmill.Core.Tenant", b =>
@@ -1105,6 +1458,70 @@ namespace Castmill.Api.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Castmill.Core.ArtifactRevision", b =>
+                {
+                    b.HasOne("Castmill.Core.ContentDependencySnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("ContentDependencySnapshotId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("Castmill.Core.ContentDependencySnapshot", b =>
+                {
+                    b.HasOne("Castmill.Core.Artifact", null)
+                        .WithMany()
+                        .HasForeignKey("ArtifactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Castmill.Core.ContentEvidenceDependency", b =>
+                {
+                    b.HasOne("Castmill.Core.ContentDependencySnapshot", null)
+                        .WithMany()
+                        .HasForeignKey("SnapshotId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Castmill.Core.EvidenceBlock", b =>
+                {
+                    b.HasOne("Castmill.Core.SourceAsset", null)
+                        .WithMany()
+                        .HasForeignKey("SourceAssetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Castmill.Core.MediaUpload", b =>
+                {
+                    b.HasOne("Castmill.Core.Asset", null)
+                        .WithMany()
+                        .HasForeignKey("AssetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Castmill.Core.Campaign", null)
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Castmill.Core.SourceAsset", b =>
+                {
+                    b.HasOne("Castmill.Core.Campaign", null)
+                        .WithMany()
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Castmill.Core.Artifact", null)
+                        .WithMany()
+                        .HasForeignKey("LegacyArtifactId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

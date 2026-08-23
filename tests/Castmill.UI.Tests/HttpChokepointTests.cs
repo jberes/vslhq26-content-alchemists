@@ -137,6 +137,28 @@ public sealed class HttpChokepointTests
         Assert.Contains("Too short.", ex.Errors["Password"]);
     }
 
+    [Fact]
+    public async Task Bad_request_problem_details_keep_their_actionable_message()
+    {
+        var problem = JsonOk(new
+        {
+            title = "Bad Request",
+            detail = "This page renders its content with JavaScript; paste its content instead.",
+        });
+        problem.StatusCode = HttpStatusCode.BadRequest;
+
+        var inner = new SequenceHandler(_ => problem);
+        var api = new ApiClient(Client(new RefreshingTokenProvider(), inner));
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() =>
+            api.PostAsync<object, object>("api/v1/sources/import/webpage", new { }));
+
+        Assert.Equal(400, ex.StatusCode);
+        Assert.Equal(
+            "This page renders its content with JavaScript; paste its content instead.",
+            ex.Message);
+    }
+
     private static HttpClient Client(IAuthTokenProvider tokens, HttpMessageHandler inner) =>
         new(new CastmillHttpHandler(tokens) { InnerHandler = inner })
         {

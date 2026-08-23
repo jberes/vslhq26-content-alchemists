@@ -50,9 +50,11 @@
     }
     else if (Campaign.IsLoading)
     {
-        @* Narrated, not a spinner (ADR-F13). *@
         <div class="cm-page">
-            <p class="cm-meta">Loading campaign…</p>
+            <p class="cm-loading-line" role="status">
+                <span class="cm-ai-dot" aria-hidden="true"></span>
+                Loading campaign overview…
+            </p>
         </div>
     }
     else
@@ -99,7 +101,9 @@
         // this screen did.
         try
         {
-            await Workspace.LoadAsync();
+            var workspaceLoad = Workspace.LoadAsync();
+            var campaignLoad = Campaign.LoadAsync(CampaignId);
+            await Task.WhenAll(workspaceLoad, campaignLoad);
 
             // Keep the rail's active-campaign card in step with the route, so a deep link or
             // a browser Back lands with the rail showing the right campaign.
@@ -108,7 +112,6 @@
                 Workspace.SetActive(CampaignId);
             }
 
-            await Campaign.LoadAsync(CampaignId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

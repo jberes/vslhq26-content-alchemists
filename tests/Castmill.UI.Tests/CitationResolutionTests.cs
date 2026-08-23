@@ -1,4 +1,5 @@
 using Castmill.Core.Ai;
+using Castmill.Core.Resources;
 using Castmill.UI.State;
 
 namespace Castmill.UI.Tests;
@@ -47,6 +48,30 @@ public sealed class CitationResolutionTests
 
         // Pasted transcripts use "S1"; that path must not be disturbed by the fix for the other.
         Assert.Equal(["S1", "S2"], resolved);
+    }
+
+    [Fact]
+    public void Qualified_evidence_citation_resolves_to_its_transcript_segment()
+    {
+        var sourceId = Guid.NewGuid();
+        var citation = CitationReferenceCodec.Format(sourceId, "S2");
+
+        var resolved = ArtifactDisplay.ResolveCitations(
+            [citation], Segments("S1", "S2"), sourceId);
+
+        Assert.Equal(["S2"], resolved);
+    }
+
+    [Fact]
+    public void Qualified_citation_from_another_source_does_not_draw_on_the_transcript()
+    {
+        var transcriptSourceId = Guid.NewGuid();
+        var citation = CitationReferenceCodec.Format(Guid.NewGuid(), "S2");
+
+        var resolved = ArtifactDisplay.ResolveCitations(
+            [citation], Segments("S1", "S2"), transcriptSourceId);
+
+        Assert.Empty(resolved);
     }
 
     [Fact]

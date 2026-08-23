@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using Castmill.Core;
 using Castmill.Core.Content;
 using DocumentFormat.OpenXml;
@@ -9,6 +10,14 @@ using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace Castmill.Api.Services.Export;
 
+public sealed record ExportImage(
+    Guid? ArtifactId,
+    string Kind,
+    string SourceUrl,
+    string ContentType,
+    byte[]? Bytes,
+    string? UnavailableReason = null);
+
 public interface IExportService
 {
     string Markdown(Artifact artifact);
@@ -16,8 +25,11 @@ public interface IExportService
     /// <summary>Styled .docx bytes — Word opens it with real heading styles, not bold text.</summary>
     byte[] Docx(Artifact artifact);
 
-    /// <summary>Every artifact in the campaign as markdown files in one archive.</summary>
-    byte[] Zip(Campaign campaign, IReadOnlyList<Artifact> artifacts);
+    /// <summary>Every artifact in the campaign plus available placed images in one archive.</summary>
+    byte[] Zip(
+        Campaign campaign,
+        IReadOnlyList<Artifact> artifacts,
+        IReadOnlyList<ExportImage>? images = null);
 }
 
 /// <summary>
@@ -27,6 +39,9 @@ public interface IExportService
 /// </summary>
 public sealed class ExportService : IExportService
 {
+    private static readonly JsonSerializerOptions ManifestJson =
+        new(JsonSerializerDefaults.Web) { WriteIndented = true };
+
     public string Markdown(Artifact artifact)
     {
         ArgumentNullException.ThrowIfNull(artifact);
@@ -69,7 +84,10 @@ public sealed class ExportService : IExportService
         return stream.ToArray();
     }
 
-    public byte[] Zip(Campaign campaign, IReadOnlyList<Artifact> artifacts)
+    public byte[] Zip(
+        Campaign campaign,
+        IReadOnlyList<Artifact> artifacts,
+        IReadOnlyList<ExportImage>? images = null)
     {
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(artifacts);
@@ -78,19 +96,92 @@ public sealed class ExportService : IExportService
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
             var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var artifactPaths = new Dictionary<Guid, string>();
             foreach (var artifact in artifacts)
             {
                 // Grouped by kind so the archive reads like the Mill Floor rather than like a
                 // database dump, and de-duplicated because a campaign can hold several blogs.
-                var name = Unique(used, $"{artifact.Kind}/{Slug(artifact.Title)}.md");
-                var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
-                using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
-                writer.Write(Markdown(artifact));
+                var name = Unique(used, $"{Slug(artifact.Kind)}/{Slug(artifact.Title)}.md");
+                artifactPaths[artifact.Id] = name;
             }
 
-            var index = archive.CreateEntry("README.md", CompressionLevel.Optimal);
-            using var indexWriter = new StreamWriter(index.Open(), new UTF8Encoding(false));
-            indexWriter.Write(Index(campaign, artifacts));
+            var manifestImages = new List<ExportManifestImage>();
+            var replacements = new Dictionary<Guid, List<(string Source, string Local)>>();
+            foreach (var image in (images ?? []).OrderBy(i => i.ArtifactId).ThenBy(i => i.Kind, StringComparer.Ordinal)
+                         .ThenBy(i => i.SourceUrl, StringComparer.Ordinal))
+            {
+                string? imagePath = null;
+                if (image.Bytes is { Length: > 0 })
+                {
+                    var owner = image.ArtifactId is { } artifactId
+                                && artifactPaths.TryGetValue(artifactId, out var artifactPath)
+                        ? Path.GetFileNameWithoutExtension(artifactPath)
+                        : "campaign";
+                    imagePath = Unique(used,
+                        $"images/{Slug(owner)}/{Slug(image.Kind)}{ImageExtension(image.ContentType)}");
+                    var entry = archive.CreateEntry(imagePath, CompressionLevel.Optimal);
+                    using var output = entry.Open();
+                    output.Write(image.Bytes);
+
+                    if (image.ArtifactId is { } ownerId && artifactPaths.ContainsKey(ownerId))
+                    {
+                        if (!replacements.TryGetValue(ownerId, out var owned))
+                        {
+                            owned = [];
+                            replacements[ownerId] = owned;
+                        }
+                        owned.Add((image.SourceUrl, $"../{imagePath}"));
+                    }
+                }
+
+                manifestImages.Add(new ExportManifestImage(
+                    image.ArtifactId,
+                    image.Kind,
+                    image.SourceUrl,
+                    imagePath,
+                    imagePath is null ? "unavailable" : "included",
+                    imagePath is null ? image.UnavailableReason ?? "bytes-unavailable" : null));
+            }
+
+            foreach (var artifact in artifacts)
+            {
+                var markdown = Markdown(artifact);
+                if (replacements.TryGetValue(artifact.Id, out var owned))
+                {
+                    foreach (var (source, local) in owned)
+                    {
+                        markdown = markdown.Replace(source, local, StringComparison.Ordinal);
+                    }
+                }
+
+                var entry = archive.CreateEntry(artifactPaths[artifact.Id], CompressionLevel.Optimal);
+                using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+                writer.Write(markdown);
+            }
+
+            {
+                var index = archive.CreateEntry("README.md", CompressionLevel.Optimal);
+                using var indexWriter = new StreamWriter(index.Open(), new UTF8Encoding(false));
+                indexWriter.Write(Index(campaign, artifacts));
+            }
+
+            {
+                var manifest = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
+                using var manifestWriter = new StreamWriter(manifest.Open(), new UTF8Encoding(false));
+                manifestWriter.Write(JsonSerializer.Serialize(new
+                {
+                    schemaVersion = 1,
+                    campaign = new { campaign.Id, campaign.Name },
+                    artifacts = artifacts.Select(artifact => new
+                    {
+                        artifact.Id,
+                        artifact.Kind,
+                        artifact.Title,
+                        path = artifactPaths[artifact.Id],
+                    }),
+                    images = manifestImages,
+                }, ManifestJson));
+            }
         }
 
         return stream.ToArray();
@@ -251,6 +342,14 @@ public sealed class ExportService : IExportService
         return text.Length <= 60 ? text : text[..60].TrimEnd('-');
     }
 
+    private static string ImageExtension(string contentType) => contentType.ToLowerInvariant() switch
+    {
+        "image/png" => ".png",
+        "image/jpeg" => ".jpg",
+        "image/gif" => ".gif",
+        _ => ".webp",
+    };
+
     private static string Unique(HashSet<string> used, string name)
     {
         if (used.Add(name))
@@ -258,13 +357,23 @@ public sealed class ExportService : IExportService
             return name;
         }
 
+        var extension = Path.GetExtension(name);
+        var stem = extension.Length == 0 ? name : name[..^extension.Length];
         for (var i = 2; ; i++)
         {
-            var candidate = $"{name[..^3]}-{i}.md";
+            var candidate = $"{stem}-{i}{extension}";
             if (used.Add(candidate))
             {
                 return candidate;
             }
         }
     }
+
+    private sealed record ExportManifestImage(
+        Guid? ArtifactId,
+        string Kind,
+        string SourceUrl,
+        string? ArchivePath,
+        string Status,
+        string? Reason);
 }

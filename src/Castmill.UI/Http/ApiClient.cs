@@ -218,6 +218,24 @@ public sealed class ApiClient(HttpClient http)
         await ThrowIfFailedAsync(response, ct);
     }
 
+    public async Task<TResponse> PutBytesAsync<TResponse>(
+        string url,
+        byte[] content,
+        string contentType,
+        string sha256,
+        CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, url)
+        {
+            Content = new ByteArrayContent(content),
+        };
+        request.Content.Headers.TryAddWithoutValidation("Content-Type", contentType);
+        request.Headers.TryAddWithoutValidation("X-Content-SHA256", sha256);
+
+        using var response = await http.SendAsync(request, ct);
+        return await ReadAsync<TResponse>(response, ct);
+    }
+
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken ct)
     {
         await ThrowIfFailedAsync(response, ct);
@@ -292,6 +310,13 @@ public sealed class ApiClient(HttpClient http)
             {
                 return new ValidationApiException(problem.Errors, correlationId);
             }
+            var message = string.IsNullOrWhiteSpace(problem?.Detail)
+                ? problem?.Title
+                : problem.Detail;
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                return new ApiException(message, 400, correlationId);
+            }
         }
         catch (JsonException)
         {
@@ -306,5 +331,8 @@ public sealed class ApiClient(HttpClient http)
             ? values.FirstOrDefault()
             : null;
 
-    private sealed record ValidationProblem(Dictionary<string, string[]>? Errors);
+    private sealed record ValidationProblem(
+        Dictionary<string, string[]>? Errors,
+        string? Title,
+        string? Detail);
 }

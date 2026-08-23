@@ -47,6 +47,98 @@
                    editor as a drawer beside the sheet, so the plan never leaves view. *@
                 <div class="cm-studio @(Selected is not null ? "cm-studio--open" : null)">
                     <div class="cm-studio__sheet" aria-label="Campaign image plan">
+                        @{ var batchPlan = CurrentBatchPlan; }
+                        <section class="cm-studio__batch" aria-label="Generate all pending images">
+                            <div class="cm-studio__batch-head">
+                                <div class="cm-studio__batch-copy">
+                                    <span class="cm-kicker">Campaign pass</span>
+                                    <h2>Generate every pending image</h2>
+                                    <p class="cm-meta cm-studio__batch-sentence">
+                                        <span>Bring each eligible slot up to</span>
+                                        <select class="cm-input cm-studio__batch-target"
+                                                aria-label="Target takes per slot"
+                                                @bind="_batchTakeTarget" disabled="@StudioRun.IsBatchRunning">
+                                            @foreach (var target in BatchTakeTargets)
+                                            {
+                                                <option value="@target">@target @(target == 1 ? "take" : "takes")</option>
+                                            }
+                                        </select>
+                                        <span>without placing a take.</span>
+                                    </p>
+                                </div>
+                                <button type="button" class="cm-button"
+                                        disabled="@(StudioRun.IsRunning || StudioRun.IsBatchRunning || batchPlan.MissingVariants == 0)"
+                                        @onclick="GeneratePendingAsync">
+                                    @(StudioRun.IsBatchRunning ? "Generating pending images" : "Generate all pending")
+                                </button>
+                            </div>
+                            <p class="cm-meta cm-studio__batch-estimate">
+                                @batchPlan.EligibleSlots eligible · @batchPlan.MissingVariants missing
+                                @(batchPlan.MissingVariants == 1 ? "take" : "takes")
+                                @if (batchPlan.MissingVariants > 0 && batchPlan.HasBaselineEstimate)
+                                {
+                                    <span> · ≈ @((batchPlan.MissingVariants * CostPerVariantUsd).ToString("$0.00")) Foundry baseline estimate</span>
+                                }
+                                else if (batchPlan.MissingVariants > 0)
+                                {
+                                    <span> · estimate unavailable for mixed or externally billed models</span>
+                                }
+                                @if (batchPlan.SkippedSlots > 0)
+                                {
+                                    <span> · @batchPlan.SkippedSlots skipped before start</span>
+                                }
+                            </p>
+                            @if (_status is null)
+                            {
+                                <p class="cm-meta">Checking provider readiness before calculating the pass.</p>
+                            }
+                            @if (StudioRun.IsBatchActiveFor(CampaignId))
+                            {
+                                var resultEvents = StudioRun.BatchResult is { } finalBatch
+                                    ? finalBatch.SucceededVariants + finalBatch.FailedVariants + finalBatch.SkippedSlots
+                                    : 0;
+                                var completed = StudioRun.BatchProgress?.Completed ?? resultEvents;
+                                var total = StudioRun.BatchProgress?.TotalKinds
+                                    ?? (resultEvents > 0 ? resultEvents : batchPlan.TotalEvents);
+                                <div class="cm-studio__batch-progress" role="status" aria-live="polite">
+                                    <progress value="@completed" max="@Math.Max(1, total)"></progress>
+                                    <p class="cm-meta">
+                                        @(StudioRun.IsBatchRunning ? "Generating" : "Pass complete") ·
+                                        @completed/@total slot events ·
+                                        <span class="cm-mono">@ElapsedLabel(StudioRun.Elapsed)</span>
+                                    </p>
+                                    @if (StudioRun.BatchResult is { } batchResult)
+                                    {
+                                        <p class="cm-studio__batch-summary">
+                                            <strong>@batchResult.SucceededSlots succeeded</strong> ·
+                                            @batchResult.FailedSlots failed ·
+                                            @batchResult.SkippedSlots skipped ·
+                                            @batchResult.SucceededVariants takes created
+                                        </p>
+                                    }
+                                    @if (StudioRun.BatchError is { } batchError)
+                                    {
+                                        <p class="cm-form__error" role="alert">@batchError</p>
+                                    }
+                                    @if (StudioRun.BatchProgress?.Items is { Count: > 0 } batchItems)
+                                    {
+                                        <ol class="cm-studio__batch-log" aria-label="Image batch progress">
+                                            @foreach (var item in batchItems)
+                                            {
+                                                <li class="cm-studio__batch-event">
+                                                    <span class="cm-status @BatchEventStatusClass(item)">@BatchEventOutcome(item)</span>
+                                                    <span>@BatchEventLabel(item)</span>
+                                                    @if (!string.IsNullOrWhiteSpace(item.Error))
+                                                    {
+                                                        <span class="cm-meta">@item.ErrorCode · @item.Error</span>
+                                                    }
+                                                </li>
+                                            }
+                                        </ol>
+                                    }
+                                </div>
+                            }
+                        </section>
                         @foreach (var item in ImageContentItems)
                         {
                             var slots = SlotsFor(item.Id).ToList();
@@ -855,6 +947,7 @@
     /// </summary>
     private string ApiOrigin() => Http.BaseAddress?.ToString() ?? "the API";
     private static readonly int[] VariantChoices = [1, 2, 4, 6];
+    private static readonly int[] BatchTakeTargets = [1, 2, 4];
 
     // gpt-image-2 list price at 2026 rates for a single ~1-2 MP render; an estimate on the
     // surface beats a silent bill (the projected-vs-actual honesty rule, applied to money).
@@ -896,6 +989,9 @@
     private string? _modelPickerError;
     private string? _modelDraft;
     private int _variantCount = 1;
+    private int _batchTakeTarget = 1;
+    private Guid? _batchAttachCampaign;
+    private Guid? _handledBatchRun;
     private Guid? _addingFor;
     private bool _seeding;
     private bool _placing;
@@ -1299,7 +1395,64 @@
             : $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s";
 
     private bool CanGenerate => (IsAutoPrompt || !string.IsNullOrWhiteSpace(_prompt)) &&
-        _status?.ImageProviders.Any(p => p.Ready) == true && SelectedProviderSupportsReferences;
+        _status?.ImageProviders.Any(p => p.Ready) == true && SelectedProviderSupportsReferences
+        && !StudioRun.IsBatchRunning;
+
+    private sealed record BatchPlan(
+        int EligibleSlots, int MissingVariants, int SkippedSlots, bool HasBaselineEstimate)
+    {
+        public int TotalEvents => MissingVariants + SkippedSlots;
+    }
+
+    private BatchPlan CurrentBatchPlan
+    {
+        get
+        {
+            var eligible = 0;
+            var missing = 0;
+            var skipped = 0;
+            var baselineEstimate = true;
+            var modelValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var slot in Campaign.ImageSlots)
+            {
+                var remaining = Math.Max(0, _batchTakeTarget - slot.ActiveTakeCount);
+                var references = ProductAssets.Count > 0 || slot.ReferenceAssetIds is { Count: > 0 };
+                var model = BatchModel(slot);
+                var prompt = slot.Id == _selectedId ? _prompt : slot.Prompt;
+                if (slot.State == "Filled"
+                    || StudioRun.IsActiveFor(slot.Id)
+                    || (slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(prompt))
+                    || remaining == 0
+                    || model is null
+                    || !model.Ready
+                    || (references && !model.SupportsReferences))
+                {
+                    skipped++;
+                    continue;
+                }
+                eligible++;
+                missing += remaining;
+                modelValues.Add(model.Value);
+                baselineEstimate &= model.Value == "foundry"
+                    || model.Detail?.StartsWith("Foundry", StringComparison.Ordinal) == true;
+            }
+            return new BatchPlan(
+                eligible, missing, skipped,
+                baselineEstimate && modelValues.Count == 1);
+        }
+    }
+
+    private ImageModelChoice? BatchModel(ImageSlotResponse slot)
+    {
+        var requested = _sessionModelOverrides.TryGetValue(slot.Id, out var sessionAlias)
+            ? sessionAlias
+            : slot.ModelAlias;
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            requested = _defaultImageModel;
+        }
+        return ImageModelCatalog.Resolve(ModelChoices, requested);
+    }
 
     private bool HasDiscardedTakes =>
         _gallery.Any(v => string.Equals(v.State, "Discarded", StringComparison.Ordinal));
@@ -1359,6 +1512,12 @@
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _status = null;
+        }
+
+        if (_batchAttachCampaign != CampaignId)
+        {
+            _batchAttachCampaign = CampaignId;
+            await StudioRun.TryAttachBatchAsync(CampaignId);
         }
     }
 
@@ -1420,6 +1579,14 @@
     private void OnStudioRunChanged() => InvokeAsync(() =>
         StoreEvents.GuardedAsync(async () =>
     {
+        if (StudioRun.CampaignId == CampaignId && !StudioRun.IsBatchRunning
+            && (StudioRun.BatchResult?.RunId ?? StudioRun.BatchProgress?.Id) is { } batchRunId
+            && _handledBatchRun != batchRunId)
+        {
+            _handledBatchRun = batchRunId;
+            await Campaign.LoadAsync(CampaignId, force: true);
+        }
+
         if (StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
         {
             await ReloadGalleryAsync();
@@ -1443,6 +1610,7 @@
             }
 
             await ReloadGalleryAsync();
+            await Campaign.LoadAsync(CampaignId, force: true);
         }
     }, Notifier, StateHasChanged, "Loading the takes"));
 
@@ -1542,6 +1710,7 @@
             await Images.DeleteVariantAsync(CampaignId, variant.SlotId, variant.Id);
             _gallery = [.. _gallery.Where(v => v.Id != variant.Id)];
             CloseVariant();
+            await Campaign.LoadAsync(CampaignId, force: true);
             Notifier.ShowSuccess("Take deleted.");
         }
         catch (ApiException ex)
@@ -1570,6 +1739,7 @@
             {
                 _showDiscarded = false;
             }
+            await Campaign.LoadAsync(CampaignId, force: true);
         }
         catch (ApiException ex)
         {
@@ -2108,6 +2278,39 @@
         // The model goes with the request. Reading it from the slot instead meant a save that
         // failed (or simply hadn't landed) rendered with the previous model without saying so.
         StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount, EffectiveAlias);
+    }
+
+    private async Task GeneratePendingAsync()
+    {
+        if (CurrentBatchPlan.MissingVariants == 0)
+        {
+            return;
+        }
+        await SavePromptAsync();
+        _handledBatchRun = null;
+        StudioRun.StartBatch(CampaignId, _batchTakeTarget);
+    }
+
+    private static string BatchEventOutcome(RunItem item) => item.Outcome switch
+    {
+        "Skipped" => "Skipped",
+        _ when item.Success => "Succeeded",
+        _ => "Failed",
+    };
+
+    private static string BatchEventStatusClass(RunItem item) => item.Outcome switch
+    {
+        "Skipped" => "cm-status--queued",
+        _ when item.Success => "cm-status--published",
+        _ => "cm-status--error",
+    };
+
+    private static string BatchEventLabel(RunItem item)
+    {
+        var slot = ArtifactDisplay.SlotLabel(item.Kind);
+        return item.VariantIndex is { } variantIndex
+            ? $"{slot} · take {variantIndex}"
+            : slot;
     }
 
     private async Task PlaceAsync(ImageVariantResponse variant)

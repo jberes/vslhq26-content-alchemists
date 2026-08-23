@@ -67,12 +67,30 @@
                                 }
                             </span>
                             <span class="cm-campaign-card__title">@campaign.Name</span>
-                            <span class="cm-meta">
-                                Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)
+                            <span class="cm-campaign-card__dates cm-meta">
+                                <span>Added @campaign.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                <span>Updated @ArtifactDisplay.Ago(campaign.UpdatedAt, DateTimeOffset.Now)</span>
                             </span>
-                            @if (summary is not null && summary.Review > 0)
+                            @if (summary is not null)
                             {
-                                <span class="cm-status cm-status--review">@summary.Review in review</span>
+                                <span class="cm-campaign-card__states" aria-label="Content workflow counts">
+                                    <span class="cm-campaign-card__state">
+                                        <span class="cm-status">Draft</span>
+                                        <strong class="cm-mono">@summary.Draft</strong>
+                                    </span>
+                                    <span class="cm-campaign-card__state">
+                                        <span class="cm-status cm-status--review">In review</span>
+                                        <strong class="cm-mono">@summary.Review</strong>
+                                    </span>
+                                    <span class="cm-campaign-card__state">
+                                        <span class="cm-status cm-status--queued">Reviewed</span>
+                                        <strong class="cm-mono">@summary.Reviewed</strong>
+                                    </span>
+                                    <span class="cm-campaign-card__state">
+                                        <span class="cm-status cm-status--published">Published</span>
+                                        <strong class="cm-mono">@summary.Published</strong>
+                                    </span>
+                                </span>
                             }
                         </span>
                     </button>
@@ -84,7 +102,15 @@
 </div>
 
 @code {
-    private sealed record Summary(int Artifacts, int Review, int Filled, int Slots, string? HeroImageUrl);
+    private sealed record Summary(
+        int Artifacts,
+        int Draft,
+        int Review,
+        int Reviewed,
+        int Published,
+        int Filled,
+        int Slots,
+        string? HeroImageUrl);
 
     private readonly Dictionary<Guid, Summary> _summaries = [];
 
@@ -106,7 +132,13 @@
             foreach (var counts in dashboard.Campaigns)
             {
                 _summaries[counts.CampaignId] = new Summary(
-                    counts.Artifacts, counts.InReview, counts.ImagesFilled, counts.ImagesTotal,
+                    counts.Artifacts,
+                    counts.Draft,
+                    counts.InReview,
+                    counts.Reviewed,
+                    counts.Published,
+                    counts.ImagesFilled,
+                    counts.ImagesTotal,
                     counts.HeroImageUrl);
             }
         }

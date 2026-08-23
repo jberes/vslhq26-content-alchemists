@@ -23,6 +23,7 @@
 
 .cm-button:hover {
     background: var(--cm-accent-hover);
+    color: var(--cm-on-accent);
 }
 
 .cm-button--quiet {
@@ -41,6 +42,13 @@
 .cm-button--danger {
     background: var(--cm-danger);
     color: var(--cm-on-accent);
+}
+
+.cm-button--danger:hover {
+    background: var(--cm-danger);
+    border-color: var(--cm-danger);
+    color: var(--cm-on-accent);
+    box-shadow: var(--cm-shadow-sm);
 }
 
 .cm-button--compact {
@@ -316,6 +324,13 @@
     }
 }
 
+@media (max-width: 599.98px) {
+    .cm-topbar > .cm-kicker,
+    .cm-topbar > .cm-meta {
+        display: none;
+    }
+}
+
 /* ---- Style guide (dev-only surface) -------------------------------------------- */
 
 .cm-guide__head,
@@ -498,6 +513,13 @@ select.cm-input {
 }
 
 /* ---- AI-progress vocabulary (ADR-F13): shimmer skeletons + the pulsing dot -------- */
+
+.cm-loading-line {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    color: var(--cm-on-surface-muted);
+}
 /* One shared language for "the model is working": the header pill, the Mill Floor's
    ghost cards and the Image Studio's tiles all shimmer and pulse in the same rhythm. */
 
@@ -574,6 +596,7 @@ input[type="file"]::file-selector-button {
 
 input[type="file"]::file-selector-button:hover {
     background: var(--cm-accent-hover);
+    color: var(--cm-on-accent);
 }
 
 /* Focus lands on the input, but the BUTTON is what the user sees — so the ring has to be

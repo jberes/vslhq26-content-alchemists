@@ -83,6 +83,19 @@
             </div>
         }
 
+        <section class="cm-clips__schedule" aria-labelledby="cm-clips-schedule-title">
+            <div>
+                <span class="cm-kicker">The Wire</span>
+                <h3 id="cm-clips-schedule-title">Schedule an exported clip</h3>
+            </div>
+            <button type="button" class="cm-button" disabled>Send exported clip to scheduler</button>
+            <p class="cm-meta">
+                Unavailable until cloud clip upload publishes a durable broker-readable URL.
+                Local file paths and short-lived worker download links are not publishable media.
+                The clip-suggestions artifact is an instruction sheet and is never sent to the scheduler.
+            </p>
+        </section>
+
         <ul class="cm-clips__list">
             @foreach (var (clip, i) in _clips.Select((c, i) => (c, i)))
             {

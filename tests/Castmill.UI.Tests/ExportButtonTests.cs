@@ -83,6 +83,21 @@ public sealed class ExportButtonTests : CastmillUiTestContext
         Assert.Equal("webinar-campaign.zip", _downloader.Saved[0].FileName);
     }
 
+    [Fact]
+    public async Task Blog_json_ld_only_output_copies_through_the_cross_shell_clipboard()
+    {
+        var view = await OpenAsync();
+
+        await ButtonAsync(view, "JSON-LD only").ClickAsync();
+        await ButtonAsync(view, "Copy JSON-LD only").ClickAsync();
+
+        var copied = Assert.Single(Clipboard.Copies);
+        using var json = System.Text.Json.JsonDocument.Parse(copied);
+        Assert.Equal("https://schema.org", json.RootElement.GetProperty("@context").GetString());
+        Assert.Equal("Article",
+            json.RootElement.GetProperty("@graph")[0].GetProperty("@type").GetString());
+    }
+
     /// <summary>A failed export says so rather than silently saving nothing.</summary>
     [Fact]
     public async Task A_failed_export_reports_the_error_and_saves_nothing()

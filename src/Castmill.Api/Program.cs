@@ -7,6 +7,7 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Evidence;
 using Castmill.Api.Services.Export;
 using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Knowledge;
@@ -74,6 +75,10 @@ builder.Services.Configure<KnowledgeBaseOptions>(
 builder.Services.AddScoped<IKnowledgeBaseClient, KnowledgeBaseClient>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<IBrandContextService, BrandContextService>();
+builder.Services.AddScoped<IContentDependencyService, ContentDependencyService>();
+builder.Services.AddScoped<ISourceImportService, SourceImportService>();
+builder.Services.AddScoped<ILegacyEvidenceBackfillService, LegacyEvidenceBackfillService>();
+builder.Services.AddHostedService<LegacyEvidenceBackfillWorker>();
 builder.Services.AddScoped<ITranscriptionService, TranscriptionService>();
 // Image path (B9): provider seam (ADR-015) → slot-accurate crop + headline
 // compositing (ADR-013) → typed image plan (ADR-012).
@@ -96,6 +101,21 @@ builder.Services.AddHttpClient("brandlookup", c =>
     c.Timeout = TimeSpan.FromSeconds(20);
     c.MaxResponseContentBufferSize = 1024 * 1024;
 });
+builder.Services.AddHttpClient("source-import", c =>
+    {
+        c.Timeout = TimeSpan.FromSeconds(30);
+        c.MaxResponseContentBufferSize = 2 * 1024 * 1024;
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        UseProxy = false,
+        AutomaticDecompression = System.Net.DecompressionMethods.GZip
+            | System.Net.DecompressionMethods.Deflate
+            | System.Net.DecompressionMethods.Brotli,
+        ConnectCallback = PublicUrlGuard.ConnectAsync,
+    });
 builder.Services.AddSingleton<IPublicContentStore, PublicContentStore>();
 builder.Services.AddSingleton<IClipJobDispatcher, ClipJobDispatcher>();
 builder.Services.Configure<PublishOptions>(builder.Configuration.GetSection(PublishOptions.SectionName));
@@ -299,7 +319,8 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy(CorsPolicyName, policy => policy
         .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
-        .WithHeaders("Authorization", "Content-Type", "If-Match", "X-Correlation-ID")
+        .WithHeaders(
+            "Authorization", "Content-Type", "If-Match", "X-Correlation-ID", "X-Content-SHA256")
         .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE")
         .WithExposedHeaders("ETag", "X-Correlation-ID"));
 });
@@ -407,9 +428,12 @@ app.MapSettingsEndpoints();
 app.MapSecretsEndpoints();
 app.MapBlobEndpoints();
 app.MapAiEndpoints();
+app.MapEvidenceEndpoints();
+app.MapImpactReviewEndpoints();
 app.MapImageEndpoints();
 app.MapImageSlotEndpoints();
 app.MapMediaEndpoints();
+app.MapMediaUploadEndpoints();
 app.MapPublishEndpoints();
 app.MapExportEndpoints();
 app.MapGitPublishEndpoints();

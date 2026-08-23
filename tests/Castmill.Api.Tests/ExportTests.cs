@@ -122,6 +122,73 @@ public sealed class ExportTests
         Assert.Contains("3 artifacts exported", index, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void A_campaign_archive_includes_placed_image_bytes_and_rewrites_the_blog_reference()
+    {
+        var campaign = new Campaign
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            Name = "Image campaign",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        const string sourceUrl = "https://public.example/campaigns/campaign/slot/placed.webp";
+        var blog = Artifact("blog", "Illustrated post",
+            "{\"content\":{\"markdown\":\"# Illustrated post\\n\\n![Diagram](" + sourceUrl + ")\"}}");
+
+        var bytes = Export.Zip(campaign, [blog], [
+            new ExportImage(blog.Id, "blog-header", sourceUrl, "image/webp", [1, 2, 3, 4]),
+        ]);
+
+        using var stream = new MemoryStream(bytes);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+
+        var image = Assert.Single(archive.Entries, entry =>
+            entry.FullName == "images/illustrated-post/blog-header.webp");
+        using (var imageStream = image.Open())
+        using (var copy = new MemoryStream())
+        {
+            imageStream.CopyTo(copy);
+            Assert.Equal(new byte[] { 1, 2, 3, 4 }, copy.ToArray());
+        }
+
+        var markdown = ReadEntry(archive, "blog/illustrated-post.md");
+        Assert.Contains("![Diagram](../images/illustrated-post/blog-header.webp)", markdown, StringComparison.Ordinal);
+        Assert.Contains("images/illustrated-post/blog-header.webp", ReadEntry(archive, "manifest.json"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Image_paths_are_safe_unique_and_unavailable_bytes_are_reported_truthfully()
+    {
+        var campaign = new Campaign
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            Name = "Image safety",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        var blog = Artifact("blog", "Safe post", """{"content":{"markdown":"Body."}}""");
+
+        var bytes = Export.Zip(campaign, [blog], [
+            new ExportImage(blog.Id, "../../blog-header", "https://example.com/one.webp", "image/webp", [1]),
+            new ExportImage(blog.Id, "blog-header", "https://example.com/two.webp", "image/webp", [2]),
+            new ExportImage(blog.Id, "blog-inline", "https://example.com/missing.webp", "image/webp", null, "blob-unavailable"),
+        ]);
+
+        using var stream = new MemoryStream(bytes);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        Assert.NotNull(archive.GetEntry("images/safe-post/blog-header.webp"));
+        Assert.NotNull(archive.GetEntry("images/safe-post/blog-header-2.webp"));
+        Assert.DoesNotContain(archive.Entries, entry => entry.FullName.Contains("..", StringComparison.Ordinal));
+
+        var manifest = ReadEntry(archive, "manifest.json");
+        Assert.Contains("\"status\": \"unavailable\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("\"reason\": \"blob-unavailable\"", manifest, StringComparison.Ordinal);
+        Assert.DoesNotContain(archive.Entries, entry => entry.FullName.EndsWith("blog-inline.webp", StringComparison.Ordinal));
+    }
+
     /// <summary>
     /// Two artifacts of a kind can share a title — "add another blog" makes that likely — and
     /// a zip entry collision would silently drop one of them.
@@ -167,6 +234,27 @@ public sealed class ExportTests
     public void A_path_traversal_title_cannot_escape_the_archive()
     {
         Assert.Equal("etc-passwd", ExportService.Slug("../../etc/passwd"));
+    }
+
+    [Fact]
+    public void A_path_traversal_artifact_kind_cannot_escape_the_archive()
+    {
+        var campaign = new Campaign
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            Name = "Safe archive",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        using var stream = new MemoryStream(Export.Zip(campaign, [
+            Artifact("../../outside", "Safe title", """{"content":{"markdown":"Body."}}"""),
+        ]));
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+
+        Assert.NotNull(archive.GetEntry("outside/safe-title.md"));
+        Assert.DoesNotContain(archive.Entries, entry => entry.FullName.Contains("..", StringComparison.Ordinal));
     }
 
     [Fact]

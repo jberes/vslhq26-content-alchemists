@@ -27,9 +27,11 @@ public sealed class CampaignsIndexCardTests : CastmillUiTestContext
         Http.OnGet("api/v1/campaigns/dashboard", new DashboardResponse(
             [], [],
             [
-                new CampaignCounts(WithImage, 5, 0, 2, 6,
-                    "https://public.example/campaigns/x/images/blog-header.webp?v=1754761600"),
-                new CampaignCounts(WithoutImage, 3, 0, 0, 6),
+                new CampaignCounts(WithImage, 5, 1, 2, 6,
+                    "https://public.example/campaigns/x/images/blog-header.webp?v=1754761600",
+                    Draft: 2, Reviewed: 1, Published: 1),
+                new CampaignCounts(WithoutImage, 3, 0, 0, 6,
+                    Draft: 3, Reviewed: 0, Published: 0),
             ],
             EmptySlots: 10,
             CampaignsWithEmptySlots: 2,
@@ -61,9 +63,33 @@ public sealed class CampaignsIndexCardTests : CastmillUiTestContext
         Assert.Single(view.FindAll(".cm-duotone"));
     }
 
+    [Fact]
+    public async Task Campaign_cards_show_dates_and_every_content_workflow_count()
+    {
+        var view = Render<CampaignsIndex>();
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-campaign-card__states").Count == 2,
+            TimeSpan.FromSeconds(5));
+
+        var card = view.FindAll(".cm-campaign-card")
+            .Single(item => item.TextContent.Contains("Webinar campaign", StringComparison.Ordinal));
+        Assert.Contains("Added", card.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Updated", card.TextContent, StringComparison.Ordinal);
+
+        var states = card.QuerySelectorAll(".cm-campaign-card__state");
+        Assert.Collection(states,
+            state => Assert.Contains("Draft2", Normalize(state.TextContent), StringComparison.Ordinal),
+            state => Assert.Contains("Inreview1", Normalize(state.TextContent), StringComparison.Ordinal),
+            state => Assert.Contains("Reviewed1", Normalize(state.TextContent), StringComparison.Ordinal),
+            state => Assert.Contains("Published1", Normalize(state.TextContent), StringComparison.Ordinal));
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private static CampaignResponse Campaign(Guid id, string name) =>
         new(id, Guid.NewGuid(), name, null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+
+    private static string Normalize(string text) =>
+        string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
 }

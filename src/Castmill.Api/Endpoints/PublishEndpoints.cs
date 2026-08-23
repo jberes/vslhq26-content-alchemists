@@ -6,15 +6,19 @@ using Castmill.Api.Services.Publish;
 using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
+using Castmill.Core.Ai;
+using Castmill.Core.Resources;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Castmill.Api.Endpoints;
 
 public sealed record SchedulePostsRequest(
     [property: Required, MinLength(1)] string[] ChannelIds,
-    [property: Required, MinLength(1), MaxLength(65_000)] string Text,
+    [property: Required, MinLength(1)] string Text,
     [property: Required] DateTimeOffset ScheduledAt,
-    [property: MaxLength(2000)] string? MediaUrl);
+    [property: MaxLength(2000)] string? MediaUrl,
+    Guid? CampaignId = null);
 
 public static class PublishEndpoints
 {
@@ -22,12 +26,33 @@ public static class PublishEndpoints
     {
         var group = routes.MapGroup("/api/v1/publish").RequireAuthorization("TenantAllowed");
 
+        group.MapGet("/readiness", ReadinessAsync);
         group.MapGet("/channels", ChannelsAsync);
         group.MapGet("/queue/{channelId}", QueueAsync);
         group.MapPost("/posts", SchedulePostsAsync).Validate<SchedulePostsRequest>().RequireRateLimiting("writes");
         group.MapDelete("/posts/{postId}", CancelAsync).RequireRateLimiting("writes");
         group.MapPost("/test", TestAsync).RequireRateLimiting("writes");
         return routes;
+    }
+
+    private static async Task<IResult> ReadinessAsync(
+        ClaimsPrincipal principal,
+        IUserSecretsService secrets,
+        IOptions<PublishOptions> options,
+        CancellationToken ct)
+    {
+        var configured = options.Value.IsConfigured;
+        var statuses = await secrets.StatusAsync(AuthEndpoints.GetUserId(principal), ct);
+        var credentialStored = statuses.ContainsKey(SecretKind.BrokerToken);
+        var ready = configured && credentialStored;
+        var detail = ready
+            ? "The publishing broker is configured and its credential is stored server-side."
+            : !configured
+                ? "No publishing broker has been selected or configured. Posts can be staged in Castmill only."
+                : "The publishing broker is configured, but no broker credential is stored. Posts can be staged in Castmill only.";
+
+        return Results.Ok(new PublishReadinessResponse(
+            configured, credentialStored, ready, detail, CanSchedule: ready));
     }
 
     /// <summary>Broker token via secret custody; a clear 503 when the integration isn't set up yet.</summary>
@@ -88,6 +113,38 @@ public static class PublishEndpoints
         {
             return error;
         }
+
+        if (request.MediaUrl is { Length: > 0 } mediaUrl
+            && (request.CampaignId is not { } campaignId
+            || !await db.ImageSlots.AnyAsync(slot =>
+                slot.CampaignId == campaignId
+                && slot.State == "Filled"
+                && slot.PublishedUrl == mediaUrl, ct)))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: "Publishing media must be a filled image from the selected campaign.");
+        }
+
+        var channels = await broker.ListChannelsAsync(token, ct);
+        var selected = channels.Where(channel => request.ChannelIds.Contains(channel.Id, StringComparer.Ordinal)).ToList();
+        if (selected.Count != request.ChannelIds.Distinct(StringComparer.Ordinal).Count())
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: "One or more publishing channels are no longer available.");
+        }
+        var overLimit = selected
+            .Select(channel => new { channel, overBy = PlatformLimits.OverBy(NormalizePlatform(channel.Platform), request.Text) })
+            .FirstOrDefault(item => item.overBy > 0);
+        if (overLimit is not null)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: $"{overLimit.channel.Name} is {overLimit.overBy} characters over its platform limit.");
+        }
+            if (PlatformLimits.CharacterCount(request.Text) > 65_000)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: "Publishing copy cannot exceed 65,000 Unicode characters.");
+            }
 
         // Per-channel fan-out with partial-failure reporting: every channel gets
         // an explicit outcome; one broken channel never blocks the rest.
@@ -163,5 +220,11 @@ public static class PublishEndpoints
         {
             return Results.Ok(new { ok = false, error = ex.GetType().Name });
         }
+    }
+
+    private static string NormalizePlatform(string value)
+    {
+        var platform = value.Trim().ToLowerInvariant();
+        return platform is "twitter" or "twitter-x" ? "x" : platform;
     }
 }

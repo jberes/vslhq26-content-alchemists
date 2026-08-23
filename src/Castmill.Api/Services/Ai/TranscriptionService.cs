@@ -1,5 +1,7 @@
 using System.ClientModel;
 using System.Text.Json;
+using Azure.Core;
+using Azure.Identity;
 using Azure.AI.OpenAI;
 using Castmill.Core.Ai;
 using Microsoft.Extensions.Options;
@@ -22,6 +24,7 @@ public sealed class TranscriptionService(
     IHttpClientFactory httpClientFactory) : ITranscriptionService
 {
     public const long ShortPathMaxBytes = 25 * 1024 * 1024;
+    private static readonly DefaultAzureCredential SpeechCredential = new();
 
     private readonly AiOptions _options = options.Value;
 
@@ -61,20 +64,39 @@ public sealed class TranscriptionService(
     {
         if (!SpeechConfigured)
         {
-            throw new AiNotConfiguredException("Azure AI Speech is not configured. Fill in Ai:Speech:Region and Ai:Speech:Key.");
+            throw new AiNotConfiguredException(
+                "Azure AI Speech is not configured. Set Ai:Speech:Endpoint for managed identity, or Region and Key for local development.");
         }
 
         // Azure AI Speech fast transcription: synchronous REST, supports long
         // audio with diarization — the >25 MB path per the architecture doc.
-        var url = $"https://{_options.Speech.Region}.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2024-11-15";
+        var serviceEndpoint = string.IsNullOrWhiteSpace(_options.Speech.Endpoint)
+            ? $"https://{_options.Speech.Region}.api.cognitive.microsoft.com"
+            : _options.Speech.Endpoint.TrimEnd('/');
+        var url = $"{serviceEndpoint}/speechtotext/transcriptions:transcribe?api-version=2024-11-15";
         using var form = new MultipartFormDataContent();
         using var audioContent = new StreamContent(audio);
+        if (audio.CanSeek)
+        {
+            audioContent.Headers.ContentLength = audio.Length - audio.Position;
+        }
         form.Add(audioContent, "audio", fileName);
         form.Add(new StringContent("""{"locales":["en-US"],"diarization":{"maxSpeakers":4,"enabled":true}}"""), "definition");
 
         var http = httpClientFactory.CreateClient("speech");
         using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = form };
-        request.Headers.Add("Ocp-Apim-Subscription-Key", _options.Speech.Key);
+        if (!string.IsNullOrWhiteSpace(_options.Speech.Key))
+        {
+            request.Headers.Add("Ocp-Apim-Subscription-Key", _options.Speech.Key);
+        }
+        else
+        {
+            var token = await SpeechCredential.GetTokenAsync(
+                new TokenRequestContext(["https://cognitiveservices.azure.com/.default"]),
+                ct);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+                "Bearer", token.Token);
+        }
 
         using var response = await http.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();

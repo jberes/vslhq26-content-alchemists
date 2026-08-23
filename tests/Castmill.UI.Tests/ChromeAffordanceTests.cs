@@ -58,6 +58,19 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
         Assert.Contains("[aria-selected=\"true\"]", css, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void The_command_palette_bounds_the_panel_and_scrolls_only_its_results()
+    {
+        var css = Css();
+        var panel = CssBlock(css, ".cm-omni__panel {");
+        var results = CssBlock(css, ".cm-omni__results {");
+
+        Assert.Contains("grid-template-rows: auto minmax(0, 1fr) auto", panel, StringComparison.Ordinal);
+        Assert.Contains("max-block-size: 100%", panel, StringComparison.Ordinal);
+        Assert.Contains("min-block-size: 0", results, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto", results, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The card toolbar is hidden until hover, so its markup existing proves nothing about
     /// whether anyone can ever see or click it.
@@ -157,6 +170,12 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine(
             directory!.FullName, "src", "Castmill.UI", "wwwroot", "css", "views.css"));
+    }
+
+    private static string CssBlock(string css, string selector)
+    {
+        var block = css[css.IndexOf(selector, StringComparison.Ordinal)..];
+        return block[..block.IndexOf('}', StringComparison.Ordinal)];
     }
 
     private static ArtifactPreviewResponse Artifact() =>

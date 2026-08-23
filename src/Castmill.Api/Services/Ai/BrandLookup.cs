@@ -1,7 +1,7 @@
 using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Castmill.Api.Services.Evidence;
 using Castmill.Core.Resources;
 
 namespace Castmill.Api.Services.Ai;
@@ -54,7 +54,15 @@ public sealed partial class BrandLookup(
             return new BrandLookupResult(fromNotes.Name, fromNotes.StyleCard, "pasted context", []);
         }
 
-        var target = await ValidateAsync(url!, ct);
+        Uri target;
+        try
+        {
+            target = await PublicUrlGuard.ValidateAsync(url!, ct);
+        }
+        catch (PublicUrlException ex)
+        {
+            throw new BrandLookupException(ex.Message);
+        }
         var remarks = new List<string>();
 
         using var client = httpClientFactory.CreateClient("brandlookup");
@@ -86,70 +94,6 @@ public sealed partial class BrandLookup(
         return new BrandLookupResult(
             string.IsNullOrWhiteSpace(card.Name) ? page.SiteName ?? target.Host : card.Name,
             card.StyleCard, target.ToString(), remarks);
-    }
-
-    /// <summary>
-    /// SSRF guard. The server is fetching a URL chosen by the caller, so this is the security
-    /// boundary: without it, "look up my brand" is a request forger pointed at the cloud
-    /// metadata endpoint, the database, or anything else reachable from the API's network.
-    ///
-    /// Every resolved address is checked, not just the first — a hostname can resolve to a
-    /// public address and a private one, and only checking one of them is the classic bypass.
-    /// </summary>
-    private static async Task<Uri> ValidateAsync(string url, CancellationToken ct)
-    {
-        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri))
-        {
-            throw new BrandLookupException("That is not a valid URL.");
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            throw new BrandLookupException("Only http and https URLs can be looked up.");
-        }
-
-        IPAddress[] addresses;
-        try
-        {
-            addresses = await Dns.GetHostAddressesAsync(uri.DnsSafeHost, ct);
-        }
-        catch (SocketException)
-        {
-            throw new BrandLookupException($"Couldn't resolve {uri.DnsSafeHost}.");
-        }
-
-        if (addresses.Length == 0 || addresses.Any(IsPrivate))
-        {
-            throw new BrandLookupException("That host resolves to a private address and cannot be fetched.");
-        }
-
-        return uri;
-    }
-
-    private static bool IsPrivate(IPAddress ip)
-    {
-        if (IPAddress.IsLoopback(ip) || ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6UniqueLocal)
-        {
-            return true;
-        }
-
-        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            // An IPv4-mapped address must be judged on the IPv4 it carries.
-            return ip.IsIPv4MappedToIPv6 && IsPrivate(ip.MapToIPv4());
-        }
-
-        var b = ip.GetAddressBytes();
-        return b[0] switch
-        {
-            10 or 127 or 0 => true,
-            172 => b[1] >= 16 && b[1] <= 31,
-            192 => b[1] == 168,
-            // 169.254.0.0/16 — link-local, and the cloud metadata endpoint lives at
-            // 169.254.169.254. This single line is the one that matters most here.
-            169 => b[1] == 254,
-            _ => b[0] >= 224,
-        };
     }
 
     private static async Task<string> ReadCappedAsync(HttpResponseMessage response, CancellationToken ct)

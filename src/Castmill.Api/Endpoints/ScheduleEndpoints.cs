@@ -5,6 +5,7 @@ using Castmill.Api.Services.Publish;
 using Castmill.Api.Services.Secrets;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
+using Castmill.Core.Ai;
 using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -26,6 +27,7 @@ public static class ScheduleEndpoints
         group.MapPost("/", CreateAsync).Validate<ScheduleEntryCreateRequest>().RequireRateLimiting("writes");
         group.MapPatch("/{id:guid}", MoveAsync).Validate<ScheduleEntryMoveRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}", CancelAsync).RequireRateLimiting("writes");
+        group.MapPost("/{id:guid}/retry", RetryAsync).RequireRateLimiting("writes");
         group.MapPost("/reconcile", ReconcileAsync).RequireRateLimiting("writes");
         return routes;
     }
@@ -76,6 +78,27 @@ public static class ScheduleEndpoints
         {
             return Results.NotFound();
         }
+        if (request.MediaUrl is { Length: > 0 } mediaUrl
+            && !await db.ImageSlots.AnyAsync(slot =>
+                slot.CampaignId == request.CampaignId
+                && slot.State == "Filled"
+                && slot.PublishedUrl == mediaUrl, ct))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: "Scheduling media must be a filled image from this campaign.");
+        }
+            var localPlatform = NormalizePlatform(request.ChannelId);
+            var localOverBy = PlatformLimits.OverBy(localPlatform, request.Text);
+            if (localOverBy > 0)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: $"The post is {localOverBy} characters over the {localPlatform} limit.");
+            }
+            if (PlatformLimits.CharacterCount(request.Text) > 65_000)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                detail: "Publishing copy cannot exceed 65,000 Unicode characters.");
+            }
 
         var now = clock.GetUtcNow();
         var entry = new ScheduleEntry
@@ -108,6 +131,19 @@ public static class ScheduleEndpoints
             {
                 try
                 {
+                    var channel = (await broker.ListChannelsAsync(token, ct))
+                        .SingleOrDefault(candidate => candidate.Id == request.ChannelId);
+                    if (channel is null)
+                    {
+                        return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                            detail: "The selected publishing channel is no longer available.");
+                    }
+                    var overBy = PlatformLimits.OverBy(NormalizePlatform(channel.Platform), request.Text);
+                    if (overBy > 0)
+                    {
+                        return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                            detail: $"{channel.Name} is {overBy} characters over its platform limit.");
+                    }
                     var post = await broker.SchedulePostAsync(
                         token, request.ChannelId, request.Text, request.ScheduledAt, request.MediaUrl, ct);
                     entry.BrokerPostId = post.Id;
@@ -158,34 +194,47 @@ public static class ScheduleEndpoints
                 detail: "A sent post cannot be rescheduled.");
         }
 
-        entry.ScheduledAt = request.ScheduledAt;
-        entry.UpdatedAt = clock.GetUtcNow();
-
         if (entry.BrokerPostId is not null)
         {
             var token = options.Value.IsConfigured
                 ? await secrets.GetAsync(AuthEndpoints.GetUserId(principal), SecretKind.BrokerToken, ct)
                 : null;
-            if (!string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(token))
             {
-                try
-                {
-                    await broker.CancelPostAsync(token, entry.BrokerPostId, ct);
-                    var post = await broker.SchedulePostAsync(
-                        token, entry.ChannelId, entry.Text, entry.ScheduledAt, entry.MediaUrl, ct);
-                    entry.BrokerPostId = post.Id;
-                    entry.Status = "Queued";
-                    entry.Error = null;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    entry.Status = "Error";
-                    entry.Error = $"Broker move failed: {ex.GetType().Name}";
-                }
+                return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    detail: "The broker post cannot be moved until publishing configuration and credential custody are ready.");
+            }
+
+            try
+            {
+                await broker.CancelPostAsync(token, entry.BrokerPostId, CancellationToken.None);
+                entry.BrokerPostId = null;
+                entry.ScheduledAt = request.ScheduledAt;
+                entry.UpdatedAt = clock.GetUtcNow();
+                entry.Status = "Moving";
+                entry.Error = null;
+                await db.SaveChangesAsync(CancellationToken.None);
+
+                var post = await broker.SchedulePostAsync(
+                    token, entry.ChannelId, entry.Text, entry.ScheduledAt, entry.MediaUrl, CancellationToken.None);
+                entry.BrokerPostId = post.Id;
+                entry.Status = "Queued";
+                entry.Error = null;
+            }
+            catch (Exception ex)
+            {
+                entry.Status = "Error";
+                entry.Error = $"Broker move failed: {ex.GetType().Name}";
+                entry.UpdatedAt = clock.GetUtcNow();
             }
         }
+        else
+        {
+            entry.ScheduledAt = request.ScheduledAt;
+            entry.UpdatedAt = clock.GetUtcNow();
+        }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
         return Results.Ok(ToResponse(entry));
     }
 
@@ -204,29 +253,41 @@ public static class ScheduleEndpoints
         {
             return Results.NotFound();
         }
+        if (entry.Status == "Sent")
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "A sent post cannot be cancelled.");
+        }
 
         if (entry.BrokerPostId is not null)
         {
             var token = options.Value.IsConfigured
                 ? await secrets.GetAsync(AuthEndpoints.GetUserId(principal), SecretKind.BrokerToken, ct)
                 : null;
-            if (!string.IsNullOrWhiteSpace(token))
+            if (string.IsNullOrWhiteSpace(token))
             {
-                try
-                {
-                    await broker.CancelPostAsync(token, entry.BrokerPostId, ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // The local row must not survive a failed remote cancel silently:
-                    // keep it, mark it, let the user retry.
-                    entry.Status = "Error";
-                    entry.Error = $"Broker cancel failed: {ex.GetType().Name}";
-                    entry.UpdatedAt = clock.GetUtcNow();
-                    await db.SaveChangesAsync(ct);
-                    return Results.Problem(statusCode: StatusCodes.Status502BadGateway,
-                        detail: "The broker rejected the cancellation; the entry is marked Error. Retry.");
-                }
+                entry.Status = "Error";
+                entry.Error = "The remote post was not cancelled because publishing configuration or credential custody is unavailable.";
+                entry.UpdatedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(ct);
+                return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                    detail: "The broker post is still live; restore publishing configuration and retry cancellation.");
+            }
+
+            try
+            {
+                await broker.CancelPostAsync(token, entry.BrokerPostId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The local row must not survive a failed remote cancel silently:
+                // keep it, mark it, let the user retry.
+                entry.Status = "Error";
+                entry.Error = $"Broker cancel failed: {ex.GetType().Name}";
+                entry.UpdatedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(ct);
+                return Results.Problem(statusCode: StatusCodes.Status502BadGateway,
+                    detail: "The broker rejected the cancellation; the entry is marked Error. Retry.");
             }
         }
 
@@ -242,6 +303,75 @@ public static class ScheduleEndpoints
         });
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    private static async Task<IResult> RetryAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        IUserSecretsService secrets,
+        IOptions<PublishOptions> options,
+        IPublishBrokerClient broker,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var token = options.Value.IsConfigured
+            ? await secrets.GetAsync(AuthEndpoints.GetUserId(principal), SecretKind.BrokerToken, ct)
+            : null;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "Retry requires a configured broker and a stored broker credential.");
+        }
+
+        var claimedAt = clock.GetUtcNow();
+        var staleMoveCutoff = claimedAt - TimeSpan.FromMinutes(5);
+        var claimed = await db.ScheduleEntries
+            .Where(entry => entry.Id == id
+                && entry.BrokerPostId == null
+                && (entry.Status == "Error"
+                    || entry.Status == "Moving" && entry.UpdatedAt < staleMoveCutoff))
+            .ExecuteUpdateAsync(updates => updates
+                .SetProperty(entry => entry.Status, "Retrying")
+                .SetProperty(entry => entry.Error, (string?)null)
+                .SetProperty(entry => entry.UpdatedAt, claimedAt), CancellationToken.None);
+        if (claimed == 0)
+        {
+            return await db.ScheduleEntries.AnyAsync(entry => entry.Id == id, CancellationToken.None)
+                ? Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "Only a failed schedule, or a move stalled for five minutes, can be retried.")
+                : Results.NotFound();
+        }
+
+        var entry = await db.ScheduleEntries.SingleAsync(
+            candidate => candidate.Id == id, CancellationToken.None);
+
+        try
+        {
+            var post = await broker.SchedulePostAsync(
+                token, entry.ChannelId, entry.Text, entry.ScheduledAt, entry.MediaUrl, CancellationToken.None);
+            entry.BrokerPostId = post.Id;
+            entry.Status = "Queued";
+            entry.Error = null;
+        }
+        catch (Exception ex)
+        {
+            entry.Status = "Error";
+            entry.Error = $"Broker retry failed: {ex.GetType().Name}";
+        }
+
+        entry.UpdatedAt = clock.GetUtcNow();
+        db.AuditEvents.Add(new AuditEvent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = entry.TenantId,
+            UserId = AuthEndpoints.GetUserId(principal),
+            Action = "schedule.retry",
+            Detail = $"{entry.Id} → {entry.Status}",
+            OccurredAt = entry.UpdatedAt,
+        });
+        await db.SaveChangesAsync(CancellationToken.None);
+        return Results.Ok(ToResponse(entry));
     }
 
     /// <summary>
@@ -273,6 +403,7 @@ public static class ScheduleEndpoints
         var entries = await db.ScheduleEntries.Where(e => e.BrokerPostId != null).ToListAsync(ct);
         var now = clock.GetUtcNow();
         var updated = 0;
+        var reconciled = 0;
         var unreachable = new List<string>();
 
         foreach (var channelId in entries.Select(e => e.ChannelId).Distinct(StringComparer.Ordinal))
@@ -288,7 +419,9 @@ public static class ScheduleEndpoints
                 continue;
             }
 
-            foreach (var entry in entries.Where(e => e.ChannelId == channelId))
+            var channelEntries = entries.Where(e => e.ChannelId == channelId).ToList();
+            reconciled += channelEntries.Count;
+            foreach (var entry in channelEntries)
             {
                 var post = queue.FirstOrDefault(p => p.Id == entry.BrokerPostId);
                 var status = post is null ? "Sent" : MapStatus(post.Status);
@@ -307,7 +440,7 @@ public static class ScheduleEndpoints
         }
 
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { reconciled = entries.Count, updated, unreachableChannels = unreachable });
+    return Results.Ok(new { reconciled, updated, unreachableChannels = unreachable });
     }
 
     private static string MapStatus(string brokerStatus) => brokerStatus.ToLowerInvariant() switch
@@ -316,4 +449,17 @@ public static class ScheduleEndpoints
         "error" or "failed" => "Error",
         _ => "Queued",
     };
+
+    private static string NormalizePlatform(string value)
+    {
+        var platform = value.Trim().ToLowerInvariant();
+        if (platform is "twitter" or "twitter-x")
+        {
+            return "x";
+        }
+
+        return PlatformLimits.MaxChars.Keys.FirstOrDefault(key =>
+            platform.Equals(key, StringComparison.Ordinal)
+            || platform.Contains(key, StringComparison.Ordinal)) ?? platform;
+    }
 }

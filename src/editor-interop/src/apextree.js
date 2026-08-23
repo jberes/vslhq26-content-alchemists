@@ -26,6 +26,9 @@ function toApexNode(node) {
         : node.tone === 'gap'
             ? palette.rule
             : palette.accent;
+    const badgeColor = node.tone === 'success'
+        ? palette.success
+        : palette.accentStrong;
 
     return {
         id: node.id,
@@ -37,7 +40,7 @@ function toApexNode(node) {
             action: node.action,
             value: node.value,
             accentColor: accent,
-            badge: node.badge ? { text: node.badge, color: accent } : undefined,
+            badge: node.badge ? { text: node.badge, color: badgeColor } : undefined,
         },
         options: {
             nodeBGColor: node.tone === 'gap' ? 'transparent' : palette.surface,
@@ -49,6 +52,40 @@ function toApexNode(node) {
         },
         children: (node.children ?? []).map(toApexNode),
     };
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    })[character]);
+}
+
+function nodeCard(content) {
+    const badge = content.badge?.text
+        ? `<span style="align-self:flex-start;flex-shrink:0;font-size:0.72em;padding:3px 7px;border-radius:999px;background:${escapeHtml(content.badge.color)};color:${palette.onAccent};font-weight:700;">${escapeHtml(content.badge.text)}</span>`
+        : '';
+    const title = content.title
+        ? `<div style="font-size:0.85em;color:${palette.muted};line-height:1.25;margin-top:2px;">${escapeHtml(content.title)}</div>`
+        : '';
+    const subtitle = content.subtitle
+        ? `<div style="font-size:0.78em;color:${palette.muted};line-height:1.25;margin-top:1px;">${escapeHtml(content.subtitle)}</div>`
+        : '';
+
+    return `<div style="display:flex;align-items:stretch;height:100%;box-sizing:border-box;text-align:left;overflow:hidden;">
+        <span aria-hidden="true" style="flex-shrink:0;align-self:stretch;width:4px;background:${escapeHtml(content.accentColor)};"></span>
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:10px 12px;">
+            <div style="min-width:0;flex:1;overflow:hidden;">
+                <div style="font-weight:600;line-height:1.25;">${escapeHtml(content.name)}</div>
+                ${title}
+                ${subtitle}
+            </div>
+            ${badge}
+        </div>
+    </div>`;
 }
 
 /**
@@ -74,6 +111,7 @@ export function initContentClusterTree(element, data, dotnet) {
         height: 'auto',
         direction: 'top',
         contentKey: 'data',
+        nodeTemplate: nodeCard,
         nodeWidth: 218,
         nodeHeight: 108,
         siblingSpacing: 28,

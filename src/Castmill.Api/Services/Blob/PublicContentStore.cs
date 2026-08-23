@@ -5,6 +5,8 @@ using Microsoft.Extensions.Options;
 
 namespace Castmill.Api.Services.Blob;
 
+public sealed record BoundedContentRead(byte[]? Bytes, bool ExceedsLimit);
+
 public interface IPublicContentStore
 {
     bool IsConfigured { get; }
@@ -21,6 +23,15 @@ public interface IPublicContentStore
     /// would make an internal operation depend on internet egress.
     /// </summary>
     Task<byte[]?> ReadAsync(string path, CancellationToken ct);
+
+    /// <summary>Reads at most <paramref name="maxBytes"/> plus one detection byte.</summary>
+    async Task<BoundedContentRead> ReadUpToAsync(string path, int maxBytes, CancellationToken ct)
+    {
+        var bytes = await ReadAsync(path, ct);
+        return bytes is { Length: > 0 } && bytes.Length > maxBytes
+            ? new BoundedContentRead(null, true)
+            : new BoundedContentRead(bytes, false);
+    }
 
     /// <summary>
     /// Removes a published blob. Deleting a blob that is already gone succeeds silently —
@@ -91,6 +102,37 @@ public sealed class PublicContentStore : IPublicContentStore
         }
         var download = await blob.DownloadContentAsync(ct);
         return download.Value.Content.ToArray();
+    }
+
+    public async Task<BoundedContentRead> ReadUpToAsync(
+        string path, int maxBytes, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+
+        var blob = _client.GetBlobContainerClient(_options.PublicContainer).GetBlobClient(path);
+        if (!await blob.ExistsAsync(ct))
+        {
+            return new BoundedContentRead(null, false);
+        }
+
+        await using var input = await blob.OpenReadAsync(cancellationToken: ct);
+        using var output = new MemoryStream(Math.Min(maxBytes + 1, 1024 * 1024));
+        var buffer = new byte[81920];
+        while (output.Length <= maxBytes)
+        {
+            var remaining = maxBytes + 1 - (int)output.Length;
+            var read = await input.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), ct);
+            if (read == 0)
+            {
+                return new BoundedContentRead(output.ToArray(), false);
+            }
+            output.Write(buffer, 0, read);
+        }
+        return new BoundedContentRead(null, true);
     }
 
     public async Task DeleteAsync(string path, CancellationToken ct)

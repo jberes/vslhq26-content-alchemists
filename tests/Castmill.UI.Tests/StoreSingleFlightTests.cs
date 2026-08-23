@@ -26,7 +26,8 @@ public sealed class StoreSingleFlightTests : CastmillUiTestContext
     {
         var gate = new TaskCompletionSource();
         var transport = new GatedHandler(gate.Task, Preview());
-        var state = new CampaignState(new CampaignsClient(new ApiClient(Client(transport))));
+        var api = new ApiClient(Client(transport));
+        var state = new CampaignState(new CampaignsClient(api), new EvidenceClient(api));
 
         // Re-entrant callers, exactly as a re-render storm produces.
         var first = state.LoadAsync(CampaignId);
@@ -50,7 +51,8 @@ public sealed class StoreSingleFlightTests : CastmillUiTestContext
         // Changed handler — which is what a component's OnParametersSetAsync amounts to.
         var gate = new TaskCompletionSource();
         var transport = new GatedHandler(gate.Task, Preview());
-        var state = new CampaignState(new CampaignsClient(new ApiClient(Client(transport))));
+        var api = new ApiClient(Client(transport));
+        var state = new CampaignState(new CampaignsClient(api), new EvidenceClient(api));
 
         var reentries = 0;
         state.Changed += () =>
@@ -74,7 +76,8 @@ public sealed class StoreSingleFlightTests : CastmillUiTestContext
     public async Task A_forced_reload_still_goes_out_again()
     {
         var transport = new GatedHandler(Task.CompletedTask, Preview());
-        var state = new CampaignState(new CampaignsClient(new ApiClient(Client(transport))));
+        var api = new ApiClient(Client(transport));
+        var state = new CampaignState(new CampaignsClient(api), new EvidenceClient(api));
 
         await state.LoadAsync(CampaignId);
         await state.LoadAsync(CampaignId);              // cached
@@ -98,6 +101,37 @@ public sealed class StoreSingleFlightTests : CastmillUiTestContext
         await Task.WhenAll(a, b);
 
         Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Campaign_preview_is_usable_before_transcript_details_finish()
+    {
+        var transcriptId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Preview().Campaign,
+            [new ArtifactPreviewResponse(
+                transcriptId, CampaignId, "transcript", "Source transcript", "Draft", 1,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)],
+            [], 0, 0));
+        var transcriptGate = Http.Gate(
+            HttpMethod.Get, $"api/v1/campaigns/{CampaignId}/artifacts/{transcriptId}");
+        var state = Services.GetRequiredService<CampaignState>();
+
+        await state.LoadAsync(CampaignId);
+
+        Assert.Equal("Gated campaign", state.Campaign?.Name);
+        Assert.False(state.IsLoading);
+        Assert.True(state.IsLoadingTranscript);
+        Assert.Null(state.Transcript);
+
+        transcriptGate.SetResult(StubHttpHandler.Json(new ArtifactResponse(
+            transcriptId, CampaignId, "transcript", "Source transcript",
+            """{"source":"paste","segments":[{"id":"S1","startSeconds":0,"endSeconds":2,"text":"Ready."}]}""",
+            "Draft", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+        await state.WhenDetailsLoadedAsync();
+
+        Assert.False(state.IsLoadingDetails);
+        Assert.Equal("Ready.", Assert.Single(state.Transcript!.Segments).Text);
     }
 
     // ---- helpers ---------------------------------------------------------------

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Castmill.Core.Ai;
 
 namespace Castmill.Api.Services.Ai;
@@ -8,27 +9,36 @@ public sealed record ValidationOutcome(bool Passed, IReadOnlyList<string> Warnin
 public sealed record GeneratorSpec(
     string Kind,
     string Instructions,
-    Func<JsonElement, TranscriptContent, ValidationOutcome> Validate,
+    Func<JsonElement, GenerationEvidenceContext, ValidationOutcome> ValidateEvidence,
     /// <summary>
     /// Optional deterministic pass over the model's output BEFORE validation. Exists for the
     /// clip generator, which asks the model which segments a clip spans and then computes the
     /// timings itself rather than trusting numbers the model wrote.
     /// </summary>
-    Func<JsonElement, TranscriptContent, JsonElement>? Transform = null);
+    Func<JsonElement, TranscriptContent, JsonElement>? Transform = null)
+{
+    public ValidationOutcome Validate(JsonElement json, GenerationEvidenceContext evidence) =>
+        ValidateEvidence(json, evidence);
+
+    public ValidationOutcome Validate(JsonElement json, TranscriptContent transcript) =>
+        ValidateEvidence(json, GenerationEvidenceContext.FromTranscript(transcript));
+}
 
 /// <summary>
 /// The fan-out set (B5.3/B5.4). Every generator returns strict JSON with a
-/// top-level "citations" array of transcript segment ids — provenance is a
+/// top-level "citations" array of approved evidence ids — provenance is a
 /// schema requirement (G5), not a convention. Deterministic validators run
 /// before anything persists.
 /// </summary>
-public static class Generators
+public static partial class Generators
 {
+    public const string EmailVideoPlaceholder = "[YOUTUBE_VIDEO_URL]";
+
     public const string CommonContract = """
         Respond with ONLY a JSON object — no markdown fences, no commentary.
-        Every claim must trace to the source transcript. Include a top-level
-        "citations" array containing the ids (e.g. "S12") of every transcript
-        segment you drew from. Never cite a segment id that does not exist.
+        Every claim must trace to approved source evidence. Include a top-level
+        "citations" array containing the exact qualified Citation ID values of every
+        evidence block you drew from. Never invent or shorten a Citation ID.
         """;
 
     private static readonly string[] SocialPlatforms = ["x", "linkedin", "facebook", "instagram", "threads", "bluesky"];
@@ -127,19 +137,25 @@ public static class Generators
 
         specs.Add(new GeneratorSpec(
             "email-sequence",
-            """
+            $$"""
             Write a 3-email nurture sequence based on the source content.
             JSON schema: { "title": string, "emails": [ { "subject": string, "preview": string, "bodyMarkdown": string } ], "citations": string[] }
+            Where the final YouTube video URL belongs, write the exact literal
+            {{EmailVideoPlaceholder}} for replacement in the user's email service provider.
+            Include it in at least one email body. Never invent or write a YouTube URL.
             """,
-            (json, t) => ValidateCommon(json, t, requireArray: "emails", minItems: 3)));
+            ValidateEmailSequence));
 
         specs.Add(new GeneratorSpec(
             "newsletter",
-            """
+            $$"""
             Write a newsletter edition based on the source content.
             JSON schema: { "title": string, "subject": string, "bodyMarkdown": string, "citations": string[] }
+            Where the final YouTube video URL belongs, write the exact literal
+            {{EmailVideoPlaceholder}} for replacement in the user's email service provider.
+            Never invent or write a YouTube URL.
             """,
-            (json, t) => ValidateCommon(json, t, requireString: "bodyMarkdown")));
+            ValidateNewsletter));
 
         specs.Add(new GeneratorSpec(
             "landing-page",
@@ -215,7 +231,7 @@ public static class Generators
             """
             Create 3-5 DISTINCT YouTube thumbnail concepts before any pixels are rendered.
             Each concept must express a different visual angle, not a minor colour variation.
-            Ground every concept in the transcript and the campaign's saved SEO/AEO analysis.
+            Ground every concept in approved evidence and the campaign's saved SEO/AEO analysis.
 
             For each concept return:
               "name": a short working name;
@@ -234,25 +250,16 @@ public static class Generators
 
     // ---- Validators ---------------------------------------------------------
 
-    public static ValidationOutcome ValidateCitations(JsonElement json, TranscriptContent transcript)
+    public static ValidationOutcome ValidateCitations(
+        JsonElement json, TranscriptContent transcript) =>
+        ValidateCitations(json, GenerationEvidenceContext.FromTranscript(transcript));
+
+    public static ValidationOutcome ValidateCitations(
+        JsonElement json, GenerationEvidenceContext evidence)
     {
-        if (!json.TryGetProperty("citations", out var citations) || citations.ValueKind != JsonValueKind.Array)
-        {
-            return new ValidationOutcome(false, [], "Missing required 'citations' array (provenance contract).");
-        }
-        var ids = citations.EnumerateArray()
-            .Where(c => c.ValueKind == JsonValueKind.String)
-            .Select(c => c.GetString()!)
-            .ToList();
-        if (ids.Count == 0)
-        {
-            return new ValidationOutcome(false, [], "At least one citation is required.");
-        }
-        var known = transcript.Segments.Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var unknown = ids.Where(id => !known.Contains(id)).ToList();
-        return unknown.Count > 0
-            ? new ValidationOutcome(false, [], $"Citations reference unknown segments: {string.Join(", ", unknown)}.")
-            : new ValidationOutcome(true, []);
+        return evidence.TryNormalizeCitations(json, out _, out var error)
+            ? new ValidationOutcome(true, [])
+            : new ValidationOutcome(false, [], error);
     }
 
     /// <summary>
@@ -260,10 +267,10 @@ public static class Generators
     /// Tech Edit can hold an unregistered kind to it instead of waving the pass through.
     /// </summary>
     internal static ValidationOutcome ValidateCommon(
-        JsonElement json, TranscriptContent transcript,
+        JsonElement json, GenerationEvidenceContext evidence,
         string? requireString = null, string? requireArray = null, int minItems = 0)
     {
-        var citations = ValidateCitations(json, transcript);
+        var citations = ValidateCitations(json, evidence);
         if (!citations.Passed)
         {
             return citations;
@@ -281,9 +288,100 @@ public static class Generators
         return new ValidationOutcome(true, []);
     }
 
-    private static ValidationOutcome ValidateSocial(JsonElement json, TranscriptContent transcript, int cap)
+    internal static ValidationOutcome ValidateCommon(
+        JsonElement json, TranscriptContent transcript,
+        string? requireString = null, string? requireArray = null, int minItems = 0) =>
+        ValidateCommon(
+            json,
+            GenerationEvidenceContext.FromTranscript(transcript),
+            requireString,
+            requireArray,
+            minItems);
+
+    private static ValidationOutcome ValidateEmailSequence(JsonElement json, GenerationEvidenceContext evidence)
     {
-        var common = ValidateCommon(json, transcript, requireString: "text");
+        var common = ValidateCommon(json, evidence, requireArray: "emails", minItems: 3);
+        if (!common.Passed)
+        {
+            return common;
+        }
+
+        var hasPlaceholder = false;
+        foreach (var email in json.GetProperty("emails").EnumerateArray())
+        {
+            if (!email.TryGetProperty("bodyMarkdown", out var bodyNode)
+                || bodyNode.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(bodyNode.GetString()))
+            {
+                return new ValidationOutcome(false, [], "Every email needs a non-empty bodyMarkdown field.");
+            }
+
+            var body = bodyNode.GetString()!;
+            if (ContainsYoutubeUrl(body))
+            {
+                return new ValidationOutcome(false, [],
+                    $"Email copy must use {EmailVideoPlaceholder} instead of a YouTube URL.");
+            }
+            hasPlaceholder |= body.Contains(EmailVideoPlaceholder, StringComparison.Ordinal);
+        }
+
+        return hasPlaceholder
+            ? common
+            : new ValidationOutcome(false, [],
+                $"At least one email body must contain the literal {EmailVideoPlaceholder}.");
+    }
+
+    private static ValidationOutcome ValidateNewsletter(JsonElement json, GenerationEvidenceContext evidence)
+    {
+        var common = ValidateCommon(json, evidence, requireString: "bodyMarkdown");
+        if (!common.Passed)
+        {
+            return common;
+        }
+
+        var body = json.GetProperty("bodyMarkdown").GetString()!;
+        if (ContainsYoutubeUrl(body))
+        {
+            return new ValidationOutcome(false, [],
+                $"Newsletter copy must use {EmailVideoPlaceholder} instead of a YouTube URL.");
+        }
+        return body.Contains(EmailVideoPlaceholder, StringComparison.Ordinal)
+            ? common
+            : new ValidationOutcome(false, [],
+                $"Newsletter bodyMarkdown must contain the literal {EmailVideoPlaceholder}.");
+    }
+
+    private static bool ContainsYoutubeUrl(string text)
+    {
+        foreach (Match match in HttpUrl().Matches(text))
+        {
+            var value = match.Value.TrimEnd('.', ',', ';', ':', '!', '?');
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            {
+                continue;
+            }
+
+            var host = uri.IdnHost.TrimEnd('.');
+            if (host.Equals("youtube.com", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase)
+                || host.Equals("youtu.be", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".youtu.be", StringComparison.OrdinalIgnoreCase)
+                || host.Equals("youtube-nocookie.com", StringComparison.OrdinalIgnoreCase)
+                || host.EndsWith(".youtube-nocookie.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [GeneratedRegex("""https?://[^\s<>\[\]()"'`]+""",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HttpUrl();
+
+    private static ValidationOutcome ValidateSocial(JsonElement json, GenerationEvidenceContext evidence, int cap)
+    {
+        var common = ValidateCommon(json, evidence, requireString: "text");
         if (!common.Passed)
         {
             return common;
@@ -300,14 +398,14 @@ public static class Generators
     internal const int MinClipSeconds = 15;
     internal const int MaxClipSeconds = 60;
 
-    private static ValidationOutcome ValidateClips(JsonElement json, TranscriptContent transcript)
+    private static ValidationOutcome ValidateClips(JsonElement json, GenerationEvidenceContext evidence)
     {
-        var common = ValidateCommon(json, transcript, requireArray: "clips", minItems: 1);
+        var common = ValidateCommon(json, evidence, requireArray: "clips", minItems: 1);
         if (!common.Passed)
         {
             return common;
         }
-        var maxEnd = transcript.Segments.Max(s => s.EndSeconds);
+        var maxEnd = evidence.Transcript.Segments.Max(s => s.EndSeconds);
         var warnings = new List<string>(common.Warnings);
         foreach (var clip in json.GetProperty("clips").EnumerateArray())
         {
@@ -341,9 +439,9 @@ public static class Generators
         return new ValidationOutcome(true, warnings);
     }
 
-    private static ValidationOutcome ValidateSeoBrief(JsonElement json, TranscriptContent transcript)
+    private static ValidationOutcome ValidateSeoBrief(JsonElement json, GenerationEvidenceContext evidence)
     {
-        var common = ValidateCommon(json, transcript, requireString: "summary", requireArray: "focusKeywords", minItems: 3);
+        var common = ValidateCommon(json, evidence, requireString: "summary", requireArray: "focusKeywords", minItems: 3);
         if (!common.Passed)
         {
             return common;
@@ -367,9 +465,9 @@ public static class Generators
 
     /// <summary>The complete YouTube package contract. These checks are deterministic so a
     /// polished audit response cannot silently omit the A/B/C experiment or pinned comment.</summary>
-    internal static ValidationOutcome ValidateYoutube(JsonElement json, TranscriptContent transcript)
+    internal static ValidationOutcome ValidateYoutube(JsonElement json, GenerationEvidenceContext evidence)
     {
-        var common = ValidateCommon(json, transcript, requireString: "description");
+        var common = ValidateCommon(json, evidence, requireString: "description");
         if (!common.Passed)
         {
             return common;
@@ -438,10 +536,13 @@ public static class Generators
         return new ValidationOutcome(true, warnings);
     }
 
+    internal static ValidationOutcome ValidateYoutube(JsonElement json, TranscriptContent transcript) =>
+        ValidateYoutube(json, GenerationEvidenceContext.FromTranscript(transcript));
+
     /// <summary>Blog validator (B5.2): word band + citations.</summary>
-    public static ValidationOutcome ValidateBlog(JsonElement json, TranscriptContent transcript)
+    public static ValidationOutcome ValidateBlog(JsonElement json, GenerationEvidenceContext evidence)
     {
-        var common = ValidateCommon(json, transcript, requireString: "markdown");
+        var common = ValidateCommon(json, evidence, requireString: "markdown");
         if (!common.Passed)
         {
             return common;
@@ -459,4 +560,7 @@ public static class Generators
         }
         return new ValidationOutcome(true, warnings);
     }
+
+    public static ValidationOutcome ValidateBlog(JsonElement json, TranscriptContent transcript) =>
+        ValidateBlog(json, GenerationEvidenceContext.FromTranscript(transcript));
 }

@@ -3,6 +3,8 @@ using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Castmill.UI.State;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -128,6 +130,14 @@ public sealed class AddContentTests : CastmillUiTestContext
         await view.WaitForStateAsync(
             () => view.Markup.Contains("Print more from this source", StringComparison.Ordinal),
             TimeSpan.FromSeconds(5));
+        await view.WaitForStateAsync(
+            () => !Services.GetRequiredService<CampaignState>().IsLoading,
+            TimeSpan.FromSeconds(5));
+        await view.WaitForStateAsync(
+            () => !Services.GetRequiredService<CampaignState>().IsLoadingDetails,
+            TimeSpan.FromSeconds(5));
+        await view.InvokeAsync(() => Task.CompletedTask);
+        view.Render();
         return view;
     }
 
@@ -135,10 +145,46 @@ public sealed class AddContentTests : CastmillUiTestContext
         view.FindAll(".cm-print-chip").First(c => c.TextContent.Contains(label, StringComparison.Ordinal));
 
     private static readonly Guid TranscriptId = Guid.Parse("a1111111-1111-1111-1111-999999999999");
+    private static readonly Guid SourceId = Guid.Parse("a2222222-2222-2222-2222-999999999999");
 
-    private void StubPreview(params ArtifactPreviewResponse[] artifacts) =>
+    private void StubPreview(params ArtifactPreviewResponse[] artifacts)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var revisionId = Guid.Parse("a3333333-3333-3333-3333-999999999999");
+        var source = new SourceAssetResponse(
+            SourceId,
+            CampaignId,
+            TranscriptId,
+            SourceKinds.Transcript,
+            SourceModalities.Text,
+            "paste",
+            null,
+            "application/json",
+            3,
+            "sha256:test",
+            1,
+            revisionId,
+            new ApprovedEvidenceRevision(SourceId, 1, revisionId, "approved", now),
+            now,
+            now);
+        using var locator = System.Text.Json.JsonDocument.Parse(
+            """{"startSeconds":0,"endSeconds":2,"sourceLabel":"paste"}""");
+        var block = new EvidenceBlockResponse(
+            SourceId,
+            "S1",
+            0,
+            "Hi.",
+            EvidenceLocatorKinds.MediaTimeRange,
+            locator.RootElement.Clone(),
+            1,
+            revisionId,
+            EvidenceApprovalStates.Approved,
+            false);
+        var evidence = new EvidenceRevisionResponse(source, 1, revisionId, true, [block]);
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
-            new CampaignPreview(Campaign(), [.. artifacts], [], 0, 0));
+            new CampaignPreview(Campaign(), [.. artifacts], [], 0, 0, Sources: [source]));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/sources/{SourceId}/evidence", evidence);
+    }
 
     private static ArtifactPreviewResponse Artifact(string kind, string title) =>
         new(kind == "transcript" ? TranscriptId : Guid.NewGuid(), CampaignId, kind, title,

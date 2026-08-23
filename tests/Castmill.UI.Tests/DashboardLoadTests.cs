@@ -36,13 +36,33 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             [new DashboardArtifact(CampaignB, "Podcast campaign", Guid.NewGuid(),
                 "newsletter", "Stale October letter", ArtifactStatus.Draft, DateTimeOffset.UtcNow.AddDays(-9))],
             [
-                new CampaignCounts(CampaignA, 5, 1, 2, 6),
-                new CampaignCounts(CampaignB, 3, 0, 0, 6),
+                new CampaignCounts(CampaignA, 5, 1, 2, 6,
+                    Draft: 2, Reviewed: 1, Published: 1),
+                new CampaignCounts(CampaignB, 3, 0, 0, 6,
+                    Draft: 3, Reviewed: 0, Published: 0),
             ],
             EmptySlots: 10,
             CampaignsWithEmptySlots: 2,
             EmptySlotModels: ["gpt-image-2"],
-            FirstEmptySlotCampaign: CampaignA));
+            FirstEmptySlotCampaign: CampaignA,
+            ReviewCounts: new ReviewDeskCounts(7, 1, 3, 11)));
+
+        Http.OnGetQuery(
+            "api/v1/campaigns/review-desk?status=Draft&skip=0&take=12",
+            new ReviewDeskResponse(
+                ArtifactStatus.Draft,
+                7,
+                [new DashboardArtifact(CampaignB, "Podcast campaign", Guid.NewGuid(),
+                    "newsletter", "Current newsletter draft", ArtifactStatus.Draft,
+                    DateTimeOffset.UtcNow)]));
+        Http.OnGetQuery(
+            "api/v1/campaigns/review-desk?status=Draft&skip=1&take=12",
+            new ReviewDeskResponse(
+                ArtifactStatus.Draft,
+                7,
+                [new DashboardArtifact(CampaignA, "Webinar campaign", Guid.NewGuid(),
+                    "blog", "Second draft page", ArtifactStatus.Draft,
+                    DateTimeOffset.UtcNow.AddMinutes(-1))]));
     }
 
     [Fact]
@@ -57,6 +77,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
         Assert.DoesNotContain("Internal deep report", page.Markup, StringComparison.Ordinal);
         Assert.Contains("10", page.Markup, StringComparison.Ordinal);
         Assert.Contains("gpt-image-2", page.Markup, StringComparison.Ordinal);
+        Assert.Empty(page.FindAll("nav[aria-label='Quick actions']"));
 
         Assert.Single(Http.Requests, r =>
             r.RequestUri!.AbsolutePath.EndsWith("campaigns/dashboard", StringComparison.Ordinal));
@@ -65,7 +86,42 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task The_front_page_columns_are_their_own_scroll_regions()
+    public async Task Review_desk_shows_counts_and_loads_other_bins_on_demand()
+    {
+        var page = Render<FrontPage>();
+        await page.WaitForStateAsync(
+            () => page.Markup.Contains("Cutting deployment time", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+
+        var bins = page.FindAll(".cm-review-bin");
+        Assert.Collection(bins,
+            bin => Assert.Contains("Drafts7", Normalize(bin.TextContent), StringComparison.Ordinal),
+            bin => Assert.Contains("Needsreview1", Normalize(bin.TextContent), StringComparison.Ordinal),
+            bin => Assert.Contains("Reviewed3", Normalize(bin.TextContent), StringComparison.Ordinal),
+            bin => Assert.Contains("Published11", Normalize(bin.TextContent), StringComparison.Ordinal));
+        Assert.Equal("true", bins[1].GetAttribute("aria-selected"));
+        Assert.DoesNotContain(Http.Requests, request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/review-desk", StringComparison.Ordinal));
+
+        await bins[0].ClickAsync();
+        await page.WaitForAssertionAsync(() =>
+            Assert.Contains("Current newsletter draft", page.Markup, StringComparison.Ordinal));
+
+        Assert.Contains(Http.Requests, request =>
+            request.RequestUri!.PathAndQuery.EndsWith(
+                "review-desk?status=Draft&skip=0&take=12", StringComparison.Ordinal));
+        Assert.Equal("true", page.FindAll(".cm-review-bin")[0].GetAttribute("aria-selected"));
+
+        await page.Find(".cm-review-desk__more").ClickAsync();
+        await page.WaitForAssertionAsync(() =>
+            Assert.Contains("Second draft page", page.Markup, StringComparison.Ordinal));
+        Assert.Contains(Http.Requests, request =>
+            request.RequestUri!.PathAndQuery.EndsWith(
+                "review-desk?status=Draft&skip=1&take=12", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Only_the_aging_list_scrolls_in_the_fixed_secondary_column()
     {
         // A campaign with fifty aging drafts must scroll inside the column, not grow the
         // page past the window — the structural half of that is these classes.
@@ -78,6 +134,9 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
         Assert.NotNull(page.Find(".cm-front__frame"));
         Assert.NotNull(page.Find(".cm-front__primary"));
         Assert.NotNull(page.Find(".cm-front__secondary"));
+        Assert.NotNull(page.Find(".cm-front__aging"));
+        Assert.Equal("UL", page.Find(".cm-front__aging-list").TagName);
+        Assert.NotNull(page.Find(".cm-front__aging-list[data-cm-scroll]"));
     }
 
     [Fact]
@@ -89,7 +148,9 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             TimeSpan.FromSeconds(5));
 
         Assert.Contains("2/6 images", page.Markup, StringComparison.Ordinal);
-        Assert.Contains("1 in review", page.Markup, StringComparison.Ordinal);
+        Assert.Contains("In review", page.Markup, StringComparison.Ordinal);
+        Assert.Contains("Reviewed", page.Markup, StringComparison.Ordinal);
+        Assert.Contains("Published", page.Markup, StringComparison.Ordinal);
         Assert.Contains("Webinar", page.Markup, StringComparison.Ordinal);
         Assert.Contains("Thought leadership", page.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain(Http.Requests, r =>
@@ -101,4 +162,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             ContentType: name.StartsWith("Webinar", StringComparison.Ordinal)
                 ? CampaignContentType.Webinar
                 : CampaignContentType.ThoughtLeadership);
+
+    private static string Normalize(string text) =>
+        string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
 }

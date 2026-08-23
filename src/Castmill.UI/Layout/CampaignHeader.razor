@@ -61,32 +61,40 @@
         <span class="cm-mono cm-meta" title="Image slots filled">
             @Campaign.ImagesFilled/@Campaign.ImagesTotal images
         </span>
+        @if (Campaign.IsLoadingDetails)
+        {
+            <span class="cm-loading-line cm-meta" role="status">
+                <span class="cm-ai-dot" aria-hidden="true"></span>
+                Loading source details…
+            </span>
+        }
+    </div>
 
-        @* Real buttons, keyboard-reachable, with a visible focus ring — not links styled as
-           tabs and not divs with click handlers (G5). *@
-        <div class="cm-tabs" role="tablist" aria-label="Campaign views">
-            @foreach (var (view, segment, label) in CampaignViews.All)
-            {
-                @* aria-selected is written as a STRING, not a bool: a bool renders as a
-                   presence-only attribute, so `aria-selected="@(view == Current)"` emitted a
-                   bare `aria-selected` and the stylesheet's [aria-selected="true"] never
-                   matched — the active tab looked like the other three. Same trap as
-                   aria-expanded on the artifact tree.
+    @* Real buttons, keyboard-reachable, with a visible focus ring — not links styled as
+       tabs and not divs with click handlers (G5). The tablist is separate from metadata so
+       its alignment does not depend on how many campaign chips happen to exist. *@
+    <div class="cm-tabs" role="tablist" aria-label="Campaign views">
+        @foreach (var (view, segment, label) in CampaignViews.All)
+        {
+            @* aria-selected is written as a STRING, not a bool: a bool renders as a
+               presence-only attribute, so `aria-selected="@(view == Current)"` emitted a
+               bare `aria-selected` and the stylesheet's [aria-selected="true"] never
+               matched — the active tab looked like the other three. Same trap as
+               aria-expanded on the artifact tree.
 
-                   This comment lives ABOVE the tag on purpose. Inside an attribute list Razor
-                   does NOT strip it; it emits the whole comment as an attribute NAME, and the
-                   browser then throws InvalidCharacterError on setAttribute and tears down the
-                   render tree — a blank campaign with Blazor's global error bar. bUnit will
-                   not catch it: AngleSharp accepts invalid attribute names where a real
-                   browser refuses them. *@
-                <button type="button" role="tab"
-                        class="cm-tabs__tab"
-                        aria-selected="@(view == Current ? "true" : "false")"
-                        @onclick="() => Go(view)">
-                    @label
-                </button>
-            }
-        </div>
+               This comment lives ABOVE the tag on purpose. Inside an attribute list Razor
+               does NOT strip it; it emits the whole comment as an attribute NAME, and the
+               browser then throws InvalidCharacterError on setAttribute and tears down the
+               render tree — a blank campaign with Blazor's global error bar. bUnit will
+               not catch it: AngleSharp accepts invalid attribute names where a real
+               browser refuses them. *@
+            <button type="button" role="tab"
+                    class="cm-tabs__tab"
+                    aria-selected="@(view == Current ? "true" : "false")"
+                    @onclick="() => Go(view)">
+                @label
+            </button>
+        }
     </div>
 </header>
 
@@ -129,7 +137,8 @@
         try
         {
             var updated = await Campaigns.UpdateAsync(campaign.Id, name, campaign.Brief, campaign.BrandId,
-                campaign.Links, status, campaign.ContentType);
+                campaign.Links, status, campaign.ContentType,
+                skipSeoAnalysis: campaign.SkipSeoAnalysis);
             // CampaignState owns this view; WorkspaceState owns the persistent campaign
             // switcher. The API response is authoritative for both, so reconcile the rail
             // immediately rather than leaving its cached name stale until a page reload.

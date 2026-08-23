@@ -24,22 +24,12 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         SignInTestUser();
         Http.OnGet("api/v1/campaigns", new List<CampaignResponse> { Campaign() });
 
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
-            Campaign(),
-            [
-                Artifact(BlogId, "blog", "Launch-day blog post"),
-                Artifact(SocialId, "social-x", "Launch thread", BlogId),
-                Artifact(YouTubeId, "youtube", "Launch video package"),
-                Artifact(Guid.NewGuid(), "seo-brief", "Legacy SEO brief"),
-                Artifact(Guid.NewGuid(), "seo-keyword-plan", "Keyword plan"),
-                Artifact(Guid.NewGuid(), "seo-report", "Deep SEO analysis"),
-            ],
-            [], 0, 0));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview());
 
         // Focus auto-opens the first editable artifact, so its full fetch must answer.
         StubFullArtifact(BlogId, "blog", "Launch-day blog post");
-        StubFullArtifact(SocialId, "social-x", "Launch thread", BlogId);
-        StubFullArtifact(YouTubeId, "youtube", "Launch video package");
+        StubFullArtifact(SocialId, "social-x", "Launch thread", BlogId, ArtifactStatus.InReview);
+        StubFullArtifact(YouTubeId, "youtube", "Launch video package", status: ArtifactStatus.Queued);
     }
 
     [Fact]
@@ -77,6 +67,68 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Artifact_rows_show_their_review_state_with_text_and_color_modifier()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Launch thread");
+
+        var blog = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch-day blog post", StringComparison.Ordinal));
+        var social = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var youtube = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch video package", StringComparison.Ordinal));
+
+        Assert.Equal("Draft", blog.QuerySelector(".cm-status")!.TextContent.Trim());
+        Assert.Equal("In review", social.QuerySelector(".cm-status--review")!.TextContent.Trim());
+        Assert.Equal("Reviewed", youtube.QuerySelector(".cm-status--queued")!.TextContent.Trim());
+    }
+
+    [Fact]
+    public async Task Marking_an_artifact_reviewed_updates_its_left_rail_state()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Launch thread");
+        await view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+            .ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+            Assert.NotNull(view.FindAll("button")
+                .SingleOrDefault(button => button.TextContent.Contains("Mark reviewed", StringComparison.Ordinal))));
+
+        Http.OnPatch($"api/v1/campaigns/{CampaignId}/artifacts/{SocialId}/status",
+            FullArtifact(SocialId, "social-x", "Launch thread", BlogId, ArtifactStatus.Queued) with { Version = 2 });
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview(ArtifactStatus.Queued));
+
+        await view.FindAll("button")
+            .Single(button => button.TextContent.Contains("Mark reviewed", StringComparison.Ordinal))
+            .ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var social = view.FindAll(".cm-focus__list-item")
+                .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+            Assert.Equal("Reviewed", social.QuerySelector(".cm-status--queued")!.TextContent.Trim());
+        });
+    }
+
+    [Fact]
+    public async Task Entering_focus_with_an_artifact_deep_link_opens_that_exact_item()
+    {
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        navigation.NavigateTo($"campaigns/{CampaignId}/focus?artifact={SocialId}");
+        var view = Render<FocusView>(parameters => parameters
+            .Add(component => component.CampaignId, CampaignId));
+
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
+
+        var selected = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        Assert.Equal("true", selected.GetAttribute("aria-current"));
+    }
+
+    [Fact]
     public async Task Clicking_a_content_row_changes_the_main_manuscript()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
@@ -91,6 +143,45 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Assert.Equal("true", view.FindAll(".cm-focus__list-item")
             .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
             .GetAttribute("aria-current"));
+    }
+
+    [Fact]
+    public async Task Slow_selection_keeps_the_current_document_and_announces_loading()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch video package", view.Find(".cm-focus__manuscript h1").TextContent));
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Http.OnAsync(HttpMethod.Get,
+            $"api/v1/campaigns/{CampaignId}/artifacts/{SocialId}", async () =>
+            {
+                await gate.Task;
+                return StubHttpHandler.Json(FullArtifact(
+                    SocialId, "social-x", "Launch thread", BlogId));
+            });
+        var social = view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var click = social.ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("Loading Launch thread", view.Find(".cm-focus__loading").TextContent,
+                StringComparison.Ordinal);
+            Assert.Equal("true", view.FindAll(".cm-focus__list-item")
+                .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+                .GetAttribute("aria-busy"));
+            Assert.Equal("Launch video package", view.Find(".cm-focus__manuscript h1").TextContent);
+        });
+
+        gate.SetResult();
+        await click;
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Empty(view.FindAll(".cm-focus__loading"));
+            Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent);
+        });
     }
 
     [Fact]
@@ -161,15 +252,34 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         }
     }
 
-    private void StubFullArtifact(Guid id, string kind, string title, Guid? parentArtifactId = null)
+    private void StubFullArtifact(
+        Guid id, string kind, string title, Guid? parentArtifactId = null,
+        string status = ArtifactStatus.Draft)
     {
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{id}", new ArtifactResponse(
-            id, CampaignId, kind, title, """{"content":{"markdown":"Hello."}}""",
-            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
-            ParentArtifactId: parentArtifactId));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{id}",
+            FullArtifact(id, kind, title, parentArtifactId, status));
         Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{id}/revisions",
             new List<ArtifactRevisionResponse>());
     }
+
+    private static ArtifactResponse FullArtifact(
+        Guid id, string kind, string title, Guid? parentArtifactId = null,
+        string status = ArtifactStatus.Draft) =>
+        new(id, CampaignId, kind, title, """{"content":{"markdown":"Hello."}}""",
+            status, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
+            ParentArtifactId: parentArtifactId);
+
+    private static CampaignPreview Preview(string socialStatus = ArtifactStatus.InReview) => new(
+        Campaign(),
+        [
+            Artifact(BlogId, "blog", "Launch-day blog post", status: ArtifactStatus.Draft),
+            Artifact(SocialId, "social-x", "Launch thread", BlogId, socialStatus),
+            Artifact(YouTubeId, "youtube", "Launch video package", status: ArtifactStatus.Queued),
+            Artifact(Guid.NewGuid(), "seo-brief", "Legacy SEO brief"),
+            Artifact(Guid.NewGuid(), "seo-keyword-plan", "Keyword plan"),
+            Artifact(Guid.NewGuid(), "seo-report", "Deep SEO analysis"),
+        ],
+        [], 0, 0);
 
     private static async Task WaitForTextAsync(IRenderedComponent<FocusView> view, string text)
     {
@@ -188,8 +298,10 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
 
-    private static ArtifactPreviewResponse Artifact(Guid id, string kind, string title, Guid? parentArtifactId = null) =>
-        new(id, CampaignId, kind, title, ArtifactStatus.Draft, 1,
+    private static ArtifactPreviewResponse Artifact(
+        Guid id, string kind, string title, Guid? parentArtifactId = null,
+        string status = ArtifactStatus.Draft) =>
+        new(id, CampaignId, kind, title, status, 1,
             DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
             ParentArtifactId: parentArtifactId);
 

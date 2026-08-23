@@ -14,7 +14,8 @@ public sealed record CampaignPreview(
     IReadOnlyList<ImageSlotResponse> ImageSlots,
     int ImagesFilled,
     int ImagesTotal,
-    BrandSummaryResponse? Brand = null);
+    BrandSummaryResponse? Brand = null,
+    IReadOnlyList<SourceAssetResponse>? Sources = null);
 
 /// <summary>Typed client for campaigns, artifacts and the preview projection.</summary>
 public sealed class CampaignsClient(ApiClient api)
@@ -33,20 +34,35 @@ public sealed class CampaignsClient(ApiClient api)
     public Task<DashboardResponse> GetDashboardAsync(CancellationToken ct = default) =>
         api.GetAsync<DashboardResponse>("api/v1/campaigns/dashboard", ct);
 
+    public Task<ReviewDeskResponse> GetReviewDeskAsync(
+        string status, int skip = 0, int take = 12, CancellationToken ct = default) =>
+        api.GetAsync<ReviewDeskResponse>(
+            $"api/v1/campaigns/review-desk?status={Uri.EscapeDataString(status)}&skip={skip}&take={take}",
+            ct);
+
     public Task<CampaignResponse> CreateAsync(
         string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
         string? contentType = null,
+        string? intent = null, IReadOnlyList<string>? outputRecipe = null,
+        bool skipSeoAnalysis = false,
         CancellationToken ct = default) =>
         api.PostAsync<CampaignCreateRequest, CampaignResponse>(
-            "api/v1/campaigns", new CampaignCreateRequest(name, brief, brandId, links, contentType), anonymous: false, ct);
+            "api/v1/campaigns",
+            new CampaignCreateRequest(
+                name, brief, brandId, links, contentType, intent, outputRecipe, skipSeoAnalysis),
+            anonymous: false, ct);
 
     public Task<CampaignResponse> UpdateAsync(
         Guid id, string name, string? brief, Guid? brandId = null, IReadOnlyList<CampaignLink>? links = null,
         string status = "Draft", string? contentType = null,
+        string? intent = null, IReadOnlyList<string>? outputRecipe = null,
+        bool skipSeoAnalysis = false,
         CancellationToken ct = default) =>
         api.PutAsync<CampaignUpdateRequest, CampaignResponse>(
             $"api/v1/campaigns/{id}",
-            new CampaignUpdateRequest(name, brief, brandId, links, status, contentType), etag: null, ct);
+            new CampaignUpdateRequest(
+                name, brief, brandId, links, status, contentType, intent, outputRecipe, skipSeoAnalysis),
+            etag: null, ct);
 
     /// <summary>Deletes the campaign and everything in it — artifacts, revisions, slots,
     /// schedule entries, runs. The server cascades explicitly; there is no undo.</summary>

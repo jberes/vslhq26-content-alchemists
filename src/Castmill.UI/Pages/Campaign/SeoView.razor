@@ -287,6 +287,14 @@
                     </div>
                 }
 
+                @if (_impactReview is not null)
+                {
+                    <ContentImpactReview Review="_impactReview"
+                                         BusyArtifactId="_impactBusy"
+                                         OnKeep="KeepImpactAsync"
+                                         OnRegenerate="RegenerateImpactAsync" />
+                }
+
                 @* The Content Scout (E4). This generalises the per-keyword "Draft as artifact"
                    button above: it spans every kind rather than only blogs, and — the point —
                    it checks what we have already published and already drafted first. *@
@@ -390,6 +398,8 @@
     private bool _sharing;
     private string? _shareUrl;
     private string? _drafting;
+    private ContentImpactReviewResponse? _impactReview;
+    private Guid? _impactBusy;
     private ApexChartOptions<KeywordRow>? _chartOptions;
 
     [Parameter] public Guid CampaignId { get; set; }
@@ -461,6 +471,7 @@
     {
         LoadPlanFromState();
         await LoadTargetsAsync();
+        await LoadImpactAsync();
     }
 
     private SeoTargetsResponse? _targets;
@@ -520,11 +531,23 @@
     }
 
     private void OnChanged() => InvokeAsync(() =>
-        StoreEvents.GuardedAsync(() =>
+        StoreEvents.GuardedAsync(async () =>
     {
         LoadPlanFromState();
-        return Task.CompletedTask;
+        await LoadImpactAsync();
     }, Notifier, StateHasChanged, "Reading the keyword plan"));
+
+    private async Task LoadImpactAsync()
+    {
+        try
+        {
+            _impactReview = await Seo.GetImpactReviewAsync(CampaignId);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _impactReview = null;
+        }
+    }
 
     /// <summary>The pre-production report is authoritative. Legacy keyword-plan artifacts
     /// remain readable for campaigns created before the analysis-first flow.</summary>
@@ -607,6 +630,7 @@
             await Seo.DeepAnalysisAsync(
                 CampaignId, transcriptId, string.IsNullOrWhiteSpace(_focus) ? null : _focus);
             await Campaign.LoadAsync(CampaignId, force: true);
+            await LoadImpactAsync();
             Notifier.ShowSuccess("SEO/AEO analysis ready. Approve its targets before generating content.");
         }
         catch (ApiException ex)
@@ -745,6 +769,45 @@
         }
         catch (ApiException ex) { Notifier.ShowError(ex.Message); }
         finally { _regeneratingAngles = false; }
+    }
+
+    private async Task KeepImpactAsync(Guid artifactId)
+    {
+        _impactBusy = artifactId;
+        try
+        {
+            await Seo.KeepImpactAsync(CampaignId, artifactId);
+            await LoadImpactAsync();
+            Notifier.ShowSuccess("Kept the current content and acknowledged the latest inputs.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _impactBusy = null;
+        }
+    }
+
+    private async Task RegenerateImpactAsync(Guid artifactId)
+    {
+        _impactBusy = artifactId;
+        try
+        {
+            await Seo.RegenerateImpactAsync(CampaignId, artifactId);
+            await Campaign.LoadAsync(CampaignId, force: true);
+            await LoadImpactAsync();
+            Notifier.ShowSuccess("Regenerated the selected content and kept its revision history.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _impactBusy = null;
+        }
     }
 
     private async Task DraftAngleAsync(SeoContentAngle angle)

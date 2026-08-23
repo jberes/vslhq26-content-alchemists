@@ -23,7 +23,7 @@
 
     --cmf-on-surface: #1a1815;       /* ink — never pure black */
     --cmf-on-surface-muted: #6b5a3c; /* brass, darkened to clear AA on paper */
-    --cmf-on-surface-subtle: #6f6656;
+    --cmf-on-surface-subtle: #6b5a3c;
     --cmf-on-inverse: #ede7dd;
 
     --cmf-accent: #c15f3c;           /* terracotta ember */

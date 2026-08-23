@@ -8,6 +8,7 @@ using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Seo;
+using Castmill.Api.Services.Evidence;
 using Castmill.Core.Resources;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
@@ -59,6 +60,7 @@ public static class SeoEndpoints
         ISeoResearch research,
         ISeoProvider provider,
         ISeoReportService reportService,
+        IContentDependencyService dependencies,
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
@@ -70,12 +72,8 @@ public static class SeoEndpoints
             return Results.NotFound();
         }
 
-        var transcriptArtifact = await db.Artifacts.SingleOrDefaultAsync(
-            a => a.Id == request.TranscriptArtifactId
-                 && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
-        var transcript = transcriptArtifact is null
-            ? null
-            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+        var transcript = await dependencies.LoadApprovedSourceAsync(
+            request.CampaignId, request.TranscriptArtifactId, ct);
         if (transcript is null)
         {
             return Results.NotFound();
@@ -203,6 +201,11 @@ public static class SeoEndpoints
             Version = 1,
             CreatedAt = now,
         };
+        if (existing is not null)
+        {
+            await ArtifactEndpoints.SnapshotRevisionAsync(
+                db, existing, "deep-analysis", now, ct);
+        }
         artifact.Title = reportTitle;
         artifact.ContentJson = serializedReport;
         artifact.UpdatedAt = now;
@@ -220,6 +223,7 @@ public static class SeoEndpoints
             insights.ContentAngles.Count > 0 ? insights.ContentAngles[0] : null,
             tenant, db, now, ct);
         await db.SaveChangesAsync(ct);
+        await dependencies.CaptureDeepAnalysisAsync(artifact, campaign, ct);
 
         return existing is null
             ? Results.Created($"/api/v1/seo/reports/{id}", report)
@@ -276,6 +280,7 @@ public static class SeoEndpoints
         Guid artifactId,
         ClaimsPrincipal principal,
         ISeoReportService reportService,
+        IContentDependencyService dependencies,
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
@@ -299,12 +304,15 @@ public static class SeoEndpoints
         }
 
         var campaign = await db.Campaigns.SingleAsync(row => row.Id == artifact.CampaignId, ct);
-        var transcriptJson = await db.Artifacts
+        var transcriptArtifactId = await db.Artifacts
             .Where(row => row.CampaignId == campaign.Id && row.Kind == "transcript")
             .OrderByDescending(row => row.CreatedAt)
-            .Select(row => row.ContentJson)
+            .Select(row => (Guid?)row.Id)
             .FirstOrDefaultAsync(ct);
-        var transcript = transcriptJson is null ? null : TranscriptService.Parse(transcriptJson);
+        var transcript = transcriptArtifactId is null
+            ? null
+            : await dependencies.LoadApprovedTranscriptAsync(
+                campaign.Id, transcriptArtifactId.Value, ct);
         if (transcript is null)
         {
             return Results.Problem("This campaign has no readable transcript.", statusCode: 409);
@@ -339,6 +347,7 @@ public static class SeoEndpoints
         SeoResearchRequest request,
         System.Security.Claims.ClaimsPrincipal principal,
         ISeoResearch research,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         CancellationToken ct)
     {
@@ -353,7 +362,8 @@ public static class SeoEndpoints
                  && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
         var transcript = transcriptArtifact is null
             ? null
-            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+            : await dependencies.LoadApprovedTranscriptAsync(
+                request.CampaignId, transcriptArtifact.Id, ct);
         if (transcript is null)
         {
             return Results.NotFound();
@@ -377,6 +387,7 @@ public static class SeoEndpoints
         System.Security.Claims.ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
         ISeoProvider provider,
+        IContentDependencyService dependencies,
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
@@ -396,7 +407,8 @@ public static class SeoEndpoints
             a => a.Id == request.TranscriptArtifactId && a.CampaignId == request.CampaignId && a.Kind == "transcript", ct);
         var transcript = transcriptArtifact is null
             ? null
-            : TranscriptService.Parse(transcriptArtifact.ContentJson);
+            : await dependencies.LoadApprovedTranscriptAsync(
+                request.CampaignId, transcriptArtifact.Id, ct);
         if (transcript is null)
         {
             return Results.NotFound();

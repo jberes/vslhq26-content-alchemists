@@ -16,6 +16,10 @@ public sealed class CastmillDbContext(
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
+    public DbSet<SourceAsset> SourceAssets => Set<SourceAsset>();
+    public DbSet<EvidenceBlock> EvidenceBlocks => Set<EvidenceBlock>();
+    public DbSet<ContentDependencySnapshot> ContentDependencySnapshots => Set<ContentDependencySnapshot>();
+    public DbSet<ContentEvidenceDependency> ContentEvidenceDependencies => Set<ContentEvidenceDependency>();
     public DbSet<Artifact> Artifacts => Set<Artifact>();
     public DbSet<ArtifactRevision> ArtifactRevisions => Set<ArtifactRevision>();
     public DbSet<ImageSlot> ImageSlots => Set<ImageSlot>();
@@ -23,6 +27,7 @@ public sealed class CastmillDbContext(
     public DbSet<GenerationRun> GenerationRuns => Set<GenerationRun>();
     public DbSet<ImageVariant> ImageVariants => Set<ImageVariant>();
     public DbSet<Asset> Assets => Set<Asset>();
+    public DbSet<MediaUpload> MediaUploads => Set<MediaUpload>();
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
     public DbSet<BrandAsset> BrandAssets => Set<BrandAsset>();
     public DbSet<BrandTemplate> BrandTemplates => Set<BrandTemplate>();
@@ -47,11 +52,117 @@ public sealed class CastmillDbContext(
             e.Property(c => c.Name).HasMaxLength(200);
             e.Property(c => c.Status).HasMaxLength(20).HasDefaultValue(CampaignStatus.Draft);
             e.Property(c => c.ContentType).HasMaxLength(30);
+            e.Property(c => c.Intent).HasMaxLength(30);
+            e.Property(c => c.OutputRecipeJson).HasMaxLength(4000);
             e.HasIndex(c => new { c.TenantId, c.UpdatedAt });
             e.HasIndex(c => new { c.TenantId, c.BrandId });
             // Structural tenant isolation (G1): every query is filtered to the
             // caller's tenant; there is no code path that opts out per-request.
             e.HasQueryFilter(c => c.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<SourceAsset>(e =>
+        {
+            e.Property(source => source.Kind).HasMaxLength(50);
+            e.Property(source => source.Modality).HasMaxLength(30);
+            e.Property(source => source.Label).HasMaxLength(300);
+            e.Property(source => source.OriginalUri).HasMaxLength(2000);
+            e.Property(source => source.BlobPath).HasMaxLength(1000);
+            e.Property(source => source.ContentType).HasMaxLength(200);
+            e.Property(source => source.SnapshotIdentity).HasMaxLength(200);
+            e.Property(source => source.SnapshotHash).HasMaxLength(64);
+            e.Property(source => source.ApprovedEvidenceHash).HasMaxLength(64);
+            e.HasIndex(source => new { source.TenantId, source.CampaignId, source.Kind });
+            e.HasIndex(source => new
+                { source.TenantId, source.CampaignId, source.Kind, source.SnapshotIdentity })
+                .IsUnique();
+            e.HasIndex(source => new { source.TenantId, source.LegacyArtifactId })
+                .IsUnique()
+                .HasFilter("[LegacyArtifactId] IS NOT NULL");
+            e.HasOne<Campaign>()
+                .WithMany()
+                .HasForeignKey(source => source.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Artifact>()
+                .WithMany()
+                .HasForeignKey(source => source.LegacyArtifactId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_SourceAssets_EvidenceRevision",
+                    "[CurrentEvidenceRevision] >= 1 AND (("
+                    + "[ApprovedEvidenceRevision] IS NULL AND "
+                    + "[ApprovedEvidenceRevisionId] IS NULL AND "
+                    + "[ApprovedEvidenceHash] IS NULL AND [ApprovedAt] IS NULL) OR ("
+                    + "[ApprovedEvidenceRevision] IS NOT NULL AND "
+                    + "[ApprovedEvidenceRevisionId] IS NOT NULL AND "
+                    + "[ApprovedEvidenceHash] IS NOT NULL AND [ApprovedAt] IS NOT NULL AND "
+                    + "[ApprovedEvidenceRevision] <= [CurrentEvidenceRevision]))");
+                table.HasCheckConstraint(
+                    "CK_SourceAssets_SizeBytes",
+                    "[SizeBytes] IS NULL OR [SizeBytes] >= 0");
+            });
+            e.HasQueryFilter(source => source.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<EvidenceBlock>(e =>
+        {
+            e.Property(block => block.StableId).HasMaxLength(100);
+            e.Property(block => block.ContentHash).HasMaxLength(64);
+            e.Property(block => block.LocatorKind).HasMaxLength(50);
+            e.Property(block => block.ApprovalState).HasMaxLength(20);
+            e.HasIndex(block => new
+                { block.TenantId, block.SourceAssetId, block.Revision, block.StableId })
+                .IsUnique();
+            e.HasIndex(block => new
+                { block.TenantId, block.CampaignId, block.SourceAssetId, block.Revision, block.Ordinal });
+            e.HasOne<SourceAsset>()
+                .WithMany()
+                .HasForeignKey(block => block.SourceAssetId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_EvidenceBlocks_Revision", "[Revision] >= 1");
+                table.HasCheckConstraint("CK_EvidenceBlocks_Ordinal", "[Ordinal] >= 0");
+                table.HasCheckConstraint(
+                    "CK_EvidenceBlocks_ApprovalState",
+                    "[ApprovalState] IN ('Draft', 'Approved')");
+            });
+            e.HasQueryFilter(block => block.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ContentDependencySnapshot>(e =>
+        {
+            e.Property(snapshot => snapshot.Reason).HasMaxLength(30);
+            e.Property(snapshot => snapshot.ApprovedReportHash).HasMaxLength(64);
+            e.Property(snapshot => snapshot.ApprovedTargetStrategyHash).HasMaxLength(64);
+            e.HasIndex(snapshot => new
+                { snapshot.TenantId, snapshot.CampaignId, snapshot.ArtifactId, snapshot.IsCurrent });
+            e.HasIndex(snapshot => new { snapshot.TenantId, snapshot.ArtifactId })
+                .IsUnique()
+                .HasFilter("[IsCurrent] = 1")
+                .HasDatabaseName("UX_ContentDependencySnapshots_Current");
+            e.HasIndex(snapshot => new
+                { snapshot.TenantId, snapshot.ArtifactId, snapshot.CreatedAt });
+            e.HasOne<Artifact>()
+                .WithMany()
+                .HasForeignKey(snapshot => snapshot.ArtifactId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(snapshot => snapshot.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<ContentEvidenceDependency>(e =>
+        {
+            e.HasKey(marker => new { marker.SnapshotId, marker.SourceAssetId });
+            e.Property(marker => marker.Hash).HasMaxLength(64);
+            e.HasIndex(marker => new
+                { marker.TenantId, marker.CampaignId, marker.SourceAssetId, marker.RevisionId });
+            e.HasOne<ContentDependencySnapshot>()
+                .WithMany()
+                .HasForeignKey(marker => marker.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(marker => marker.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<Artifact>(e =>
@@ -78,6 +189,11 @@ public sealed class CastmillDbContext(
             e.Property(r => r.Title).HasMaxLength(300);
             e.Property(r => r.Reason).HasMaxLength(50);
             e.HasIndex(r => new { r.TenantId, r.ArtifactId, r.Version });
+            e.HasIndex(r => r.ContentDependencySnapshotId);
+            e.HasOne<ContentDependencySnapshot>()
+                .WithMany()
+                .HasForeignKey(r => r.ContentDependencySnapshotId)
+                .OnDelete(DeleteBehavior.SetNull);
             e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
         });
 
@@ -181,6 +297,32 @@ public sealed class CastmillDbContext(
             e.Property(a => a.ContentType).HasMaxLength(200);
             e.Property(a => a.BlobPath).HasMaxLength(1000);
             e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<MediaUpload>(e =>
+        {
+            e.Property(upload => upload.BlockIdsJson).HasMaxLength(80_000);
+            e.Property(upload => upload.Status).HasMaxLength(20);
+            e.Property(upload => upload.Error).HasMaxLength(2000);
+            e.HasIndex(upload => new { upload.TenantId, upload.CampaignId, upload.UpdatedAt });
+            e.HasOne<Campaign>()
+                .WithMany()
+                .HasForeignKey(upload => upload.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Asset>()
+                .WithMany()
+                .HasForeignKey(upload => upload.AssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_MediaUploads_Progress",
+                    "[UploadedBytes] >= 0 AND [NextBlockIndex] >= 0");
+                table.HasCheckConstraint(
+                    "CK_MediaUploads_Status",
+                    "[Status] IN ('Uploading', 'Committed', 'Transcribing', 'Completed', 'Cancelled')");
+            });
+            e.HasQueryFilter(upload => upload.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<BrandProfile>(e =>

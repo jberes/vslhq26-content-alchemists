@@ -38,7 +38,7 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         CampaignId == campaignId && (IsRunning || Progress is not null);
 
     /// <param name="copies">How many of each kind to print — "3 more LinkedIn posts".</param>
-    public void Start(Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds, int copies = 1)
+    public void Start(Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds, int copies = 1)
     {
         ArgumentNullException.ThrowIfNull(kinds);
 
@@ -73,7 +73,7 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     public void Dispose() => _cts?.Cancel();
 
     private async Task RunAsync(
-        Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds, int copies, CancellationToken ct)
+        Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds, int copies, CancellationToken ct)
     {
         var startedAfter = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(10);
 

@@ -51,16 +51,92 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
         using var scope = factory.CreateDbScope();
 
         // Seed a campaign in Alice's tenant.
+        var campaignId = Guid.NewGuid();
+        var artifactId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var revisionId = Guid.NewGuid();
+        var snapshotId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
         await using (var aliceDb = CreateContextForTenant(scope, alice.TenantId))
         {
             aliceDb.Campaigns.Add(new Campaign
             {
-                Id = Guid.NewGuid(),
+                Id = campaignId,
                 TenantId = alice.TenantId,
                 OwnerId = alice.UserId,
                 Name = "Alice's launch",
-                CreatedAt = DateTimeOffset.UtcNow,
-                UpdatedAt = DateTimeOffset.UtcNow,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            aliceDb.Artifacts.Add(new Artifact
+            {
+                Id = artifactId,
+                TenantId = alice.TenantId,
+                CampaignId = campaignId,
+                Kind = "blog",
+                Title = "Alice's private draft",
+                ContentJson = "{}",
+                Version = 1,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            aliceDb.SourceAssets.Add(new SourceAsset
+            {
+                Id = sourceId,
+                TenantId = alice.TenantId,
+                CampaignId = campaignId,
+                Kind = SourceKinds.Transcript,
+                Modality = SourceModalities.Media,
+                Label = "Alice's recording",
+                SnapshotIdentity = $"sha256:{new string('a', 64)}",
+                SnapshotHash = new string('a', 64),
+                CurrentEvidenceRevision = 1,
+                CurrentEvidenceRevisionId = revisionId,
+                ApprovedEvidenceRevision = 1,
+                ApprovedEvidenceRevisionId = revisionId,
+                ApprovedEvidenceHash = new string('b', 64),
+                ApprovedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            aliceDb.EvidenceBlocks.Add(new EvidenceBlock
+            {
+                Id = Guid.NewGuid(),
+                TenantId = alice.TenantId,
+                CampaignId = campaignId,
+                SourceAssetId = sourceId,
+                StableId = "s01",
+                Ordinal = 0,
+                Content = "Alice's private evidence.",
+                ContentHash = new string('c', 64),
+                LocatorKind = EvidenceLocatorKinds.MediaTimeRange,
+                LocatorJson = """{"startSeconds":0,"endSeconds":4,"sourceLabel":"alice.mp4"}""",
+                Revision = 1,
+                RevisionId = revisionId,
+                ApprovalState = EvidenceApprovalStates.Approved,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            aliceDb.ContentDependencySnapshots.Add(new ContentDependencySnapshot
+            {
+                Id = snapshotId,
+                TenantId = alice.TenantId,
+                CampaignId = campaignId,
+                ArtifactId = artifactId,
+                IsCurrent = true,
+                Reason = ContentDependencyReasons.Generated,
+                CreatedAt = now,
+            });
+            aliceDb.ContentEvidenceDependencies.Add(new ContentEvidenceDependency
+            {
+                TenantId = alice.TenantId,
+                CampaignId = campaignId,
+                SnapshotId = snapshotId,
+                SourceAssetId = sourceId,
+                Revision = 1,
+                RevisionId = revisionId,
+                Hash = new string('b', 64),
+                ApprovedAt = now,
             });
             await aliceDb.SaveChangesAsync();
         }
@@ -68,17 +144,29 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
         await using (var aliceDb = CreateContextForTenant(scope, alice.TenantId))
         {
             Assert.Equal(1, await aliceDb.Campaigns.CountAsync());
+            Assert.Equal(1, await aliceDb.SourceAssets.CountAsync());
+            Assert.Equal(1, await aliceDb.EvidenceBlocks.CountAsync());
+            Assert.Equal(1, await aliceDb.ContentDependencySnapshots.CountAsync());
+            Assert.Equal(1, await aliceDb.ContentEvidenceDependencies.CountAsync());
         }
 
         // Bob's tenant sees nothing; no tenant sees nothing.
         await using (var bobDb = CreateContextForTenant(scope, bob.TenantId))
         {
             Assert.Equal(0, await bobDb.Campaigns.CountAsync());
+            Assert.Equal(0, await bobDb.SourceAssets.CountAsync());
+            Assert.Equal(0, await bobDb.EvidenceBlocks.CountAsync());
+            Assert.Equal(0, await bobDb.ContentDependencySnapshots.CountAsync());
+            Assert.Equal(0, await bobDb.ContentEvidenceDependencies.CountAsync());
         }
 
         await using (var anonDb = CreateContextForTenant(scope, null))
         {
             Assert.Equal(0, await anonDb.Campaigns.CountAsync());
+            Assert.Equal(0, await anonDb.SourceAssets.CountAsync());
+            Assert.Equal(0, await anonDb.EvidenceBlocks.CountAsync());
+            Assert.Equal(0, await anonDb.ContentDependencySnapshots.CountAsync());
+            Assert.Equal(0, await anonDb.ContentEvidenceDependencies.CountAsync());
         }
     }
 }

@@ -42,7 +42,7 @@ public sealed class SeoClient(ApiClient api)
             anonymous: false, ct);
 
     public Task<SeoAnalysisReportResponse> DeepAnalysisAsync(
-        Guid campaignId, Guid transcriptArtifactId, string? siteUrl = null,
+        Guid campaignId, Guid? transcriptArtifactId, string? siteUrl = null,
         CancellationToken ct = default) =>
         api.PostAsync<SeoDeepAnalysisRequest, SeoAnalysisReportResponse>(
             "api/v1/seo/deep-analysis",
@@ -51,6 +51,10 @@ public sealed class SeoClient(ApiClient api)
 
     public Task<SeoTargetsResponse> GetTargetsAsync(Guid campaignId, CancellationToken ct = default) =>
         api.GetAsync<SeoTargetsResponse>($"api/v1/campaigns/{campaignId}/seo-targets", ct);
+
+    public Task<SeoAnalysisReportResponse> GetReportAsync(
+        Guid artifactId, CancellationToken ct = default) =>
+        api.GetAsync<SeoAnalysisReportResponse>($"api/v1/seo/reports/{artifactId}", ct);
 
     public Task<SeoTargetsResponse> SaveTargetsAsync(
         Guid campaignId, SeoTargetsRequest request, CancellationToken ct = default) =>
@@ -73,4 +77,21 @@ public sealed class SeoClient(ApiClient api)
         Guid artifactId, CancellationToken ct = default) =>
         api.PostAsync<object, SeoAngleRegenerationResponse>(
             $"api/v1/seo/reports/{artifactId}/angles/regenerate", new { }, anonymous: false, ct);
+
+    public Task<ContentImpactReviewResponse> GetImpactReviewAsync(
+        Guid campaignId, CancellationToken ct = default) =>
+        api.GetAsync<ContentImpactReviewResponse>(
+            $"api/v1/campaigns/{campaignId}/impact-review", ct);
+
+    public Task<ContentImpactActionResponse> KeepImpactAsync(
+        Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
+        api.PostAsync<object, ContentImpactActionResponse>(
+            $"api/v1/campaigns/{campaignId}/impact-review/{artifactId}/keep",
+            new { }, anonymous: false, ct);
+
+    public Task<ContentImpactActionResponse> RegenerateImpactAsync(
+        Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
+        api.PostAsync<object, ContentImpactActionResponse>(
+            $"api/v1/campaigns/{campaignId}/impact-review/{artifactId}/regenerate",
+            new { }, anonymous: false, ct);
 }

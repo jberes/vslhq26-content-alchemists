@@ -1,9 +1,10 @@
-@* New campaign — five steps, and the only path that creates one (ADR-F29).
-     1. pick a source            drop zone + paste URL / paste transcript / pick from assets
-     2. transcription progress   determinate bar + narrated log (ADR-F13: never a spinner)
-     3. research context         audience, voice, brand and required site URL; no generation
-     4. deep SEO/AEO report      live evidence, suggestions and editable target approval
-     5. production brief         AI-drafted from the approved report, then Press Run
+@* Start a Run is one six-step path for every working source capability (ADR-F29).
+    1. source                    capability-backed text, page, document, or local media
+    2. reading                   determinate import/transcription progress (ADR-F13)
+    3. intent                    source review plus campaign intent
+    4. research context          audience, voice, brand and required site URL; no generation
+    5. deep SEO/AEO report       live evidence, suggestions and editable target approval
+    6. output recipe             AI-drafted brief, persisted recipe, then Press Run
 
    Desktop (F7): pick an MP3/MP4 → ffmpeg extracts → Whisper transcribes on-device → the
    TIMED segments go to the server. Web: capability flagged off with a stated reason (G3);
@@ -16,13 +17,17 @@
 @using Castmill.UI.Http
 @using Castmill.UI.Platform
 @using Castmill.UI.State
+@using Microsoft.AspNetCore.Components.Forms
 @inject BrandsClient Brands
 @inject SeoClient Seo
 @inject CampaignsClient Campaigns
 @inject GenerationClient Generation
+@inject EvidenceClient Evidence
+@inject MediaUploadClient MediaUploads
 @inject WorkspaceState Workspace
 @inject PressRunService PressRun
 @inject IMediaPipeline Media
+@inject IVoiceCaptureService Voice
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 
@@ -40,25 +45,97 @@
             <li class="cm-steps__step @(step <= _step ? "cm-steps__step--done" : "")"
                 aria-current="@(step == _step ? "step" : "false")">
                 <span class="cm-mono">@((int)step + 1)</span>
-                <span>@Title(step)</span>
+                <span>@(step == Step.Targets && _skipSeoAnalysis ? "SEO/AEO skipped" : Title(step))</span>
             </li>
         }
     </ol>
 
-    @if (_step == Step.Source)
-    {
-        <section class="cm-run__panel">
-            @if (Media.CanProcessLocally)
+    <section class="cm-run__panel" hidden="@(!_step.Equals(Step.Source))">
+            <div class="cm-starter-grid" role="list" aria-label="Source type">
+                @foreach (var starter in AvailableStarters)
+                {
+                    <button type="button" role="listitem"
+                            class="cm-starter @(_sourceStarter == starter.Kind ? "cm-starter--active" : null)"
+                            aria-pressed="@(_sourceStarter == starter.Kind ? "true" : "false")"
+                            @onclick="() => SelectStarter(starter.Kind)">
+                        <span class="cm-starter__mark" aria-hidden="true">@starter.Mark</span>
+                        <span class="cm-starter__copy">
+                            <strong>@starter.Label</strong>
+                            <span class="cm-meta">@starter.Detail</span>
+                        </span>
+                    </button>
+                }
+            </div>
+            @if (_voiceUnavailableReason is { Length: > 0 } voiceReason)
+            {
+                <p class="cm-meta" role="status">Voice recording unavailable: @voiceReason</p>
+            }
+
+            <label class="cm-field">
+                <span class="cm-field__label">Campaign name</span>
+                <input class="cm-input" @ref="_sourceFirstField" @bind="_name" @bind:event="oninput"
+                       placeholder="Q3 product webinar" />
+            </label>
+
+            @if (_sourceStarter == SourceStarter.PasteText)
+            {
+                <label class="cm-field">
+                    <span class="cm-field__label">Paste source text</span>
+                    <textarea class="cm-input cm-textarea" rows="8" @bind="_transcript" @bind:event="oninput"
+                              placeholder="Paste a transcript, notes, article draft, or source material."></textarea>
+                    <span class="cm-field__hint cm-meta">@_transcript.Length characters</span>
+                </label>
+            }
+            else if (_sourceStarter == SourceStarter.WebPage)
+            {
+                <label class="cm-field">
+                    <span class="cm-field__label">Public webpage URL</span>
+                    <input class="cm-input" type="url" @bind="_sourceUrl" @bind:event="oninput"
+                           placeholder="https://example.com/article" />
+                    <span class="cm-field__hint cm-meta">Castmill saves an immutable HTML snapshot; it never runs page scripts.</span>
+                </label>
+            }
+            else if (_sourceStarter == SourceStarter.Document)
+            {
+                <label class="cm-field cm-dropzone">
+                    <span class="cm-field__label">Upload a document</span>
+                    <InputFile OnChange="DocumentSelected" accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.pptx" />
+                    <span class="cm-field__hint cm-meta">TXT, Markdown, HTML, PDF, DOCX, or PPTX · 20 MB maximum</span>
+                    @if (_documentFile is not null)
+                    {
+                        <span class="cm-mono cm-meta">@_documentFile.Name · @(_documentFile.Size / 1024) KB</span>
+                    }
+                </label>
+            }
+            else if (_sourceStarter == SourceStarter.CloudMedia)
+            {
+                <label class="cm-field cm-dropzone">
+                    <span class="cm-field__label">Upload audio or video</span>
+                    <InputFile OnChange="CloudMediaSelected" accept="audio/*,video/*" />
+                    <span class="cm-field__hint cm-meta">Private resumable upload · 2 GB maximum</span>
+                    @if (_mediaFile is not null)
+                    {
+                        <span class="cm-mono cm-meta">@_mediaFile.Name · @FormatBytes(_mediaFile.Size)</span>
+                    }
+                    else if (_mediaUpload is { Status: MediaUploadStatus.Uploading } pending)
+                    {
+                        <span class="cm-meta">
+                            Reselect @pending.FileName to resume at @FormatBytes(pending.UploadedBytes)
+                            of @FormatBytes(pending.TotalBytes).
+                        </span>
+                    }
+                </label>
+            }
+            else if (_sourceStarter == SourceStarter.VoiceNote)
+            {
+                <VoiceRecorder OnUse="UseVoiceRecordingAsync" />
+            }
+            else if (_sourceStarter == SourceStarter.LocalMedia)
             {
                 <div class="cm-dropzone">
-                    <p class="cm-dropzone__headline">Bring a video or audio file</p>
-                    <p class="cm-meta">
-                        MP3, MP4, MOV, M4A, WAV — extracted and transcribed on this machine.
-                        Nothing leaves it except the finished transcript.
-                    </p>
-                    <button type="button" class="cm-button" @onclick="PickMediaAsync">
-                        Pick files &amp; transcribe…
-                    </button>
+                    <p class="cm-dropzone__headline">Bring video or audio</p>
+                    <p class="cm-meta">MP3, MP4, MOV, M4A, WAV — transcribed on this machine.</p>
+                    <button type="button" class="cm-button" @onclick="PickMediaAsync">Pick files…</button>
                     @if (_pickedFiles.Count > 0)
                     {
                         <ul class="cm-log" aria-label="Selected source files">
@@ -70,52 +147,47 @@
                     }
                 </div>
             }
-            else
-            {
-                @* Capability off with a stated reason — never a dead control (G3). *@
-                <div class="cm-dropzone cm-dropzone--disabled" aria-disabled="true">
-                    <p class="cm-dropzone__headline">Bring a video or audio file</p>
-                    <p class="cm-meta">@Media.UnavailableReason</p>
-                </div>
-            }
 
-            <div class="cm-run__sources">
-                <label class="cm-field">
-                    <span class="cm-field__label">Campaign name</span>
-                    <input class="cm-input" @ref="_sourceFirstField" @bind="_name" @bind:event="oninput"
-                           placeholder="Q3 product webinar" />
-                </label>
-
-                <label class="cm-field">
-                    <span class="cm-field__label">Paste a transcript</span>
-                    <textarea class="cm-input cm-textarea" rows="8" @bind="_transcript" @bind:event="oninput"
-                              placeholder="Paste the transcript text. Segments and timings are derived server-side."></textarea>
-                    <span class="cm-field__hint cm-meta">@_transcript.Length characters</span>
-                </label>
-            </div>
-
-            @if (_error is not null)
+            @if (_error is not null && _step == Step.Source)
             {
                 <p class="cm-form__error" role="alert">@_error</p>
             }
 
             <div class="cm-form__actions">
-                @if (_pickedFiles.Count > 0)
+                @if (_sourceStarter == SourceStarter.LocalMedia)
                 {
                     <button type="button" class="cm-button" disabled="@(_name.Trim().Length == 0)"
                             @onclick="StartLocalIngestAsync">
                         Transcribe on this machine
                     </button>
                 }
-                <button type="button" class="cm-button @(_picked is null ? "" : "cm-button--quiet")"
-                        disabled="@(!CanStart)" @onclick="StartIngestAsync">
-                    Transcribe pasted text
-                </button>
+                else if (_sourceStarter == SourceStarter.WebPage)
+                {
+                    <button type="button" class="cm-button" disabled="@(!CanStart)" @onclick="StartWebImportAsync">Import webpage</button>
+                }
+                else if (_sourceStarter == SourceStarter.Document)
+                {
+                    <button type="button" class="cm-button" disabled="@(!CanStart)" @onclick="StartDocumentImportAsync">Import document</button>
+                }
+                else if (_sourceStarter == SourceStarter.CloudMedia)
+                {
+                    <button type="button" class="cm-button" disabled="@(!CanStart)" @onclick="StartCloudMediaIngestAsync">
+                        @(_mediaUpload is { Status: MediaUploadStatus.Uploading, UploadedBytes: > 0 }
+                            ? "Resume upload"
+                            : "Upload and transcribe")
+                    </button>
+                }
+                else if (_sourceStarter == SourceStarter.VoiceNote)
+                {
+                }
+                else
+                {
+                    <button type="button" class="cm-button" disabled="@(!CanStart)" @onclick="StartIngestAsync">Use pasted text</button>
+                }
                 <a class="cm-meta" href="campaigns">Cancel</a>
             </div>
-        </section>
-    }
-    else if (_step == Step.Transcribing)
+    </section>
+    @if (_step == Step.Transcribing)
     {
         <section class="cm-run__panel">
             @* Determinate progress + a narrated log line. The steps are real: each one is a
@@ -135,6 +207,29 @@
             @if (_error is not null)
             {
                 <p class="cm-form__error" role="alert">@_error</p>
+            }
+            @if (IsCloudMediaSource && _mediaUpload is not null)
+            {
+                <div class="cm-form__actions">
+                    @if (_cloudOperation && _mediaUpload.Status == MediaUploadStatus.Uploading)
+                    {
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="ToggleUploadPause">
+                            @(_uploadPaused ? "Resume" : "Pause")
+                        </button>
+                    }
+                    @if (!_cloudOperation && _mediaFile is not null && _error is not null)
+                    {
+                        <button type="button" class="cm-button" @onclick="ReturnToCloudMediaSelection">
+                            Reselect file to resume
+                        </button>
+                    }
+                    <button type="button" class="cm-button cm-button--quiet"
+                            @onclick="CancelCloudUploadAsync">Cancel upload</button>
+                </div>
+            }
+            @if (_error is not null)
+            {
                 <div class="cm-form__actions">
                     <button type="button" class="cm-button cm-button--quiet" @onclick="() => _step = Step.Source">
                         Back
@@ -143,12 +238,77 @@
             }
         </section>
     }
+    else if (_step == Step.Intent)
+    {
+        <section class="cm-run__panel cm-run__panel--wide">
+            <div class="cm-run__decision-layout">
+                <div class="cm-run__decision">
+                    <p class="cm-seo__banner">
+                        <strong>The source is saved.</strong> Choose why this campaign exists.
+                        Intent steers research and production without changing the approved source.
+                    </p>
+                    <div class="cm-intent-grid" role="radiogroup" aria-label="Campaign intent">
+                        @foreach (var option in AvailableIntentOptions)
+                        {
+                            <button type="button" role="radio"
+                                    class="cm-intent @(_intent == option.Value ? "cm-intent--active" : null)"
+                                    aria-checked="@(_intent == option.Value ? "true" : "false")"
+                                    disabled="@(_busy || !ImportedEvidenceIsApproved)"
+                                    @onclick="() => ChooseIntentAsync(option.Value)">
+                                <strong>@option.Label</strong>
+                                <span class="cm-meta">@option.Detail</span>
+                            </button>
+                        }
+                    </div>
+                    @if (!ImportedEvidenceIsApproved)
+                    {
+                        <p class="cm-meta">Approve the current evidence revision before choosing an intent.</p>
+                    }
+                    @if (_error is not null)
+                    {
+                        <p class="cm-form__error" role="alert">@_error</p>
+                    }
+                </div>
+
+                @if (_importedEvidence is { } importedEvidence)
+                {
+                    <aside class="cm-run__source-summary" aria-label="Imported source summary">
+                        <div class="cm-run__source-summary-head">
+                            <div>
+                                <span class="cm-kicker">Source ready</span>
+                                <h2>@importedEvidence.Source.Label</h2>
+                            </div>
+                            <span class="cm-badge @(importedEvidence.IsApproved ? "cm-badge--success" : "cm-badge--warning")">
+                                @(importedEvidence.IsApproved ? "Approved" : $"Draft r{importedEvidence.Revision}")
+                            </span>
+                        </div>
+                        <div class="cm-run__source-facts cm-meta">
+                            <span>@SourceBlockLabel(importedEvidence)</span>
+                            @if (SourceDuration(importedEvidence) is { } duration)
+                            {
+                                <span>@Clock(duration)</span>
+                            }
+                            <span>@importedEvidence.Source.Modality</span>
+                        </div>
+                        @if (SourceExcerpt(importedEvidence) is { Length: > 0 } excerpt)
+                        {
+                            <blockquote>@excerpt</blockquote>
+                        }
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="OpenSourceReview">
+                            @SourceReviewLabel(importedEvidence)
+                        </button>
+                    </aside>
+                }
+            </div>
+        </section>
+    }
     else if (_step == Step.Context)
     {
         <section class="cm-run__panel">
             <p class="cm-seo__banner">
                 <strong>No content is generated at this stage.</strong> Castmill infers the
-                research audience from the transcript, and the selected Brand supplies its
+                research audience from approved source evidence, and the selected Brand supplies its
                 approved voice. The SEO/AEO report comes next; titles, angles, and the production
                 brief are derived only after you approve it.
             </p>
@@ -168,7 +328,7 @@
             </label>
 
             <div class="cm-brief">
-                <label class="cm-field">
+                <label class="cm-field cm-brief__compact">
                     <span class="cm-field__label">Content type</span>
                     <select class="cm-input" @bind="_contentType">
                         @foreach (var contentType in CampaignContentType.All)
@@ -178,29 +338,29 @@
                     </select>
                     <span class="cm-field__hint cm-meta">Steers the analysis, brief, and every downstream generator.</span>
                 </label>
-                <label class="cm-field">
+                <label class="cm-field cm-brief__wide">
                     <span class="cm-field__label">AI-generated audience for the analysis</span>
                     <textarea class="cm-input cm-textarea" rows="2" @ref="_briefFirstField" @bind="_audience"
-                              placeholder="@(_contextSuggesting ? "Inferring the audience from the transcript…" : "Audience inferred from the transcript")"></textarea>
+                              placeholder="@(_contextSuggesting ? "Inferring the audience from approved evidence…" : "Audience inferred from approved evidence")"></textarea>
                     <span class="cm-field__hint cm-meta">Review or refine this before research.</span>
                 </label>
-                <label class="cm-field">
+                <label class="cm-field cm-brief__wide">
                     <span class="cm-field__label">Brand voice — from selected Brand</span>
                     <textarea class="cm-input cm-textarea" rows="2" value="@_voice" readonly
                               aria-readonly="true"
                               placeholder="@BrandVoicePlaceholder"></textarea>
                 </label>
-                <label class="cm-field">
-                    <span class="cm-field__label">Site URL</span>
+                <label class="cm-field cm-brief__compact">
+                    <span class="cm-field__label">Site URL <span class="cm-meta">SEO/AEO only</span></span>
                     <input class="cm-input" type="url" @bind="_siteUrl" @bind:event="oninput"
                            placeholder="https://example.com" />
-                    <span class="cm-field__hint cm-meta">Required for ranked keywords, backlinks, competitors, and AI citation visibility.</span>
+                    <span class="cm-field__hint cm-meta">Required only for the deep SEO/AEO path: rankings, backlinks, competitors, and AI citation visibility.</span>
                 </label>
             </div>
 
             <button type="button" class="cm-button cm-button--quiet"
                     disabled="@_contextSuggesting" @onclick="SuggestResearchContextAsync">
-                @(_contextSuggesting ? "Inferring audience…" : "Regenerate audience from transcript")
+                @(_contextSuggesting ? "Inferring audience…" : "Regenerate audience from evidence")
             </button>
             @if (_contextError is { } contextError)
             {
@@ -234,9 +394,13 @@
                 <button type="button" class="cm-button" disabled="@(!CanRunAnalysis)" @onclick="GoToTargetsAsync">
                     Build the deep SEO/AEO report
                 </button>
+                <button type="button" class="cm-button cm-button--quiet"
+                        disabled="@(!CanSkipSeo)" @onclick="SkipSeoAsync">
+                    Create content without SEO
+                </button>
                 @if (!HasValidSiteUrl)
                 {
-                    <span class="cm-meta">Enter a valid site URL to unlock the full domain analysis.</span>
+                    <span class="cm-meta">No URL needed to create source-informed content. Enter one only for the deep analysis.</span>
                 }
             </div>
         </section>
@@ -387,24 +551,27 @@
     {
         <section class="cm-run__panel">
             <p class="cm-seo__banner">
-                <strong>Built from the approved report.</strong> This production brief, its angle,
-                and every selected output inherit the SEO/AEO evidence you just approved.
+                <strong>@(_skipSeoAnalysis ? "Built from approved source evidence." : "Built from the approved report.")</strong>
+                @(_skipSeoAnalysis
+                    ? " This production brief and every selected output are grounded in the source, without keyword or ranking targets."
+                    : " This production brief, its angle, and every selected output inherit the SEO/AEO evidence you just approved.")
+                <span class="cm-chip cm-mono">@IntentLabel(_intent)</span>
             </p>
 
             @if (_briefing)
             {
                 <div class="cm-brief__reading" role="status">
                     <span class="cm-spinner" aria-hidden="true"></span>
-                    <span>Turning the approved SEO/AEO strategy into a production brief…</span>
+                    <span>@(_skipSeoAnalysis ? "Turning the approved source into a production brief…" : "Turning the approved SEO/AEO strategy into a production brief…")</span>
                 </div>
             }
             else if (_summary is { } summary)
             {
                 <div class="cm-brief__summary">
                     <div class="cm-brief__summary-head">
-                        <span class="cm-kicker">SEO-informed source brief</span>
+                        <span class="cm-kicker">@(_skipSeoAnalysis ? "Source-informed content brief" : "SEO-informed source brief")</span>
                         <button type="button" class="cm-button cm-button--quiet" @onclick="SuggestBriefAsync">
-                            Rebuild from report
+                            @(_skipSeoAnalysis ? "Rebuild from source" : "Rebuild from report")
                         </button>
                     </div>
                     <p>@summary</p>
@@ -428,7 +595,7 @@
             }
 
             <div class="cm-brief">
-                <label class="cm-field">
+                <label class="cm-field cm-brief__compact">
                     <span class="cm-field__label">Content type</span>
                     <select class="cm-input" @bind="_contentType">
                         @foreach (var contentType in CampaignContentType.All)
@@ -437,31 +604,31 @@
                         }
                     </select>
                 </label>
-                <label class="cm-field">
+                <label class="cm-field cm-brief__wide">
                     <span class="cm-field__label">Audience</span>
                     <textarea class="cm-input cm-textarea" rows="2" @bind="_audience"></textarea>
                 </label>
-                <label class="cm-field">
+                <label class="cm-field cm-brief__wide">
                     <span class="cm-field__label">Brand voice — from selected Brand</span>
                     <textarea class="cm-input cm-textarea" rows="2" value="@_voice" readonly
                               aria-readonly="true" placeholder="@BrandVoicePlaceholder"></textarea>
                 </label>
-                <label class="cm-field">
-                    <span class="cm-field__label">SEO-informed campaign angle</span>
+                <label class="cm-field cm-brief__wide">
+                    <span class="cm-field__label">@(_skipSeoAnalysis ? "Campaign angle" : "SEO-informed campaign angle")</span>
                     <textarea class="cm-input cm-textarea" rows="3" @bind="_angle"
-                              placeholder="The approved report will propose the core angle."></textarea>
+                              placeholder="@(_skipSeoAnalysis ? "The source-informed brief will propose the core angle." : "The approved report will propose the core angle.")"></textarea>
                 </label>
             </div>
 
-            <h2 class="cm-front__block-title">Fan-out</h2>
-            <p class="cm-meta">Choose what to produce from this shared strategy. Channel titles and copy are generated only after Press Run.</p>
+            <h2 class="cm-front__block-title">Output recipe</h2>
+            <p class="cm-meta">Choose the first outputs to produce from this shared strategy. This recipe is saved on the campaign and remains editable before Press Run.</p>
             <ul class="cm-fanout">
                 @foreach (var item in _fanOut)
                 {
                     <li>
                         <label class="cm-fanout__item">
                             <input type="checkbox" checked="@item.Selected"
-                                   @onchange="e => item.Selected = (bool)(e.Value ?? false)" />
+                                @onchange="e => RecipeChangedAsync(item, e)" />
                             <span>@item.Label</span>
                         </label>
                     </li>
@@ -478,7 +645,9 @@
                     @(_busy ? "Starting the run…" : "Press Run")
                 </button>
                 <button type="button" class="cm-button cm-button--quiet" disabled="@_busy"
-                        @onclick="() => _step = Step.Targets">Back to report</button>
+                        @onclick="() => _step = _skipSeoAnalysis ? Step.Context : Step.Targets">
+                    @(_skipSeoAnalysis ? "Back to context" : "Back to report")
+                </button>
                 <span class="cm-meta">@_fanOut.Count(f => f.Selected) of @_fanOut.Count selected</span>
             </div>
         </section>
@@ -486,15 +655,107 @@
 </div>
 </div>
 
+@if (_sourceReviewOpen && _importedEvidence is { } reviewEvidence)
+{
+    <div class="cm-run-review" role="presentation" @onclick="CloseSourceReview">
+        <section class="cm-run-review__drawer" role="dialog" aria-modal="true"
+                 aria-label="Review source evidence" tabindex="-1" @ref="_sourceReviewPanel"
+                 @onclick:stopPropagation="true" @onkeydown="OnSourceReviewKey">
+            <header class="cm-run-review__head">
+                <div>
+                    <span class="cm-kicker">Source review</span>
+                    <h2>@reviewEvidence.Source.Label</h2>
+                </div>
+                <button type="button" class="cm-button cm-button--quiet"
+                        aria-label="Close source review" @onclick="CloseSourceReview">Close</button>
+            </header>
+            <div class="cm-run-review__body">
+                <SourceEvidenceReview Source="reviewEvidence.Source"
+                                      Evidence="reviewEvidence"
+                                      CampaignId="reviewEvidence.Source.CampaignId"
+                                      Busy="_busy"
+                                      OnCorrect="CorrectImportedEvidenceAsync"
+                                      OnToggleExcluded="ToggleImportedEvidenceAsync"
+                                      OnApprove="ApproveImportedEvidenceAsync" />
+            </div>
+        </section>
+    </div>
+}
+
 @code {
     private enum Step
     {
         Source,
         Transcribing,
+        Intent,
         Context,
         Targets,
         Brief,
     }
+
+    private enum SourceStarter
+    {
+        PasteText,
+        WebPage,
+        Document,
+        CloudMedia,
+        VoiceNote,
+        LocalMedia,
+    }
+
+    private sealed record StarterOption(
+        SourceStarter Kind, string Mark, string Label, string Detail);
+
+    private sealed record IntentOption(string Value, string Label, string Detail);
+
+    private IReadOnlyList<StarterOption> AvailableStarters
+    {
+        get
+        {
+            var starters = new List<StarterOption>
+            {
+                new(SourceStarter.PasteText, "T", "Paste text", "Transcript, notes, draft, or source copy"),
+                new(SourceStarter.WebPage, "↗", "Import webpage", "Immutable snapshot of a public HTML page"),
+                new(SourceStarter.Document, "▤", "Upload document", "TXT, Markdown, HTML, PDF, DOCX, or PPTX"),
+                new(SourceStarter.CloudMedia, "↑", "Upload media", "Private resumable audio or video transcription"),
+            };
+            if (_voiceAvailable)
+            {
+                starters.Add(new StarterOption(
+                    SourceStarter.VoiceNote, "●", "Record an idea", "Focused voice note with review before upload"));
+            }
+            if (Media.CanProcessLocally)
+            {
+                starters.Add(new StarterOption(
+                    SourceStarter.LocalMedia, "▶", "Local media", "Audio or video transcribed on this machine"));
+            }
+            return starters;
+        }
+    }
+
+    private static readonly IntentOption[] IntentOptions =
+    [
+        new(CampaignIntent.Repurpose, "Repurpose", "Turn the source into a coordinated multi-channel campaign"),
+        new(CampaignIntent.Promote, "Promote", "Drive attention to the source, offer, or event"),
+        new(CampaignIntent.Launch, "Launch", "Introduce something new with a focused market narrative"),
+        new(CampaignIntent.BuildAuthority, "Build authority", "Own a topic with useful, evidence-backed depth"),
+        new(CampaignIntent.Refresh, "Refresh", "Reframe existing material for current demand and gaps"),
+        new(CampaignIntent.CaptureIdea, "Capture an idea", "Develop early source material into a deliberate campaign"),
+    ];
+
+    private static readonly IntentOption[] WebPageIntentOptions =
+    [
+        new(CampaignIntent.Repurpose, "Repurpose this page", "Turn the saved page into a coordinated multi-channel campaign"),
+        new(CampaignIntent.Promote, "Promote or expand this page", "Drive attention to the page or develop its evidence into deeper content"),
+    ];
+
+    private IReadOnlyList<IntentOption> AvailableIntentOptions =>
+        _sourceStarter == SourceStarter.WebPage ? WebPageIntentOptions : IntentOptions;
+
+    private bool ImportedEvidenceIsApproved => _importedEvidence?.IsApproved != false;
+
+    private static string IntentLabel(string? intent) =>
+        IntentOptions.FirstOrDefault(option => option.Value == intent)?.Label ?? "Intent not selected";
 
     private sealed class FanOutItem(string kind, string label, bool selected = true)
     {
@@ -522,6 +783,7 @@
     /// YouTube package is the app's founding use case.
     /// </summary>
     private readonly List<FanOutItem> _fanOut = BuildFanOutChoices();
+    private readonly SemaphoreSlim _campaignSaveLock = new(1, 1);
 
     private static List<FanOutItem> BuildFanOutChoices()
     {
@@ -547,6 +809,26 @@
         [.. kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]),
          "thumbnail-concepts", "image-prompts"];
 
+    private IReadOnlyList<string> SelectedRecipe() =>
+        _fanOut.Where(item => item.Selected).Select(item => item.Kind).ToList();
+
+    private async Task RecipeChangedAsync(FanOutItem item, ChangeEventArgs args)
+    {
+        item.Selected = args.Value is true;
+        if (_campaignId is not { } campaignId)
+        {
+            return;
+        }
+        try
+        {
+            await SaveCampaignContextAsync(campaignId);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't save the output recipe.";
+        }
+    }
+
     private sealed class LinkRow
     {
         public string Label { get; set; } = string.Empty;
@@ -563,10 +845,26 @@
     // document top and Tab walks the whole rail before ever reaching the form.
     private ElementReference _sourceFirstField;
     private ElementReference _briefFirstField;
+    private ElementReference _sourceReviewPanel;
     private Step? _focusedStep;
+    private bool _sourceReviewOpen;
+    private bool _sourceReviewNeedsFocus;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_sourceReviewNeedsFocus)
+        {
+            _sourceReviewNeedsFocus = false;
+            try
+            {
+                await _sourceReviewPanel.FocusAsync();
+            }
+            catch (Exception)
+            {
+            }
+            return;
+        }
+
         if (_focusedStep == _step)
         {
             return;
@@ -598,11 +896,24 @@
 
     private string _name = string.Empty;
     private string _transcript = string.Empty;
+    private string _sourceUrl = string.Empty;
+    private IBrowserFile? _documentFile;
+    private IBrowserFile? _mediaFile;
+    private MediaUploadResponse? _mediaUpload;
+    private CancellationTokenSource? _mediaCancellation;
+    private bool _cloudOperation;
+    private bool _uploadPaused;
+    private bool _voiceAvailable;
+    private string? _voiceUnavailableReason;
+    private SourceStarter _sourceStarter = SourceStarter.PasteText;
+    private EvidenceRevisionResponse? _importedEvidence;
+    private string? _intent;
     private string _audience = string.Empty;
     private string _voice = string.Empty;
     private string _angle = string.Empty;
     private string _contentType = CampaignContentType.ThoughtLeadership;
     private string _siteUrl = string.Empty;
+    private bool _skipSeoAnalysis;
     private string? _error;
     private bool _busy;
     private int _percent;
@@ -613,15 +924,102 @@
     private bool _contextSuggesting;
     private string? _contextError;
 
-    private bool CanStart => _name.Trim().Length > 0 && _transcript.Trim().Length > 40;
+    private void OpenSourceReview()
+    {
+        _sourceReviewOpen = true;
+        _sourceReviewNeedsFocus = true;
+    }
+
+    private void CloseSourceReview()
+    {
+        _sourceReviewOpen = false;
+        _sourceReviewNeedsFocus = false;
+    }
+
+    private void OnSourceReviewKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            CloseSourceReview();
+        }
+    }
+
+    private static string SourceReviewLabel(EvidenceRevisionResponse evidence) =>
+        evidence.Source.Kind == SourceKinds.Transcript ? "Review transcript" : "Review source";
+
+    private static string SourceBlockLabel(EvidenceRevisionResponse evidence)
+    {
+        var count = evidence.Blocks.Count(block => !block.IsExcluded);
+        var noun = evidence.Source.Kind == SourceKinds.Transcript
+            ? (count == 1 ? "segment" : "segments")
+            : (count == 1 ? "evidence block" : "evidence blocks");
+        return $"{count} {noun}";
+    }
+
+    private static double? SourceDuration(EvidenceRevisionResponse evidence)
+    {
+        var ends = evidence.Blocks
+            .Where(block => block.LocatorKind == EvidenceLocatorKinds.MediaTimeRange)
+            .Select(block => block.Locator.TryGetProperty("endSeconds", out var end)
+                && end.TryGetDouble(out var seconds)
+                    ? (double?)seconds
+                    : null)
+            .Where(seconds => seconds is not null)
+            .Select(seconds => seconds!.Value)
+            .ToList();
+        return ends.Count == 0 ? null : ends.Max();
+    }
+
+    private static string? SourceExcerpt(EvidenceRevisionResponse evidence)
+    {
+        var content = evidence.Blocks.FirstOrDefault(block =>
+            !block.IsExcluded
+            && block.LocatorKind is not EvidenceLocatorKinds.WebPageMetadata
+            && block.LocatorKind is not EvidenceLocatorKinds.WebPageImage)?.Content;
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+        const int limit = 240;
+        return content.Length <= limit ? content : $"{content[..(limit - 1)].TrimEnd()}…";
+    }
+
+    private static string Clock(double seconds)
+    {
+        var duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return duration.TotalHours >= 1
+            ? duration.ToString(@"h\:mm\:ss")
+            : duration.ToString(@"m\:ss");
+    }
+
+    [SupplyParameterFromQuery(Name = "campaign")]
+    public Guid? ResumeCampaignId { get; set; }
+
+    private bool CanStart => _name.Trim().Length > 0 && _sourceStarter switch
+    {
+        SourceStarter.PasteText => _transcript.Trim().Length > 40,
+        SourceStarter.WebPage => Uri.TryCreate(_sourceUrl.Trim(), UriKind.Absolute, out var url)
+            && url.Scheme is "http" or "https",
+        SourceStarter.Document => _documentFile is { Size: > 0 and <= 20 * 1024 * 1024 },
+        SourceStarter.CloudMedia => _mediaFile is { Size: > 0 and <= MaxMediaBytes },
+        SourceStarter.VoiceNote => _mediaFile is { Size: > 0 and <= MaxMediaBytes },
+        SourceStarter.LocalMedia => _pickedFiles.Count > 0,
+        _ => false,
+    };
     private bool HasValidSiteUrl => Uri.TryCreate(_siteUrl.Trim(), UriKind.Absolute, out var site)
         && site.Scheme is "http" or "https";
     private bool CanRunAnalysis => !_busy && !_researching && !_contextSuggesting
         && !string.IsNullOrWhiteSpace(_audience) && HasValidSiteUrl;
+    private bool CanSkipSeo => !_busy && !_contextSuggesting
+        && !string.IsNullOrWhiteSpace(_audience);
 
     private string BrandVoicePlaceholder => string.IsNullOrWhiteSpace(_brandId)
         ? "Select a Brand to inherit its voice"
         : "This Brand has no saved voice guidelines";
+
+    private const long MaxMediaBytes = 2L * 1024 * 1024 * 1024;
+    private bool IsCloudMediaSource =>
+        _sourceStarter is SourceStarter.CloudMedia or SourceStarter.VoiceNote;
 
     // ---- Deep report and target-approval step ------------------------------------------
 
@@ -734,6 +1132,7 @@
     /// </summary>
     private async Task GoToTargetsAsync()
     {
+        _skipSeoAnalysis = false;
         _step = Step.Targets;
         _error = null;
         try
@@ -750,9 +1149,47 @@
         }
     }
 
+    private async Task SkipSeoAsync()
+    {
+        if (_campaignId is not { } campaignId)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _skipSeoAnalysis = true;
+        try
+        {
+            await SaveCampaignContextAsync(campaignId);
+
+            // A campaign can opt out after previously completing research. Clear those
+            // targets so the generators do not silently keep using SEO steering while the
+            // UI says this run is source-only.
+            await Seo.SaveTargetsAsync(campaignId, new SeoTargetsRequest(null, [], []));
+            _analysis = null;
+            _targets.Clear();
+            _questions.Clear();
+            _primaryKeyword = null;
+            _step = Step.Brief;
+            await SuggestBriefAsync();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _step = Step.Context;
+            _error = ex is ApiException api
+                ? api.Message
+                : "Couldn't save the no-SEO content path.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private async Task ResearchAsync()
     {
-        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        if (_campaignId is not { } campaignId)
         {
             return;
         }
@@ -766,7 +1203,7 @@
 
         try
         {
-            _analysis = await Seo.DeepAnalysisAsync(campaignId, transcriptId,
+            _analysis = await Seo.DeepAnalysisAsync(campaignId, _transcriptArtifactId,
                 _siteUrl.Trim());
             var research = _analysis.Research;
 
@@ -886,7 +1323,7 @@
     /// </summary>
     private async Task SuggestBriefAsync()
     {
-        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        if (_campaignId is not { } campaignId)
         {
             return;
         }
@@ -897,7 +1334,8 @@
 
         try
         {
-            var brief = await Generation.SuggestBriefAsync(campaignId, transcriptId, _name);
+            var brief = await Generation.SuggestBriefAsync(
+                campaignId, _transcriptArtifactId, _name);
 
             // The title is the one field the user has already committed to, so it is only
             // taken when they left it blank.
@@ -932,6 +1370,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Voice.InitializeAsync();
+        _voiceAvailable = Voice.Snapshot.State != VoiceCaptureStates.Unsupported;
+        _voiceUnavailableReason = _voiceAvailable ? null : Voice.Snapshot.Message;
         try
         {
             _brands.AddRange(await Brands.ListAsync());
@@ -942,6 +1383,184 @@
         }
         catch (HttpRequestException)
         {
+        }
+
+        if (ResumeCampaignId is { } campaignId)
+        {
+            await ResumeAsync(campaignId);
+        }
+    }
+
+    private async Task ResumeAsync(Guid campaignId)
+    {
+        try
+        {
+            var campaign = await Campaigns.GetAsync(campaignId);
+            var preview = await Campaigns.GetPreviewAsync(campaignId);
+            _campaignId = campaign.Id;
+            _name = campaign.Name;
+            _brandId = campaign.BrandId?.ToString() ?? string.Empty;
+            _contentType = campaign.ContentType ?? CampaignContentType.ThoughtLeadership;
+            _intent = campaign.Intent;
+            _skipSeoAnalysis = campaign.SkipSeoAnalysis;
+            _links.Clear();
+            _links.AddRange((campaign.Links ?? []).Select(link => new LinkRow
+            {
+                Label = link.Label,
+                Url = link.Url,
+            }));
+            _siteUrl = campaign.Links?
+                .FirstOrDefault(link => Uri.TryCreate(link.Url, UriKind.Absolute, out _))?.Url
+                ?? string.Empty;
+            RestoreBrief(campaign.Brief);
+            ApplyRecipe(campaign.OutputRecipe);
+
+            var transcript = preview.Artifacts.FirstOrDefault(item => item.Kind == "transcript");
+            _transcriptArtifactId = transcript?.Id;
+            var source = preview.Sources?.OrderBy(item => item.CreatedAt).FirstOrDefault();
+            _sourceStarter = source?.Kind switch
+            {
+                SourceKinds.WebPage => SourceStarter.WebPage,
+                SourceKinds.Document => SourceStarter.Document,
+                SourceKinds.Transcript when source.Modality == SourceModalities.Media
+                    => SourceStarter.LocalMedia,
+                _ => SourceStarter.PasteText,
+            };
+            _sourceUrl = source?.OriginalUri ?? string.Empty;
+
+            var pendingUpload = await MediaUploads.GetLatestAsync(campaignId);
+            if (pendingUpload is { Status: MediaUploadStatus.Uploading or MediaUploadStatus.Committed })
+            {
+                _mediaUpload = pendingUpload;
+                _sourceStarter = SourceStarter.CloudMedia;
+                _percent = (int)Math.Clamp(pendingUpload.Percent, 0, 100);
+                _error = pendingUpload.Status == MediaUploadStatus.Uploading
+                    ? $"Reselect {pendingUpload.FileName} to resume this private upload."
+                    : $"Reselect {pendingUpload.FileName} to retry transcription.";
+                _step = Step.Source;
+                return;
+            }
+
+            if (source is null && transcript is null)
+            {
+                _step = Step.Source;
+                return;
+            }
+
+            if (_skipSeoAnalysis)
+            {
+                _step = Step.Brief;
+                return;
+            }
+
+            var reportPreview = preview.Artifacts
+                .Where(item => item.Kind == "seo-report")
+                .OrderByDescending(item => item.UpdatedAt)
+                .FirstOrDefault();
+            if (reportPreview is not null)
+            {
+                _analysis = await Seo.GetReportAsync(reportPreview.Id);
+                RestoreResearch(_analysis.Research);
+                var targets = await Seo.GetTargetsAsync(campaignId);
+                if (targets.Keywords.Count > 0)
+                {
+                    ApplyApprovedTargets(targets);
+                    _step = Step.Brief;
+                    return;
+                }
+                _step = Step.Targets;
+                return;
+            }
+            _step = string.IsNullOrWhiteSpace(_intent) ? Step.Intent : Step.Context;
+            if (_step == Step.Intent && source is not null
+                && source.Kind is SourceKinds.WebPage or SourceKinds.Document or SourceKinds.Transcript)
+            {
+                _importedEvidence = await Evidence.GetEvidenceAsync(campaignId, source.Id);
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't restore this run.";
+            _step = Step.Source;
+        }
+    }
+
+    private void RestoreBrief(string? brief)
+    {
+        if (string.IsNullOrWhiteSpace(brief))
+        {
+            return;
+        }
+        foreach (var line in brief.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = line.IndexOf(':');
+            if (separator < 0)
+            {
+                continue;
+            }
+            var key = line[..separator].Trim();
+            var value = line[(separator + 1)..].Trim();
+            switch (key)
+            {
+                case "Campaign intent": _intent = value; break;
+                case "Audience": _audience = value; break;
+                case "Brand voice": _voice = value; break;
+                case "Angle": _angle = value; break;
+            }
+        }
+    }
+
+    private void ApplyRecipe(IReadOnlyList<string>? recipe)
+    {
+        if (recipe is not { Count: > 0 })
+        {
+            return;
+        }
+        foreach (var item in _fanOut)
+        {
+            item.Selected = recipe.Contains(item.Kind, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void RestoreResearch(SeoResearchResponse research)
+    {
+        _targets.Clear();
+        _targets.AddRange(research.Keywords.Select(keyword => new TargetRow
+        {
+            Term = keyword.Term,
+            Volume = keyword.Volume,
+            Difficulty = keyword.Difficulty,
+            Opportunity = keyword.Opportunity,
+            Competition = keyword.Competition,
+            Cpc = keyword.Cpc,
+            Intent = keyword.Intent,
+            Source = keyword.Source,
+        }));
+        _questions.Clear();
+        _questions.AddRange(research.Questions.Select(question => new QuestionRow
+        {
+            Question = question.Question,
+            Source = question.Source,
+        }));
+        _hasMetrics = research.HasProviderMetrics;
+        _researchNotes.Clear();
+        _researchNotes.AddRange(research.Notes);
+    }
+
+    private void ApplyApprovedTargets(SeoTargetsResponse targets)
+    {
+        _primaryKeyword = targets.PrimaryKeyword;
+        var selectedKeywords = targets.Keywords.Select(item => item.Term)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in _targets)
+        {
+            target.Selected = selectedKeywords.Contains(target.Term);
+        }
+        var selectedQuestions = targets.Questions.Select(item => item.Question)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var question in _questions)
+        {
+            question.Selected = selectedQuestions.Contains(question.Question);
         }
     }
 
@@ -960,19 +1579,373 @@
     {
         Step.Source => "Pick a source.",
         Step.Transcribing => "Reading the source.",
+        Step.Intent => "Choose the campaign intent.",
         Step.Context => "Set the research context.",
         Step.Targets => "Review the deep SEO/AEO report.",
-        _ => "Build from the approved strategy.",
+        _ => "Choose the output recipe.",
     };
 
     private static string Title(Step step) => step switch
     {
         Step.Source => "Source",
-        Step.Transcribing => "Transcript",
+        Step.Transcribing => "Reading",
+        Step.Intent => "Intent",
         Step.Context => "Context",
         Step.Targets => "SEO/AEO",
-        _ => "Production brief",
+        _ => "Output recipe",
     };
+
+    private void SelectStarter(SourceStarter starter)
+    {
+        _sourceStarter = starter;
+        _importedEvidence = null;
+        _error = null;
+    }
+
+    private void DocumentSelected(InputFileChangeEventArgs args)
+    {
+        _documentFile = args.File;
+        _error = _documentFile.Size > 20 * 1024 * 1024
+            ? "Documents must be 20 MB or smaller."
+            : null;
+        if (_name.Trim().Length == 0)
+        {
+            _name = Path.GetFileNameWithoutExtension(_documentFile.Name);
+        }
+    }
+
+    private void CloudMediaSelected(InputFileChangeEventArgs args)
+    {
+        _mediaFile = args.File;
+        _error = _mediaFile.Size > MaxMediaBytes
+            ? "Media files must be 2 GB or smaller."
+            : !IsMediaContentType(NormalizeMediaContentType(_mediaFile.ContentType, _mediaFile.Name))
+                ? "Choose an audio or video file."
+                : _mediaUpload is { Status: MediaUploadStatus.Uploading or MediaUploadStatus.Committed } upload
+                    && (!string.Equals(upload.FileName, _mediaFile.Name, StringComparison.Ordinal)
+                        || upload.TotalBytes != _mediaFile.Size)
+                    ? $"Reselect {upload.FileName} with its original size to resume, or cancel that upload."
+                    : null;
+        if (_name.Trim().Length == 0)
+        {
+            _name = Path.GetFileNameWithoutExtension(_mediaFile.Name);
+        }
+    }
+
+    private async Task UseVoiceRecordingAsync(VoiceRecording recording)
+    {
+        _mediaFile = new MemoryBrowserFile(
+            recording.FileName,
+            recording.ContentType,
+            recording.Bytes);
+        if (_name.Trim().Length == 0)
+        {
+            _name = $"Voice note {DateTimeOffset.Now:MMM d, h:mm tt}";
+        }
+        await StartCloudMediaIngestAsync();
+    }
+
+    private async Task<CampaignResponse> EnsureCampaignAsync()
+    {
+        if (_campaignId is { } existingId)
+        {
+            return await Campaigns.GetAsync(existingId);
+        }
+        var campaign = await Campaigns.CreateAsync(
+            _name.Trim(),
+            brief: null,
+            contentType: _contentType,
+            intent: _intent,
+            outputRecipe: SelectedRecipe());
+        _campaignId = campaign.Id;
+        Workspace.Add(campaign);
+        Navigation.NavigateTo($"campaigns/new?campaign={campaign.Id}", replace: true);
+        return campaign;
+    }
+
+    private async Task StartWebImportAsync()
+    {
+        _error = null;
+        _step = Step.Transcribing;
+        _log.Clear();
+        _percent = 0;
+        try
+        {
+            await NarrateAsync("creating campaign…", 15);
+            var campaign = await EnsureCampaignAsync();
+            await NarrateAsync("fetching and validating the public page…", 45);
+            var imported = await Evidence.ImportWebPageAsync(
+                campaign.Id, _sourceUrl.Trim(), _name.Trim());
+            _importedEvidence = imported;
+            _siteUrl = imported.Source.OriginalUri ?? _sourceUrl.Trim();
+            await NarrateAsync($"{imported.Blocks.Count} approved evidence blocks saved", 100);
+            _step = Step.Intent;
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't reach the Castmill API.";
+        }
+    }
+
+    private async Task StartDocumentImportAsync()
+    {
+        if (_documentFile is null)
+        {
+            return;
+        }
+        _error = null;
+        _step = Step.Transcribing;
+        _log.Clear();
+        _percent = 0;
+        try
+        {
+            await NarrateAsync("creating campaign…", 10);
+            var campaign = await EnsureCampaignAsync();
+            await NarrateAsync($"uploading {_documentFile.Name}…", 35);
+            await using var stream = _documentFile.OpenReadStream(20 * 1024 * 1024);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            var asset = await Brands.CreateLibraryAssetAsync(
+                _documentFile.Name, _documentFile.ContentType, memory.Length);
+            await Brands.UploadAssetContentAsync(
+                asset.Id, memory.ToArray(), _documentFile.ContentType);
+            await NarrateAsync("extracting bounded document evidence…", 70);
+            var imported = await Evidence.ImportDocumentAsync(
+                campaign.Id, asset.Id, _documentFile.Name);
+            _importedEvidence = imported;
+            await NarrateAsync($"{imported.Blocks.Count} approved evidence blocks saved", 100);
+            _step = Step.Intent;
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or IOException)
+        {
+            _error = ex is ApiException api ? api.Message
+                : ex is IOException io ? io.Message
+                : "Couldn't reach the Castmill API.";
+        }
+    }
+
+    private async Task StartCloudMediaIngestAsync()
+    {
+        if (_mediaFile is null || !CanStart)
+        {
+            return;
+        }
+
+        _error = null;
+        _step = Step.Transcribing;
+        _log.Clear();
+        _cloudOperation = true;
+        _uploadPaused = false;
+        _mediaCancellation?.Dispose();
+        _mediaCancellation = new CancellationTokenSource();
+        var ct = _mediaCancellation.Token;
+        try
+        {
+            await NarrateAsync("creating campaign…", 2);
+            var campaign = await EnsureCampaignAsync();
+            var contentType = NormalizeMediaContentType(_mediaFile.ContentType, _mediaFile.Name);
+            if (_mediaUpload is null
+                || _mediaUpload.Status == MediaUploadStatus.Cancelled
+                || !string.Equals(_mediaUpload.FileName, _mediaFile.Name, StringComparison.Ordinal)
+                || _mediaUpload.TotalBytes != _mediaFile.Size)
+            {
+                _mediaUpload = await MediaUploads.CreateAsync(
+                    campaign.Id,
+                    _mediaFile.Name,
+                    contentType,
+                    _mediaFile.Size,
+                    ct);
+            }
+
+            if (_mediaUpload.Status == MediaUploadStatus.Uploading)
+            {
+                await using var stream = _mediaFile.OpenReadStream(MaxMediaBytes, ct);
+                await SkipAsync(stream, _mediaUpload.UploadedBytes, ct);
+                while (_mediaUpload.UploadedBytes < _mediaUpload.TotalBytes)
+                {
+                    while (_uploadPaused)
+                    {
+                        await Task.Delay(100, ct);
+                    }
+                    var wanted = (int)Math.Min(
+                        _mediaUpload.BlockSize,
+                        _mediaUpload.TotalBytes - _mediaUpload.UploadedBytes);
+                    var block = await ReadExactlyAsync(stream, wanted, ct);
+                    _mediaUpload = await MediaUploads.PutBlockAsync(
+                        campaign.Id,
+                        _mediaUpload.Id,
+                        _mediaUpload.NextBlockIndex,
+                        block,
+                        ct);
+                    _percent = 5 + (int)Math.Round(_mediaUpload.Percent * 0.7);
+                    SetNarratedStage(
+                        "uploading private media",
+                        $"{FormatBytes(_mediaUpload.UploadedBytes)} / {FormatBytes(_mediaUpload.TotalBytes)}");
+                    StateHasChanged();
+                }
+
+                await NarrateAsync("committing private media…", 78);
+                _mediaUpload = await MediaUploads.CommitAsync(campaign.Id, _mediaUpload.Id, ct);
+            }
+
+            await NarrateAsync(
+                _mediaUpload.TotalBytes > TranscriptionServiceShortLimit
+                    ? "transcribing with Azure AI Speech…"
+                    : "transcribing in the cloud…",
+                85);
+            _mediaUpload = await MediaUploads.TranscribeAsync(
+                campaign.Id,
+                _mediaUpload.Id,
+                useSpeech: _mediaUpload.TotalBytes > TranscriptionServiceShortLimit,
+                ct);
+            _transcriptArtifactId = _mediaUpload.TranscriptArtifactId
+                ?? throw new InvalidOperationException("The completed upload has no transcript artifact.");
+            await LoadTranscriptEvidenceAsync(campaign.Id, _transcriptArtifactId.Value);
+            await NarrateAsync("timed transcript evidence saved", 100);
+            _step = Step.Intent;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _error ??= "The media operation was paused. Resume when ready.";
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or IOException
+            or InvalidOperationException or Microsoft.JSInterop.JSException)
+        {
+            _error = ex is ApiException api ? api.Message
+                : ex is IOException io ? io.Message
+                : ex is InvalidOperationException invalid ? invalid.Message
+                : "Couldn't reach the Castmill API. Your uploaded blocks remain resumable.";
+        }
+        finally
+        {
+            _cloudOperation = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleUploadPause()
+    {
+        _uploadPaused = !_uploadPaused;
+        SetNarratedStage(_uploadPaused ? "upload paused" : "upload resumed", null);
+    }
+
+    private void ReturnToCloudMediaSelection()
+    {
+        _mediaFile = null;
+        _step = Step.Source;
+        _error = _mediaUpload is { } upload
+            ? $"Reselect {upload.FileName} to resume from block {upload.NextBlockIndex}."
+            : null;
+    }
+
+    private async Task CancelCloudUploadAsync()
+    {
+        _mediaCancellation?.Cancel();
+        if (_campaignId is { } campaignId && _mediaUpload is { } upload)
+        {
+            try
+            {
+                await MediaUploads.CancelAsync(campaignId, upload.Id);
+            }
+            catch (ApiException ex)
+            {
+                _error = ex.Message;
+                return;
+            }
+        }
+        _mediaUpload = null;
+        _mediaFile = null;
+        _cloudOperation = false;
+        _uploadPaused = false;
+        _percent = 0;
+        _step = Step.Source;
+        _error = null;
+    }
+
+    private async Task ChooseIntentAsync(string intent)
+    {
+        if (_campaignId is not { } campaignId || !ImportedEvidenceIsApproved)
+        {
+            return;
+        }
+        _busy = true;
+        _error = null;
+        _intent = intent;
+        try
+        {
+            await SaveCampaignContextAsync(campaignId);
+            _step = Step.Context;
+            await SuggestResearchContextAsync();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CorrectImportedEvidenceAsync(
+        (EvidenceBlockResponse Block, string Content) correction)
+    {
+        if (_campaignId is not { } campaignId || _importedEvidence is null)
+        {
+            return;
+        }
+        await UpdateImportedEvidenceAsync(() => Evidence.ReviseAsync(
+            campaignId,
+            _importedEvidence.Source.Id,
+            correction.Block.StableId,
+            correction.Content,
+            isExcluded: null));
+    }
+
+    private async Task ToggleImportedEvidenceAsync(EvidenceBlockResponse block)
+    {
+        if (_campaignId is not { } campaignId || _importedEvidence is null)
+        {
+            return;
+        }
+        await UpdateImportedEvidenceAsync(() => Evidence.ReviseAsync(
+            campaignId,
+            _importedEvidence.Source.Id,
+            block.StableId,
+            content: null,
+            isExcluded: !block.IsExcluded));
+    }
+
+    private async Task ApproveImportedEvidenceAsync()
+    {
+        if (_campaignId is not { } campaignId || _importedEvidence is null)
+        {
+            return;
+        }
+        await UpdateImportedEvidenceAsync(() => Evidence.ApproveAsync(
+            campaignId,
+            _importedEvidence.Source.Id,
+            _importedEvidence.Revision));
+    }
+
+    private async Task UpdateImportedEvidenceAsync(
+        Func<Task<EvidenceRevisionResponse>> update)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _importedEvidence = await update();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _error = ex is ApiException api ? api.Message : "Couldn't update the source evidence.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task StartIngestAsync()
     {
@@ -984,18 +1957,15 @@
         try
         {
             await NarrateAsync("creating campaign…", 10);
-            var campaign = await Campaigns.CreateAsync(_name.Trim(), brief: null);
-            _campaignId = campaign.Id;
-            Workspace.Add(campaign);
+            var campaign = await EnsureCampaignAsync();
 
             await NarrateAsync($"ingesting transcript · {_transcript.Length:N0} characters…", 45);
             var ingest = await Generation.IngestTranscriptAsync(campaign.Id, _transcript);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
+            await LoadTranscriptEvidenceAsync(campaign.Id, ingest.TranscriptArtifactId);
 
-            await NarrateAsync($"{ingest.Segments} timed segments · inferring the research audience…", 85);
-            await SuggestResearchContextAsync();
-            await NarrateAsync("research audience ready for review", 100);
-            _step = Step.Context;
+            await NarrateAsync($"{ingest.Segments} source segments saved", 100);
+            _step = Step.Intent;
         }
         catch (ApiException ex)
         {
@@ -1104,20 +2074,17 @@
             }
 
             await NarrateAsync("creating campaign…", 96);
-            var campaign = await Campaigns.CreateAsync(_name.Trim(), brief: null);
-            _campaignId = campaign.Id;
-            Workspace.Add(campaign);
+            var campaign = await EnsureCampaignAsync();
 
             await NarrateAsync($"combining {_pickedFiles.Count} sources · {combined.Count} timed segments…", 98);
             var ingest = await Generation.IngestTranscriptAsync(
                 campaign.Id, string.Join(' ', combined.Select(segment => segment.Text)),
                 string.Join(" + ", _pickedFiles.Select(file => file.FileName)), combined);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
+            await LoadTranscriptEvidenceAsync(campaign.Id, ingest.TranscriptArtifactId);
 
-            await NarrateAsync($"{ingest.Segments} timed segments · inferring the research audience…", 85);
-            await SuggestResearchContextAsync();
-            await NarrateAsync("research audience ready for review", 100);
-            _step = Step.Context;
+            await NarrateAsync($"{ingest.Segments} timed segments saved", 100);
+            _step = Step.Intent;
         }
         catch (NotSupportedException ex)
         {
@@ -1156,9 +2123,118 @@
         await Task.Yield();
     }
 
+    private async Task LoadTranscriptEvidenceAsync(Guid campaignId, Guid transcriptArtifactId)
+    {
+        var sources = await Evidence.ListSourcesAsync(campaignId);
+        var source = sources
+            .Where(candidate => candidate.Kind == SourceKinds.Transcript
+                && candidate.LegacyArtifactId == transcriptArtifactId)
+            .OrderByDescending(candidate => candidate.CreatedAt)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("The timed transcript evidence was not found.");
+        _importedEvidence = await Evidence.GetEvidenceAsync(campaignId, source.Id);
+    }
+
+    private void SetNarratedStage(string stage, string? detail)
+    {
+        var line = $"{stage}…{(string.IsNullOrWhiteSpace(detail) ? string.Empty : $" {detail}")}";
+        if (_log.Count == 0 || !_log[^1].StartsWith(stage, StringComparison.Ordinal))
+        {
+            _log.Add(line);
+        }
+        else
+        {
+            _log[^1] = line;
+        }
+    }
+
+    private static async Task SkipAsync(Stream stream, long bytes, CancellationToken ct)
+    {
+        var buffer = new byte[64 * 1024];
+        var remaining = bytes;
+        while (remaining > 0)
+        {
+            var read = await stream.ReadAsync(
+                buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)),
+                ct);
+            if (read == 0)
+            {
+                throw new IOException("The reselected file is shorter than the resumable upload.");
+            }
+            remaining -= read;
+        }
+    }
+
+    private static async Task<byte[]> ReadExactlyAsync(
+        Stream stream, int length, CancellationToken ct)
+    {
+        var bytes = new byte[length];
+        var offset = 0;
+        while (offset < length)
+        {
+            var read = await stream.ReadAsync(bytes.AsMemory(offset, length - offset), ct);
+            if (read == 0)
+            {
+                throw new IOException("The selected file ended before its declared size.");
+            }
+            offset += read;
+        }
+        return bytes;
+    }
+
+    private static bool IsMediaContentType(string contentType) =>
+        contentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)
+        || contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeMediaContentType(string contentType, string fileName)
+    {
+        if (IsMediaContentType(contentType))
+        {
+            return contentType;
+        }
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".mp3" => "audio/mpeg",
+            ".m4a" or ".aac" => "audio/mp4",
+            ".wav" => "audio/wav",
+            ".webm" => "audio/webm",
+            ".mp4" or ".m4v" => "video/mp4",
+            ".mov" => "video/quicktime",
+            _ => "application/octet-stream",
+        };
+    }
+
+    private static string FormatBytes(long bytes) => bytes >= 1024L * 1024 * 1024
+        ? $"{bytes / (1024d * 1024 * 1024):0.0} GB"
+        : $"{bytes / (1024d * 1024):0.0} MB";
+
+    private const long TranscriptionServiceShortLimit = 25L * 1024 * 1024;
+
+    private sealed class MemoryBrowserFile(
+        string name,
+        string contentType,
+        byte[] bytes) : IBrowserFile
+    {
+        public string Name => name;
+        public DateTimeOffset LastModified { get; } = DateTimeOffset.UtcNow;
+        public long Size => bytes.LongLength;
+        public string ContentType => contentType;
+
+        public Stream OpenReadStream(
+            long maxAllowedSize = 512_000,
+            CancellationToken cancellationToken = default)
+        {
+            if (bytes.LongLength > maxAllowedSize)
+            {
+                throw new IOException("Recording exceeds the allowed media size.");
+            }
+            return new MemoryStream(bytes, writable: false);
+        }
+    }
+
     private async Task SuggestResearchContextAsync()
     {
-        if (_campaignId is not { } campaignId || _transcriptArtifactId is not { } transcriptId)
+        if (_campaignId is not { } campaignId)
         {
             return;
         }
@@ -1169,7 +2245,8 @@
 
         try
         {
-            var suggestion = await Generation.SuggestResearchContextAsync(campaignId, transcriptId);
+            var suggestion = await Generation.SuggestResearchContextAsync(
+                campaignId, _transcriptArtifactId);
             if (!string.IsNullOrWhiteSpace(suggestion.Audience))
             {
                 _audience = suggestion.Audience.Trim();
@@ -1193,29 +2270,40 @@
     }
 
     private string CampaignBrief => string.Join('\n',
+        $"Campaign intent: {_intent}",
         $"Content type: {_contentType}",
+        $"SEO/AEO: {(_skipSeoAnalysis ? "Skipped" : "Included")}",
         $"Audience: {_audience}",
         $"Brand voice: {_voice}",
         $"Angle: {_angle}");
 
     private async Task SaveCampaignContextAsync(Guid campaignId)
     {
-        var links = _links
-            .Where(l => !string.IsNullOrWhiteSpace(l.Url))
-            .Select(l => new CampaignLink(
-                string.IsNullOrWhiteSpace(l.Label) ? "Link" : l.Label.Trim(), l.Url.Trim()))
-            .ToList();
-        if (HasValidSiteUrl && !links.Any(link =>
-                string.Equals(link.Url, _siteUrl.Trim(), StringComparison.OrdinalIgnoreCase)))
+        await _campaignSaveLock.WaitAsync();
+        try
         {
-            links.Insert(0, new CampaignLink("Site", _siteUrl.Trim()));
-        }
+            var links = _links
+                .Where(l => !string.IsNullOrWhiteSpace(l.Url))
+                .Select(l => new CampaignLink(
+                    string.IsNullOrWhiteSpace(l.Label) ? "Link" : l.Label.Trim(), l.Url.Trim()))
+                .ToList();
+            if (HasValidSiteUrl && !links.Any(link =>
+                    string.Equals(link.Url, _siteUrl.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                links.Insert(0, new CampaignLink("Site", _siteUrl.Trim()));
+            }
 
-        await Campaigns.UpdateAsync(
-            campaignId, _name.Trim(), CampaignBrief,
-            Guid.TryParse(_brandId, out var brandId) ? brandId : null,
-            links.Count > 0 ? links : null,
-            CampaignStatus.Draft, _contentType);
+            await Campaigns.UpdateAsync(
+                campaignId, _name.Trim(), CampaignBrief,
+                Guid.TryParse(_brandId, out var brandId) ? brandId : null,
+                links.Count > 0 ? links : null,
+                CampaignStatus.Draft, _contentType, _intent, SelectedRecipe(),
+                _skipSeoAnalysis);
+        }
+        finally
+        {
+            _campaignSaveLock.Release();
+        }
     }
 
     private async Task PressRunAsync()
@@ -1230,27 +2318,29 @@
 
         try
         {
-            if (_analysis is null)
+            if (!_skipSeoAnalysis && _analysis is null)
             {
                 _error = "Complete the SEO/AEO analysis before starting the content run.";
                 return;
             }
-            await SaveCampaignContextAsync(campaignId);
-
-            if (_transcriptArtifactId is not { } transcriptId)
+            if (!_fanOut.Any(item => item.Selected))
             {
-                _error = "This campaign has no transcript to generate from.";
+                _error = "Choose at least one output for the Press Run.";
                 return;
             }
+            await SaveCampaignContextAsync(campaignId);
 
             // Saved BEFORE the run: the orchestrator reads targets off the campaign when it
             // builds each prompt, so a save that lands after the fan-out starts steers nothing.
-            await SaveTargetsAsync(campaignId);
+            if (!_skipSeoAnalysis)
+            {
+                await SaveTargetsAsync(campaignId);
+            }
 
             // Hand the run to the press-run service and go straight to the Mill Floor:
             // the reveal happens there, card by card, as completions land (ADR-F13).
             PressRun.Start(
-                campaignId, transcriptId, CampaignBrief,
+                campaignId, _transcriptArtifactId, CampaignBrief,
                 ExpandKinds(_fanOut.Where(f => f.Selected).Select(f => f.Kind)));
 
             Navigation.NavigateTo(CampaignViews.PathFor(campaignId, CampaignView.MillFloor));

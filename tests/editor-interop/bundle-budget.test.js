@@ -15,6 +15,10 @@ const bundle = fileURLToPath(
     new URL('../../src/Castmill.UI/wwwroot/js/castmill-editor.js', import.meta.url));
 const apexTreeBundle = fileURLToPath(
     new URL('../../src/Castmill.UI/wwwroot/js/castmill-apextree.js', import.meta.url));
+const apexTreeInterop = fileURLToPath(
+    new URL('../../src/editor-interop/src/apextree.js', import.meta.url));
+const viewsCss = fileURLToPath(
+    new URL('../../src/Castmill.UI/wwwroot/css/views.css', import.meta.url));
 
 describe('editor bundle', () => {
     it('has been built', () => {
@@ -54,5 +58,18 @@ describe('ApexTree bundle', () => {
         const gzipped = gzipSync(readFileSync(apexTreeBundle)).length;
         console.log(`ApexTree bundle: ${(gzipped / 1024).toFixed(1)} KB gzip of 100 KB budget`);
         expect(gzipped).toBeLessThan(100 * 1024);
+    });
+
+    it('uses explicit text-safe semantic colors for status badges', () => {
+        const interopSource = readFileSync(apexTreeInterop, 'utf8');
+        const css = readFileSync(viewsCss, 'utf8');
+
+        expect(interopSource).toContain('color: badgeColor');
+        expect(interopSource).toContain('palette.accentStrong');
+        expect(interopSource).toContain('palette.success');
+        expect(interopSource).toContain('color:${palette.onAccent}');
+        expect(interopSource).toContain('color:${palette.muted}');
+        expect(interopSource).toContain('escapeHtml(content.badge.text)');
+        expect(css).not.toContain('--apex-tree-badge-color');
     });
 });

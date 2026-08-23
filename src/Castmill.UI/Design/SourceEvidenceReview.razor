@@ -1,0 +1,198 @@
+@using Castmill.Core
+@using Castmill.Core.Resources
+
+<section class="cm-evidence-review" aria-label="Source evidence">
+    <header class="cm-evidence-review__head">
+        <div>
+            <span class="cm-kicker">@SourceKindLabel(Source.Kind)</span>
+            <h2>@Source.Label</h2>
+        </div>
+        <span class="cm-badge @(Evidence.IsApproved ? "cm-badge--success" : "cm-badge--warning")">
+            @(Evidence.IsApproved ? "Approved" : $"Draft r{Evidence.Revision}")
+        </span>
+    </header>
+
+    <div class="cm-evidence-review__meta cm-meta">
+        <span>@Evidence.Blocks.Count blocks</span>
+        <span>@Source.Modality</span>
+        @if (Source.OriginalUri is { Length: > 0 } sourceUri)
+        {
+            <a href="@sourceUri" target="_blank" rel="noopener noreferrer">Open captured origin</a>
+        }
+    </div>
+
+    <ol class="cm-evidence-review__blocks">
+        @foreach (var block in Evidence.Blocks)
+        {
+            var active = Highlighted.Contains(block.StableId);
+            <li id="@BlockAnchor(Source.Id, block.StableId)"
+                class="cm-evidence-block @(active ? "cm-evidence-block--active" : null) @(block.IsExcluded ? "cm-evidence-block--excluded" : null)">
+                <header class="cm-evidence-block__head">
+                    <span class="cm-mono cm-meta">@LocatorLabel(block)</span>
+                    <span class="cm-evidence-block__identity">
+                        <span class="cm-mono cm-meta">@block.StableId</span>
+                        <a class="cm-evidence-block__link"
+                           href="@DeepLink(block)"
+                           title="Link to this evidence block"
+                           aria-label="Link to evidence block @block.StableId">#</a>
+                    </span>
+                </header>
+                @if (_editing == block.StableId)
+                {
+                    <textarea class="cm-input cm-evidence-block__editor"
+                              aria-label="Evidence text"
+                              @bind="_editText"></textarea>
+                    <div class="cm-form__actions">
+                        <button type="button" class="cm-button"
+                                disabled="@Busy"
+                                @onclick="() => SaveEditAsync(block)">Save correction</button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                @onclick="CancelEdit">Cancel</button>
+                    </div>
+                }
+                else
+                {
+                    @if (block.LocatorKind == EvidenceLocatorKinds.WebPageImage
+                        && LocatorText(block, "url") is { } imageUrl)
+                    {
+                        <p>@block.Content</p>
+                        <a class="cm-meta" href="@imageUrl" target="_blank" rel="noopener noreferrer">
+                            Open eligible image
+                        </a>
+                    }
+                    else
+                    {
+                        <p>@block.Content</p>
+                    }
+                    @if (Editable)
+                    {
+                        <div class="cm-evidence-block__actions">
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    disabled="@Busy"
+                                    @onclick="() => BeginEdit(block)">Correct</button>
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    disabled="@Busy"
+                                    @onclick="() => ToggleExcludedAsync(block)">
+                                @(block.IsExcluded ? "Include" : "Exclude")
+                            </button>
+                        </div>
+                    }
+                }
+            </li>
+        }
+    </ol>
+
+    @if (!Evidence.IsApproved)
+    {
+        <footer class="cm-evidence-review__footer">
+            <p class="cm-meta">Generation continues to use the previous approved revision until this draft is approved.</p>
+            <button type="button" class="cm-button" disabled="@Busy" @onclick="ApproveAsync">
+                Approve revision @Evidence.Revision
+            </button>
+        </footer>
+    }
+</section>
+
+@code {
+    private string? _editing;
+    private string _editText = string.Empty;
+
+    [Parameter, EditorRequired] public SourceAssetResponse Source { get; set; } = default!;
+    [Parameter, EditorRequired] public EvidenceRevisionResponse Evidence { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid CampaignId { get; set; }
+    [Parameter] public IReadOnlySet<string> Highlighted { get; set; } = new HashSet<string>();
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public bool Editable { get; set; } = true;
+    [Parameter] public EventCallback<(EvidenceBlockResponse Block, string Content)> OnCorrect { get; set; }
+    [Parameter] public EventCallback<EvidenceBlockResponse> OnToggleExcluded { get; set; }
+    [Parameter] public EventCallback OnApprove { get; set; }
+
+    private void BeginEdit(EvidenceBlockResponse block)
+    {
+        _editing = block.StableId;
+        _editText = block.Content;
+    }
+
+    private void CancelEdit()
+    {
+        _editing = null;
+        _editText = string.Empty;
+    }
+
+    private async Task SaveEditAsync(EvidenceBlockResponse block)
+    {
+        if (string.IsNullOrWhiteSpace(_editText))
+        {
+            return;
+        }
+        await OnCorrect.InvokeAsync((block, _editText.Trim()));
+        CancelEdit();
+    }
+
+    private Task ToggleExcludedAsync(EvidenceBlockResponse block) =>
+        OnToggleExcluded.InvokeAsync(block);
+
+    private Task ApproveAsync() => OnApprove.InvokeAsync();
+
+    public static string BlockAnchor(Guid sourceId, string stableId) =>
+        $"evidence-{sourceId:N}-{Uri.EscapeDataString(stableId)}";
+
+    private string DeepLink(EvidenceBlockResponse block) =>
+        $"/campaigns/{CampaignId}/floor?source={Source.Id}&revision={Evidence.Revision}"
+        + $"&evidence={Uri.EscapeDataString(block.StableId)}";
+
+    private static string SourceKindLabel(string kind) => kind switch
+    {
+        SourceKinds.WebPage => "Web page snapshot",
+        SourceKinds.Document => "Document snapshot",
+        SourceKinds.CastmillArtifact => "Castmill artifact snapshot",
+        SourceKinds.Transcript => "Transcript source",
+        _ => "Source evidence",
+    };
+
+    private static string LocatorLabel(EvidenceBlockResponse block) => block.LocatorKind switch
+    {
+        EvidenceLocatorKinds.WebPageMetadata =>
+            LocatorText(block, "label") ?? "Page metadata",
+        EvidenceLocatorKinds.WebPageImage =>
+            LocatorText(block, "alt") ?? "Eligible page image",
+        EvidenceLocatorKinds.WebPageSection =>
+            block.Locator.TryGetProperty("heading", out var heading)
+                && heading.ValueKind == System.Text.Json.JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(heading.GetString())
+                    ? heading.GetString()!
+                    : $"Page section {block.Ordinal + 1}",
+        EvidenceLocatorKinds.DocumentSection =>
+            block.Locator.TryGetProperty("page", out var page)
+                ? $"Page {page.GetInt32()}"
+                : block.Locator.TryGetProperty("paragraph", out var paragraph)
+                    ? $"Paragraph {paragraph.GetInt32()}"
+                    : $"Section {block.Ordinal + 1}",
+        EvidenceLocatorKinds.Slide =>
+            block.Locator.TryGetProperty("slide", out var slide)
+                ? $"Slide {slide.GetInt32()}"
+                : $"Slide {block.Ordinal + 1}",
+        EvidenceLocatorKinds.ArtifactField =>
+            block.Locator.TryGetProperty("path", out var path)
+                ? path.GetString() ?? $"Field {block.Ordinal + 1}"
+                : $"Field {block.Ordinal + 1}",
+        EvidenceLocatorKinds.MediaTimeRange =>
+            block.Locator.TryGetProperty("startSeconds", out var start)
+                ? Clock(start.GetDouble())
+                : $"Segment {block.Ordinal + 1}",
+        _ => $"Block {block.Ordinal + 1}",
+    };
+
+    private static string? LocatorText(EvidenceBlockResponse block, string property) =>
+        block.Locator.TryGetProperty(property, out var value)
+        && value.ValueKind == System.Text.Json.JsonValueKind.String
+        && !string.IsNullOrWhiteSpace(value.GetString())
+            ? value.GetString()
+            : null;
+
+    private static string Clock(double seconds)
+    {
+        var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return time.TotalHours >= 1 ? time.ToString(@"h\:mm\:ss") : time.ToString(@"m\:ss");
+    }
+}

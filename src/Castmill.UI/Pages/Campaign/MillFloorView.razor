@@ -16,6 +16,7 @@
 @inject PressRunService PressRun
 @inject Castmill.UI.Http.CampaignsClient Campaigns
 @inject Castmill.UI.Http.GenerationClient Generation
+@inject Castmill.UI.Http.EvidenceClient Evidence
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject IClipboardService Clipboard
@@ -28,21 +29,39 @@
         <section class="cm-canvas__source">
             <header class="cm-source__head">
                 <span class="cm-kicker">Source master</span>
-                <span class="cm-meta">@(Campaign.Transcript?.Source ?? "no source")</span>
-                @* The transcript is the campaign's raw material; being able to READ it as
-                   text and paste it elsewhere should never require exporting an artifact. *@
-                @if (Campaign.Transcript is { Segments.Count: > 0 })
+                <span class="cm-meta">@(SelectedSource?.Label ?? "no source")</span>
+                @if (SelectedCurrentEvidence is not null)
                 {
                     <span class="cm-source__tools">
                         <button type="button" class="cm-button cm-button--quiet"
                                 @onclick="() => _transcriptOpen = true">View</button>
-                        <button type="button" class="cm-button cm-button--quiet"
-                                @onclick="CopyTranscriptAsync">Copy</button>
+                        @if (SelectedSource?.Id == Campaign.TranscriptSourceAssetId)
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="CopyTranscriptAsync">Copy</button>
+                        }
                     </span>
                 }
             </header>
 
-            @if (Campaign.Transcript is { Segments.Count: > 0 } transcript)
+            @if (Campaign.Sources.Count > 1)
+            {
+                <div class="cm-source-tabs" role="tablist" aria-label="Campaign sources">
+                    @foreach (var source in Campaign.Sources)
+                    {
+                        <button type="button" role="tab"
+                                class="cm-source-tab"
+                            aria-selected="@(source.Id == SelectedSource?.Id ? "true" : "false")"
+                                @onclick="() => SelectSource(source.Id)">
+                            <span>@source.Label</span>
+                            <span class="cm-meta">@SourceKindLabel(source.Kind)</span>
+                        </button>
+                    }
+                </div>
+            }
+
+            @if (SelectedSource?.Id == Campaign.TranscriptSourceAssetId
+                && Campaign.Transcript is { Segments.Count: > 0 } transcript)
             {
                 <div class="cm-source__player cm-duotone" aria-hidden="true">
                     <span class="cm-source__play">&#9654;</span>
@@ -75,11 +94,30 @@
                     </aside>
                 }
             }
+            else if (SelectedApprovedEvidence is { } sourceEvidence && SelectedSource is { } selectedSource)
+            {
+                <SourceEvidenceReview Source="selectedSource"
+                                      Evidence="sourceEvidence"
+                                      CampaignId="CampaignId"
+                                      Highlighted="HighlightedEvidence"
+                                      Busy="_evidenceBusy"
+                                      Editable="false" />
+            }
             else
             {
-                <EmptyState Kicker="Source"
-                            Headline="No transcript on this campaign."
-                            Detail="The source master renders the timed transcript — every thread on this board points back into it." />
+                @if (Campaign.IsLoadingDetails)
+                {
+                    <p class="cm-loading-line" role="status">
+                        <span class="cm-ai-dot" aria-hidden="true"></span>
+                        Loading source evidence…
+                    </p>
+                }
+                else
+                {
+                    <EmptyState Kicker="Source"
+                                Headline="No approved evidence on this campaign."
+                                Detail="Import a source before generating campaign content." />
+                }
             }
         </section>
 
@@ -351,26 +389,30 @@
             }
         </section>
 
-        @if (_transcriptOpen && Campaign.Transcript is { } fullTranscript)
+        @if (_transcriptOpen && SelectedCurrentEvidence is { } reviewEvidence && SelectedSource is { } reviewSource)
         {
             <div class="cm-modal" role="presentation" @onclick="() => _transcriptOpen = false">
                 <div class="cm-modal__panel cm-transcript-modal" role="dialog" aria-modal="true"
-                     aria-label="Transcript" @onclick:stopPropagation>
+                     aria-label="Source evidence" @onclick:stopPropagation>
                     <header class="cm-transcript-modal__head">
-                        <h2>Transcript</h2>
-                        <span class="cm-meta">@fullTranscript.Segments.Count segments · @fullTranscript.Source</span>
+                        <h2>@reviewSource.Label</h2>
+                        <span class="cm-meta">@reviewEvidence.Blocks.Count evidence blocks</span>
                     </header>
-                    @* Flowing text, not the rail's timestamped slivers: this view exists for
-                       reading and for select-all, and timestamps in the middle of sentences
-                       defeat both. *@
                     <div class="cm-transcript-modal__body">
-                        @foreach (var chunk in TranscriptParagraphs())
-                        {
-                            <p>@chunk</p>
-                        }
+                        <SourceEvidenceReview Source="reviewSource"
+                                              Evidence="reviewEvidence"
+                                              CampaignId="CampaignId"
+                                              Highlighted="HighlightedEvidence"
+                                              Busy="_evidenceBusy"
+                                              OnCorrect="CorrectEvidenceAsync"
+                                              OnToggleExcluded="ToggleEvidenceAsync"
+                                              OnApprove="ApproveEvidenceAsync" />
                     </div>
                     <footer class="cm-form__actions">
-                        <button type="button" class="cm-button" @onclick="CopyTranscriptAsync">Copy all</button>
+                        @if (reviewSource.Id == Campaign.TranscriptSourceAssetId)
+                        {
+                            <button type="button" class="cm-button" @onclick="CopyTranscriptAsync">Copy all</button>
+                        }
                         <button type="button" class="cm-button cm-button--quiet"
                                 @onclick="() => _transcriptOpen = false">Close</button>
                     </footer>
@@ -419,14 +461,25 @@
     private ElementReference _canvas;
     private Guid? _hoverId;
     private Guid? _pinnedId;
+    private Guid? _selectedSourceId;
     private bool _overview;
     private int _geometryEpoch;
+    private bool _evidenceBusy;
 
     [Parameter] public Guid CampaignId { get; set; }
 
     /// <summary>Deep link from the omnibox's transcript search: highlights this segment.</summary>
     [SupplyParameterFromQuery(Name = "seg")]
     private string? RequestedSegment { get; set; }
+
+    [SupplyParameterFromQuery(Name = "source")]
+    public Guid? RequestedSource { get; set; }
+
+    [SupplyParameterFromQuery(Name = "evidence")]
+    public string? RequestedEvidence { get; set; }
+
+    [SupplyParameterFromQuery(Name = "revision")]
+    public int? RequestedRevision { get; set; }
 
     private Guid? ActiveId => _hoverId ?? _pinnedId;
 
@@ -435,6 +488,76 @@
 
     private IReadOnlyList<string> PinnedCitations =>
         _pinnedId is { } id ? CitationsOf(id) : [];
+
+    private SourceAssetResponse? SelectedSource =>
+        Campaign.Sources.FirstOrDefault(source => source.Id == _selectedSourceId)
+        ?? Campaign.Sources.FirstOrDefault(source => source.Id == Campaign.TranscriptSourceAssetId)
+        ?? Campaign.Sources.FirstOrDefault();
+
+    private EvidenceRevisionResponse? SelectedCurrentEvidence =>
+        SelectedSource is { } source
+            && Campaign.Evidence.TryGetValue(source.Id, out var evidence)
+                ? evidence
+                : null;
+
+    private EvidenceRevisionResponse? SelectedApprovedEvidence =>
+        ResolveProvenanceEvidence();
+
+    private EvidenceRevisionResponse? ResolveProvenanceEvidence()
+    {
+        if (SelectedSource is not { } source)
+        {
+            return null;
+        }
+        if (RequestedSource == source.Id
+            && RequestedRevision is { } requestedRevision
+            && Campaign.HistoricalEvidence.TryGetValue(
+                (source.Id, requestedRevision), out var requested))
+        {
+            return requested;
+        }
+        if (ActiveId is { } artifactId)
+        {
+            var marker = Campaign.Artifacts
+                .FirstOrDefault(artifact => artifact.Id == artifactId)?
+                .Evidence?
+                .FirstOrDefault(candidate => candidate.SourceAssetId == source.Id);
+            if (marker is not null
+                && Campaign.HistoricalEvidence.TryGetValue(
+                    (source.Id, marker.Revision), out var historical))
+            {
+                return historical;
+            }
+        }
+        return Campaign.ApprovedEvidence.GetValueOrDefault(source.Id);
+    }
+
+    private IReadOnlySet<string> HighlightedEvidence
+    {
+        get
+        {
+            if (SelectedSource is not { } source || ActiveId is not { } artifactId)
+            {
+                return string.IsNullOrWhiteSpace(RequestedEvidence)
+                    ? new HashSet<string>()
+                    : new HashSet<string>([RequestedEvidence], StringComparer.OrdinalIgnoreCase);
+            }
+            var citations = Campaign.Artifacts.FirstOrDefault(artifact => artifact.Id == artifactId)?.Citations ?? [];
+            var highlighted = citations
+                .Select(citation => CitationReferenceCodec.TryParse(citation, out var reference)
+                    && reference.SourceAssetId == source.Id
+                        ? reference.EvidenceBlockId
+                        : null)
+                .Where(id => id is not null)
+                .Select(id => id!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(RequestedEvidence))
+            {
+                highlighted.Add(RequestedEvidence);
+            }
+            return highlighted;
+        }
+    }
 
     private string ZoomCss => _overview ? "0.72" : "1";
 
@@ -517,11 +640,25 @@
         PressRun.Changed += OnPressRunChanged;
     }
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
         if (!string.IsNullOrEmpty(RequestedSegment))
         {
             _highlighted.Add(RequestedSegment);
+        }
+        if (RequestedSource is { } requestedSource)
+        {
+            _selectedSourceId = requestedSource;
+        }
+        EnsureSelectedSource();
+        await EnsureRequestedEvidenceAsync();
+    }
+
+    private async Task EnsureRequestedEvidenceAsync()
+    {
+        if (RequestedSource is { } sourceId && RequestedRevision is { } revision)
+        {
+            await Campaign.EnsureEvidenceRevisionAsync(CampaignId, sourceId, revision);
         }
     }
 
@@ -529,17 +666,95 @@
     private IReadOnlyList<string> CitationsOf(Guid artifactId) =>
         ArtifactDisplay.ResolveCitations(
             Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Citations,
-            Campaign.Transcript?.Segments);
+            Campaign.Transcript?.Segments,
+            Campaign.TranscriptSourceAssetId);
 
     private string ArtifactTitle(Guid artifactId) =>
         Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId)?.Title ?? "…";
 
-    private void Hover(ArtifactPreviewResponse artifact) => _hoverId = artifact.Id;
+    private void Hover(ArtifactPreviewResponse artifact)
+    {
+        _hoverId = artifact.Id;
+        SelectFirstCitedSource(artifact);
+        QueueArtifactEvidence(artifact);
+    }
 
     private void Unhover() => _hoverId = null; // the pinned set, if any, takes back over
 
-    private void TogglePin(ArtifactPreviewResponse artifact) =>
+    private void TogglePin(ArtifactPreviewResponse artifact)
+    {
         _pinnedId = _pinnedId == artifact.Id ? null : artifact.Id;
+        if (_pinnedId is not null)
+        {
+            SelectFirstCitedSource(artifact);
+            QueueArtifactEvidence(artifact);
+        }
+    }
+
+    private void QueueArtifactEvidence(ArtifactPreviewResponse artifact) =>
+        _ = InvokeAsync(() => StoreEvents.GuardedAsync(
+            () => EnsureArtifactEvidenceAsync(artifact),
+            Notifier,
+            StateHasChanged,
+            "Loading cited evidence"));
+
+    private async Task EnsureArtifactEvidenceAsync(ArtifactPreviewResponse artifact)
+    {
+        foreach (var marker in artifact.Evidence ?? [])
+        {
+            await Campaign.EnsureEvidenceRevisionAsync(
+                CampaignId, marker.SourceAssetId, marker.Revision);
+        }
+    }
+
+    private void SelectFirstCitedSource(ArtifactPreviewResponse artifact)
+    {
+        var sourceId = artifact.Citations?
+            .Select(citation => CitationReferenceCodec.TryParse(citation, out var reference)
+                ? reference.SourceAssetId
+                : null)
+            .FirstOrDefault(id => id is not null);
+        if (sourceId is { } citedSourceId
+            && Campaign.Sources.Any(source => source.Id == citedSourceId))
+        {
+            _selectedSourceId = citedSourceId;
+        }
+    }
+
+    private void SelectSource(Guid sourceId)
+    {
+        _selectedSourceId = sourceId;
+        _geometryEpoch++;
+    }
+
+    private void EnsureSelectedSource()
+    {
+        if (RequestedSource is { } requestedSource
+            && Campaign.Sources.Any(source => source.Id == requestedSource))
+        {
+            _selectedSourceId = requestedSource;
+            return;
+        }
+        if (Campaign.Sources.Count == 0)
+        {
+            return;
+        }
+        if (_selectedSourceId is null
+            || !Campaign.Sources.Any(source => source.Id == _selectedSourceId))
+        {
+            _selectedSourceId = Campaign.TranscriptSourceAssetId
+                ?? Campaign.Sources.FirstOrDefault()?.Id;
+        }
+    }
+
+    private static string SourceKindLabel(string kind) => kind switch
+    {
+        SourceKinds.Transcript => "Transcript",
+        SourceKinds.WebPage => "Web page",
+        SourceKinds.Document => "Document",
+        SourceKinds.CastmillArtifact => "Castmill artifact",
+        _ => "Source",
+    };
 
     /// <summary>
     /// On-demand menu entries; "social" fans out to the six real platform kinds. Image
@@ -593,14 +808,14 @@
     /// </summary>
     private void GenerateKind(string kind)
     {
-        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        if (Campaign.TranscriptArtifactId is null && Campaign.Sources.Count == 0)
         {
             return;
         }
 
         var kinds = kind == "social" ? ArtifactDisplay.SocialKinds : [kind];
         var angle = string.IsNullOrWhiteSpace(_addAngle) ? null : _addAngle.Trim();
-        PressRun.Start(CampaignId, transcriptId, angle, kinds, _addCount);
+        PressRun.Start(CampaignId, Campaign.TranscriptArtifactId, angle, kinds, _addCount);
         _addKind = null;
     }
 
@@ -644,9 +859,15 @@
         }
     }
 
-    private void OpenFocus(ArtifactPreviewResponse artifact) =>
+    private void OpenFocus(ArtifactPreviewResponse artifact)
+    {
+        // A completed press is transient progress, not navigation history. Clear it before
+        // entering Focus so browser Back returns to the board rather than reopening Done.
+        // Acknowledge deliberately leaves a still-running press intact.
+        PressRun.Acknowledge();
         Navigation.NavigateTo(
             $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifact.Id}");
+    }
 
     private void SetZoom(bool overview)
     {
@@ -687,8 +908,10 @@
     };
 
     private void OnCampaignChanged() => InvokeAsync(() =>
-        StoreEvents.GuardedAsync(() =>
+        StoreEvents.GuardedAsync(async () =>
     {
+        EnsureSelectedSource();
+        await EnsureRequestedEvidenceAsync();
         // Track which artifacts are new so the Press Run's print-in animation applies to
         // exactly the cards that just landed, in completion order.
         foreach (var artifact in Campaign.Artifacts)
@@ -699,7 +922,6 @@
             }
         }
 
-        return Task.CompletedTask;
     }, Notifier, StateHasChanged, "Refreshing the floor"));
 
     // The board reload on completion lives in PressRunService now, so the floor refreshes
@@ -785,6 +1007,71 @@
     }
 
     private bool _transcriptOpen;
+
+    private async Task CorrectEvidenceAsync((EvidenceBlockResponse Block, string Content) edit)
+    {
+        if (SelectedSource is not { } source)
+        {
+            return;
+        }
+        await MutateEvidenceAsync(async () =>
+        {
+            await Evidence.ReviseAsync(
+                CampaignId, source.Id, edit.Block.StableId, edit.Content, null);
+            Notifier.ShowSuccess("Evidence correction saved as a new draft revision.");
+        });
+    }
+
+    private async Task ToggleEvidenceAsync(EvidenceBlockResponse block)
+    {
+        if (SelectedSource is not { } source)
+        {
+            return;
+        }
+        await MutateEvidenceAsync(async () =>
+        {
+            await Evidence.ReviseAsync(
+                CampaignId, source.Id, block.StableId, null, !block.IsExcluded);
+            Notifier.ShowSuccess(block.IsExcluded
+                ? "Evidence block included in the draft."
+                : "Evidence block excluded from the draft.");
+        });
+    }
+
+    private async Task ApproveEvidenceAsync()
+    {
+        if (SelectedSource is not { } source || SelectedCurrentEvidence is not { } evidence)
+        {
+            return;
+        }
+        await MutateEvidenceAsync(async () =>
+        {
+            await Evidence.ApproveAsync(CampaignId, source.Id, evidence.Revision);
+            Notifier.ShowSuccess($"Approved evidence revision {evidence.Revision}.");
+        });
+    }
+
+    private async Task MutateEvidenceAsync(Func<Task> mutation)
+    {
+        if (_evidenceBusy || SelectedSource is not { } source)
+        {
+            return;
+        }
+        _evidenceBusy = true;
+        try
+        {
+            await mutation();
+            await Campaign.RefreshEvidenceAsync(CampaignId, source.Id);
+        }
+        catch (Http.ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _evidenceBusy = false;
+        }
+    }
 
     /// <summary>
     /// Segments regrouped into readable paragraphs (~5 segments each): the rail's

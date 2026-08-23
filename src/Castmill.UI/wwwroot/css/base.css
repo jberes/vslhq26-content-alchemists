@@ -141,7 +141,7 @@ a {
 }
 
 a:hover {
-    color: var(--cm-accent-hover);
+    color: var(--cm-accent-strong);
 }
 
 code,

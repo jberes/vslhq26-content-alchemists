@@ -1,4 +1,5 @@
 using Castmill.Core;
+using Castmill.Core.Resources;
 
 namespace Castmill.UI.State;
 
@@ -13,7 +14,7 @@ public static class ArtifactDisplay
     public static string StatusLabel(string status) => status switch
     {
         ArtifactStatus.InReview => "In review",
-        ArtifactStatus.Queued => "Queued",
+        ArtifactStatus.Queued => "Reviewed",
         ArtifactStatus.Published => "Published",
         _ => "Draft",
     };
@@ -28,6 +29,14 @@ public static class ArtifactDisplay
         ArtifactStatus.Queued => "cm-status cm-status--queued",
         ArtifactStatus.Published => "cm-status cm-status--published",
         _ => "cm-status",
+    };
+
+    public static string StatusBarModifier(string status) => status switch
+    {
+        ArtifactStatus.InReview => "cm-card__bar--review",
+        ArtifactStatus.Queued => "cm-card__bar--queued",
+        ArtifactStatus.Published => "cm-card__bar--published",
+        _ => string.Empty,
     };
 
     /// <summary>
@@ -203,11 +212,18 @@ public static class ArtifactDisplay
     /// lines silently stopped drawing.
     /// </summary>
     public static IReadOnlyList<string> ResolveCitations(
-        IReadOnlyList<string>? cited, IReadOnlyList<Castmill.Core.Ai.TranscriptSegment>? segments)
+        IReadOnlyList<string>? cited,
+        IReadOnlyList<Castmill.Core.Ai.TranscriptSegment>? segments,
+        Guid? transcriptSourceAssetId = null)
     {
-        if (cited is null || cited.Count == 0 || segments is null || segments.Count == 0)
+        if (cited is null || cited.Count == 0)
         {
             return cited ?? [];
+        }
+        if (segments is null || segments.Count == 0)
+        {
+            return [.. cited.Where(citation =>
+                !CitationReferenceCodec.TryParse(citation, out _))];
         }
 
         var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -218,7 +234,14 @@ public static class ArtifactDisplay
 
         // A thread to a segment that does not exist would be a line pointing at nothing.
         return [.. cited
-            .Select(c => canonical.TryGetValue(c, out var real) ? real : null)
+            .Select(c => CitationReferenceCodec.TryParse(c, out var reference)
+                ? reference.SourceAssetId == transcriptSourceAssetId
+                    ? reference.EvidenceBlockId
+                    : null
+                : c)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .Select(id => canonical.TryGetValue(id, out var real) ? real : null)
             .Where(id => id is not null)
             .Select(id => id!)];
     }

@@ -24,14 +24,39 @@ public sealed class DesignTokenTests
         ("--cmf-on-surface", "--cmf-surface-sunken"),
         ("--cmf-on-surface-muted", "--cmf-surface"),
         ("--cmf-on-surface-muted", "--cmf-surface-raised"),
+        ("--cmf-on-surface-muted", "--cmf-surface-sunken"),
         ("--cmf-on-surface-subtle", "--cmf-surface"),
+        ("--cmf-on-surface-subtle", "--cmf-surface-raised"),
+        ("--cmf-on-surface-subtle", "--cmf-surface-sunken"),
         ("--cmf-on-accent", "--cmf-accent-strong"),
         ("--cmf-on-inverse", "--cmf-surface-inverse"),
         ("--cmf-on-rail", "--cmf-surface-rail"),
         ("--cmf-on-rail-muted", "--cmf-surface-rail"),
         ("--cmf-success", "--cmf-surface"),
+        ("--cmf-success", "--cmf-surface-raised"),
+        ("--cmf-success", "--cmf-surface-sunken"),
         ("--cmf-warning", "--cmf-surface"),
+        ("--cmf-warning", "--cmf-surface-raised"),
+        ("--cmf-warning", "--cmf-surface-sunken"),
         ("--cmf-danger", "--cmf-surface"),
+        ("--cmf-danger", "--cmf-surface-raised"),
+        ("--cmf-danger", "--cmf-surface-sunken"),
+    ];
+
+    private static readonly (string Foreground, string Background, string? Parent)[] InteractivePairs =
+    [
+        ("--cmf-on-accent", "--cmf-accent-strong", null),
+        ("--cmf-on-accent", "--cmf-accent-hover", null),
+        ("--cmf-on-accent", "--cmf-success", null),
+        ("--cmf-on-accent", "--cmf-danger", null),
+        ("--cmf-on-surface", "--cmf-accent-wash", "--cmf-surface"),
+        ("--cmf-on-surface", "--cmf-accent-wash", "--cmf-surface-raised"),
+        ("--cmf-on-surface", "--cmf-accent-wash", "--cmf-surface-sunken"),
+        ("--cmf-on-rail", "--cmf-accent-wash", "--cmf-surface-rail"),
+        ("--cmf-on-surface", "--cmf-surface-sunken", null),
+        ("--cmf-accent-strong", "--cmf-surface", null),
+        ("--cmf-accent-strong", "--cmf-surface-raised", null),
+        ("--cmf-accent-strong", "--cmf-surface-sunken", null),
     ];
 
     private static readonly string[] Families = ["warm-editorial", "industry-blueprint"];
@@ -59,6 +84,72 @@ public sealed class DesignTokenTests
                         failures.Add(
                             $"{family}/{mode}: {fg} on {bg} is {ratio:0.00}:1 (needs 4.5:1)");
                     }
+                }
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    }
+
+    [Fact]
+    public void Every_interactive_state_pair_clears_WCAG_AA_in_all_four_palettes()
+    {
+        var failures = new List<string>();
+
+        foreach (var family in Families)
+        {
+            foreach (var mode in Modes)
+            {
+                var tokens = TokensFor(family, mode);
+                foreach (var (foregroundToken, backgroundToken, parentToken) in InteractivePairs)
+                {
+                    var foreground = Resolve(tokens, foregroundToken);
+                    var background = ResolveWithAlpha(tokens, backgroundToken);
+                    var opaqueBackground = background.A < 1
+                        ? Composite(background, Resolve(tokens, parentToken!))
+                        : (background.R, background.G, background.B);
+                    var ratio = ContrastRatio(foreground, opaqueBackground);
+                    if (ratio < 4.5)
+                    {
+                        failures.Add(
+                            $"{family}/{mode}: {foregroundToken} on {backgroundToken}"
+                            + (parentToken is null ? string.Empty : $" over {parentToken}")
+                            + $" is {ratio:0.00}:1 (needs 4.5:1)");
+                    }
+                }
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
+    }
+
+    [Fact]
+    public void Every_background_changing_interactive_state_declares_its_foreground()
+    {
+        var cssRoot = Path.Combine(RepositoryRoot(), "src", "Castmill.UI", "wwwroot", "css");
+        var failures = new List<string>();
+        var stateMarkers = new[]
+        {
+            ":hover", ":focus", "[aria-selected", "[aria-pressed",
+            "--active", "--selected", "--on",
+        };
+
+        foreach (var file in new[] { "base.css", "components.css", "views.css" })
+        {
+            var css = string.Join('\n', StripComments(File.ReadAllText(Path.Combine(cssRoot, file))));
+            foreach (Match rule in Regex.Matches(css, @"(?<selectors>[^{}]+)\{(?<body>[^{}]*)\}"))
+            {
+                var selectors = rule.Groups["selectors"].Value.Trim();
+                var body = rule.Groups["body"].Value;
+                if (!stateMarkers.Any(marker => selectors.Contains(marker, StringComparison.Ordinal))
+                    || !Regex.IsMatch(body, @"(?m)^\s*background(?:-color)?\s*:"))
+                {
+                    continue;
+                }
+                if (!Regex.IsMatch(body, @"(?m)^\s*color\s*:"))
+                {
+                    var line = css[..rule.Index].Count(character => character == '\n') + 1;
+                    failures.Add($"{file}:{line} {selectors} changes background without color");
                 }
             }
         }
@@ -245,6 +336,28 @@ public sealed class DesignTokenTests
         Assert.True(tokens.TryGetValue(token, out var raw), $"{token} is not defined");
         return ParseColour(raw!);
     }
+
+    private static (double R, double G, double B, double A) ResolveWithAlpha(
+        Dictionary<string, string> tokens, string token)
+    {
+        Assert.True(tokens.TryGetValue(token, out var raw), $"{token} is not defined");
+        var colour = ParseColour(raw!);
+        var numbers = Regex.Matches(raw!, @"[\d.]+")
+            .Select(match => double.Parse(match.Value, CultureInfo.InvariantCulture))
+            .ToList();
+        var alpha = raw!.Contains('/', StringComparison.Ordinal) && numbers.Count >= 4
+            ? numbers[3]
+            : 1;
+        return (colour.R, colour.G, colour.B, alpha);
+    }
+
+    private static (double R, double G, double B) Composite(
+        (double R, double G, double B, double A) foreground,
+        (double R, double G, double B) background) =>
+        (
+            foreground.R * foreground.A + background.R * (1 - foreground.A),
+            foreground.G * foreground.A + background.G * (1 - foreground.A),
+            foreground.B * foreground.A + background.B * (1 - foreground.A));
 
     private static (double R, double G, double B) ParseColour(string value)
     {

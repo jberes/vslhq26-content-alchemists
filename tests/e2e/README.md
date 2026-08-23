@@ -12,6 +12,18 @@ check opens the full-height YouTube editor and persists a prompt longer than the
 4,000-character limit. It makes no model or DataForSEO calls and removes all disposable content
 rows after the run.
 
+The always-on webpage-import regression creates disposable campaigns while stubbing only the
+external page response. It verifies immutable metadata and eligible-image review, page-specific
+intent choices, exclusion plus revision approval, horizontal containment, and the honest recovery
+message for a JavaScript-only shell. API integration tests separately exercise the real bounded
+fetch, parser, SSRF guard, structured-data extraction, and prompt-injection boundary.
+
+The always-on media/voice regression uses Chromium's deterministic fake microphone and mocked
+metered transcription/SEO responses while keeping real authentication, campaign persistence and
+shared RCL behavior. It completes resumable media selection and voice Record → Pause → Resume →
+Stop → playback → Use recording, verifies block checksums and content types, reviews timed evidence,
+and reaches analysis approval plus Press Run for both sources without calling a paid provider.
+
 The deep SEO scenario drives the real browser UI and local API through:
 
 `sign-in → transcript → AI context + selected-brand voice → deep SEO/AEO report → approval → production brief → Focus Mode`

@@ -50,6 +50,7 @@
 
 .cm-app__content {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     min-inline-size: 0;   /* see above */
     overflow: hidden;
@@ -71,6 +72,7 @@
     position: relative;
     display: grid;
     grid-template-rows: minmax(0, 1fr);
+    min-inline-size: 0;
     min-block-size: 0;
     overflow: hidden;
 }
@@ -102,8 +104,10 @@
 .cm-campaign-frame {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
+    min-inline-size: 0;
     min-block-size: 0;
     block-size: 100%;
+    overflow: hidden;
 }
 
 /* ---- Scroll containment -------------------------------------------------------- */

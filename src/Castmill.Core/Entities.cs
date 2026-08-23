@@ -29,6 +29,12 @@ public sealed class Campaign : ITenantScoped
     public string Status { get; set; } = CampaignStatus.Draft;
     /// <summary>Tutorial | ProductDemo | Webinar | ThoughtLeadership.</summary>
     public string? ContentType { get; set; }
+    /// <summary>Why this source is being milled; independent from source modality and format.</summary>
+    public string? Intent { get; set; }
+    /// <summary>JSON array of requested initial output kinds; the Press Run expands aliases.</summary>
+    public string? OutputRecipeJson { get; set; }
+    /// <summary>Explicit producer choice to generate from approved source evidence without SEO/AEO research.</summary>
+    public bool SkipSeoAnalysis { get; set; }
 
     /// <summary>The brand steering this campaign's generation — null means "None".
     /// No FK constraint; brand delete detaches campaigns explicitly (house style).</summary>
@@ -78,6 +84,22 @@ public static class CampaignContentType
         ThoughtLeadership => "Thought leadership",
         _ => "Campaign",
     };
+}
+
+public static class CampaignIntent
+{
+    public const string Repurpose = "repurpose";
+    public const string Promote = "promote";
+    public const string Launch = "launch";
+    public const string BuildAuthority = "build-authority";
+    public const string Refresh = "refresh";
+    public const string CaptureIdea = "capture-idea";
+
+    public static readonly string[] All =
+        [Repurpose, Promote, Launch, BuildAuthority, Refresh, CaptureIdea];
+
+    public static bool IsValid(string? value) => string.IsNullOrWhiteSpace(value)
+        || All.Contains(value, StringComparer.Ordinal);
 }
 
 public sealed class Artifact : ITenantScoped
@@ -145,6 +167,8 @@ public sealed class ArtifactRevision : ITenantScoped
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public Guid ArtifactId { get; set; }
+    /// <summary>The dependency observation current when this content was snapshotted.</summary>
+    public Guid? ContentDependencySnapshotId { get; set; }
     /// <summary>The artifact's Version at the time of the snapshot.</summary>
     public long Version { get; set; }
     public required string Title { get; set; }
@@ -312,6 +336,33 @@ public sealed class Asset : ITenantScoped
     public long SizeBytes { get; set; }
     public required string BlobPath { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>A private, resumable audio/video upload that becomes one transcript source.</summary>
+public sealed class MediaUpload : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid AssetId { get; set; }
+    public long UploadedBytes { get; set; }
+    public int NextBlockIndex { get; set; }
+    public required string BlockIdsJson { get; set; }
+    public required string Status { get; set; }
+    public string? Error { get; set; }
+    public Guid? TranscriptArtifactId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
+public static class MediaUploadStatus
+{
+    public const string Uploading = "Uploading";
+    public const string Committed = "Committed";
+    public const string Transcribing = "Transcribing";
+    public const string Completed = "Completed";
+    public const string Cancelled = "Cancelled";
 }
 
 /// <summary>

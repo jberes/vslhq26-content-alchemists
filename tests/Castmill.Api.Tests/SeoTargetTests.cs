@@ -305,7 +305,7 @@ public sealed class SeoTargetTests(CastmillApiFactory factory)
             var prompt = string.Join("\n", messages.Select(m => m.Text));
             prompts.Add(prompt);
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                """{"title":"News","subject":"s","bodyMarkdown":"body","citations":["S1"]}""")));
+                """{"title":"News","subject":"s","bodyMarkdown":"Watch: [YOUTUBE_VIDEO_URL]","citations":["S1"]}""")));
         }
 
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

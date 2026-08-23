@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Castmill.Core;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
 
@@ -65,6 +66,53 @@ public sealed class ResourceApiTests(CastmillApiFactory factory)
         Assert.Equal(HttpStatusCode.NotFound, (await bob.PutAsJsonAsync($"/api/v1/campaigns/{campaign.Id}",
             new CampaignUpdateRequest("hijack", null))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await bob.DeleteAsync($"/api/v1/campaigns/{campaign.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Campaign_run_plan_roundtrips_and_rejects_unsupported_outputs()
+    {
+        var client = await AuthedClientAsync();
+        var create = await client.PostAsJsonAsync(
+            "/api/v1/campaigns",
+            new CampaignCreateRequest(
+                "Launch run",
+                null,
+                Intent: CampaignIntent.Launch,
+                OutputRecipe: ["youtube", "blog", "social"]));
+        create.EnsureSuccessStatusCode();
+        var campaign = (await create.Content.ReadFromJsonAsync<CampaignResponse>())!;
+        Assert.Equal(CampaignIntent.Launch, campaign.Intent);
+        Assert.Equal(["youtube", "blog", "social"], campaign.OutputRecipe);
+
+        var update = await client.PutAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}",
+            new CampaignUpdateRequest(
+                campaign.Name,
+                campaign.Brief,
+                Status: campaign.Status,
+                Intent: CampaignIntent.Refresh,
+                OutputRecipe: ["blog", "newsletter"]));
+        update.EnsureSuccessStatusCode();
+        var updated = (await update.Content.ReadFromJsonAsync<CampaignResponse>())!;
+        Assert.Equal(CampaignIntent.Refresh, updated.Intent);
+        Assert.Equal(["blog", "newsletter"], updated.OutputRecipe);
+
+        var renamed = await client.PutAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}",
+            new CampaignUpdateRequest("Renamed without run-plan fields", null));
+        renamed.EnsureSuccessStatusCode();
+        var preserved = (await renamed.Content.ReadFromJsonAsync<CampaignResponse>())!;
+        Assert.Equal(CampaignIntent.Refresh, preserved.Intent);
+        Assert.Equal(["blog", "newsletter"], preserved.OutputRecipe);
+
+        var invalid = await client.PutAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}",
+            new CampaignUpdateRequest(
+                campaign.Name,
+                null,
+                Intent: "invented-intent",
+                OutputRecipe: ["seo-report"]));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
     }
 
     [Fact]

@@ -1,0 +1,355 @@
+@using System.Text.Json
+@using Castmill.Core
+@using Castmill.Core.Ai
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Editor
+@using Castmill.UI.Http
+@using Castmill.UI.State
+@inject CampaignsClient Campaigns
+@inject ScheduleClient Schedule
+@inject INotifier Notifier
+
+<section class="cm-composer" aria-labelledby="cm-composer-title">
+    <header class="cm-composer__head">
+        <div>
+            <span class="cm-kicker">Composer</span>
+            <h2 id="cm-composer-title" class="cm-front__block-title">@Item.Title</h2>
+            <span class="cm-meta">@Item.CampaignName · @ArtifactDisplay.KindLabel(Item.Kind)</span>
+        </div>
+        <button type="button" class="cm-button cm-button--quiet" aria-label="Close composer"
+                disabled="@_working" @onclick="CloseAsync">Close</button>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="cm-meta" role="status">Loading the reviewed copy…</p>
+    }
+    else if (_loadError is { } loadError)
+    {
+        <p class="cm-form__error" role="alert">@loadError</p>
+    }
+    else if (!IsSocialArtifact)
+    {
+        <p class="cm-form__error" role="alert">
+            This composer schedules reviewed social posts. @ArtifactDisplay.KindLabel(Item.Kind)
+            remains available in Focus mode, but it is not sent through a social channel.
+        </p>
+    }
+    else
+    {
+        <div class="cm-composer__readiness">
+            <span class="@((Readiness?.Ready ?? false) ? "cm-status cm-status--queued" : "cm-status")">
+                @((Readiness?.Ready ?? false) ? "Broker ready" : "Local staging")
+            </span>
+            <span class="cm-meta">@(Readiness?.Detail ?? "Publishing readiness has not been checked yet.")</span>
+        </div>
+
+        <div class="cm-composer__grid">
+            <div class="cm-composer__variants">
+                <span class="cm-kicker">Channel variants</span>
+                @foreach (var draft in _drafts)
+                {
+                    <article class="cm-composer__variant">
+                        <label class="cm-fanout__item">
+                            <input type="checkbox" checked="@draft.Selected" disabled="@draft.Completed"
+                                   @onchange="e => SelectChannel(draft, e.Value is true)" />
+                            <span>@draft.Channel.Name@(draft.Completed ? " · scheduled" : "")</span>
+                        </label>
+                        <textarea class="cm-input cm-composer__text" rows="5"
+                                  aria-label="@($"Copy for {draft.Channel.Name}")"
+                                  disabled="@(!draft.Selected || draft.Completed)"
+                                  value="@draft.Text"
+                                  @oninput="e => UpdateText(draft, e.Value?.ToString() ?? string.Empty)"></textarea>
+                        <div class="cm-composer__meter">
+                            <span class="cm-mono cm-meta">@draft.CharacterCount / @draft.Limit</span>
+                            @if (draft.OverBy > 0)
+                            {
+                                <span class="cm-form__error" role="alert">
+                                    @draft.OverBy over limit. Remove exactly @draft.OverBy character@(draft.OverBy == 1 ? "" : "s") before scheduling.
+                                </span>
+                            }
+                        </div>
+                        <div class="cm-composer__preview" data-platform="@draft.Platform">
+                            <span class="cm-kicker">@draft.Platform preview</span>
+                            <p>@draft.Text</p>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <aside class="cm-composer__controls">
+                <label class="cm-field">
+                    <span class="cm-field__label">Existing image</span>
+                    <select class="cm-input" value="@_mediaUrl" @onchange="SelectImage">
+                        <option value="">No image</option>
+                        @foreach (var image in SafeImages)
+                        {
+                            <option value="@image.PublishedUrl">@ArtifactDisplay.SlotLabel(image.Kind)</option>
+                        }
+                    </select>
+                </label>
+                @if (!string.IsNullOrWhiteSpace(_mediaUrl))
+                {
+                    <img class="cm-composer__image" src="@_mediaUrl" alt="Selected publishing attachment" />
+                    <span class="cm-meta">Only the selected published URL is sent to the broker. No storage credential reaches the client.</span>
+                }
+
+                <label class="cm-field">
+                    <span class="cm-field__label">Schedule at</span>
+                    <InputDate class="cm-input" Type="InputDateType.DateTimeLocal"
+                               @bind-Value="_scheduledAt" @bind-Value:after="InvalidateStage" />
+                </label>
+                @if (!ScheduleTimeIsValid)
+                {
+                    <span class="cm-form__error" role="alert">Choose a future time.</span>
+                }
+
+                <div class="cm-composer__actions">
+                    <button type="button" class="cm-button cm-button--quiet"
+                            disabled="@(!CanStage || _working)" @onclick="StageAsync">
+                        @(_staged ? "Queued locally" : "Add to Queue")
+                    </button>
+                    <button type="button" class="cm-button"
+                            disabled="@(!CanSchedule || _working)" @onclick="ScheduleAsync">
+                        @(_working ? "Scheduling…" : (Readiness?.CanSchedule ?? false) ? "Schedule" : "Save local schedule")
+                    </button>
+                    <button type="button" class="cm-button cm-button--quiet" disabled
+                            title="The broker abstraction does not expose next-slot selection.">
+                        Next slot
+                    </button>
+                    <button type="button" class="cm-button cm-button--quiet" disabled
+                            title="The broker abstraction does not expose immediate publishing.">
+                        Send now
+                    </button>
+                </div>
+
+                @if (_staged)
+                {
+                    <p class="cm-meta" role="status">
+                        Staged in this composer. Schedule writes one mirror row per selected channel.
+                    </p>
+                }
+            </aside>
+        </div>
+    }
+</section>
+
+@code {
+    private sealed class ChannelDraft(PublishChannel channel, string text, bool selected)
+    {
+        public PublishChannel Channel { get; } = channel;
+        public string Text { get; set; } = text;
+        public bool Selected { get; set; } = selected;
+        public bool Completed { get; set; }
+        public string Platform => NormalizePlatform(Channel.Platform);
+        public int Limit => PlatformLimits.MaxChars.GetValueOrDefault(Platform, 65_000);
+        public int CharacterCount => PlatformLimits.CharacterCount(Text);
+        public int OverBy => PlatformLimits.OverBy(Platform, Text);
+    }
+
+    private readonly List<ChannelDraft> _drafts = [];
+    private CampaignPreview? _preview;
+    private string? _loadKey;
+    private bool _loading;
+    private bool _working;
+    private bool _staged;
+    private string? _loadError;
+    private string? _mediaUrl;
+    private DateTime _scheduledAt = NextHour();
+
+    [Parameter, EditorRequired] public DashboardArtifact Item { get; set; } = default!;
+    [Parameter] public PublishReadinessResponse? Readiness { get; set; }
+    [Parameter] public IReadOnlyList<PublishChannel> Channels { get; set; } = [];
+    [Parameter] public EventCallback Closed { get; set; }
+    [Parameter] public EventCallback Scheduled { get; set; }
+
+    private bool IsSocialArtifact =>
+        Item.Kind.StartsWith("social-", StringComparison.Ordinal)
+        && ArtifactKinds.IsDistributionContent(Item.Kind);
+
+    private IEnumerable<ImageSlotResponse> SafeImages => (_preview?.ImageSlots ?? [])
+        .Where(image => image.State == "Filled"
+            && (image.ArtifactId == Item.ArtifactId
+                || image.ArtifactId is null && image.Kind == "social-card")
+            && IsSafeMediaUrl(image.PublishedUrl));
+
+    private bool CanStage =>
+        (Readiness?.CanStageLocally ?? true)
+        && _drafts.Any(draft => draft.Selected)
+        && _drafts.Where(draft => draft.Selected).All(draft =>
+            !string.IsNullOrWhiteSpace(draft.Text) && draft.OverBy == 0);
+
+    private bool ScheduleTimeIsValid => _scheduledAt > DateTime.Now;
+    private bool CanSchedule => _staged && CanStage && ScheduleTimeIsValid;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var loadKey = $"{Item.ArtifactId:N}:{string.Join(',', Channels.Select(channel => channel.Id))}";
+        if (_loadKey == loadKey)
+        {
+            return;
+        }
+
+        _loadKey = loadKey;
+        _loading = true;
+        _loadError = null;
+        _drafts.Clear();
+
+        try
+        {
+            var artifact = (await Campaigns.GetArtifactAsync(Item.CampaignId, Item.ArtifactId)).Artifact;
+            _preview = await Campaigns.GetPreviewAsync(Item.CampaignId);
+            var copy = StructuredContent.ToDisplayMarkdown(Item.Kind, artifact.ContentJson).Trim();
+            var channels = Channels.Count > 0 ? Channels : [LocalChannel(Item.Kind)];
+            var artifactPlatform = NormalizePlatform(Item.Kind["social-".Length..]);
+            foreach (var channel in channels)
+            {
+                var selected = NormalizePlatform(channel.Platform) == artifactPlatform;
+                _drafts.Add(new ChannelDraft(channel, copy, selected));
+            }
+        }
+        catch (ApiException ex)
+        {
+            _loadError = ex.Message;
+        }
+        catch (HttpRequestException)
+        {
+            _loadError = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SelectChannel(ChannelDraft draft, bool selected)
+    {
+        draft.Selected = selected;
+        InvalidateStage();
+    }
+
+    private void UpdateText(ChannelDraft draft, string text)
+    {
+        draft.Text = text;
+        InvalidateStage();
+    }
+
+    private void SelectImage(ChangeEventArgs args)
+    {
+        _mediaUrl = args.Value?.ToString();
+        InvalidateStage();
+    }
+
+    private Task StageAsync()
+    {
+        if (!CanStage)
+        {
+            return Task.CompletedTask;
+        }
+
+        _staged = true;
+        Notifier.ShowSuccess($"{_drafts.Count(draft => draft.Selected)} channel variant(s) added to the local queue.");
+        return Task.CompletedTask;
+    }
+
+    private async Task ScheduleAsync()
+    {
+        if (!CanSchedule)
+        {
+            return;
+        }
+
+        _working = true;
+        var scheduled = 0;
+        var failures = new List<string>();
+        try
+        {
+            foreach (var draft in _drafts.Where(draft => draft.Selected && !draft.Completed).ToList())
+            {
+                try
+                {
+                    var result = await Schedule.CreateAsync(new ScheduleEntryCreateRequest(
+                        Item.CampaignId,
+                        Item.ArtifactId,
+                        draft.Channel.Id,
+                        draft.Text,
+                        ToDateTimeOffset(_scheduledAt),
+                        _mediaUrl,
+                        PushToBroker: Readiness?.CanSchedule ?? false));
+                    var acceptedStatus = Readiness?.CanSchedule ?? false ? "Queued" : "Draft";
+                    if (result.Status == acceptedStatus)
+                    {
+                        scheduled++;
+                        draft.Completed = true;
+                        draft.Selected = false;
+                    }
+                    else
+                    {
+                        failures.Add($"{draft.Channel.Name}: {result.Error ?? $"Castmill returned {result.Status}."}");
+                    }
+                }
+                catch (ApiException ex)
+                {
+                    failures.Add($"{draft.Channel.Name}: {ex.Message}");
+                }
+                catch (HttpRequestException)
+                {
+                    failures.Add($"{draft.Channel.Name}: couldn't reach the Castmill API.");
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                Notifier.ShowError($"{scheduled} scheduled. {string.Join(" ", failures)}");
+                return;
+            }
+
+            Notifier.ShowSuccess(Readiness?.CanSchedule ?? false
+                ? $"Scheduled {scheduled} channel post(s)."
+                : $"Saved {scheduled} local schedule draft(s). Connect a broker to publish them.");
+            await Scheduled.InvokeAsync();
+            await Closed.InvokeAsync();
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    private Task CloseAsync() => _working ? Task.CompletedTask : Closed.InvokeAsync();
+
+    private void InvalidateStage() => _staged = false;
+
+    private static DateTimeOffset ToDateTimeOffset(DateTime local) =>
+        new(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(local));
+
+    private static DateTime NextHour()
+    {
+        var next = DateTime.Now.AddHours(1);
+        return new DateTime(next.Year, next.Month, next.Day, next.Hour, 0, 0);
+    }
+
+    private static PublishChannel LocalChannel(string kind)
+    {
+        var platform = NormalizePlatform(kind["social-".Length..]);
+        return new PublishChannel(platform, $"{ArtifactDisplay.KindLabel(kind)} · Castmill staging", platform);
+    }
+
+    private static string NormalizePlatform(string value)
+    {
+        var platform = value.Trim().ToLowerInvariant();
+        if (platform is "twitter" or "twitter-x")
+        {
+            return "x";
+        }
+
+        return PlatformLimits.MaxChars.Keys.FirstOrDefault(key =>
+            platform.Equals(key, StringComparison.Ordinal)
+            || platform.Contains(key, StringComparison.Ordinal)) ?? platform;
+    }
+
+    private static bool IsSafeMediaUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && uri.Scheme is "https" or "http";
+}

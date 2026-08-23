@@ -1,5 +1,6 @@
 using System.Net;
 using Castmill.Api.Services.Ai;
+using Castmill.Api.Services.Evidence;
 
 namespace Castmill.Api.Tests;
 
@@ -13,6 +14,18 @@ namespace Castmill.Api.Tests;
 /// </summary>
 public sealed class BrandLookupTests
 {
+    [Theory]
+    [InlineData("::1")]
+    [InlineData("fe80::1")]
+    [InlineData("fc00::1")]
+    [InlineData("2001:db8::1")]
+    [InlineData("2001:0000::1")]
+    [InlineData("2002:7f00:1::")]
+    public void Non_global_ipv6_addresses_are_private_source_targets(string address)
+    {
+        Assert.True(PublicUrlGuard.IsPrivate(System.Net.IPAddress.Parse(address)));
+    }
+
     [Theory]
     [InlineData("http://169.254.169.254/latest/meta-data/")]  // cloud metadata — the classic target
     [InlineData("http://127.0.0.1:5005/api/v1/campaigns")]

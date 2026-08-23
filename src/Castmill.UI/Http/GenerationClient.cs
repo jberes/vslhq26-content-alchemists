@@ -17,7 +17,11 @@ public sealed record RunItem(
     Guid? ArtifactId,
     string? Error,
     IReadOnlyList<string>? ValidationWarnings,
-    long DurationMs);
+    long DurationMs,
+    Guid? SlotId = null,
+    int? VariantIndex = null,
+    string? Outcome = null,
+    string? ErrorCode = null);
 
 /// <summary>
 /// Run progress, as the Press Run polls it (backend B9.8). Items appear in completion
@@ -44,20 +48,29 @@ public sealed class GenerationClient(ApiClient api)
 {
     /// <summary>Infers the audience before SEO/AEO research without generating content.</summary>
     public Task<ResearchContextSuggestionResponse> SuggestResearchContextAsync(
-        Guid campaignId, Guid transcriptArtifactId, CancellationToken ct = default) =>
+        Guid campaignId, Guid? transcriptArtifactId, CancellationToken ct = default) =>
         api.PostAsync<object, ResearchContextSuggestionResponse>(
-            $"api/v1/ai/campaigns/{campaignId}/research-context?transcriptArtifactId={transcriptArtifactId}",
+            $"api/v1/ai/campaigns/{campaignId}/research-context"
+            + (transcriptArtifactId is null
+                ? string.Empty
+                : $"?transcriptArtifactId={transcriptArtifactId}"),
             new { }, anonymous: false, ct);
 
     /// <summary>Builds the production brief after SEO/AEO approval so the final step is review, not a form.</summary>
     public Task<BriefSuggestionResponse> SuggestBriefAsync(
-        Guid campaignId, Guid transcriptArtifactId, string? title, CancellationToken ct = default)
+        Guid campaignId, Guid? transcriptArtifactId, string? title, CancellationToken ct = default)
     {
-        var url = $"api/v1/ai/campaigns/{campaignId}/brief?transcriptArtifactId={transcriptArtifactId}";
+        var query = new List<string>();
+        if (transcriptArtifactId is not null)
+        {
+            query.Add($"transcriptArtifactId={transcriptArtifactId}");
+        }
         if (!string.IsNullOrWhiteSpace(title))
         {
-            url += $"&title={Uri.EscapeDataString(title)}";
+            query.Add($"title={Uri.EscapeDataString(title)}");
         }
+        var url = $"api/v1/ai/campaigns/{campaignId}/brief"
+            + (query.Count == 0 ? string.Empty : $"?{string.Join('&', query)}");
         return api.PostAsync<object, BriefSuggestionResponse>(url, new { }, anonymous: false, ct);
     }
 
@@ -76,7 +89,7 @@ public sealed class GenerationClient(ApiClient api)
     /// directly — <see cref="PressRunService"/> holds the task and polls the latest run.
     /// </summary>
     public Task<RunFinished> GenerateAsync(
-        Guid campaignId, Guid transcriptArtifactId, string? brief, string[] kinds,
+        Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds,
         int count = 1, CancellationToken ct = default) =>
         api.PostAsync<object, RunFinished>(
             $"api/v1/ai/campaigns/{campaignId}/generate",
@@ -89,7 +102,7 @@ public sealed class GenerationClient(ApiClient api)
     /// <summary>Regenerates one kind (Focus mode's Producer rail). Note backend 🔶 5.7: this
     /// currently inserts a new artifact row rather than revising in place.</summary>
     public Task<RunItem> GenerateOneAsync(
-        Guid campaignId, string kind, Guid transcriptArtifactId, string? brief,
+        Guid campaignId, string kind, Guid? transcriptArtifactId, string? brief,
         Guid? parentArtifactId = null, Guid? replaceArtifactId = null,
         CancellationToken ct = default) =>
         api.PostAsync<object, RunItem>(

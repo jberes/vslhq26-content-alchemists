@@ -24,6 +24,18 @@ public sealed class ClipBatchExportTests : CastmillUiTestContext
         """;
 
     [Fact]
+    public void Clip_scheduling_requires_durable_exported_media_and_never_uses_the_suggestion_artifact()
+    {
+        var view = Render<ClipReview>(p => p.Add(c => c.ContentJson, ThreeClips));
+
+        var schedule = view.FindAll("button")
+            .Single(button => button.TextContent.Contains("Send exported clip to scheduler", StringComparison.Ordinal));
+        Assert.True(schedule.HasAttribute("disabled"));
+        Assert.Contains("durable broker-readable URL", view.Markup, StringComparison.Ordinal);
+        Assert.Contains("clip-suggestions artifact is an instruction sheet", view.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Export_all_cuts_every_clip_in_order_with_its_publishing_copy()
     {
         Media.EnableLocalProcessing();

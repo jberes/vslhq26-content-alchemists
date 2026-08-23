@@ -16,6 +16,8 @@
     <!-- Official Anthropic SDK, MIT. Used only by the second-pass Tech Edit (ADR-020):
          it returns a Microsoft.Extensions.AI IChatClient, so ADR-005's "all AI behind
          Microsoft.Extensions.AI" holds and no call site learns a second abstraction. -->
+    <!-- Generalized source adapters: structured HTML and page-aware PDF extraction. -->
+    <PackageReference Include="AngleSharp" Version="1.7.1" />
     <PackageReference Include="Anthropic" Version="12.39.0" />
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
@@ -46,8 +48,12 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.8.3" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.6" />
+    <PackageReference Include="PdfPig" Version="0.1.15" />
     <PackageReference Include="SkiaSharp" Version="4.150.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.150.1" />
+        <!-- PdfPig currently resolves SSH.NET 2025.1.0 (GHSA-q939-rpr3-3284); pin the patched
+          runtime transitive explicitly. NuGet audit is an error, never suppressed. -->
+        <PackageReference Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>
 
   <ItemGroup>

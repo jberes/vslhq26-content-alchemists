@@ -9,7 +9,10 @@ public sealed record CampaignCreateRequest(
     [property: MaxLength(8000)] string? Brief,
     Guid? BrandId = null,
     IReadOnlyList<CampaignLink>? Links = null,
-    [property: MaxLength(30)] string? ContentType = null);
+    [property: MaxLength(30)] string? ContentType = null,
+    [property: MaxLength(30)] string? Intent = null,
+    IReadOnlyList<string>? OutputRecipe = null,
+    bool SkipSeoAnalysis = false);
 
 public sealed record CampaignUpdateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
@@ -17,7 +20,10 @@ public sealed record CampaignUpdateRequest(
     Guid? BrandId = null,
     IReadOnlyList<CampaignLink>? Links = null,
     [property: MaxLength(20)] string Status = CampaignStatus.Draft,
-    [property: MaxLength(30)] string? ContentType = null);
+    [property: MaxLength(30)] string? ContentType = null,
+    [property: MaxLength(30)] string? Intent = null,
+    IReadOnlyList<string>? OutputRecipe = null,
+    bool SkipSeoAnalysis = false);
 
 public sealed record CampaignResponse(
     Guid Id, Guid OwnerId, string Name, string? Brief,
@@ -25,18 +31,37 @@ public sealed record CampaignResponse(
     Guid? BrandId = null,
     IReadOnlyList<CampaignLink>? Links = null,
     string Status = CampaignStatus.Draft,
-    string? ContentType = null);
+    string? ContentType = null,
+    string? Intent = null,
+    IReadOnlyList<string>? OutputRecipe = null,
+    bool SkipSeoAnalysis = false);
 
 /// <summary>One artifact row on the workspace dashboard (review queue / aging drafts).</summary>
 public sealed record DashboardArtifact(
     Guid CampaignId, string CampaignName, Guid ArtifactId,
     string Kind, string Title, string Status, DateTimeOffset UpdatedAt);
 
+/// <summary>Counts for the four editorial workflow bins shown on the Review desk.</summary>
+public sealed record ReviewDeskCounts(
+    int Draft,
+    int InReview,
+    int Reviewed,
+    int Published);
+
+/// <summary>One bounded page from a single editorial workflow bin.</summary>
+public sealed record ReviewDeskResponse(
+    string Status,
+    int Total,
+    IReadOnlyList<DashboardArtifact> Items);
+
 /// <summary>Per-campaign counters for the campaigns index cards.</summary>
 public sealed record CampaignCounts(
     Guid CampaignId, int Artifacts, int InReview, int ImagesFilled, int ImagesTotal,
     /// <summary>Most recently placed image, cache-busted — the card's media band. Null keeps the duotone placeholder.</summary>
-    string? HeroImageUrl = null);
+    string? HeroImageUrl = null,
+    int Draft = 0,
+    int Reviewed = 0,
+    int Published = 0);
 
 /// <summary>
 /// The workspace dashboard in ONE call. The front page and the campaigns index previously
@@ -52,7 +77,8 @@ public sealed record DashboardResponse(
     IReadOnlyList<string> EmptySlotModels,
     Guid? FirstEmptySlotCampaign,
     /// <summary>Reviewed artifacts waiting for a slot on the Wire (status Queued).</summary>
-    IReadOnlyList<DashboardArtifact>? ReadyToSchedule = null);
+    IReadOnlyList<DashboardArtifact>? ReadyToSchedule = null,
+    ReviewDeskCounts? ReviewCounts = null);
 
 // ---- Artifacts -------------------------------------------------------------
 
@@ -70,10 +96,11 @@ public sealed record ArtifactUpdateRequest(
 public sealed record ArtifactPreviewResponse(
     Guid Id, Guid CampaignId, string Kind, string Title, string Status, long Version,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
-    /// <summary>Transcript segment ids this artifact cites — the provenance threads' data.</summary>
+    /// <summary>Evidence citation ids this artifact cites — legacy segment ids remain readable.</summary>
     IReadOnlyList<string>? Citations = null,
     Guid? ParentArtifactId = null,
-    bool IsPlaceholder = false);
+    bool IsPlaceholder = false,
+    IReadOnlyList<ApprovedEvidenceRevision>? Evidence = null);
 
 public sealed record ArtifactResponse(
     Guid Id, Guid CampaignId, string Kind, string Title, string ContentJson, string Status,
@@ -117,7 +144,9 @@ public sealed record ImageSlotResponse(
     IReadOnlyList<Guid>? ReferenceAssetIds = null,
     /// <summary>Thumb of the best un-discarded take (kept first, then newest) — lets the sheet
     /// preview a slot that has generated work but nothing placed yet. Null when no takes.</summary>
-    string? LatestTakeThumbUrl = null);
+    string? LatestTakeThumbUrl = null,
+    /// <summary>Candidate + kept takes. Discarded takes do not satisfy a future batch target.</summary>
+    int ActiveTakeCount = 0);
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,
@@ -172,6 +201,31 @@ public sealed record VariantBatchResponse(
     IReadOnlyList<ImageVariantResponse> Variants,
     IReadOnlyList<string>? Failures);
 
+public sealed record ImageBatchGenerateRequest(
+    [property: Range(1, 6)] int VariantsPerSlot = 1,
+    /// <summary>Optional explicit content-item scope; null generates across the campaign.</summary>
+    Guid? ArtifactId = null);
+
+public sealed record ImageBatchSlotResult(
+    Guid SlotId,
+    string Kind,
+    string Outcome,
+    int RequestedVariants,
+    int SucceededVariants,
+    int FailedVariants,
+    string? ErrorCode = null,
+    string? Error = null);
+
+public sealed record ImageBatchResponse(
+    Guid RunId,
+    int EligibleSlots,
+    int SucceededSlots,
+    int FailedSlots,
+    int SkippedSlots,
+    int SucceededVariants,
+    int FailedVariants,
+    IReadOnlyList<ImageBatchSlotResult> Slots);
+
 public sealed record PlaceVariantRequest(
     /// <summary>The persisted variant to place. Preferred over Url.</summary>
     Guid? VariantId,
@@ -194,7 +248,7 @@ public sealed record ScheduleEntryCreateRequest(
     [property: Required] Guid CampaignId,
     Guid? ArtifactId,
     [property: Required, MinLength(1), MaxLength(200)] string ChannelId,
-    [property: Required, MinLength(1), MaxLength(65_000)] string Text,
+    [property: Required, MinLength(1)] string Text,
     [property: Required] DateTimeOffset ScheduledAt,
     [property: MaxLength(2000)] string? MediaUrl,
     /// <summary>Push to the broker immediately; false keeps the entry local (Draft).</summary>
@@ -207,6 +261,16 @@ public sealed record ScheduleEntryResponse(
     Guid Id, Guid CampaignId, Guid? ArtifactId, string ChannelId, string? BrokerPostId,
     string Text, string? MediaUrl, DateTimeOffset ScheduledAt, string Status, string? Error,
     DateTimeOffset UpdatedAt);
+
+public sealed record PublishReadinessResponse(
+    bool BrokerConfigured,
+    bool CredentialStored,
+    bool Ready,
+    string Detail,
+    bool CanStageLocally = true,
+    bool CanSchedule = false,
+    bool CanSendNow = false,
+    bool CanUseNextSlot = false);
 
 // ---- Assets (metadata only until B3 wires blob SAS) ------------------------
 
@@ -266,12 +330,12 @@ public sealed record SeoQuestion(
 
 public sealed record SeoResearchRequest(
     [property: Required] Guid CampaignId,
-    [property: Required] Guid TranscriptArtifactId);
+    Guid? TranscriptArtifactId = null);
 
 /// <summary>The required, persisted analysis that precedes content generation.</summary>
 public sealed record SeoDeepAnalysisRequest(
     [property: Required] Guid CampaignId,
-    [property: Required] Guid TranscriptArtifactId,
+    Guid? TranscriptArtifactId = null,
     [property: MaxLength(2000), Url] string? SiteUrl = null);
 
 public sealed record SeoSerpResult(

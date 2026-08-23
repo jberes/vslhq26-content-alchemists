@@ -12,7 +12,10 @@ public sealed record TranscriptSegment(
     string? SourceLabel = null);
 
 /// <summary>Stored as the ContentJson of an artifact with Kind = "transcript".</summary>
-public sealed record TranscriptContent(string Source, IReadOnlyList<TranscriptSegment> Segments);
+public sealed record TranscriptContent(
+    string Source,
+    IReadOnlyList<TranscriptSegment> Segments,
+    Guid? SourceAssetId = null);
 
 public sealed record TranscriptIngestRequest(
     [property: Required, MinLength(20), MaxLength(400_000)] string Text,
@@ -27,7 +30,7 @@ public sealed record TranscriptIngestRequest(
     IReadOnlyList<TranscriptSegment>? Segments = null);
 
 public sealed record GenerateRequest(
-    [property: Required] Guid TranscriptArtifactId,
+    Guid? TranscriptArtifactId,
     [property: MaxLength(4000)] string? Brief,
     /// <summary>Subset of generator kinds to run; null/empty = the full fan-out.</summary>
     string[]? Kinds,

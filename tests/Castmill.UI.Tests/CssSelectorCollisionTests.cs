@@ -128,5 +128,17 @@ public sealed class CssSelectorCollisionTests
             + string.Join("\n  ", offenders));
     }
 
+    [Fact]
+    public void Campaign_scroll_regions_are_clipped_below_an_opaque_header()
+    {
+        var layout = File.ReadAllText(Path.Combine(CssRoot(), "layout.css"));
+        var views = File.ReadAllText(Path.Combine(CssRoot(), "views.css"));
+
+        Assert.Matches(@"(?s)\.cm-campaign-frame\s*\{[^}]*overflow:\s*hidden", layout);
+        Assert.Matches(@"(?s)\.cm-campaign-header\s*\{[^}]*position:\s*relative", views);
+        Assert.Matches(@"(?s)\.cm-campaign-header\s*\{[^}]*z-index:\s*2", views);
+        Assert.Matches(@"(?s)\.cm-campaign-header\s*\{[^}]*background:\s*var\(--cm-surface\)", views);
+    }
+
 
 }

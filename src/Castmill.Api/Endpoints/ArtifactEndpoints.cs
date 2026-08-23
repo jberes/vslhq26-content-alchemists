@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Castmill.Api.Data;
+using Castmill.Api.Services.Evidence;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Resources;
@@ -41,11 +42,17 @@ public static class ArtifactEndpoints
     internal static async Task SnapshotRevisionAsync(
         CastmillDbContext db, Artifact artifact, string reason, DateTimeOffset now, CancellationToken ct)
     {
+        var dependencySnapshotId = await db.ContentDependencySnapshots
+            .Where(snapshot => snapshot.ArtifactId == artifact.Id && snapshot.IsCurrent)
+            .OrderByDescending(snapshot => snapshot.CreatedAt)
+            .Select(snapshot => (Guid?)snapshot.Id)
+            .FirstOrDefaultAsync(ct);
         db.ArtifactRevisions.Add(new ArtifactRevision
         {
             Id = Guid.NewGuid(),
             TenantId = artifact.TenantId,
             ArtifactId = artifact.Id,
+            ContentDependencySnapshotId = dependencySnapshotId,
             Version = artifact.Version,
             Title = artifact.Title,
             ContentJson = artifact.ContentJson,
@@ -87,6 +94,38 @@ public static class ArtifactEndpoints
         {
             return null;
         }
+    }
+
+    internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ApprovedEvidenceRevision>>>
+        LoadEvidenceMarkersAsync(
+            CastmillDbContext db, IReadOnlyList<Guid> artifactIds, CancellationToken ct)
+    {
+        if (artifactIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<ApprovedEvidenceRevision>>();
+        }
+        var snapshots = await db.ContentDependencySnapshots
+            .Where(snapshot => artifactIds.Contains(snapshot.ArtifactId) && snapshot.IsCurrent)
+            .Select(snapshot => new { snapshot.Id, snapshot.ArtifactId })
+            .ToListAsync(ct);
+        var snapshotIds = snapshots.Select(snapshot => snapshot.Id).ToList();
+        var artifactBySnapshot = snapshots.ToDictionary(snapshot => snapshot.Id, snapshot => snapshot.ArtifactId);
+        var markers = await db.ContentEvidenceDependencies
+            .Where(marker => snapshotIds.Contains(marker.SnapshotId))
+            .OrderBy(marker => marker.SourceAssetId)
+            .ToListAsync(ct);
+        return markers
+            .GroupBy(marker => artifactBySnapshot[marker.SnapshotId])
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<ApprovedEvidenceRevision>)group
+                    .Select(marker => new ApprovedEvidenceRevision(
+                        marker.SourceAssetId,
+                        marker.Revision,
+                        marker.RevisionId,
+                        marker.Hash,
+                        marker.ApprovedAt))
+                    .ToList());
     }
 
     private static string ToEtag(long version) => $"\"{version}\"";
@@ -136,11 +175,14 @@ public static class ArtifactEndpoints
             .OrderBy(a => a.Kind).ThenBy(a => a.CreatedAt)
             .Select(a => new { a.Id, a.CampaignId, a.ParentArtifactId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson, a.ContentJson })
             .ToListAsync(ct);
+        var evidence = await LoadEvidenceMarkersAsync(
+            db, rows.Select(row => row.Id).ToList(), ct);
         var previews = rows
             .Select(a => new ArtifactPreviewResponse(
                 a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt,
                 ParseCitations(a.CitationsJson), a.ParentArtifactId,
-                a.ContentJson.Contains("\"placeholder\":true")))
+                a.ContentJson.Contains("\"placeholder\":true"),
+                evidence.GetValueOrDefault(a.Id)))
             .ToList();
         return Results.Ok(previews);
     }
@@ -338,6 +380,7 @@ public static class ArtifactEndpoints
         HttpRequest httpRequest,
         HttpResponse response,
         CastmillDbContext db,
+        IContentDependencyService dependencies,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -368,7 +411,7 @@ public static class ArtifactEndpoints
         artifact.ContentJson = revision.ContentJson;
         artifact.Version++;
         artifact.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+        await dependencies.RestoreAsync(artifact, revision.ContentDependencySnapshotId, ct);
 
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,

@@ -1,0 +1,82 @@
+@using Castmill.Core
+@using Castmill.Core.Resources
+
+<section class="cm-deep-report__section" aria-label="Re-analysis impact review">
+    <span class="cm-kicker">Re-analysis impact review</span>
+    <h2>Choose what follows the current evidence and strategy</h2>
+    <p class="cm-meta">
+        Nothing changes until you choose. Keep acknowledges the current inputs without editing
+        the content; Regenerate creates a revision and replaces the current take.
+    </p>
+
+    @if (Affected.Count == 0)
+    {
+        <p class="cm-meta" role="status">All tracked user content is current.</p>
+    }
+    else
+    {
+        <div class="cm-scroll-x">
+            <table class="cm-seo__table">
+                <thead>
+                    <tr><th>Content</th><th>Impact</th><th>Reason</th><th>Decision</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Affected)
+                    {
+                        var busy = BusyArtifactId == item.ArtifactId;
+                        <tr>
+                            <td>
+                                <strong>@item.Title</strong>
+                                <span class="cm-meta">@item.Kind</span>
+                            </td>
+                            <td><span class="cm-chip">@StateLabel(item.State)</span></td>
+                            <td>
+                                @foreach (var reason in item.Reasons)
+                                {
+                                    <span class="cm-meta">@reason.Detail</span>
+                                }
+                                @if (item.ReadinessReason is not null)
+                                {
+                                    <span class="cm-meta">@item.ReadinessReason</span>
+                                }
+                            </td>
+                            <td>
+                                <div class="cm-form__actions">
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(busy || !item.CanAcknowledge)"
+                                            @onclick="() => OnKeep.InvokeAsync(item.ArtifactId)">
+                                        @(busy ? "Working…" : "Keep")
+                                    </button>
+                                    <button type="button" class="cm-button"
+                                            disabled="@(busy || !item.CanRegenerate)"
+                                            @onclick="() => OnRegenerate.InvokeAsync(item.ArtifactId)">
+                                        @(busy ? "Working…" : "Regenerate")
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ContentImpactReviewResponse Review { get; set; } = default!;
+    [Parameter] public Guid? BusyArtifactId { get; set; }
+    [Parameter] public EventCallback<Guid> OnKeep { get; set; }
+    [Parameter] public EventCallback<Guid> OnRegenerate { get; set; }
+
+    private IReadOnlyList<ContentImpactItemResponse> Affected =>
+        Review.Artifacts.Where(item => item.State != ContentStalenessStates.Fresh).ToList();
+
+    private static string StateLabel(string state) => state switch
+    {
+        ContentStalenessStates.EvidenceChanged => "Evidence changed",
+        ContentStalenessStates.StrategyChanged => "Strategy changed",
+        ContentStalenessStates.BothChanged => "Evidence + strategy changed",
+        ContentStalenessStates.Unknown => "Needs transition",
+        _ => state,
+    };
+}

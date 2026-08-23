@@ -21,7 +21,7 @@
 
     --cmf-on-surface: #1d1f20;
     --cmf-on-surface-muted: #5d5d60;  /* neutral-700; 600 fails AA on this surface */
-    --cmf-on-surface-subtle: #6c6c6f;
+   --cmf-on-surface-subtle: #5d5d60;
     --cmf-on-inverse: #f2f2f3;
 
     --cmf-accent: #5980a6;            /* steel blue */

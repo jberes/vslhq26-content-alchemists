@@ -33,8 +33,16 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
 
     private sealed class FakeBroker : IPublishBrokerClient
     {
-        public Task<IReadOnlyList<BrokerChannel>> ListChannelsAsync(string token, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<BrokerChannel>>([new BrokerChannel("ch-1", "Main X", "x")]);
+        public int ListCalls { get; private set; }
+
+        public Task<IReadOnlyList<BrokerChannel>> ListChannelsAsync(string token, CancellationToken ct)
+        {
+            ListCalls++;
+            return Task.FromResult<IReadOnlyList<BrokerChannel>>([
+                new BrokerChannel("ch-1", "Main X", "x"),
+                new BrokerChannel("ch-bad", "Broken X", "x"),
+            ]);
+        }
 
         public Task<BrokerPost> SchedulePostAsync(string token, string channelId, string text, DateTimeOffset scheduledAt, string? mediaUrl, CancellationToken ct) =>
             channelId == "ch-bad"
@@ -136,6 +144,38 @@ public sealed class PipelineEndpointsTests(CastmillApiFactory factory)
 
         var status = await client.GetAsync($"/api/v1/media/clip-jobs/{message.JobId}");
         Assert.Contains("Succeeded", await status.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Publish_readiness_is_truthful_without_contacting_the_broker()
+    {
+        var broker = new FakeBroker();
+        await using var app = factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Publish:BrokerBaseUrl", "https://broker.example");
+            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Scoped<IPublishBrokerClient>(_ => broker)));
+        });
+        var client = await AuthedClientAsync(app);
+
+        var withoutCredential = await client.GetFromJsonAsync<PublishReadinessResponse>(
+            "/api/v1/publish/readiness");
+        Assert.True(withoutCredential!.BrokerConfigured);
+        Assert.False(withoutCredential.CredentialStored);
+        Assert.False(withoutCredential.Ready);
+        Assert.True(withoutCredential.CanStageLocally);
+        Assert.False(withoutCredential.CanSchedule);
+        Assert.False(withoutCredential.CanSendNow);
+        Assert.False(withoutCredential.CanUseNextSlot);
+        Assert.Equal(0, broker.ListCalls);
+
+        (await client.PutAsJsonAsync("/api/v1/settings/secrets/BrokerToken", new { value = "broker-token-1" }))
+            .EnsureSuccessStatusCode();
+
+        var ready = await client.GetFromJsonAsync<PublishReadinessResponse>(
+            "/api/v1/publish/readiness");
+        Assert.True(ready!.Ready);
+        Assert.True(ready.CanSchedule);
+        Assert.Equal(0, broker.ListCalls);
     }
 
     [Fact]

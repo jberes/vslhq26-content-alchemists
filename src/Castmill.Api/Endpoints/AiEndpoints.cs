@@ -5,6 +5,7 @@ using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Evidence;
 using Castmill.Api.Services.Knowledge;
 using Castmill.Api.Services.Scout;
 using Castmill.Api.Services.Secrets;
@@ -27,6 +28,14 @@ public sealed record TranscribeRequest(
 public static class AiEndpoints
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    private sealed record MediaTimeRangeLocator(
+        double StartSeconds,
+        double EndSeconds,
+        string? Speaker,
+        string SourceLabel);
+
+    private sealed record TextSegmentLocator(int Position, string? Speaker, string SourceLabel);
 
     public static IEndpointRouteBuilder MapAiEndpoints(this IEndpointRouteBuilder routes)
     {
@@ -213,13 +222,14 @@ public static class AiEndpoints
                 ["Text"] = ["No usable sentences found in the pasted text."],
             });
         }
-        var artifact = await PersistTranscriptAsync(campaignId, transcript, tenant, db, clock, ct);
-        await CampaignEndpoints.MarkLatestReportStaleAsync(
-            campaignId, db, clock.GetUtcNow(), inputs: true, ct: ct);
-        await db.SaveChangesAsync(ct);
+        var modality = request.Segments is { Count: > 0 }
+            ? SourceModalities.Media
+            : SourceModalities.Text;
+        var persisted = await PersistTranscriptAsync(
+            campaignId, transcript, modality, null, tenant, db, clock, ct);
         return Results.Created(
-            $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
-            new { transcriptArtifactId = artifact.Id, segmentCount = transcript.Segments.Count });
+            $"/api/v1/campaigns/{campaignId}/artifacts/{persisted.Id}",
+            new { transcriptArtifactId = persisted.Id, segmentCount = transcript.Segments.Count });
     }
 
     private static async Task<IResult> TranscribeAsync(
@@ -269,13 +279,11 @@ public static class AiEndpoints
             return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
         }
 
-        var artifact = await PersistTranscriptAsync(campaignId, transcript, tenant, db, clock, ct);
-        await CampaignEndpoints.MarkLatestReportStaleAsync(
-            campaignId, db, clock.GetUtcNow(), inputs: true, ct: ct);
-        await db.SaveChangesAsync(ct);
+        var persisted = await PersistTranscriptAsync(
+            campaignId, transcript, SourceModalities.Media, asset, tenant, db, clock, ct);
         return Results.Created(
-            $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
-            new { transcriptArtifactId = artifact.Id, segmentCount = transcript.Segments.Count });
+            $"/api/v1/campaigns/{campaignId}/artifacts/{persisted.Id}",
+            new { transcriptArtifactId = persisted.Id, segmentCount = transcript.Segments.Count });
     }
 
     // ---- Generation -----------------------------------------------------------
@@ -285,18 +293,20 @@ public static class AiEndpoints
         GenerateRequest request,
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         IOptions<SeoOptions> seoOptions,
         HttpResponse response,
         CancellationToken ct)
     {
-        var loaded = await LoadAsync(campaignId, request.TranscriptArtifactId, db, ct);
+        var loaded = await LoadForGenerationAsync(
+            campaignId, request.TranscriptArtifactId, dependencies, db, ct);
         if (loaded is not var (campaign, transcript))
         {
             return Results.NotFound();
         }
 
-        if (seoOptions.Value.RequireAnalysisBeforeGeneration
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration && !campaign.SkipSeoAnalysis
             && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
         {
             return SeoAnalysisRequired();
@@ -354,16 +364,18 @@ public static class AiEndpoints
         GenerateRequest request,
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         IOptions<SeoOptions> seoOptions,
         CancellationToken ct)
     {
-        var loaded = await LoadAsync(campaignId, request.TranscriptArtifactId, db, ct);
+        var loaded = await LoadForGenerationAsync(
+            campaignId, request.TranscriptArtifactId, dependencies, db, ct);
         if (loaded is not var (campaign, transcript))
         {
             return Results.NotFound();
         }
-        if (seoOptions.Value.RequireAnalysisBeforeGeneration
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration && !campaign.SkipSeoAnalysis
             && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
         {
             return SeoAnalysisRequired();
@@ -420,6 +432,7 @@ public static class AiEndpoints
         YoutubeTitleRegenerationRequest request,
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         CancellationToken ct)
     {
@@ -431,20 +444,21 @@ public static class AiEndpoints
         var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, ct);
         var artifact = await db.Artifacts.SingleOrDefaultAsync(
             a => a.Id == artifactId && a.CampaignId == campaignId && a.Kind == "youtube", ct);
-        var transcriptJson = await db.Artifacts
+        var transcriptArtifactId = await db.Artifacts
             .Where(a => a.CampaignId == campaignId && a.Kind == "transcript")
             .OrderByDescending(a => a.CreatedAt)
-            .Select(a => a.ContentJson)
+            .Select(a => (Guid?)a.Id)
             .FirstOrDefaultAsync(ct);
-        var transcript = transcriptJson is null ? null : TranscriptService.Parse(transcriptJson);
-        if (campaign is null || artifact is null || transcript is null)
+        var loaded = await LoadForGenerationAsync(
+            campaignId, transcriptArtifactId, dependencies, db, ct);
+        if (campaign is null || artifact is null || loaded is null)
         {
             return Results.NotFound();
         }
         try
         {
             return Results.Ok(await orchestrator.RegenerateYoutubeTitleAsync(
-                AuthEndpoints.GetUserId(principal), campaign, artifact, transcript,
+                AuthEndpoints.GetUserId(principal), campaign, artifact, loaded.Value.Transcript,
                 slot, request.Steering, ct));
         }
         catch (InvalidOperationException ex)
@@ -469,6 +483,7 @@ public static class AiEndpoints
         TechEditRequest request,
         ClaimsPrincipal principal,
         IAiOrchestrator orchestrator,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         HttpResponse response,
         CancellationToken ct)
@@ -493,21 +508,22 @@ public static class AiEndpoints
                 detail: "A transcript is source material, not an artifact to edit.");
         }
 
-        // The pass re-cites transcript segments, so it must be shown the same transcript
-        // rendering pass 1 saw — segment ids differ between ingest paths (S1 vs s01).
-        var transcriptArtifact = await db.Artifacts
+        var transcriptArtifactId = await db.Artifacts
             .Where(a => a.CampaignId == campaignId && a.Kind == "transcript")
             .OrderBy(a => a.CreatedAt)
+            .Select(a => (Guid?)a.Id)
             .FirstOrDefaultAsync(ct);
-        if (transcriptArtifact is null || TranscriptService.Parse(transcriptArtifact.ContentJson) is not { } transcript)
+        var loaded = await LoadForGenerationAsync(
+            campaignId, transcriptArtifactId, dependencies, db, ct);
+        if (loaded is null)
         {
             return Results.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
-                detail: "This campaign has no readable transcript to check the edit against.");
+                detail: "This campaign has no approved evidence to check the edit against.");
         }
 
         var result = await orchestrator.RunTechEditAsync(
-            AuthEndpoints.GetUserId(principal), campaign, artifact, transcript,
+            AuthEndpoints.GetUserId(principal), campaign, artifact, loaded.Value.Transcript,
             request.Steering, request.UseKnowledgeBase, ct);
 
         if (result.Success)
@@ -549,43 +565,48 @@ public static class AiEndpoints
     /// </summary>
     private static async Task<IResult> SuggestBriefAsync(
         Guid campaignId,
-        Guid transcriptArtifactId,
+        Guid? transcriptArtifactId,
         string? title,
         ClaimsPrincipal principal,
         IBriefSuggester suggester,
         IBrandContextService brandContext,
+        IContentDependencyService dependencies,
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
         IOptions<SeoOptions> seoOptions,
         CancellationToken ct)
     {
-        var loaded = await LoadAsync(campaignId, transcriptArtifactId, db, ct);
-        if (loaded is not { } pair)
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(
+            candidate => candidate.Id == campaignId, ct);
+        var source = await dependencies.LoadApprovedSourceAsync(
+            campaignId, transcriptArtifactId, ct);
+        if (campaign is null || source is null)
         {
             return Results.NotFound();
         }
-        if (seoOptions.Value.RequireAnalysisBeforeGeneration
-            && !await HasApprovedSeoAnalysisAsync(pair.Campaign, db, ct))
+        if (seoOptions.Value.RequireAnalysisBeforeGeneration && !campaign.SkipSeoAnalysis
+            && !await HasApprovedSeoAnalysisAsync(campaign, db, ct))
         {
             return SeoAnalysisRequired();
         }
 
         try
         {
-            var context = await brandContext.ResolveAsync(pair.Campaign, ct);
+            var context = await brandContext.ResolveAsync(campaign, ct);
             var strategy = string.Join("\n\n", new[]
             {
                 context.SeoTargetBlock,
-                string.IsNullOrWhiteSpace(pair.Campaign.ContentType)
+                string.IsNullOrWhiteSpace(campaign.ContentType)
                     ? null
-                    : $"Required content format: {pair.Campaign.ContentType}.",
+                    : $"Required content format: {campaign.ContentType}.",
             }.Where(value => !string.IsNullOrWhiteSpace(value)));
             var brief = await suggester.SuggestAsync(
-                AuthEndpoints.GetUserId(principal), pair.Transcript, title,
+                AuthEndpoints.GetUserId(principal), source, title,
                 strategy, ct);
 
-            await PersistSummaryAsync(pair.Campaign, brief, tenant, db, clock.GetUtcNow(), ct);
+            await PersistSummaryAsync(
+                campaign, brief, dependencies, tenant, db, clock.GetUtcNow(), ct);
 
             return Results.Ok(new BriefSuggestionResponse(
                 brief.Title, brief.Audience, brief.BrandVoice, brief.Angle,
@@ -602,7 +623,8 @@ public static class AiEndpoints
     }
 
     private static async Task PersistSummaryAsync(
-        Campaign campaign, BriefSuggestion brief, ITenantProvider tenant,
+        Campaign campaign, BriefSuggestion brief, IContentDependencyService dependencies,
+        ITenantProvider tenant,
         CastmillDbContext db, DateTimeOffset now, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(brief.Summary) && brief.KeyPoints.Count == 0)
@@ -640,9 +662,10 @@ public static class AiEndpoints
         }, WebJson);
         var existing = await db.Artifacts.SingleOrDefaultAsync(
             artifact => artifact.CampaignId == campaign.Id && artifact.Kind == "campaign-summary", ct);
+        Artifact summary;
         if (existing is null)
         {
-            db.Artifacts.Add(new Artifact
+            summary = new Artifact
             {
                 Id = Guid.NewGuid(),
                 TenantId = tenant.TenantId!.Value,
@@ -653,16 +676,23 @@ public static class AiEndpoints
                 Version = 1,
                 CreatedAt = now,
                 UpdatedAt = now,
-            });
+            };
+            db.Artifacts.Add(summary);
         }
         else
         {
+            summary = existing;
             await ArtifactEndpoints.SnapshotRevisionAsync(db, existing, "ai-generation", now, ct);
             existing.ContentJson = content;
             existing.Version++;
             existing.UpdatedAt = now;
         }
         await db.SaveChangesAsync(ct);
+        await dependencies.CaptureGeneratedAsync(
+            summary,
+            campaign,
+            existing is null ? ContentDependencyReasons.Generated : ContentDependencyReasons.Regenerated,
+            ct);
     }
 
     /// <summary>
@@ -672,14 +702,20 @@ public static class AiEndpoints
     /// </summary>
     private static async Task<IResult> SuggestResearchContextAsync(
         Guid campaignId,
-        Guid transcriptArtifactId,
+        Guid? transcriptArtifactId,
         ClaimsPrincipal principal,
         IResearchContextSuggester suggester,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         CancellationToken ct)
     {
-        var loaded = await LoadAsync(campaignId, transcriptArtifactId, db, ct);
-        if (loaded is not { } pair)
+        if (!await db.Campaigns.AnyAsync(candidate => candidate.Id == campaignId, ct))
+        {
+            return Results.NotFound();
+        }
+        var source = await dependencies.LoadApprovedSourceAsync(
+            campaignId, transcriptArtifactId, ct);
+        if (source is null)
         {
             return Results.NotFound();
         }
@@ -687,7 +723,7 @@ public static class AiEndpoints
         try
         {
             return Results.Ok(await suggester.SuggestAsync(
-                AuthEndpoints.GetUserId(principal), pair.Transcript, ct));
+                AuthEndpoints.GetUserId(principal), source, ct));
         }
         catch (AiNotConfiguredException ex)
         {
@@ -700,41 +736,178 @@ public static class AiEndpoints
     }
 
     private static async Task<(Campaign Campaign, TranscriptContent Transcript)?> LoadAsync(
-        Guid campaignId, Guid transcriptArtifactId, CastmillDbContext db, CancellationToken ct)
+        Guid campaignId,
+        Guid transcriptArtifactId,
+        IContentDependencyService dependencies,
+        CastmillDbContext db,
+        CancellationToken ct)
     {
         var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, ct);
         if (campaign is null)
         {
             return null;
         }
-        var artifact = await db.Artifacts.SingleOrDefaultAsync(
-            a => a.Id == transcriptArtifactId && a.CampaignId == campaignId && a.Kind == "transcript", ct);
-        if (artifact is null)
+        if (!await db.Artifacts.AnyAsync(
+            artifact => artifact.Id == transcriptArtifactId
+                && artifact.CampaignId == campaignId
+                && artifact.Kind == "transcript", ct))
         {
             return null;
         }
-        var transcript = TranscriptService.Parse(artifact.ContentJson);
+        var transcript = await dependencies.LoadApprovedTranscriptAsync(
+            campaignId, transcriptArtifactId, ct);
         return transcript is null ? null : (campaign, transcript);
     }
 
-    private static async Task<Artifact> PersistTranscriptAsync(
-        Guid campaignId, TranscriptContent transcript, ITenantProvider tenant,
+    private static async Task<(Campaign Campaign, TranscriptContent Transcript)?> LoadForGenerationAsync(
+        Guid campaignId,
+        Guid? transcriptArtifactId,
+        IContentDependencyService dependencies,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        if (transcriptArtifactId is { } artifactId)
+        {
+            return await LoadAsync(campaignId, artifactId, dependencies, db, ct);
+        }
+
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(
+            candidate => candidate.Id == campaignId, ct);
+        if (campaign is null
+            || !await db.SourceAssets.AnyAsync(source =>
+                source.CampaignId == campaignId
+                && source.ApprovedEvidenceRevision != null, ct))
+        {
+            return null;
+        }
+        return (campaign, new TranscriptContent("approved evidence", []));
+    }
+
+    internal static async Task<Artifact> PersistTranscriptAsync(
+        Guid campaignId, TranscriptContent transcript, string modality, Asset? sourceMedia,
+        ITenantProvider tenant,
         CastmillDbContext db, TimeProvider clock, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
+        var tenantId = tenant.TenantId!.Value;
+        var transcriptJson = JsonSerializer.Serialize(transcript, TranscriptService.Json);
+        var snapshotHash = EvidenceRevisionHasher.HashContent(transcriptJson);
+        var existingSource = await db.SourceAssets
+            .Where(source => source.CampaignId == campaignId
+                && source.Kind == SourceKinds.Transcript
+                && source.SnapshotHash == snapshotHash)
+            .OrderBy(source => source.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+        if (existingSource?.LegacyArtifactId is { } existingArtifactId)
+        {
+            var existingArtifact = await db.Artifacts.SingleOrDefaultAsync(
+                artifact => artifact.Id == existingArtifactId
+                    && artifact.CampaignId == campaignId
+                    && artifact.Kind == "transcript",
+                ct);
+            if (existingArtifact is not null)
+            {
+                return existingArtifact;
+            }
+        }
+
         var artifact = new Artifact
         {
             Id = Guid.NewGuid(),
-            TenantId = tenant.TenantId!.Value,
+            TenantId = tenantId,
             CampaignId = campaignId,
             Kind = "transcript",
             Title = $"Transcript — {transcript.Source}",
-            ContentJson = System.Text.Json.JsonSerializer.Serialize(transcript, TranscriptService.Json),
+            ContentJson = transcriptJson,
             Version = 1,
             CreatedAt = now,
             UpdatedAt = now,
         };
         db.Artifacts.Add(artifact);
+
+        if (existingSource is not null)
+        {
+            existingSource.LegacyArtifactId = artifact.Id;
+            existingSource.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            return artifact;
+        }
+
+        var revisionId = Guid.NewGuid();
+        var blocks = transcript.Segments
+            .Select((segment, ordinal) =>
+            {
+                var sourceLabel = string.IsNullOrWhiteSpace(segment.SourceLabel)
+                    ? transcript.Source
+                    : segment.SourceLabel;
+                var locatorKind = modality == SourceModalities.Media
+                    ? EvidenceLocatorKinds.MediaTimeRange
+                    : EvidenceLocatorKinds.TextSegment;
+                var locatorJson = modality == SourceModalities.Media
+                    ? JsonSerializer.Serialize(new MediaTimeRangeLocator(
+                        segment.StartSeconds,
+                        segment.EndSeconds,
+                        segment.Speaker,
+                        sourceLabel),
+                        WebJson)
+                    : JsonSerializer.Serialize(new TextSegmentLocator(
+                        ordinal,
+                        segment.Speaker,
+                        sourceLabel),
+                        WebJson);
+
+                return new EvidenceBlock
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    CampaignId = campaignId,
+                    StableId = segment.Id,
+                    Ordinal = ordinal,
+                    Content = segment.Text,
+                    ContentHash = EvidenceRevisionHasher.HashContent(segment.Text),
+                    LocatorKind = locatorKind,
+                    LocatorJson = locatorJson,
+                    Revision = 1,
+                    RevisionId = revisionId,
+                    ApprovalState = EvidenceApprovalStates.Approved,
+                    IsExcluded = false,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                };
+            })
+            .ToList();
+        var source = new SourceAsset
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            CampaignId = campaignId,
+            LegacyArtifactId = artifact.Id,
+            Kind = SourceKinds.Transcript,
+            Modality = modality,
+            Label = transcript.Source,
+            BlobPath = sourceMedia?.BlobPath,
+            ContentType = sourceMedia?.ContentType,
+            SizeBytes = sourceMedia?.SizeBytes,
+            SnapshotIdentity = $"sha256:{snapshotHash}",
+            SnapshotHash = snapshotHash,
+            CurrentEvidenceRevision = 1,
+            CurrentEvidenceRevisionId = revisionId,
+            ApprovedEvidenceRevision = 1,
+            ApprovedEvidenceRevisionId = revisionId,
+            ApprovedEvidenceHash = EvidenceRevisionHasher.HashApproved(blocks),
+            ApprovedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        foreach (var block in blocks)
+        {
+            block.SourceAssetId = source.Id;
+        }
+        db.SourceAssets.Add(source);
+        db.EvidenceBlocks.AddRange(blocks);
+        await CampaignEndpoints.MarkLatestReportStaleAsync(
+            campaignId, db, now, inputs: true, ct: ct);
         await db.SaveChangesAsync(ct);
         return artifact;
     }

@@ -1,6 +1,8 @@
 using Azure.Identity;
 using Azure.Storage;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
 using Azure.Storage.Sas;
 
 namespace Castmill.Api.Services.Blob;
@@ -17,6 +19,7 @@ public sealed class StorageOptions
     public string PublicContainer { get; set; } = "public";
     public int DefaultSasMinutes { get; set; } = 10;
     public int MaxSasMinutes { get; set; } = 60;
+    public long MaxMediaBytes { get; set; } = 2L * 1024 * 1024 * 1024;
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(AccountName) || !string.IsNullOrWhiteSpace(ConnectionString);
 }
@@ -42,6 +45,11 @@ public interface IBlobSasService
     /// which must not pull a multi-megabyte original just to discover it already has a thumb.
     /// </summary>
     Task<bool> ExistsAsync(string blobPath, CancellationToken ct);
+    Task StageBlockAsync(
+        string blobPath, string blockId, Stream content, CancellationToken ct);
+    Task CommitBlocksAsync(
+        string blobPath, IReadOnlyList<string> blockIds, string contentType, CancellationToken ct);
+    Task DeleteAsync(string blobPath, CancellationToken ct);
 }
 
 public sealed class BlobSasService : IBlobSasService
@@ -143,6 +151,47 @@ public sealed class BlobSasService : IBlobSasService
         }
         return await _client.GetBlobContainerClient(_options.PrivateContainer)
             .GetBlobClient(blobPath).ExistsAsync(ct);
+    }
+
+    public async Task StageBlockAsync(
+        string blobPath, string blockId, Stream content, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        var blockBlob = _client.GetBlobContainerClient(_options.PrivateContainer)
+            .GetBlockBlobClient(blobPath);
+        await blockBlob.StageBlockAsync(blockId, content, cancellationToken: ct);
+    }
+
+    public async Task CommitBlocksAsync(
+        string blobPath, IReadOnlyList<string> blockIds, string contentType, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Storage is not configured.");
+        }
+        var blockBlob = _client.GetBlobContainerClient(_options.PrivateContainer)
+            .GetBlockBlobClient(blobPath);
+        await blockBlob.CommitBlockListAsync(
+            blockIds,
+            new CommitBlockListOptions
+            {
+                HttpHeaders = new BlobHttpHeaders { ContentType = contentType },
+            },
+            ct);
+    }
+
+    public async Task DeleteAsync(string blobPath, CancellationToken ct)
+    {
+        if (_client is null)
+        {
+            return;
+        }
+        await _client.GetBlobContainerClient(_options.PrivateContainer)
+            .GetBlobClient(blobPath)
+            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: ct);
     }
 
     public async Task<bool> ProbeAsync(CancellationToken ct)

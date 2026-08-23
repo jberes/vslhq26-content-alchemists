@@ -52,6 +52,20 @@ public sealed class ImagesClient(ApiClient api)
             anonymous: false,
             ct);
 
+    /// <summary>
+    /// Generates takes for every pending eligible slot in one durable campaign run. Null
+    /// <paramref name="artifactId"/> means the whole campaign; a value narrows the pass to
+    /// one explicit content item. Existing takes are not placed or published into content.
+    /// </summary>
+    public Task<ImageBatchResponse> GeneratePendingAsync(
+        Guid campaignId, int variantsPerSlot, Guid? artifactId = null,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, ImageBatchResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/generate-pending",
+            new { variantsPerSlot, artifactId },
+            anonymous: false,
+            ct);
+
     /// <summary>Every persisted take for the slot, newest first (discarded hidden by default).</summary>
     public Task<List<ImageVariantResponse>> ListVariantsAsync(
         Guid campaignId, Guid slotId, bool includeDiscarded = false, CancellationToken ct = default) =>

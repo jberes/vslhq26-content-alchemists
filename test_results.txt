@@ -1,0 +1,347 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  Castmill.Core -> /Users/jasonberes/Dev/Castmill/src/Castmill.Core/bin/Debug/net10.0/Castmill.Core.dll
+  Castmill.UI -> /Users/jasonberes/Dev/Castmill/src/Castmill.UI/bin/Debug/net10.0/Castmill.UI.dll
+  Castmill.UI.Tests -> /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/bin/Debug/net10.0/Castmill.UI.Tests.dll
+Test run for /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/bin/Debug/net10.0/Castmill.UI.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+  Failed Castmill.UI.Tests.CssTokenReferenceTests.Every_referenced_token_is_defined_somewhere_in_the_stylesheets [27 ms]
+  Error Message:
+   These custom properties are referenced but never defined, so CSS silently drops the whole declaration:
+  views.css: --cm-text-heading-sm (line 1362)
+  Stack Trace:
+     at Castmill.UI.Tests.CssTokenReferenceTests.Every_referenced_token_is_defined_somewhere_in_the_stylesheets() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/CssTokenReferenceTests.cs:line 63
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed Castmill.UI.Tests.AddContentTests.Copy_and_view_copy_all_put_the_complete_transcript_on_the_clipboard [14 ms]
+  Error Message:
+   System.InvalidOperationException : Sequence contains no matching element
+  Stack Trace:
+     at System.Linq.ThrowHelper.ThrowNoMatchException()
+   at System.Linq.Enumerable.Single[TSource](IEnumerable`1 source, Func`2 predicate)
+   at Castmill.UI.Tests.AddContentTests.Copy_and_view_copy_all_put_the_complete_transcript_on_the_clipboard() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/AddContentTests.cs:line 107
+--- End of stack trace from previous location ---
+  Failed Castmill.UI.Tests.AddContentTests.A_kind_the_campaign_lacks_reads_as_print_not_add [14 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '43' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '43'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.AddContentTests.A_kind_the_campaign_lacks_reads_as_print_not_add() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/AddContentTests.cs:line 50
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.MillFloorLanesTests.The_edit_tool_opens_focus_on_that_artifact_in_one_click [13 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '9' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '9'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.MillFloorLanesTests.The_edit_tool_opens_focus_on_that_artifact_in_one_click() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/MillFloorLanesTests.cs:line 203
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ArtifactTreeTests.Deleting_from_the_tree_confirms_calls_the_endpoint_and_reloads [21 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '59' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '59'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ArtifactTreeTests.Deleting_from_the_tree_confirms_calls_the_endpoint_and_reloads() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ArtifactTreeTests.cs:line 111
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ExportButtonTests.Blog_json_ld_only_output_copies_through_the_cross_shell_clipboard [22 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '91' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '91'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ExportButtonTests.Blog_json_ld_only_output_copies_through_the_cross_shell_clipboard() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ExportButtonTests.cs:line 91
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ArtifactTreeTests.Clicking_a_content_row_changes_the_main_manuscript [8 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '58' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '58'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ArtifactTreeTests.Clicking_a_content_row_changes_the_main_manuscript() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ArtifactTreeTests.cs:line 87
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.AddContentTests.Choosing_a_kind_opens_an_angle_and_count_panel [20 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '38' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '38'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.AddContentTests.Choosing_a_kind_opens_an_angle_and_count_panel() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/AddContentTests.cs:line 37
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ImageStudioKitPickerTests.The_dialog_lists_the_kit_by_type_and_previews_the_clicked_item [11 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '17' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '17'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ImageStudioKitPickerTests.OpenDrawerAsync() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioKitPickerTests.cs:line 128
+   at Castmill.UI.Tests.ImageStudioKitPickerTests.The_dialog_lists_the_kit_by_type_and_previews_the_clicked_item() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioKitPickerTests.cs:line 68
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.MillFloorLanesTests.The_delete_confirm_names_what_is_destroyed_and_is_marked_destructive [7 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '25' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '25'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.MillFloorLanesTests.The_delete_confirm_names_what_is_destroyed_and_is_marked_destructive() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/MillFloorLanesTests.cs:line 225
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ImageStudioBlogTargetTests.A_non_blog_slot_never_asks_which_blog [7 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '23' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '23'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ImageStudioBlogTargetTests.OpenFirstSlotAsync(IRenderedComponent`1 view) in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioBlogTargetTests.cs:line 120
+   at Castmill.UI.Tests.ImageStudioBlogTargetTests.OpenTakeAsync() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioBlogTargetTests.cs:line 126
+   at Castmill.UI.Tests.ImageStudioBlogTargetTests.A_non_blog_slot_never_asks_which_blog() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioBlogTargetTests.cs:line 85
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.CssSelectorCollisionTests.No_class_is_defined_twice_as_a_bare_selector [235 ms]
+  Error Message:
+   These classes are declared twice as bare selectors. The rules MERGE, so the second one silently inherits whatever the first declared and it didn't — give one of them its own name:
+  views.css: .cm-evidence-review__footer at line 1348 and again at 1356
+  views.css: .cm-evidence-review__footer at line 1348 and again at 1410
+  Stack Trace:
+     at Castmill.UI.Tests.CssSelectorCollisionTests.No_class_is_defined_twice_as_a_bare_selector() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/CssSelectorCollisionTests.cs:line 67
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+  Failed Castmill.UI.Tests.ImageStudioGalleryTests.Clicking_a_tile_opens_the_dialog_with_the_full_size_image_and_escape_closes_it [4 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '17' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '17'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ImageStudioGalleryTests.OpenFirstSlotAsync(IRenderedComponent`1 view) in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioGalleryTests.cs:line 495
+   at Castmill.UI.Tests.ImageStudioGalleryTests.Clicking_a_tile_opens_the_dialog_with_the_full_size_image_and_escape_closes_it() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioGalleryTests.cs:line 243
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+  Failed Castmill.UI.Tests.ImageStudioGalleryTests.Placing_goes_by_variant_id_not_url [3 ms]
+  Error Message:
+   Bunit.Rendering.UnknownEventHandlerIdException : There is no event handler with ID '17' associated with the 'onclick' event in the current render tree.
+
+This can happen, for example, when using `cut.FindAll()`, and calling event trigger methods on the found elements after a re-render of the render tree. The workaround is to use re-issue the `cut.FindAll()` call after each render of a component, this ensures you have the latest version of the render tree and DOM tree available in your test code.
+
+This can happen with code like this, `cut.Find("button").Click()`, where the buttons event handler can be removed between the time button is found with the Find method and the Click method is triggered. The workaround is to use wrap the Find and Click method calls in InvokeAsync, i.e. `cut.InvokeAsync(() => cut.Find("button").Click());`. This ensures that there are no changes to the DOM between Find method and the Click method calls.
+---- System.ArgumentException : There is no event handler associated with this event. EventId: '17'. (Parameter 'eventHandlerId')
+  Stack Trace:
+     at Bunit.Rendering.BunitRenderer.AssertNoUnhandledExceptions() in /_/src/bunit/Rendering/BunitRenderer.cs:line 751
+   at Bunit.Rendering.BunitRenderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean ignoreUnknownEventHandlers) in /_/src/bunit/Rendering/BunitRenderer.cs:line 249
+   at Bunit.TriggerEventDispatchExtensions.GetDispatchEventTasks(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 135
+   at Bunit.TriggerEventDispatchExtensions.TriggerBubblingEventAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 110
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventsAsync(BunitRenderer renderer, IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 86
+   at Bunit.TriggerEventDispatchExtensions.<>c__DisplayClass3_0.<TriggerEventAsync>b__0() in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 73
+   at Microsoft.AspNetCore.Components.Rendering.RendererSynchronizationContext.<>c.<<InvokeAsync>b__10_0>d.MoveNext()
+--- End of stack trace from previous location ---
+   at Bunit.TriggerEventDispatchExtensions.ThrowIfFailedSynchronously(Task result) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 254
+   at Bunit.TriggerEventDispatchExtensions.TriggerEventAsync(IElement element, String eventName, EventArgs eventArgs) in /_/src/bunit/EventDispatchExtensions/TriggerEventDispatchExtensions.cs:line 75
+   at Bunit.EventHandlerDispatchExtensions.ClickAsync(IElement element, MouseEventArgs eventArgs) in /_/src/bunit/obj/Release/net10.0/bunit.generators.internal/Bunit.Blazor.EventDispatcherExtensionGenerator/EventHandlerDispatchExtensions.g.cs:line 1209
+   at Castmill.UI.Tests.ImageStudioGalleryTests.OpenFirstSlotAsync(IRenderedComponent`1 view) in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioGalleryTests.cs:line 495
+   at Castmill.UI.Tests.ImageStudioGalleryTests.Placing_goes_by_variant_id_not_url() in /Users/jasonberes/Dev/Castmill/tests/Castmill.UI.Tests/ImageStudioGalleryTests.cs:line 303
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.GetRequiredEventBindingEntry(UInt64 eventHandlerId)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs, Boolean waitForQuiescence)
+   at Microsoft.AspNetCore.Components.RenderTree.Renderer.DispatchEventAsync(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>n__0(UInt64 eventHandlerId, EventFieldInfo fieldInfo, EventArgs eventArgs)
+   at Bunit.Rendering.BunitRenderer.<>c__DisplayClass37_0.<DispatchEventAsync>b__0() in /_/src/bunit/Rendering/BunitRenderer.cs:line 230
+
+Failed!  - Failed:    14, Passed:   222, Skipped:     0, Total:   236, Duration: 3 s - Castmill.UI.Tests.dll (net10.0)

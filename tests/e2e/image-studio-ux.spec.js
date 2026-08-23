@@ -8,20 +8,15 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
     let assetId = null;
 
     try {
-        await page.goto('/sign-in');
-        const email = 'image-ux-e2e@castmill.local';
+        const email = `image-ux-e2e-${crypto.randomUUID()}@castmill.local`;
         const password = 'image-ux-e2e-password-2026';
-        let login = await request.post('http://localhost:5005/api/v1/auth/login', {
-            data: { email, password },
+        const registration = await request.post('http://localhost:5005/api/v1/auth/register', {
+            data: { email, password, displayName: 'Image UX E2E' },
         });
-        if (login.status() === 401) {
-            login = await request.post('http://localhost:5005/api/v1/auth/register', {
-                data: { email, password, displayName: 'Image UX E2E' },
-            });
-        }
-        const loginBody = await login.text();
-        expect(login.status(), loginBody).toBe(200);
-        accessToken = JSON.parse(loginBody).accessToken;
+        const registrationBody = await registration.text();
+        expect(registration.status(), registrationBody).toBe(200);
+        const auth = JSON.parse(registrationBody);
+        accessToken = auth.accessToken;
 
         const brand = await request.post('http://localhost:5005/api/v1/brands', {
             headers: bearer(accessToken),
@@ -97,18 +92,11 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const artifactId = (await artifact.json()).id;
 
         const transcript = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/transcripts`, {
                 headers: bearer(accessToken),
                 data: {
-                    kind: 'transcript',
-                    title: 'Source transcript',
-                    contentJson: JSON.stringify({
-                        source: 'e2e',
-                        segments: [{
-                            id: 's01', startSeconds: 0, endSeconds: 6, speaker: null,
-                            text: 'A focused visual story for every content channel.',
-                        }],
-                    }),
+                    source: 'e2e',
+                    text: 'A focused visual story for every content channel.',
                 },
             });
         expect(transcript.status()).toBe(201);
@@ -150,10 +138,12 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
             });
         expect(submitReport.ok()).toBeTruthy();
 
+        await page.goto('/sign-in');
         await page.getByLabel('Email').fill(email);
         await page.getByLabel('Password').fill(password);
         await page.getByRole('button', { name: 'Sign in' }).click();
         await expect(page).toHaveURL(/\/$/);
+        await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
         const workspaceRail = page.locator('nav.cm-rail');
         await expect(workspaceRail.getByText('In this campaign', { exact: true })).toHaveCount(0);
@@ -347,7 +337,6 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page).toHaveURL(new RegExp(`slot=${slotId}`));
         await expect(page.locator('.cm-studio__context'))
             .toContainText('A concise product launch post.');
-        const loadedPreviewRequests = previewRequests;
 
         const compactModel = page.locator('.cm-studio__models');
         await expect(compactModel).toContainText('DEFAULT');
@@ -361,10 +350,15 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-gallery__tile')).toHaveCount(1);
         await expect(page.getByRole('button', { name: 'Show discarded takes' })).toHaveCount(0);
         await page.locator('.cm-gallery__tile').click();
+        const keeperRefresh = page.waitForResponse(response =>
+            response.url().endsWith(`/api/v1/campaigns/${campaignId}/preview`)
+            && response.request().method() === 'GET');
         await page.getByRole('button', { name: 'Mark as keeper' }).click();
+        await keeperRefresh;
         await page.getByRole('button', { name: 'Close', exact: true }).click();
         await expect(page.locator('.cm-gallery__tile')).toHaveClass(/cm-gallery__tile--keeper/);
         await expect(page.locator('.cm-gallery__keeper')).toHaveText('✓ Keeper');
+        const loadedPreviewRequests = previewRequests;
 
         const manual = page.getByRole('button', { name: /Manual Use this prompt verbatim/ });
         const patch = page.waitForResponse(response =>

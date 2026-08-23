@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Castmill.Api.Services.Ai;
 using Castmill.Core.Ai;
+using Castmill.Core.Resources;
 
 namespace Castmill.Api.Tests;
 
@@ -33,6 +34,50 @@ public sealed class AiValidatorTests
         var spec = Generators.Find("social-x")!;
         var result = spec.Validate(Json("""{"title":"t","text":"hi","hashtags":[]}"""), Transcript);
         Assert.False(result.Passed);
+    }
+
+    [Fact]
+    public void Legacy_citation_is_qualified_when_it_identifies_one_approved_block()
+    {
+        var sourceId = Guid.NewGuid();
+        var evidence = new GenerationEvidenceContext(Transcript,
+        [
+            new GenerationEvidenceBlock(
+                sourceId, "source", "S1", "Grounded claim", "text-segment", "{}"),
+        ]);
+
+        Assert.True(evidence.TryNormalizeCitations(
+            Json("""{"citations":["s1"]}"""), out var normalized, out var error), error);
+        Assert.Equal(
+            CitationReferenceCodec.Format(sourceId, "S1"),
+            Assert.Single(normalized.GetProperty("citations").EnumerateArray()).GetString());
+    }
+
+    [Fact]
+    public void Duplicate_local_ids_across_sources_require_a_qualified_citation()
+    {
+        var firstSource = Guid.NewGuid();
+        var secondSource = Guid.NewGuid();
+        var evidence = new GenerationEvidenceContext(Transcript,
+        [
+            new GenerationEvidenceBlock(
+                firstSource, "first", "S1", "First claim", "text-segment", "{}"),
+            new GenerationEvidenceBlock(
+                secondSource, "second", "S1", "Second claim", "text-segment", "{}"),
+        ]);
+
+        Assert.False(evidence.TryNormalizeCitations(
+            Json("""{"citations":["S1"]}"""), out _, out var ambiguous));
+        Assert.Contains("ambiguous", ambiguous, StringComparison.OrdinalIgnoreCase);
+
+        var qualified = CitationReferenceCodec.Format(secondSource, "S1");
+        Assert.True(evidence.TryNormalizeCitations(
+            Json($$"""{"citations":["{{qualified}}"]}"""),
+            out var normalized,
+            out var error), error);
+        Assert.Equal(
+            qualified,
+            Assert.Single(normalized.GetProperty("citations").EnumerateArray()).GetString());
     }
 
     [Fact]
@@ -150,6 +195,40 @@ public sealed class AiValidatorTests
 
         var kept = Json("""{"title":"t","text":"a sharper post","hashtags":[],"citations":["S1"]}""");
         Assert.True(spec.Validate(kept, Transcript).Passed);
+    }
+
+    [Theory]
+    [InlineData("email-sequence", "{\"title\":\"t\",\"emails\":[{\"subject\":\"a\",\"preview\":\"p\",\"bodyMarkdown\":\"Watch: [YOUTUBE_VIDEO_URL]\"},{\"subject\":\"b\",\"preview\":\"p\",\"bodyMarkdown\":\"Follow up\"},{\"subject\":\"c\",\"preview\":\"p\",\"bodyMarkdown\":\"Last call\"}],\"citations\":[\"S1\"]}")]
+    [InlineData("newsletter", "{\"title\":\"t\",\"subject\":\"s\",\"bodyMarkdown\":\"Watch: [YOUTUBE_VIDEO_URL]\",\"citations\":[\"S1\"]}")]
+    public void Email_outputs_require_the_literal_esp_video_placeholder(string kind, string payload)
+    {
+        var spec = Generators.Find(kind)!;
+
+        Assert.True(spec.Validate(Json(payload), Transcript).Passed);
+        Assert.False(spec.Validate(Json(payload.Replace(
+            Generators.EmailVideoPlaceholder, "https://youtube.com/watch?v=invented", StringComparison.Ordinal)), Transcript).Passed);
+        Assert.False(spec.Validate(Json(payload.Replace(
+            Generators.EmailVideoPlaceholder, "video link goes here", StringComparison.Ordinal)), Transcript).Passed);
+        Assert.False(spec.Validate(Json(payload.Replace(
+            Generators.EmailVideoPlaceholder,
+            $"{Generators.EmailVideoPlaceholder} https://youtube.com",
+            StringComparison.Ordinal)), Transcript).Passed);
+    }
+
+    [Fact]
+    public void Workspace_link_substitution_does_not_invent_or_erase_the_email_video_placeholder()
+    {
+        var original = Json("""
+            {"bodyMarkdown":"Watch: [YOUTUBE_VIDEO_URL]\n\n{{LINKS}}","citations":["S1"]}
+            """);
+
+        var substituted = AiOrchestrator.SubstituteWorkspaceLinks(
+            original, "Website: https://example.com");
+        var body = substituted.GetProperty("bodyMarkdown").GetString();
+
+        Assert.Contains(Generators.EmailVideoPlaceholder, body, StringComparison.Ordinal);
+        Assert.Contains("Website: https://example.com", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("{{LINKS}}", body, StringComparison.Ordinal);
     }
 
     [Fact]

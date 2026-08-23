@@ -15,6 +15,7 @@
     --cm-surface-raised: var(--cmf-surface-raised);
     --cm-surface-sunken: var(--cmf-surface-sunken);
     --cm-surface-inverse: var(--cmf-surface-inverse);
+   --cm-scrim: rgb(0 0 0 / 0.44);
 
     /* The workspace rail's own surface + text, so chrome reads apart from content. */
     --cm-surface-rail: var(--cmf-surface-rail);

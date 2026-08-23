@@ -142,9 +142,10 @@ public sealed class TargetsStepTests : CastmillUiTestContext
             await (Task)approve.Invoke(view.Instance, null)!;
         });
 
-        var targetSave = Http.Bodies.FindIndex(call => call.Method == HttpMethod.Put
+        var calls = Http.Bodies.ToList();
+        var targetSave = calls.FindIndex(call => call.Method == HttpMethod.Put
             && call.Path.EndsWith("seo-targets", StringComparison.Ordinal));
-        var briefRequest = Http.Bodies.FindIndex(call => call.Method == HttpMethod.Post
+        var briefRequest = calls.FindIndex(call => call.Method == HttpMethod.Post
             && call.Path.EndsWith("/brief", StringComparison.Ordinal));
         Assert.True(targetSave >= 0);
         Assert.True(briefRequest > targetSave);

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Tenancy;
+using Castmill.Api.Services.Evidence;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,7 @@ public static class CampaignEndpoints
         // The whole workspace dashboard in one query set — the front page and the
         // campaigns index used to fetch a full preview per campaign to derive this.
         group.MapGet("/dashboard", DashboardAsync);
+        group.MapGet("/review-desk", ReviewDeskAsync);
         group.MapGet("/{id:guid}", GetAsync);
         // One call feeds the campaign header counter, the front page's "slots
         // waiting" block and Focus Mode's slot list (G9) — no per-surface polling.
@@ -42,7 +44,8 @@ public static class CampaignEndpoints
 
     internal static CampaignResponse ToResponse(Campaign c) =>
         new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId,
-            ParseLinks(c.ContextJson), c.Status, c.ContentType);
+            ParseLinks(c.ContextJson), c.Status, c.ContentType, c.Intent,
+            ParseOutputRecipe(c.OutputRecipeJson), c.SkipSeoAnalysis);
 
     private static readonly JsonSerializerOptions TargetsJson = new(JsonSerializerDefaults.Web);
 
@@ -68,6 +71,39 @@ public static class CampaignEndpoints
         }
     }
 
+    internal static IReadOnlyList<string> ParseOutputRecipe(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json, Json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static IResult? ValidateRunPlan(string? intent, IReadOnlyList<string>? recipe)
+    {
+        if (!CampaignIntent.IsValid(intent))
+        {
+            return Results.Problem("Campaign intent is not supported.", statusCode: 400);
+        }
+        var invalid = (recipe ?? [])
+            .Where(kind => kind != "social" && !ArtifactKinds.IsUserContent(kind))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return invalid.Count == 0
+            ? null
+            : Results.Problem(
+                $"Output recipe contains unsupported kinds: {string.Join(", ", invalid)}.",
+                statusCode: 400);
+    }
+
     private static async Task<IResult> GetSeoTargetsAsync(
         Guid id, CastmillDbContext db, CancellationToken ct)
     {
@@ -80,6 +116,7 @@ public static class CampaignEndpoints
     private static async Task<IResult> SetSeoTargetsAsync(
         Guid id,
         SeoTargetsRequest request,
+        IContentDependencyService dependencies,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
@@ -121,6 +158,7 @@ public static class CampaignEndpoints
             .Where(a => a.CampaignId == campaign.Id && a.Kind == "seo-report")
             .OrderByDescending(a => a.UpdatedAt)
             .FirstOrDefaultAsync(ct);
+        var strategyApproved = false;
         if (reportArtifact is not null)
         {
             try
@@ -142,6 +180,7 @@ public static class CampaignEndpoints
                     reportArtifact.Status = approved ? ArtifactStatus.InReview : ArtifactStatus.Draft;
                     reportArtifact.Version++;
                     reportArtifact.UpdatedAt = now;
+                    strategyApproved = approved;
                 }
             }
             catch (JsonException)
@@ -152,6 +191,10 @@ public static class CampaignEndpoints
             }
         }
         await db.SaveChangesAsync(ct);
+        if (strategyApproved && reportArtifact is not null)
+        {
+            await dependencies.CaptureStrategyApprovalAsync(reportArtifact, campaign, ct);
+        }
 
         return Results.Ok(stored);
     }
@@ -235,20 +278,28 @@ public static class CampaignEndpoints
             .OrderBy(a => a.Kind).ThenBy(a => a.CreatedAt)
             .Select(a => new { a.Id, a.CampaignId, a.ParentArtifactId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt, a.CitationsJson, a.ContentJson })
             .ToListAsync(ct);
+        var evidence = await ArtifactEndpoints.LoadEvidenceMarkersAsync(
+            db, artifactRows.Select(row => row.Id).ToList(), ct);
         var artifacts = artifactRows
             .Select(a => new ArtifactPreviewResponse(
                 a.Id, a.CampaignId, a.Kind, a.Title, a.Status, a.Version, a.CreatedAt, a.UpdatedAt,
                 ArtifactEndpoints.ParseCitations(a.CitationsJson), a.ParentArtifactId,
-                a.ContentJson.Contains("\"placeholder\":true")))
+                a.ContentJson.Contains("\"placeholder\":true"),
+                evidence.GetValueOrDefault(a.Id)))
             .ToList();
         var slots = await db.ImageSlots.Where(s => s.CampaignId == id).ToListAsync(ct);
+        var sources = await db.SourceAssets
+            .Where(source => source.CampaignId == id)
+            .OrderBy(source => source.CreatedAt)
+            .ToListAsync(ct);
 
         // Best take per slot for the sheet's tile preview: kept beats candidate (it's the
         // one a person chose), then newest. Discarded takes never resurface.
-        var latestTakeBySlot = (await db.ImageVariants
+        var activeTakes = await db.ImageVariants
                 .Where(v => v.CampaignId == id && v.State != "Discarded")
                 .Select(v => new { v.SlotId, v.ThumbUrl, v.State, v.CreatedAt })
-                .ToListAsync(ct))
+            .ToListAsync(ct);
+        var latestTakeBySlot = activeTakes
             .GroupBy(v => v.SlotId)
             .ToDictionary(
                 g => g.Key,
@@ -268,11 +319,13 @@ public static class CampaignEndpoints
             campaign = ToResponse(campaign),
             brand,
             artifacts,
+            sources = sources.Select(EvidenceEndpoints.ToSourceResponse).ToList(),
             imageSlots = slots
                 .OrderBy(s => Array.FindIndex(Services.Images.ImagePlanService.Templates, t => t.Kind == s.Kind))
                 .Select(s => ImageSlotEndpoints.ToResponse(s) with
                 {
                     LatestTakeThumbUrl = latestTakeBySlot.GetValueOrDefault(s.Id),
+                    ActiveTakeCount = activeTakes.Count(v => v.SlotId == s.Id),
                 })
                 .ToList(),
             imagesFilled = slots.Count(s => s.State == "Filled"),
@@ -300,7 +353,14 @@ public static class CampaignEndpoints
             {
                 CampaignId = g.Key,
                 Total = g.Count(),
-                InReview = g.Count(a => a.Status == ArtifactStatus.InReview),
+                Draft = g.Count(a => a.Status == ArtifactStatus.Draft
+                    && !DashboardHiddenArtifactKinds.Contains(a.Kind)),
+                InReview = g.Count(a => a.Status == ArtifactStatus.InReview
+                    && !DashboardHiddenArtifactKinds.Contains(a.Kind)),
+                Reviewed = g.Count(a => a.Status == ArtifactStatus.Queued
+                    && !DashboardHiddenArtifactKinds.Contains(a.Kind)),
+                Published = g.Count(a => a.Status == ArtifactStatus.Published
+                    && !DashboardHiddenArtifactKinds.Contains(a.Kind)),
             })
             .ToListAsync(ct);
 
@@ -318,9 +378,20 @@ public static class CampaignEndpoints
             .Where(a => a.Status == ArtifactStatus.InReview
                 && !DashboardHiddenArtifactKinds.Contains(a.Kind))
             .OrderByDescending(a => a.UpdatedAt)
-            .Take(50)
+            .Take(12)
             .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
             .ToListAsync(ct);
+
+        var reviewCounts = await db.Artifacts
+            .Where(a => !DashboardHiddenArtifactKinds.Contains(a.Kind))
+            .GroupBy(_ => 1)
+            .Select(group => new ReviewDeskCounts(
+                group.Count(a => a.Status == ArtifactStatus.Draft),
+                group.Count(a => a.Status == ArtifactStatus.InReview),
+                group.Count(a => a.Status == ArtifactStatus.Queued),
+                group.Count(a => a.Status == ArtifactStatus.Published)))
+            .SingleOrDefaultAsync(ct)
+            ?? new ReviewDeskCounts(0, 0, 0, 0);
 
         var agingCutoff = clock.GetUtcNow() - TimeSpan.FromDays(7);
         var aging = await db.Artifacts
@@ -335,7 +406,8 @@ public static class CampaignEndpoints
         // The Wire's queue: reviewed and waiting for a slot (ADR-F22's Queued state).
         var readyToSchedule = await db.Artifacts
             .Where(a => a.Status == ArtifactStatus.Queued
-                && ArtifactKinds.DistributionContent.Contains(a.Kind))
+                && ArtifactKinds.DistributionContent.Contains(a.Kind)
+                && !db.ScheduleEntries.Any(entry => entry.ArtifactId == a.Id))
             .OrderBy(a => a.UpdatedAt)
             .Take(50)
             .Select(a => new { a.CampaignId, a.Id, a.Kind, a.Title, a.Status, a.UpdatedAt })
@@ -386,8 +458,16 @@ public static class CampaignEndpoints
         {
             var a = artifactCounts.FirstOrDefault(x => x.CampaignId == c.Id);
             var s = slotCounts.FirstOrDefault(x => x.CampaignId == c.Id);
-            return new CampaignCounts(c.Id, a?.Total ?? 0, a?.InReview ?? 0, s?.Filled ?? 0, s?.Total ?? 0,
-                heroByCampaign.GetValueOrDefault(c.Id));
+            return new CampaignCounts(
+                c.Id,
+                a?.Total ?? 0,
+                a?.InReview ?? 0,
+                s?.Filled ?? 0,
+                s?.Total ?? 0,
+                heroByCampaign.GetValueOrDefault(c.Id),
+                a?.Draft ?? 0,
+                a?.Reviewed ?? 0,
+                a?.Published ?? 0);
         }).ToList();
 
         var withEmpty = slotCounts.Where(s => s.Total > s.Filled).Select(s => s.CampaignId).ToHashSet();
@@ -406,7 +486,59 @@ public static class CampaignEndpoints
             campaigns.FirstOrDefault(c => withEmpty.Contains(c.Id))?.Id,
             readyToSchedule.Select(a => new DashboardArtifact(
                 a.CampaignId, names.GetValueOrDefault(a.CampaignId, ""), a.Id,
-                a.Kind, a.Title, a.Status, a.UpdatedAt)).ToList()));
+                a.Kind, a.Title, a.Status, a.UpdatedAt)).ToList(),
+            reviewCounts));
+    }
+
+    private static async Task<IResult> ReviewDeskAsync(
+        string status,
+        int? skip,
+        int? take,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        if (!ArtifactStatus.IsValid(status))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["status"] = [$"Status must be one of: {string.Join(", ", ArtifactStatus.All)}."],
+            });
+        }
+
+        var offset = Math.Max(0, skip ?? 0);
+        var pageSize = Math.Clamp(take ?? 12, 1, 50);
+        var query = db.Artifacts.Where(a =>
+            a.Status == status && !DashboardHiddenArtifactKinds.Contains(a.Kind));
+        var total = await query.CountAsync(ct);
+        var rows = await (
+            from artifact in query
+            join campaign in db.Campaigns on artifact.CampaignId equals campaign.Id
+            orderby artifact.UpdatedAt descending
+            select new
+            {
+                artifact.CampaignId,
+                CampaignName = campaign.Name,
+                ArtifactId = artifact.Id,
+                artifact.Kind,
+                artifact.Title,
+                artifact.Status,
+                artifact.UpdatedAt,
+            })
+            .Skip(offset)
+            .Take(pageSize)
+            .ToListAsync(ct);
+
+        return Results.Ok(new ReviewDeskResponse(
+            status,
+            total,
+            rows.Select(item => new DashboardArtifact(
+                item.CampaignId,
+                item.CampaignName,
+                item.ArtifactId,
+                item.Kind,
+                item.Title,
+                item.Status,
+                item.UpdatedAt)).ToList()));
     }
 
     private static async Task<IResult> CreateAsync(
@@ -422,6 +554,10 @@ public static class CampaignEndpoints
         {
             return invalid;
         }
+        if (ValidateRunPlan(request.Intent, request.OutputRecipe) is { } invalidPlan)
+        {
+            return invalidPlan;
+        }
 
         var now = clock.GetUtcNow();
         var campaign = new Campaign
@@ -433,6 +569,11 @@ public static class CampaignEndpoints
             Brief = request.Brief,
             BrandId = request.BrandId,
             ContentType = request.ContentType,
+            Intent = request.Intent,
+            SkipSeoAnalysis = request.SkipSeoAnalysis,
+            OutputRecipeJson = request.OutputRecipe is null
+                ? null
+                : JsonSerializer.Serialize(request.OutputRecipe, Json),
             ContextJson = request.Links is null
                 ? null
                 : System.Text.Json.JsonSerializer.Serialize(request.Links, Json),
@@ -462,15 +603,28 @@ public static class CampaignEndpoints
         {
             return invalid;
         }
+        var nextIntent = request.Intent ?? campaign.Intent;
+        var nextRecipe = request.OutputRecipe ?? ParseOutputRecipe(campaign.OutputRecipeJson);
+        if (ValidateRunPlan(nextIntent, nextRecipe) is { } invalidPlan)
+        {
+            return invalidPlan;
+        }
 
         var inputsChanged = !string.Equals(campaign.Brief, request.Brief, StringComparison.Ordinal)
             || campaign.BrandId != request.BrandId
-            || !string.Equals(campaign.ContentType, request.ContentType, StringComparison.Ordinal);
+            || !string.Equals(campaign.ContentType, request.ContentType, StringComparison.Ordinal)
+            || !string.Equals(campaign.Intent, nextIntent, StringComparison.Ordinal)
+            || campaign.SkipSeoAnalysis != request.SkipSeoAnalysis;
         campaign.Name = request.Name;
         campaign.Brief = request.Brief;
         campaign.BrandId = request.BrandId;
         campaign.Status = request.Status;
         campaign.ContentType = request.ContentType;
+        campaign.Intent = nextIntent;
+        campaign.SkipSeoAnalysis = request.SkipSeoAnalysis;
+        campaign.OutputRecipeJson = nextRecipe.Count == 0
+            ? null
+            : JsonSerializer.Serialize(nextRecipe, Json);
         campaign.ContextJson = request.Links is null
             ? null
             : System.Text.Json.JsonSerializer.Serialize(request.Links, Json);
@@ -505,11 +659,20 @@ public static class CampaignEndpoints
             {
                 return;
             }
+            var nextInputsStale = report.InputsStale || inputs;
+            var nextAnglesStale = report.AnglesStale || angles;
+            var nextShareStale = report.ShareStale || share || report.SharedAt is not null;
+            if (nextInputsStale == report.InputsStale
+                && nextAnglesStale == report.AnglesStale
+                && nextShareStale == report.ShareStale)
+            {
+                return;
+            }
             artifact.ContentJson = JsonSerializer.Serialize(report with
             {
-                InputsStale = report.InputsStale || inputs,
-                AnglesStale = report.AnglesStale || angles,
-                ShareStale = report.ShareStale || share || report.SharedAt is not null,
+                InputsStale = nextInputsStale,
+                AnglesStale = nextAnglesStale,
+                ShareStale = nextShareStale,
             }, TargetsJson);
             artifact.Version++;
             artifact.UpdatedAt = now;

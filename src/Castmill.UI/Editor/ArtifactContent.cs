@@ -146,8 +146,12 @@ public static class ArtifactContent
             var content = root["content"] as JsonObject ?? root;
             return new BlogPublishingMetadata
             {
+                Title = Text(publishing, "title"),
                 CanonicalUrl = Text(publishing, "canonicalUrl"),
+                SiteUrl = Text(publishing, "siteUrl"),
+                Slug = Text(publishing, "slug"),
                 SiteName = Text(publishing, "siteName"),
+                OrganizationName = Text(publishing, "organizationName"),
                 Author = Text(publishing, "author"),
                 OrganizationLogoUrl = Text(publishing, "organizationLogoUrl"),
                 VideoUrl = Text(publishing, "videoUrl"),
@@ -176,15 +180,43 @@ public static class ArtifactContent
             root = new JsonObject { [MarkdownProperty] = contentJson ?? string.Empty };
         }
 
-        root["publishingMetadata"] = JsonSerializer.SerializeToNode(metadata, Options);
+        var publishing = root["publishingMetadata"] as JsonObject ?? new JsonObject();
+        Set(publishing, "title", metadata.Title);
+        Set(publishing, "canonicalUrl", metadata.CanonicalUrl);
+        Set(publishing, "siteUrl", metadata.SiteUrl);
+        Set(publishing, "slug", metadata.Slug);
+        Set(publishing, "siteName", metadata.SiteName);
+        Set(publishing, "organizationName", metadata.OrganizationName);
+        Set(publishing, "author", metadata.Author);
+        Set(publishing, "organizationLogoUrl", metadata.OrganizationLogoUrl);
+        Set(publishing, "videoUrl", metadata.VideoUrl);
+        Set(publishing, "description", metadata.Description);
+        Set(publishing, "keywords", metadata.Keywords);
+        root["publishingMetadata"] = publishing;
         return root.ToJsonString(Options);
+
+        static void Set(JsonObject publishing, string name, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                publishing.Remove(name);
+            }
+            else
+            {
+                publishing[name] = value.Trim();
+            }
+        }
     }
 }
 
 public sealed class BlogPublishingMetadata
 {
+    public string? Title { get; set; }
     public string? CanonicalUrl { get; set; }
+    public string? SiteUrl { get; set; }
+    public string? Slug { get; set; }
     public string? SiteName { get; set; }
+    public string? OrganizationName { get; set; }
     public string? Author { get; set; }
     public string? OrganizationLogoUrl { get; set; }
     public string? VideoUrl { get; set; }

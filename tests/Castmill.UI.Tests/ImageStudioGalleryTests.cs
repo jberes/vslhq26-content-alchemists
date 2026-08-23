@@ -60,6 +60,91 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Generate_all_pending_shows_cost_real_variant_progress_and_final_counts()
+    {
+        var runId = Guid.Parse("71111111-1111-1111-1111-555555555555");
+        var started = DateTimeOffset.UtcNow;
+        var progress = new RunProgress(
+            runId, CampaignId, "Running", 1, 1,
+            [new RunItem("youtube-thumbnail", true, null, null, null, 2100,
+                SlotId, 1, "Succeeded")],
+            started, started.AddSeconds(2));
+        var gate = Http.Gate(HttpMethod.Post,
+            $"api/v1/campaigns/{CampaignId}/image-slots/generate-pending");
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() =>
+        {
+            var batch = view.Find(".cm-studio__batch");
+            Assert.Contains("1 eligible", batch.TextContent, StringComparison.Ordinal);
+            Assert.Contains("$0.07", batch.TextContent, StringComparison.Ordinal);
+        });
+
+        Http.OnGet($"api/v1/ai/campaigns/{CampaignId}/runs/latest", progress);
+        Http.OnGet($"api/v1/ai/runs/{runId}", progress with { Status = "Completed" });
+        await view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Generate all pending", StringComparison.Ordinal)).ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var batch = view.Find(".cm-studio__batch");
+            Assert.NotNull(batch.QuerySelector("progress"));
+            Assert.Empty(batch.QuerySelectorAll(".cm-spinner"));
+            Assert.Contains("YouTube thumbnail · take 1", batch.TextContent, StringComparison.Ordinal);
+            Assert.Contains("Succeeded", batch.TextContent, StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
+        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Post
+            && body.Path.EndsWith("image-slots/generate-pending", StringComparison.Ordinal)
+            && body.Body.Contains("\"variantsPerSlot\":1", StringComparison.Ordinal));
+
+        gate.SetResult(StubHttpHandler.Json(new ImageBatchResponse(
+            runId, 1, 1, 0, 0, 1, 0,
+            [new ImageBatchSlotResult(SlotId, "youtube-thumbnail", "Succeeded", 1, 1, 0)])));
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var summary = view.Find(".cm-studio__batch-summary").TextContent;
+            Assert.Contains("1 succeeded", summary, StringComparison.Ordinal);
+            Assert.Contains("0 failed", summary, StringComparison.Ordinal);
+            Assert.Contains("0 skipped", summary, StringComparison.Ordinal);
+            Assert.Contains("1 takes created", summary, StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Reload_reattaches_to_the_running_image_batch_and_reenables_controls_on_completion()
+    {
+        var runId = Guid.Parse("71111111-1111-1111-1111-666666666666");
+        var started = DateTimeOffset.UtcNow;
+        var running = new RunProgress(runId, CampaignId, "Running", 1, 0, [], started, started);
+        Http.OnGet($"api/v1/ai/campaigns/{CampaignId}/runs/latest", running);
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        var studioRun = Services.GetRequiredService<Castmill.UI.State.StudioRunService>();
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.True(studioRun.IsBatchRunning);
+            Assert.Contains("Generating pending images", view.Find(".cm-studio__batch").TextContent,
+                StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
+
+        Http.OnGet($"api/v1/ai/campaigns/{CampaignId}/runs/latest",
+            running with { Status = "Completed", Completed = 1, UpdatedAt = started.AddSeconds(4) });
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.False(studioRun.IsBatchRunning);
+            Assert.Contains("Pass complete", view.Find(".cm-studio__batch").TextContent,
+                StringComparison.Ordinal);
+            Assert.Contains(view.FindAll("button"), button =>
+                button.TextContent.Contains("Generate all pending", StringComparison.Ordinal)
+                && !button.HasAttribute("disabled"));
+        }, TimeSpan.FromSeconds(5));
+        Assert.DoesNotContain(Http.Requests, request => request.Method == HttpMethod.Post
+            && request.RequestUri!.AbsolutePath.EndsWith("generate-pending", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Marking_a_take_as_keeper_updates_the_take_card_immediately()
     {
         StubPatchResult(Take(TakeId, "Kept"));

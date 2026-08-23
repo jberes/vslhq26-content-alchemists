@@ -20,6 +20,7 @@
 @inject ExportClient Exports
 @inject GitClient Git
 @inject IFileDownloader Downloader
+@inject IClipboardService Clipboard
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -52,11 +53,24 @@
                                 {
                                     <li class="cm-tree__row">
                                         <button type="button"
-                                                class="cm-focus__list-item @(item.Id == _artifactId ? "cm-focus__list-item--active" : "")"
-                                                aria-current="@(item.Id == _artifactId ? "true" : "false")"
+                                                class="cm-focus__list-item @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
+                                                aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
+                                                aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
                                                 @onclick="() => SelectAsync(item.Id)">
                                             <span class="cm-focus__list-title">@item.Title</span>
-                                            <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                            @if (item.Id == _loadingArtifactId)
+                                            {
+                                                <span class="cm-meta">Loading content…</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="cm-focus__list-meta">
+                                                    <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                                    <span class="@ArtifactDisplay.StatusModifier(item.Status)">
+                                                        @ArtifactDisplay.StatusLabel(item.Status)
+                                                    </span>
+                                                </span>
+                                            }
                                         </button>
                                         <button type="button" class="cm-tree__delete"
                                                 title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
@@ -90,6 +104,15 @@
         </aside>
 
         <div class="cm-focus__manuscript cm-region">
+            @if (_loadingArtifactId is not null)
+            {
+                <div class="cm-focus__loading" role="status" aria-live="polite">
+                    <span class="cm-ai-dot" aria-hidden="true"></span>
+                    <strong>Loading @(_loadingArtifactTitle ?? "content")…</strong>
+                    <span class="cm-meta">The current document will stay in place until the next one is ready.</span>
+                </div>
+            }
+
             @if (_loadError is { } error)
             {
                 <EmptyState Kicker="Focus" Headline="That artifact couldn't be opened." Detail="@error" />
@@ -125,6 +148,13 @@
                         Structured artifact — rendered read-only. Its fields are validated
                         server-side; a composer for structured kinds is a later phase.
                     </p>
+                    @if (_artifact.Kind is "email-sequence" or "newsletter")
+                    {
+                        <span class="cm-chip"
+                              title="Replace this token with the final YouTube video URL in your email service provider before sending.">
+                            <code>[YOUTUBE_VIDEO_URL]</code> · ESP replacement token
+                        </span>
+                    }
                 }
                 <RichEditor @key="EditorKey"
                             Markdown="@DisplayedMarkdown"
@@ -414,8 +444,23 @@
                         <span class="cm-kicker">Blog publishing metadata</span>
                         <p class="cm-meta">This belongs to this blog—not the campaign SEO report.</p>
                         <label class="cm-field">
+                            <span class="cm-field__label">Metadata title</span>
+                            <input class="cm-input" @bind="_blogMetadata.Title" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Site URL</span>
+                            <input class="cm-input" type="url" @bind="_blogMetadata.SiteUrl" placeholder="https://example.com/blog" />
+                        </label>
+                        <label class="cm-field">
+                            <span class="cm-field__label">Slug</span>
+                            <input class="cm-input" @bind="_blogMetadata.Slug" placeholder="article-slug" />
+                        </label>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="BuildBlogCanonicalUrl">
+                            Build canonical URL
+                        </button>
+                        <label class="cm-field">
                             <span class="cm-field__label">Canonical URL</span>
-                            <input class="cm-input" @bind="_blogMetadata.CanonicalUrl" placeholder="https://example.com/blog/post" />
+                            <input class="cm-input" type="url" @bind="_blogMetadata.CanonicalUrl" placeholder="https://example.com/blog/post" />
                         </label>
                         <label class="cm-field">
                             <span class="cm-field__label">Description</span>
@@ -430,16 +475,20 @@
                             <input class="cm-input" @bind="_blogMetadata.SiteName" />
                         </label>
                         <label class="cm-field">
+                            <span class="cm-field__label">Organization</span>
+                            <input class="cm-input" @bind="_blogMetadata.OrganizationName" />
+                        </label>
+                        <label class="cm-field">
                             <span class="cm-field__label">Author</span>
                             <input class="cm-input" @bind="_blogMetadata.Author" />
                         </label>
                         <label class="cm-field">
                             <span class="cm-field__label">Organization logo URL</span>
-                            <input class="cm-input" @bind="_blogMetadata.OrganizationLogoUrl" />
+                            <input class="cm-input" type="url" @bind="_blogMetadata.OrganizationLogoUrl" />
                         </label>
                         <label class="cm-field">
-                            <span class="cm-field__label">Related video URL <span class="cm-meta">optional</span></span>
-                            <input class="cm-input" @bind="_blogMetadata.VideoUrl" />
+                            <span class="cm-field__label">Related video URL <span class="cm-meta">optional · schema requires a visible article link</span></span>
+                            <input class="cm-input" type="url" @bind="_blogMetadata.VideoUrl" />
                         </label>
                         <button type="button" class="cm-button cm-button--quiet" disabled="@_savingMetadata"
                                 @onclick="SaveBlogMetadataAsync">
@@ -453,6 +502,9 @@
                             }
                         </div>
                         <pre class="cm-seo__meta-pre cm-mono">@BlogMetadataOutput(_blogMetaTab)</pre>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="CopyBlogMetadataAsync">
+                            Copy @_blogMetaTab
+                        </button>
                     </div>
                 }
 
@@ -596,13 +648,16 @@
     private bool _savingMetadata;
     private BlogPublishingMetadata _blogMetadata = new();
     private string _blogMetaTab = "Combined";
-    private static readonly string[] BlogMetaTabs = ["Combined", "Head", "JSON-LD"];
+    private static readonly string[] BlogMetaTabs = ["Combined", "HTML head", "JSON-LD only"];
     private ArtifactResponse? _artifact;
     private Guid? _artifactId;
     private string? _etag;
     private string _markdown = string.Empty;
     private string _saveState = "Saved on blur";
     private string? _loadError;
+    private Guid? _loadingArtifactId;
+    private string? _loadingArtifactTitle;
+    private int _selectionVersion;
     private bool _selecting;
     private Guid? _selectionCampaignId;
     private bool _useKnowledgeBase;
@@ -741,7 +796,7 @@
         StateHasChanged();
     }
 
-    protected override Task OnParametersSetAsync()
+    protected override async Task OnParametersSetAsync()
     {
         // Blazor may reuse this page instance when only the campaign route value changes.
         // Never carry the previous campaign's selected id into the next campaign.
@@ -754,7 +809,12 @@
             _loadError = null;
         }
 
-        return SyncSelectionAsync();
+        // Focus owns a stronger invariant than the other campaign views: the query-selected
+        // artifact must be open on the first usable render. CampaignShell also loads this
+        // store, but it is a child and may not have run yet; CampaignState collapses this
+        // duplicate request into the same single-flight operation.
+        await Campaign.LoadAsync(CampaignId);
+        await SyncSelectionAsync();
     }
 
     /// <summary>
@@ -811,11 +871,20 @@
 
     private async Task LoadArtifactAsync(Guid id)
     {
+        var selectionVersion = ++_selectionVersion;
+        _loadingArtifactId = id;
+        _loadingArtifactTitle = Campaign.Artifacts.FirstOrDefault(item => item.Id == id)?.Title;
         _loadError = null;
+        StateHasChanged();
 
         try
         {
             var (artifact, etag) = await Campaigns.GetArtifactAsync(CampaignId, id);
+            if (selectionVersion != _selectionVersion)
+            {
+                return;
+            }
+
             _artifact = artifact;
             _artifactId = id;
             _etag = etag;
@@ -825,11 +894,19 @@
             _blogMetadata = artifact.Kind == "blog"
                 ? ArtifactContent.PublishingMetadata(artifact.ContentJson)
                 : new BlogPublishingMetadata();
+            if (artifact.Kind == "blog")
+            {
+                _blogMetadata.Title ??= artifact.Title;
+                _blogMetadata.Slug ??= BlogMetadataBuilder.Slug(artifact.Title);
+            }
             _headings.Clear();
             _saveState = "Saved on blur";
             _previewRevision = null;
-            await LoadRevisionsAsync(id);
-            await LoadSeoReportAsync();
+            _loadingArtifactId = null;
+            _loadingArtifactTitle = null;
+            StateHasChanged();
+
+            await Task.WhenAll(LoadRevisionsAsync(id), LoadSeoReportAsync());
         }
         catch (ApiException ex)
         {
@@ -838,6 +915,14 @@
         catch (HttpRequestException)
         {
             _loadError = "Couldn't reach the Castmill API.";
+        }
+        finally
+        {
+            if (selectionVersion == _selectionVersion)
+            {
+                _loadingArtifactId = null;
+                _loadingArtifactTitle = null;
+            }
         }
 
         StateHasChanged();
@@ -1396,6 +1481,35 @@
         }
     }
 
+    private void BuildBlogCanonicalUrl()
+    {
+        if (_artifact is null)
+        {
+            return;
+        }
+
+        var canonical = BlogMetadataBuilder.BuildCanonicalUrl(
+            _blogMetadata.SiteUrl, _blogMetadata.Slug, _artifact.Title);
+        if (canonical is null)
+        {
+            Notifier.ShowError("Enter an absolute HTTP or HTTPS site URL first.");
+            return;
+        }
+        _blogMetadata.CanonicalUrl = canonical;
+    }
+
+    private async Task CopyBlogMetadataAsync()
+    {
+        if (await Clipboard.CopyTextAsync(BlogMetadataOutput(_blogMetaTab)))
+        {
+            Notifier.ShowSuccess($"Copied {_blogMetaTab} metadata.");
+        }
+        else
+        {
+            Notifier.ShowError("Clipboard unavailable.");
+        }
+    }
+
     private string BlogMetadataOutput(string tab)
     {
         if (_artifact is null)
@@ -1403,60 +1517,14 @@
             return string.Empty;
         }
 
-        Func<string?, string?> encode = System.Net.WebUtility.HtmlEncode;
-        var title = _artifact.Title;
-        var description = string.IsNullOrWhiteSpace(_blogMetadata.Description)
-            ? title
-            : _blogMetadata.Description!;
-        var canonical = _blogMetadata.CanonicalUrl;
-        var head = $"""
-            <title>{encode(title)}</title>
-            <meta name="description" content="{encode(description)}" />
-            <meta name="keywords" content="{encode(_blogMetadata.Keywords ?? string.Empty)}" />
-            <meta property="og:type" content="article" />
-            <meta property="og:title" content="{encode(title)}" />
-            <meta property="og:description" content="{encode(description)}" />
-            {(!string.IsNullOrWhiteSpace(canonical) ? $"<link rel=\"canonical\" href=\"{encode(canonical)}\" />" : string.Empty)}
-            """;
-
-        var article = new Dictionary<string, object?>
-        {
-            ["@type"] = "Article",
-            ["headline"] = title,
-            ["description"] = description,
-            ["keywords"] = _blogMetadata.Keywords,
-            ["mainEntityOfPage"] = canonical,
-            ["dateModified"] = _artifact.UpdatedAt.ToString("O"),
-            ["author"] = string.IsNullOrWhiteSpace(_blogMetadata.Author) ? null : new Dictionary<string, object?>
-            {
-                ["@type"] = "Person", ["name"] = _blogMetadata.Author,
-            },
-            ["publisher"] = string.IsNullOrWhiteSpace(_blogMetadata.SiteName) ? null : new Dictionary<string, object?>
-            {
-                ["@type"] = "Organization", ["name"] = _blogMetadata.SiteName,
-                ["logo"] = _blogMetadata.OrganizationLogoUrl,
-            },
-        };
-        var graph = new List<object> { article };
-        if (!string.IsNullOrWhiteSpace(_blogMetadata.VideoUrl))
-        {
-            graph.Add(new Dictionary<string, object?>
-            {
-                ["@type"] = "VideoObject", ["name"] = title,
-                ["description"] = description, ["contentUrl"] = _blogMetadata.VideoUrl,
-            });
-        }
-        var jsonLd = JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["@context"] = "https://schema.org", ["@graph"] = graph,
-        }, new JsonSerializerOptions { WriteIndented = true });
-        var jsonLdBlock = $"<script type=\"application/ld+json\">\n{jsonLd}\n</script>";
+        var output = BlogMetadataBuilder.Build(new BlogMetadataDocument(
+            _artifact.Title, _markdown, _artifact.UpdatedAt, _blogMetadata));
 
         return tab switch
         {
-            "Head" => head,
-            "JSON-LD" => jsonLdBlock,
-            _ => head + "\n" + jsonLdBlock,
+            "HTML head" => output.HtmlHead,
+            "JSON-LD only" => output.JsonLdOnly,
+            _ => output.Combined,
         };
     }
 

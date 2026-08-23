@@ -206,6 +206,21 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         Assert.Contains($"artifact={artifactId}", navigation.Uri, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Editing_acknowledges_a_finished_press_so_back_does_not_reopen_it()
+    {
+        StubPreview(Artifact("blog", "Printed draft"));
+        var press = Services.GetRequiredService<PressRunService>();
+        SetFinishedPressRun(press, CampaignId);
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Printed draft");
+        Assert.Contains("Done — back to the board", view.Markup, StringComparison.Ordinal);
+
+        await view.Find(".cm-card__tools button:not(.cm-card__tool--danger)").ClickAsync();
+
+        Assert.False(press.IsActiveFor(CampaignId));
+    }
+
     /// <summary>
     /// Deleting destroys the revision ring too, which is work the user may not realise is
     /// attached. The dialog has to say that, and its accept button must not read as the
@@ -249,6 +264,29 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
     }
 
     private List<ArtifactPreviewResponse> StubbedArtifacts { get; } = [];
+
+    private static void SetFinishedPressRun(PressRunService press, Guid campaignId)
+    {
+        var flags = System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic;
+        var type = typeof(PressRunService);
+        type.GetProperty(nameof(PressRunService.CampaignId), flags)!.SetValue(press, campaignId);
+        type.GetProperty(nameof(PressRunService.Kinds), flags)!.SetValue(press, new[] { "blog" });
+        type.GetProperty(nameof(PressRunService.IsRunning), flags)!.SetValue(press, false);
+        var now = DateTimeOffset.UtcNow;
+        type.GetProperty(nameof(PressRunService.Progress), flags)!.SetValue(
+            press,
+            new RunProgress(
+                Guid.NewGuid(),
+                campaignId,
+                "Completed",
+                1,
+                1,
+                [new RunItem("blog", true, Guid.NewGuid(), null, [], 10)],
+                now,
+                now));
+    }
 
     private void StubPreview(params ArtifactPreviewResponse[] artifacts)
     {

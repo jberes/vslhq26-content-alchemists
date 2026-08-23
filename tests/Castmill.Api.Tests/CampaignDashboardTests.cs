@@ -53,12 +53,28 @@ public sealed class CampaignDashboardTests(CastmillApiFactory factory)
         Assert.NotNull(dashboard);
         var counts = Assert.Single(dashboard!.Campaigns, c => c.CampaignId == campaign.Id);
         Assert.Equal(2, counts.Artifacts);
+        Assert.Equal(1, counts.Draft);
         Assert.Equal(1, counts.InReview);
+        Assert.Equal(0, counts.Reviewed);
+        Assert.Equal(0, counts.Published);
 
         var review = Assert.Single(dashboard.ReviewQueue, r => r.CampaignId == campaign.Id);
         Assert.Equal("Reviewable blog", review.Title);
         Assert.Equal("Dash campaign", review.CampaignName);
         Assert.Equal(ArtifactStatus.InReview, review.Status);
+
+        Assert.NotNull(dashboard.ReviewCounts);
+        Assert.Equal(1, dashboard.ReviewCounts.Draft);
+        Assert.Equal(1, dashboard.ReviewCounts.InReview);
+        Assert.Equal(0, dashboard.ReviewCounts.Reviewed);
+        Assert.Equal(0, dashboard.ReviewCounts.Published);
+
+        var drafts = await client.GetFromJsonAsync<ReviewDeskResponse>(
+            "/api/v1/campaigns/review-desk?status=Draft&skip=0&take=1");
+        Assert.NotNull(drafts);
+        Assert.Equal(ArtifactStatus.Draft, drafts.Status);
+        Assert.Equal(1, drafts.Total);
+        Assert.Equal("Waiting draft", Assert.Single(drafts.Items).Title);
 
         // Fresh drafts are not "aging".
         Assert.DoesNotContain(dashboard.AgingDrafts, a => a.CampaignId == campaign.Id);
@@ -124,6 +140,20 @@ public sealed class CampaignDashboardTests(CastmillApiFactory factory)
         Assert.Contains(dashboard!.ReadyToSchedule!, item => item.ArtifactId == blog.Id);
         Assert.DoesNotContain(dashboard.ReadyToSchedule!, item => item.ArtifactId == summary.Id);
         Assert.DoesNotContain(dashboard.ReadyToSchedule!, item => item.ArtifactId == brief.Id);
+
+        var scheduled = await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id,
+            artifactId = blog.Id,
+            channelId = "x",
+            text = "Publishable blog",
+            scheduledAt = DateTimeOffset.UtcNow.AddHours(1),
+            pushToBroker = false,
+        });
+        Assert.Equal(System.Net.HttpStatusCode.Created, scheduled.StatusCode);
+
+        var afterSchedule = await client.GetFromJsonAsync<DashboardResponse>("/api/v1/campaigns/dashboard");
+        Assert.DoesNotContain(afterSchedule!.ReadyToSchedule!, item => item.ArtifactId == blog.Id);
 
         async Task<ArtifactResponse> CreateAndQueueAsync(string kind, string title)
         {

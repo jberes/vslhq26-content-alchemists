@@ -1,0 +1,148 @@
+@using Castmill.UI.Platform
+@implements IDisposable
+@inject IVoiceCaptureService Voice
+
+<section class="cm-voice" aria-label="Voice note recorder">
+    @if (_snapshot.State == VoiceCaptureStates.Unsupported)
+    {
+        <p class="cm-form__error" role="status">@_snapshot.Message</p>
+    }
+    else if (_snapshot.State == VoiceCaptureStates.PermissionDenied)
+    {
+        <p class="cm-form__error" role="alert">@_snapshot.Message</p>
+        <button type="button" class="cm-button" @onclick="StartAsync">Try microphone again</button>
+    }
+    else if (_snapshot.State == VoiceCaptureStates.Error)
+    {
+        <p class="cm-form__error" role="alert">@_snapshot.Message</p>
+        <button type="button" class="cm-button" @onclick="StartAsync">Try again</button>
+    }
+    else if (_snapshot.State == VoiceCaptureStates.Stopped)
+    {
+        <div class="cm-voice__readout">
+            <span class="cm-kicker">Voice note ready</span>
+            <strong class="cm-mono">@Clock(_snapshot.ElapsedSeconds)</strong>
+            <span class="cm-meta">@FormatBytes(_snapshot.SizeBytes)</span>
+        </div>
+        @if (_snapshot.PlaybackUrl is { Length: > 0 } playbackUrl)
+        {
+            <audio class="cm-voice__playback" controls src="@playbackUrl">
+                Playback is not supported in this shell.
+            </audio>
+        }
+        <div class="cm-form__actions">
+            <button type="button" class="cm-button" disabled="@_busy" @onclick="UseAsync">
+                Use recording
+            </button>
+            <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="DiscardAsync">
+                Discard
+            </button>
+        </div>
+    }
+    else if (_snapshot.IsRecording || _snapshot.State == VoiceCaptureStates.RequestingPermission)
+    {
+        <div class="cm-voice__readout" aria-live="polite">
+            <span class="cm-kicker">@StateLabel</span>
+            <strong class="cm-mono">@Clock(_snapshot.ElapsedSeconds)</strong>
+            <span class="cm-meta">10:00 maximum</span>
+        </div>
+        <div class="cm-voice__meter" role="meter" aria-label="Microphone input level"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="@LevelPercent">
+            <div class="cm-voice__meter-fill" style="inline-size: @LevelPercent%"></div>
+        </div>
+        <div class="cm-form__actions">
+            @if (_snapshot.State == VoiceCaptureStates.Recording)
+            {
+                <button type="button" class="cm-button cm-button--quiet" @onclick="PauseAsync">Pause</button>
+            }
+            else if (_snapshot.State == VoiceCaptureStates.Paused)
+            {
+                <button type="button" class="cm-button" @onclick="ResumeAsync">Resume</button>
+            }
+            <button type="button" class="cm-button" disabled="@(_snapshot.State == VoiceCaptureStates.RequestingPermission)"
+                    @onclick="StopAsync">Stop</button>
+            <button type="button" class="cm-button cm-button--quiet" @onclick="DiscardAsync">Discard</button>
+        </div>
+    }
+    else
+    {
+        <div class="cm-voice__ready">
+            <strong>Capture the idea while it is fresh.</strong>
+            <span class="cm-meta">Your microphone opens only after you press Record. Nothing uploads until you choose Use recording.</span>
+        </div>
+        <button type="button" class="cm-button" disabled="@_busy" @onclick="StartAsync">Record</button>
+    }
+</section>
+
+@code {
+    private const int MaxSeconds = 10 * 60;
+    private VoiceCaptureSnapshot _snapshot = new(VoiceCaptureStates.Idle);
+    private bool _busy;
+
+    [Parameter] public EventCallback<VoiceRecording> OnUse { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Voice.Changed += OnChanged;
+        await Voice.InitializeAsync();
+        _snapshot = Voice.Snapshot;
+    }
+
+    private string StateLabel => _snapshot.State switch
+    {
+        VoiceCaptureStates.RequestingPermission => "Requesting microphone",
+        VoiceCaptureStates.Paused => "Recording paused",
+        _ => "Recording",
+    };
+
+    private int LevelPercent => (int)Math.Round(Math.Clamp(_snapshot.InputLevel, 0, 1) * 100);
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Voice.StartAsync(MaxSeconds);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task PauseAsync() => Voice.PauseAsync();
+
+    private Task ResumeAsync() => Voice.ResumeAsync();
+
+    private Task StopAsync() => Voice.StopAsync();
+
+    private Task DiscardAsync() => Voice.DiscardAsync();
+
+    private async Task UseAsync()
+    {
+        _busy = true;
+        try
+        {
+            await OnUse.InvokeAsync(await Voice.UseAsync());
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnChanged()
+    {
+        _snapshot = Voice.Snapshot;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string Clock(double seconds) =>
+        TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"mm\:ss");
+
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024
+        ? $"{bytes / (1024d * 1024):0.0} MB"
+        : $"{Math.Max(1, bytes / 1024d):0} KB";
+
+    public void Dispose() => Voice.Changed -= OnChanged;
+}

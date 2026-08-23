@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
@@ -26,6 +27,8 @@ public static class ImageSlotEndpoints
         group.MapGet("/", ListAsync);
         group.MapPost("/", CreateAsync).Validate<ImageSlotCreateRequest>().RequireRateLimiting("writes");
         group.MapPost("/reserve", ReserveAsync).RequireRateLimiting("writes");
+        group.MapPost("/generate-pending", GeneratePendingAsync)
+            .Validate<ImageBatchGenerateRequest>().RequireRateLimiting("ai");
         group.MapPatch("/{slotId:guid}", PatchAsync).Validate<ImageSlotPatchRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
         group.MapPost("/{slotId:guid}/place", PlaceAsync).Validate<PlaceVariantRequest>().RequireRateLimiting("writes");
@@ -303,6 +306,424 @@ public static class ImageSlotEndpoints
             resolvedReferences, request.ModelAlias);
     }
 
+    private static async Task<IResult> GeneratePendingAsync(
+        Guid campaignId,
+        ImageBatchGenerateRequest request,
+        ClaimsPrincipal principal,
+        HttpContext http,
+        IImageRenderer renderer,
+        IImageReferenceResolver references,
+        IImageProviderRegistry providers,
+        IFoundryClientFactory foundry,
+        IPublicContentStore publicStore,
+        IImageComposer composer,
+        IBrandContextService brands,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken requestCt)
+    {
+        if (!publicStore.IsConfigured)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "Storage is not configured for public publishing.");
+        }
+
+        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == campaignId, requestCt);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+        if (request.ArtifactId is { } artifactId
+            && !await db.Artifacts.AnyAsync(
+                artifact => artifact.Id == artifactId && artifact.CampaignId == campaignId, requestCt))
+        {
+            return Results.NotFound();
+        }
+
+        var userId = AuthEndpoints.GetUserId(principal);
+        var workspaceDefaultModel = await db.UserSettings
+            .Where(setting => setting.UserId == userId
+                && setting.Key == "images.default-model" && !setting.IsEncrypted)
+            .Select(setting => setting.Value)
+            .SingleOrDefaultAsync(requestCt);
+
+        var activeBatch = await db.GenerationRuns
+            .Where(run => run.CampaignId == campaignId
+                && run.Kind == "image-batch" && run.Status == "Running")
+            .OrderByDescending(run => run.StartedAt)
+            .FirstOrDefaultAsync(requestCt);
+        if (activeBatch is not null)
+        {
+            http.Response.Headers.Append("Castmill-Run-Id", activeBatch.Id.ToString());
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "This campaign already has an image batch running. Reattach to the existing run.");
+        }
+
+        var slots = await db.ImageSlots
+            .Where(slot => slot.CampaignId == campaignId
+                && (request.ArtifactId == null || slot.ArtifactId == request.ArtifactId))
+            .ToListAsync(requestCt);
+        slots = [.. slots
+            .OrderBy(slot => slot.ArtifactId ?? Guid.Empty)
+            .ThenBy(slot => Array.FindIndex(ImagePlanService.Templates, template => template.Kind == slot.Kind)
+                is var index && index >= 0 ? index : int.MaxValue)
+            .ThenBy(slot => slot.CreatedAt)
+            .ThenBy(slot => slot.Id)];
+
+        var renderingSlotIds = await db.GenerationRuns
+            .Where(run => run.CampaignId == campaignId && run.Kind == "image"
+                && run.Status == "Running" && run.SlotId != null)
+            .Select(run => run.SlotId!.Value)
+            .ToListAsync(requestCt);
+        var rendering = renderingSlotIds.ToHashSet();
+        var activeTakeCounts = await db.ImageVariants
+            .Where(variant => variant.CampaignId == campaignId && variant.State != "Discarded")
+            .GroupBy(variant => variant.SlotId)
+            .Select(group => new { SlotId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(row => row.SlotId, row => row.Count, requestCt);
+        var skipped = new List<ImageBatchSlotResult>();
+        var eligible = new List<(ImageSlot Slot, int Variants)>();
+        foreach (var slot in slots)
+        {
+            if (slot.State == "Filled")
+            {
+                skipped.Add(Skipped(slot, request.VariantsPerSlot, "already_filled",
+                    "The slot already has a placed image."));
+            }
+            else if (rendering.Contains(slot.Id))
+            {
+                skipped.Add(Skipped(slot, request.VariantsPerSlot, "already_rendering",
+                    "The slot already has a generation run in progress."));
+            }
+            else if (slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt))
+            {
+                skipped.Add(Skipped(slot, request.VariantsPerSlot, "manual_prompt_missing",
+                    "The manual slot has no prompt."));
+            }
+            else if (activeTakeCounts.GetValueOrDefault(slot.Id) >= request.VariantsPerSlot)
+            {
+                skipped.Add(Skipped(slot, request.VariantsPerSlot, "take_target_met",
+                    "The slot already has the requested number of active takes."));
+            }
+            else
+            {
+                eligible.Add((slot,
+                    request.VariantsPerSlot - activeTakeCounts.GetValueOrDefault(slot.Id)));
+            }
+        }
+
+        var brand = await brands.ResolveAsync(campaign, requestCt);
+        var owners = await db.Artifacts
+            .Where(artifact => artifact.CampaignId == campaignId)
+            .ToDictionaryAsync(artifact => artifact.Id, requestCt);
+        var prepared = new List<PreparedImageBatchSlot>(eligible.Count);
+        foreach (var work in eligible)
+        {
+            var slot = work.Slot;
+            var effectiveModel = string.IsNullOrWhiteSpace(slot.ModelAlias)
+                ? workspaceDefaultModel
+                : slot.ModelAlias;
+            try
+            {
+                var resolvedReferences = await references.ResolveAsync(campaign, slot, requestCt);
+                var provider = providers.Resolve(effectiveModel);
+                var readiness = await provider.StatusAsync(userId, requestCt);
+                if (!readiness.Ready)
+                {
+                    skipped.Add(Skipped(slot, work.Variants, "provider_unavailable",
+                        readiness.Reason ?? "The image provider is not ready."));
+                    continue;
+                }
+                if (provider.Name == "foundry")
+                {
+                    var alias = string.IsNullOrWhiteSpace(effectiveModel)
+                        || effectiveModel.Equals("foundry", StringComparison.OrdinalIgnoreCase)
+                        ? "image"
+                        : effectiveModel;
+                    if (await foundry.ResolveTargetAsync(userId, alias, requestCt) is null)
+                    {
+                        skipped.Add(Skipped(slot, work.Variants, "model_unavailable",
+                            $"The Foundry model alias '{alias}' is not configured for this user."));
+                        continue;
+                    }
+                }
+                if (resolvedReferences.Count > 0 && !readiness.SupportsReferenceImages)
+                {
+                    skipped.Add(Skipped(slot, work.Variants, "reference_unsupported",
+                        "The selected image model cannot use this slot's required reference images."));
+                    continue;
+                }
+
+                var owner = slot.ArtifactId is { } ownerId
+                    && owners.TryGetValue(ownerId, out var artifact) ? artifact : null;
+                var basePrompt = slot.PromptMode == "Manual"
+                    ? slot.Prompt!
+                    : BuildAutoPrompt(slot, campaign, owner);
+                var effectivePrompt = ComposeEffectivePrompt(
+                    basePrompt, slot.PromptMode == "Manual" ? null : brand.ImageStyleBlock,
+                    steeringNote: null,
+                    slot.PromptMode == "Manual"
+                        ? null
+                        : CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
+                effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
+                effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
+                prepared.Add(new PreparedImageBatchSlot(
+                    slot, work.Variants, effectiveModel, effectivePrompt, resolvedReferences));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !requestCt.IsCancellationRequested)
+            {
+                skipped.Add(Skipped(slot, work.Variants, FailureCode(ex), FailureReason(ex)));
+            }
+        }
+
+        var preparedSeed = prepared.ToList();
+        var skippedSeed = skipped.ToList();
+        GenerationRun? run = null;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            activeBatch = null;
+            run = null;
+            var attemptPrepared = preparedSeed.ToList();
+            var attemptSkipped = skippedSeed.ToList();
+            db.ChangeTracker.Clear();
+            await using var startLock = await db.Database.BeginTransactionAsync(
+                IsolationLevel.ReadCommitted, requestCt);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Campaigns WITH (ROWLOCK, UPDLOCK) SET UpdatedAt = UpdatedAt WHERE Id = {campaignId} AND TenantId = {tenant.TenantId!.Value}",
+                requestCt);
+            activeBatch = await db.GenerationRuns
+                .Where(candidate => candidate.CampaignId == campaignId
+                    && candidate.Kind == "image-batch" && candidate.Status == "Running")
+                .OrderByDescending(candidate => candidate.StartedAt)
+                .FirstOrDefaultAsync(requestCt);
+            if (activeBatch is not null)
+            {
+                return;
+            }
+
+            var preparedIds = attemptPrepared.Select(work => work.Slot.Id).ToList();
+            var currentStates = await db.ImageSlots
+                .Where(candidate => preparedIds.Contains(candidate.Id))
+                .Select(candidate => new { candidate.Id, candidate.State })
+                .ToDictionaryAsync(candidate => candidate.Id, candidate => candidate.State, requestCt);
+            var currentRendering = (await db.GenerationRuns
+                    .Where(candidate => candidate.CampaignId == campaignId && candidate.Kind == "image"
+                        && candidate.Status == "Running" && candidate.SlotId != null
+                        && preparedIds.Contains(candidate.SlotId.Value))
+                    .Select(candidate => candidate.SlotId!.Value)
+                    .ToListAsync(requestCt))
+                .ToHashSet();
+            var currentTakeCounts = await db.ImageVariants
+                .Where(variant => preparedIds.Contains(variant.SlotId) && variant.State != "Discarded")
+                .GroupBy(variant => variant.SlotId)
+                .Select(group => new { SlotId = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(row => row.SlotId, row => row.Count, requestCt);
+            for (var index = attemptPrepared.Count - 1; index >= 0; index--)
+            {
+                var work = attemptPrepared[index];
+                if (currentStates.GetValueOrDefault(work.Slot.Id) == "Filled")
+                {
+                    attemptSkipped.Add(Skipped(work.Slot, work.Variants, "already_filled",
+                        "The slot was filled while the batch was preparing."));
+                    attemptPrepared.RemoveAt(index);
+                    continue;
+                }
+                if (currentRendering.Contains(work.Slot.Id))
+                {
+                    attemptSkipped.Add(Skipped(work.Slot, work.Variants, "already_rendering",
+                        "The slot started another generation run while the batch was preparing."));
+                    attemptPrepared.RemoveAt(index);
+                    continue;
+                }
+
+                var remaining = request.VariantsPerSlot - currentTakeCounts.GetValueOrDefault(work.Slot.Id);
+                if (remaining <= 0)
+                {
+                    attemptSkipped.Add(Skipped(work.Slot, work.Variants, "take_target_met",
+                        "The slot reached the requested take target while the batch was preparing."));
+                    attemptPrepared.RemoveAt(index);
+                }
+                else if (remaining != work.Variants)
+                {
+                    attemptPrepared[index] = work with { Variants = remaining };
+                }
+            }
+
+            var now = clock.GetUtcNow();
+            run = new GenerationRun
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.TenantId!.Value,
+                CampaignId = campaignId,
+                Status = "Running",
+                Kind = "image-batch",
+                SlotId = null,
+                TotalKinds = attemptSkipped.Count + attemptPrepared.Sum(item => item.Variants),
+                ItemsJson = "[]",
+                StartedAt = now,
+                UpdatedAt = now,
+            };
+            db.GenerationRuns.Add(run);
+            await db.SaveChangesAsync(requestCt);
+            await startLock.CommitAsync(requestCt);
+            prepared = attemptPrepared;
+            skipped = attemptSkipped;
+        });
+        if (activeBatch is not null)
+        {
+            http.Response.Headers.Append("Castmill-Run-Id", activeBatch.Id.ToString());
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "This campaign already has an image batch running. Reattach to the existing run.");
+        }
+        if (run is null)
+        {
+            throw new InvalidOperationException("The image batch did not start.");
+        }
+        http.Response.Headers.Append("Castmill-Run-Id", run.Id.ToString());
+
+        var events = new List<object>();
+        var results = new List<ImageBatchSlotResult>(slots.Count);
+        foreach (var skip in skipped)
+        {
+            results.Add(skip);
+            events.Add(BatchEvent(skip, variantIndex: null, success: false, durationMs: 0));
+        }
+        await SaveBatchProgressAsync(db, run, events, clock, CancellationToken.None);
+
+        foreach (var work in prepared)
+        {
+            var slot = work.Slot;
+            var succeeded = 0;
+            var failures = new List<(string Code, string Message)>();
+
+            for (var variantIndex = 1; variantIndex <= work.Variants; variantIndex++)
+            {
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    var webp = await renderer.RenderExactAsync(
+                        userId, work.EffectivePrompt, slot.TargetWidth, slot.TargetHeight,
+                        work.EffectiveModel, work.References, CancellationToken.None);
+                    var thumb = composer.ToThumbWebp(webp);
+                    var blobPath = VariantPath(slot.CampaignId, slot.Kind, variantIndex);
+                    var thumbPath = ThumbPath(slot.CampaignId, slot.Kind);
+                    var url = await publicStore.PublishAsync(
+                        blobPath, webp, "image/webp", CancellationToken.None);
+                    var thumbUrl = await publicStore.PublishAsync(
+                        thumbPath, thumb, "image/webp", CancellationToken.None);
+                    db.ImageVariants.Add(new ImageVariant
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = slot.TenantId,
+                        CampaignId = slot.CampaignId,
+                        SlotId = slot.Id,
+                        Url = url.ToString(),
+                        BlobPath = blobPath,
+                        ThumbUrl = thumbUrl.ToString(),
+                        ThumbBlobPath = thumbPath,
+                        Model = work.EffectiveModel ?? "image",
+                        Prompt = work.EffectivePrompt,
+                        State = "Candidate",
+                        Width = slot.TargetWidth,
+                        Height = slot.TargetHeight,
+                        CreatedAt = clock.GetUtcNow(),
+                    });
+                    succeeded++;
+                    events.Add(BatchEvent(slot, variantIndex, success: true, null, null,
+                        stopwatch.ElapsedMilliseconds));
+                }
+                catch (Exception ex)
+                {
+                    var failure = (FailureCode(ex), FailureReason(ex));
+                    failures.Add(failure);
+                    events.Add(BatchEvent(slot, variantIndex, success: false,
+                        failure.Item1, failure.Item2, stopwatch.ElapsedMilliseconds));
+                }
+                await SaveBatchProgressAsync(db, run, events, clock, CancellationToken.None);
+            }
+
+            var failed = work.Variants - succeeded;
+            var firstFailure = failures.FirstOrDefault();
+            results.Add(new ImageBatchSlotResult(
+                slot.Id, slot.Kind,
+                failed == 0 ? "Succeeded" : succeeded == 0 ? "Failed" : "Partial",
+                work.Variants, succeeded, failed,
+                firstFailure == default ? null : firstFailure.Code,
+                firstFailure == default ? null : firstFailure.Message));
+        }
+
+        run.Status = "Completed";
+        await SaveBatchProgressAsync(db, run, events, clock, CancellationToken.None);
+        return Results.Ok(new ImageBatchResponse(
+            run.Id,
+            prepared.Count,
+            results.Count(result => result.Outcome == "Succeeded"),
+            results.Count(result => result.Outcome is "Failed" or "Partial"),
+            results.Count(result => result.Outcome == "Skipped"),
+            results.Sum(result => result.SucceededVariants),
+            results.Sum(result => result.FailedVariants),
+            results));
+    }
+
+    private sealed record PreparedImageBatchSlot(
+        ImageSlot Slot,
+        int Variants,
+        string? EffectiveModel,
+        string EffectivePrompt,
+        IReadOnlyList<ImageReference> References);
+
+    private static ImageBatchSlotResult Skipped(
+        ImageSlot slot, int requestedVariants, string code, string message) =>
+        new(slot.Id, slot.Kind, "Skipped", requestedVariants, 0, 0, code, message);
+
+    private static object BatchEvent(
+        ImageBatchSlotResult result, int? variantIndex, bool success, long durationMs) => new
+        {
+            kind = result.Kind,
+            slotId = result.SlotId,
+            variantIndex,
+            success,
+            outcome = result.Outcome,
+            errorCode = result.ErrorCode,
+            error = result.Error,
+            durationMs,
+        };
+
+    private static object BatchEvent(
+        ImageSlot slot, int variantIndex, bool success,
+        string? errorCode, string? error, long durationMs) => new
+        {
+            kind = slot.Kind,
+            slotId = slot.Id,
+            variantIndex,
+            success,
+            outcome = success ? "Succeeded" : "Failed",
+            errorCode,
+            error,
+            durationMs,
+        };
+
+    private static async Task SaveBatchProgressAsync(
+        CastmillDbContext db, GenerationRun run, List<object> events,
+        TimeProvider clock, CancellationToken ct)
+    {
+        run.ItemsJson = System.Text.Json.JsonSerializer.Serialize(events, JsonWeb);
+        run.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static string FailureCode(Exception ex) => ex switch
+    {
+        ImageModerationException => "moderation_refusal",
+        AiNotConfiguredException => "provider_unavailable",
+        ImageProviderException => "provider_error",
+        TaskCanceledException or TimeoutException => "provider_timeout",
+        HttpRequestException => "provider_network_error",
+        _ => "render_failed",
+    };
+
     /// <summary>
     /// Hard delete: the row AND its blobs. Discard is the soft, recoverable path; this is
     /// for a take the user never wants to see again. The take whose blob is the slot's
@@ -466,26 +887,56 @@ public static class ImageSlotEndpoints
         string? modelOverride = null)
     {
         var userId = AuthEndpoints.GetUserId(principal);
-        var now = clock.GetUtcNow();
+        GenerationRun? run = null;
+        IResult? startError = null;
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            run = null;
+            startError = null;
+            db.ChangeTracker.Clear();
+            await using var startLock = await db.Database.BeginTransactionAsync(
+                IsolationLevel.ReadCommitted, ct);
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE Campaigns WITH (ROWLOCK, UPDLOCK) SET UpdatedAt = UpdatedAt WHERE Id = {slot.CampaignId} AND TenantId = {tenant.TenantId!.Value}",
+                ct);
+            if (await db.GenerationRuns.AnyAsync(candidate => candidate.CampaignId == slot.CampaignId
+                && candidate.Kind == "image-batch" && candidate.Status == "Running", ct))
+            {
+                startError = Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "This campaign has a generate-all-pending pass in progress. Reattach to that run before starting another take.");
+                return;
+            }
+            var now = clock.GetUtcNow();
+            run = new GenerationRun
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenant.TenantId!.Value,
+                CampaignId = slot.CampaignId,
+                Status = "Running",
+                Kind = "image",
+                SlotId = slot.Id,
+                TotalKinds = count,
+                ItemsJson = "[]",
+                StartedAt = now,
+                UpdatedAt = now,
+            };
+            db.GenerationRuns.Add(run);
+            await db.SaveChangesAsync(ct);
+            await startLock.CommitAsync(ct);
+        });
+        if (startError is not null)
+        {
+            return startError;
+        }
+
         // The batch's model: the caller's choice for this run, else the slot's saved default.
         // Recorded on every variant, so a gallery of takes from two models stays readable.
         var model = string.IsNullOrWhiteSpace(modelOverride) ? slot.ModelAlias : modelOverride.Trim();
-
-        var run = new GenerationRun
+        if (run is null)
         {
-            Id = Guid.NewGuid(),
-            TenantId = tenant.TenantId!.Value,
-            CampaignId = slot.CampaignId,
-            Status = "Running",
-            Kind = "image",
-            SlotId = slot.Id,
-            TotalKinds = count,
-            ItemsJson = "[]",
-            StartedAt = now,
-            UpdatedAt = now,
-        };
-        db.GenerationRuns.Add(run);
-        await db.SaveChangesAsync(ct);
+            throw new InvalidOperationException("The image run did not start.");
+        }
         http.Response.Headers.Append("Castmill-Run-Id", run.Id.ToString());
 
         var variants = new List<ImageVariantResponse>();

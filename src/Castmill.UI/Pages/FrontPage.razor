@@ -17,26 +17,11 @@
 <PageTitle>Front page — Castmill</PageTitle>
 
 <div class="cm-page cm-page--fill"><div class="cm-measure--dashboard cm-front__frame">
-    @* The actions live in the header, pinned above both columns. They used to sit at the
-       bottom of whichever block owned them, so reaching "open image studio" meant scrolling
-       past everything else first. *@
     <header class="cm-front__head">
         <div>
             <span class="cm-kicker">Front page</span>
             <h1>What needs you today.</h1>
         </div>
-        <nav class="cm-front__actions" aria-label="Quick actions">
-            <a class="cm-button" href="campaigns/new">Start a run</a>
-            @if (_firstSlotCampaign is { } slotTarget)
-            {
-                <a class="cm-button cm-button--quiet"
-                   href="@CampaignViews.PathFor(slotTarget, CampaignView.ImageStudio)">
-                    Image studio@(_emptySlots > 0 ? $" · {_emptySlots} empty" : "")
-                </a>
-            }
-            <a class="cm-button cm-button--quiet" href="wire">The Wire</a>
-            <a class="cm-button cm-button--quiet" href="campaigns">All campaigns</a>
-        </nav>
     </header>
 
     @if (!Workspace.IsLoaded)
@@ -60,36 +45,54 @@
     else
     {
         <div class="cm-front">
-            <section class="cm-front__primary">
-                <h2 class="cm-front__block-title">
-                    Not approved yet
-                    @if (Unapproved.Count > 0)
-                    {
-                        <span class="cm-mono cm-meta">(@Unapproved.Count)</span>
-                    }
-                </h2>
-                <p class="cm-meta">
-                    Everything still in draft or review, newest first — not just what is formally
-                    queued, so nothing sits here invisible.
-                </p>
+            <section class="cm-front__primary cm-review-desk" aria-labelledby="cm-review-desk-title">
+                <header class="cm-review-desk__head">
+                    <div>
+                        <span class="cm-kicker">Editorial workflow</span>
+                        <h2 class="cm-front__block-title" id="cm-review-desk-title">Review desk</h2>
+                    </div>
+                    <span class="cm-meta">@ReviewDescription</span>
+                </header>
 
-                @if (Unapproved.Count == 0)
+                <div class="cm-review-bins" role="tablist" aria-label="Content review state">
+                    @foreach (var bin in ReviewBins)
+                    {
+                        <button type="button" role="tab"
+                                class="cm-review-bin @(_reviewStatus == bin.Status ? "cm-review-bin--active" : null)"
+                                aria-selected="@(_reviewStatus == bin.Status ? "true" : "false")"
+                                @onclick="() => SelectReviewStatusAsync(bin.Status)">
+                            <span class="cm-review-bin__label">@bin.Label</span>
+                            <span class="cm-review-bin__count cm-mono">@ReviewCount(bin.Status)</span>
+                        </button>
+                    }
+                </div>
+
+                @if (_reviewLoading && ReviewItems.Count == 0)
                 {
-                    <p class="cm-meta">
-                        Nothing is waiting on you. @(_loaded ? "" : "Still checking…")
+                    <p class="cm-loading-line" role="status">
+                        <span class="cm-ai-dot" aria-hidden="true"></span>
+                        Loading @ReviewBinLabel.ToLowerInvariant()…
                     </p>
+                }
+                else if (_reviewError is { } reviewError)
+                {
+                    <p class="cm-form__error" role="alert">@reviewError</p>
+                }
+                else if (ReviewItems.Count == 0)
+                {
+                    <p class="cm-meta cm-review-desk__empty">@ReviewEmptyMessage</p>
                 }
                 else
                 {
-                    <ul class="cm-cards">
-                        @foreach (var item in Unapproved)
+                    <ul class="cm-cards cm-review-desk__list" data-cm-scroll>
+                        @foreach (var item in ReviewItems)
                         {
                             <li>
                                 @* A row, not a giant click target: the actions are explicit
                                    buttons because "what happens if I click this card" was
                                    previously guesswork. *@
                                 <div class="cm-card cm-card--artifact cm-front__item">
-                                    <span class="cm-card__bar cm-card__bar--review" aria-hidden="true"></span>
+                                    <span class="cm-card__bar @ArtifactDisplay.StatusBarModifier(item.Status)" aria-hidden="true"></span>
                                     <span class="cm-card__body">
                                         <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)</span>
                                         <span class="cm-card__title">@item.Title</span>
@@ -100,7 +103,7 @@
                                     </span>
                                     <span class="cm-front__item-actions">
                                         <button type="button" class="cm-button cm-button--quiet"
-                                                @onclick="() => OpenFocus(item)">Edit</button>
+                                            @onclick="() => OpenFocus(item)">@ReviewActionLabel(item.Status)</button>
                                         <button type="button" class="cm-button cm-button--quiet"
                                                 @onclick="() => OpenCampaign(item)">Campaign</button>
                                     </span>
@@ -108,6 +111,14 @@
                             </li>
                         }
                     </ul>
+                }
+
+                @if (ReviewItems.Count < ReviewTotal)
+                {
+                    <button type="button" class="cm-button cm-button--quiet cm-review-desk__more"
+                            disabled="@_reviewLoading" @onclick="LoadMoreReviewAsync">
+                        @(_reviewLoading ? "Loading more…" : $"Show more · {ReviewTotal - ReviewItems.Count} remaining")
+                    </button>
                 }
             </section>
 
@@ -151,7 +162,7 @@
                     }
                 </section>
 
-                <section>
+                <section class="cm-front__aging">
                     <h2 class="cm-front__block-title">Drafts aging</h2>
                     @if (_aging.Count == 0)
                     {
@@ -159,7 +170,7 @@
                     }
                     else
                     {
-                        <ul class="cm-rows">
+                        <ul class="cm-rows cm-front__aging-list" data-cm-scroll>
                             @foreach (var item in _aging)
                             {
                                 <li class="cm-row">
@@ -207,29 +218,57 @@
 </div>
 
 @code {
-    private readonly List<DashboardArtifact> _review = [];
+    private const int ReviewPageSize = 12;
+    private sealed record ReviewBin(string Status, string Label);
+    private static readonly ReviewBin[] ReviewBins =
+    [
+        new(ArtifactStatus.Draft, "Drafts"),
+        new(ArtifactStatus.InReview, "Needs review"),
+        new(ArtifactStatus.Queued, "Reviewed"),
+        new(ArtifactStatus.Published, "Published"),
+    ];
+
+    private readonly Dictionary<string, List<DashboardArtifact>> _reviewPages =
+        new(StringComparer.Ordinal);
+    private ReviewDeskCounts _reviewCounts = new(0, 0, 0, 0);
+    private string _reviewStatus = ArtifactStatus.InReview;
+    private bool _reviewLoading;
+    private string? _reviewError;
+    private int _reviewRequestVersion;
     private readonly List<DashboardArtifact> _aging = [];
     private readonly List<string> _slotModels = [];
     private readonly List<ScheduleEntryResponse> _wire = [];
     private bool _wireLoaded;
 
-    /// <summary>
-    /// Both dashboard lists, deduplicated and newest first. The review queue alone hid drafts
-    /// that had never been submitted, which is most of what is actually outstanding.
-    /// </summary>
-    private List<DashboardArtifact> Unapproved =>
-        [.. _review.Concat(_aging)
-            // Defend against an older API/dashboard cache returning operational artifacts.
-            // Those have dedicated surfaces and must never open as a Focus manuscript.
-            .Where(a => ArtifactDisplay.Editable(a.Kind))
-            .GroupBy(a => a.ArtifactId)
-            .Select(g => g.First())
-            .OrderByDescending(a => a.UpdatedAt)];
+    private List<DashboardArtifact> ReviewItems =>
+        _reviewPages.GetValueOrDefault(_reviewStatus) ?? [];
+
+    private int ReviewTotal => ReviewCount(_reviewStatus);
+
+    private string ReviewBinLabel =>
+        ReviewBins.Single(bin => bin.Status == _reviewStatus).Label;
+
+    private string ReviewDescription => _reviewStatus switch
+    {
+        ArtifactStatus.Draft => "Work in progress that has not been submitted.",
+        ArtifactStatus.InReview => "Submitted content waiting for your decision.",
+        ArtifactStatus.Queued => "Reviewed content ready for scheduling or publishing.",
+        ArtifactStatus.Published => "Content that has already shipped.",
+        _ => string.Empty,
+    };
+
+    private string ReviewEmptyMessage => _reviewStatus switch
+    {
+        ArtifactStatus.Draft => "No drafts are waiting in the workspace.",
+        ArtifactStatus.InReview => "Nothing needs review right now.",
+        ArtifactStatus.Queued => "Nothing has been marked reviewed yet.",
+        ArtifactStatus.Published => "Nothing has been published yet.",
+        _ => "Nothing is in this state.",
+    };
 
     private int _emptySlots;
     private int _campaignsWithSlots;
     private Guid? _firstSlotCampaign;
-    private bool _loaded;
 
     private static DateTimeOffset Now => DateTimeOffset.Now;
 
@@ -237,9 +276,10 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Workspace.LoadAsync();
-        await LoadDashboardAsync();
-        await LoadWireAsync();
+        await Task.WhenAll(
+            Workspace.LoadAsync(),
+            LoadDashboardAsync(),
+            LoadWireAsync());
     }
 
     /// <summary>One server-side projection instead of a preview fetch per campaign —
@@ -250,8 +290,14 @@
         {
             var dashboard = await Campaigns.GetDashboardAsync();
 
-            _review.Clear();
-            _review.AddRange(dashboard.ReviewQueue);
+            _reviewCounts = dashboard.ReviewCounts
+                ?? new ReviewDeskCounts(
+                    dashboard.AgingDrafts.Count,
+                    dashboard.ReviewQueue.Count,
+                    dashboard.ReadyToSchedule?.Count ?? 0,
+                    0);
+            _reviewPages[ArtifactStatus.InReview] =
+                [.. dashboard.ReviewQueue.Where(item => ArtifactDisplay.Editable(item.Kind))];
             _aging.Clear();
             _aging.AddRange(dashboard.AgingDrafts);
             _slotModels.Clear();
@@ -268,9 +314,91 @@
         {
         }
 
-        _loaded = true;
         StateHasChanged();
     }
+
+    private async Task SelectReviewStatusAsync(string status)
+    {
+        _reviewStatus = status;
+        _reviewError = null;
+        if (!_reviewPages.ContainsKey(status))
+        {
+            await LoadReviewPageAsync(status, append: false);
+        }
+    }
+
+    private Task LoadMoreReviewAsync() => LoadReviewPageAsync(_reviewStatus, append: true);
+
+    private async Task LoadReviewPageAsync(string status, bool append)
+    {
+        var version = ++_reviewRequestVersion;
+        _reviewLoading = true;
+        _reviewError = null;
+        StateHasChanged();
+        try
+        {
+            var items = append && _reviewPages.TryGetValue(status, out var existing)
+                ? existing
+                : [];
+            var page = await Campaigns.GetReviewDeskAsync(
+                status, append ? items.Count : 0, ReviewPageSize);
+            if (version != _reviewRequestVersion || _reviewStatus != status)
+            {
+                return;
+            }
+
+            if (!append)
+            {
+                items = [];
+                _reviewPages[status] = items;
+            }
+            items.AddRange(page.Items.Where(item => ArtifactDisplay.Editable(item.Kind)));
+            SetReviewCount(status, page.Total);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            if (version == _reviewRequestVersion)
+            {
+                _reviewError = "This review bin couldn't be loaded.";
+            }
+        }
+        finally
+        {
+            if (version == _reviewRequestVersion)
+            {
+                _reviewLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private int ReviewCount(string status) => status switch
+    {
+        ArtifactStatus.Draft => _reviewCounts.Draft,
+        ArtifactStatus.InReview => _reviewCounts.InReview,
+        ArtifactStatus.Queued => _reviewCounts.Reviewed,
+        ArtifactStatus.Published => _reviewCounts.Published,
+        _ => 0,
+    };
+
+    private void SetReviewCount(string status, int value)
+    {
+        _reviewCounts = status switch
+        {
+            ArtifactStatus.Draft => _reviewCounts with { Draft = value },
+            ArtifactStatus.InReview => _reviewCounts with { InReview = value },
+            ArtifactStatus.Queued => _reviewCounts with { Reviewed = value },
+            ArtifactStatus.Published => _reviewCounts with { Published = value },
+            _ => _reviewCounts,
+        };
+    }
+
+    private static string ReviewActionLabel(string status) => status switch
+    {
+        ArtifactStatus.InReview => "Review",
+        ArtifactStatus.Draft => "Edit",
+        _ => "Open",
+    };
 
     private async Task LoadWireAsync()
     {
