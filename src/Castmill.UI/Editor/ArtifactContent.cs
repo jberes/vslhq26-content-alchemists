@@ -242,6 +242,75 @@ public static class StructuredContent
                 // "markdown" field, and Focus rendered the raw JSON envelope on screen.
                 or "youtube";
 
+    public static bool IsRichEditable(string kind) =>
+        kind == "youtube" || kind.StartsWith("social-", StringComparison.Ordinal);
+
+    /// <summary>The prose surface that belongs in the ordinary rich editor. YouTube's
+    /// description already contains its paste-ready chapters and hashtags; package metadata
+    /// such as scored title options stays in JSON and is never flattened into editable text.</summary>
+    public static string ToEditorMarkdown(string kind, string? contentJson)
+    {
+        if (kind != "youtube")
+        {
+            return ToDisplayMarkdown(kind, contentJson);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson ?? "{}");
+            var root = document.RootElement;
+            var content = root.TryGetProperty("content", out var nested) ? nested : root;
+            return Str(content, "description");
+        }
+        catch (JsonException)
+        {
+            return contentJson ?? string.Empty;
+        }
+    }
+
+    /// <summary>Patches rich-editor prose back into a typed package without dropping the
+    /// validated fields, citations, audit result, or envelope around it.</summary>
+    public static string FromEditorMarkdown(string kind, string? originalJson, string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(originalJson ?? "{}") as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject();
+        }
+
+        var content = root["content"] as JsonObject ?? root;
+        if (kind == "youtube")
+        {
+            content["description"] = markdown.Trim();
+        }
+        else if (kind.StartsWith("social-", StringComparison.Ordinal))
+        {
+            var lines = markdown.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n').ToList();
+            var last = lines.FindLastIndex(line => !string.IsNullOrWhiteSpace(line));
+            var tags = last >= 0
+                ? lines[last].Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                : [];
+            if (tags.Length > 0 && tags.All(tag => tag.StartsWith('#')))
+            {
+                content["hashtags"] = new JsonArray(tags
+                    .Select(tag => (JsonNode?)JsonValue.Create(tag.TrimStart('#'))).ToArray());
+                lines.RemoveAt(last);
+            }
+            else
+            {
+                content["hashtags"] = new JsonArray();
+            }
+            content["text"] = string.Join('\n', lines).Trim();
+        }
+
+        return root.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+
     /// <summary>Formats a structured payload as display markdown. Falls back to pretty JSON.</summary>
     public static string ToDisplayMarkdown(string kind, string? contentJson)
     {

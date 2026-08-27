@@ -22,9 +22,10 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class AiGenerationTests(CastmillApiFactory factory)
 {
-    private WebApplicationFactory<Program> WithFakeModel() =>
+    private WebApplicationFactory<Program> WithFakeModel(bool malformedYoutubeTaxonomy = false) =>
         factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
-            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(_ => new FakeFoundryFactory()))));
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
+                _ => new FakeFoundryFactory(malformedYoutubeTaxonomy)))));
 
     private static async Task<(HttpClient Client, Guid CampaignId, Guid TranscriptId)> SetUpAsync(WebApplicationFactory<Program> app)
     {
@@ -238,6 +239,29 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         var revisions = await client.GetFromJsonAsync<List<ArtifactRevisionResponse>>(
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}/revisions");
         Assert.Contains(revisions!, revision => revision.Reason == "youtube-title-b");
+    }
+
+    [Fact]
+    public async Task Youtube_repairs_model_taxonomy_synonyms_and_duplicate_angles()
+    {
+        await using var app = WithFakeModel(malformedYoutubeTaxonomy: true);
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        generate.EnsureSuccessStatusCode();
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+        Assert.True(result!.Success, result.Error);
+
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        var options = package.RootElement.GetProperty("content").GetProperty("titleOptions");
+        Assert.Equal(["A", "B", "C"], options.EnumerateArray()
+            .Select(option => option.GetProperty("slot").GetString()));
+        Assert.Equal(["seo", "curiosity", "problem-solution"], options.EnumerateArray()
+            .Select(option => option.GetProperty("angle").GetString()));
     }
 
     [Fact]
@@ -471,7 +495,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
     // ---- Fakes ---------------------------------------------------------------
 
-    internal sealed class FakeFoundryFactory : IFoundryClientFactory
+    internal sealed class FakeFoundryFactory(bool malformedYoutubeTaxonomy = false) : IFoundryClientFactory
     {
         public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
             Task.FromResult<FoundryCredentials?>(new FoundryCredentials("https://fake.local", "fake", "config"));
@@ -483,7 +507,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
                 new FoundryCredentials("https://fake.local", "fake", "config"), "fake-deployment"));
 
         public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-            Task.FromResult<IChatClient>(new FakeChatClient());
+            Task.FromResult<IChatClient>(new FakeChatClient(malformedYoutubeTaxonomy));
     }
 
     private sealed class PromptEvidenceFoundryFactory : IFoundryClientFactory
@@ -683,7 +707,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     }
 
     /// <summary>Returns schema-valid canned JSON keyed off distinctive prompt text.</summary>
-    internal sealed class FakeChatClient : IChatClient
+    internal sealed class FakeChatClient(bool malformedYoutubeTaxonomy = false) : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -693,7 +717,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
         }
 
-        private static string Respond(string prompt)
+        private string Respond(string prompt)
         {
             if (prompt.Contains("Regenerate only title slot", StringComparison.Ordinal))
             {
@@ -740,7 +764,14 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             // stale before, when a prompt was reworded and the generator silently fell through.
             if (prompt.Contains("\"titleOptions\"", StringComparison.Ordinal))
             {
-                return """{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Leads with the measured result."},{"slot":"B","title":"The Deployment Workflow Behind Faster Shipping","angle":"curiosity","score":84,"rationale":"Opens a useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Delivery Workflow","angle":"problem-solution","score":82,"rationale":"Names the pain directly."}],"description":"Deployment automation cut delivery time in half, and this grounded workflow shows the exact product and dashboard proof.\n\nLearn how the team shipped the product and used its dashboard.\n\nChapters:\n0:00 Deployment automation result\n0:08 Delivery dashboard proof\n0:16 Faster shipping workflow\n\n{{LINKS}}\n#devops #automation","chapters":[{"startSeconds":0,"title":"Deployment automation result"},{"startSeconds":8,"title":"Delivery dashboard proof"},{"startSeconds":16,"title":"Faster shipping workflow"}],"tags":["deployment automation","devops dashboard","shipping workflow","delivery time","product launch","faster deploys","release process","automation tool"],"suggestedPinnedComment":"The source says deployment time was cut in half after the launch—where would this workflow remove the most delay for your team?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1","S2","S3"]}""";
+                var package = JsonNode.Parse("""{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Leads with the measured result."},{"slot":"B","title":"The Deployment Workflow Behind Faster Shipping","angle":"curiosity","score":84,"rationale":"Opens a useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Delivery Workflow","angle":"problem-solution","score":82,"rationale":"Names the pain directly."}],"description":"Deployment automation cut delivery time in half, and this grounded workflow shows the exact product and dashboard proof.\n\nLearn how the team shipped the product and used its dashboard.\n\nChapters:\n0:00 Deployment automation result\n0:08 Delivery dashboard proof\n0:16 Faster shipping workflow\n\n{{LINKS}}\n#devops #automation","chapters":[{"startSeconds":0,"title":"Deployment automation result"},{"startSeconds":8,"title":"Delivery dashboard proof"},{"startSeconds":16,"title":"Faster shipping workflow"}],"tags":["deployment automation","devops dashboard","shipping workflow","delivery time","product launch","faster deploys","release process","automation tool"],"suggestedPinnedComment":"The source says deployment time was cut in half after the launch—where would this workflow remove the most delay for your team?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1","S2","S3"]}""")!.AsObject();
+                if (malformedYoutubeTaxonomy)
+                {
+                    var options = package["titleOptions"]!.AsArray();
+                    options[0]!["angle"] = "search engine optimization";
+                    options[2]!["angle"] = "curiosity";
+                }
+                return package.ToJsonString();
             }
             if (prompt.Contains("show notes", StringComparison.Ordinal))
             {

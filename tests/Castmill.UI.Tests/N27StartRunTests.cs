@@ -126,7 +126,7 @@ public sealed class N27StartRunTests : CastmillUiTestContext
         var save = Http.Bodies.Last(request =>
             request.Method == HttpMethod.Put && request.Path.EndsWith(CampaignId.ToString(), StringComparison.Ordinal));
         Assert.Contains($"\"intent\":\"{CampaignIntent.Launch}\"", save.Body, StringComparison.Ordinal);
-        Assert.Contains("\"outputRecipe\":[\"youtube\",\"blog\"]", save.Body, StringComparison.Ordinal);
+        Assert.Contains("\"outputRecipe\":[\"youtube\",\"blog\",\"social-x\"]", save.Body, StringComparison.Ordinal);
         Assert.Contains("Platform leaders launching governed analytics", view.Markup, StringComparison.Ordinal);
     }
 

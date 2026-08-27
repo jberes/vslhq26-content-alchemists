@@ -128,6 +128,13 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         {
             return;
         }
+        catch (ApiException ex) when (ex.StatusCode >= 500 && Progress is not null)
+        {
+            if (!await ReattachAsync(campaignId, ct))
+            {
+                Error = "The server connection timed out — the board shows what printed.";
+            }
+        }
         catch (ApiException ex)
         {
             Error = ex.Message;

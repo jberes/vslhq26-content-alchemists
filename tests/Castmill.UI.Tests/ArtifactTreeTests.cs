@@ -239,6 +239,85 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Assert.DoesNotContain("Social card", producer, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Copy_icon_writes_plain_text_and_formatted_html()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.FindAll(".cm-focus__list-item")
+            .Single(item => item.TextContent.Contains("Launch-day blog post", StringComparison.Ordinal))
+            .ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch-day blog post", view.Find(".cm-focus__manuscript h1").TextContent));
+
+        await view.Find("button[aria-label='Copy formatted']").ClickAsync();
+
+        var copied = Assert.Single(Clipboard.FormattedCopies);
+        Assert.Equal("Hello.", copied.Text);
+        Assert.Contains("<p>Hello.</p>", copied.Html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Producer_shows_the_keeper_for_the_open_content_item_before_placement()
+    {
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [Artifact(BlogId, "blog", "Launch-day blog post")],
+            [Slot("blog-hero", BlogId, keeperUrl: "https://public.example/keeper.webp")], 0, 1));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll(".cm-plan__slot-image").Count == 1,
+            TimeSpan.FromSeconds(5));
+
+        Assert.StartsWith("https://public.example/keeper.webp",
+            view.Find(".cm-plan__slot-image").GetAttribute("src"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Legacy_youtube_keeper_replaces_an_empty_artifact_owned_slot()
+    {
+        var keeperId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [Artifact(YouTubeId, "youtube", "Launch video package")],
+            [
+                Slot("youtube-thumbnail", YouTubeId),
+                Slot("youtube-thumbnail", null, keeperUrl: "https://public.example/legacy-keeper.webp",
+                    keeperVariantId: keeperId),
+            ], 0, 2));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll(".cm-plan__slot-image").Count == 1,
+            TimeSpan.FromSeconds(5));
+
+        Assert.StartsWith("https://public.example/legacy-keeper.webp",
+            view.Find(".cm-plan__slot-image").GetAttribute("src"), StringComparison.Ordinal);
+        Assert.Contains("KEEPER", view.Find(".cm-plan__slot").TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Keeper_hover_download_saves_the_full_resolution_image()
+    {
+        var slotId = Guid.NewGuid();
+        var keeperId = Guid.NewGuid();
+        var downloader = new RecordingDownloader();
+        Services.AddSingleton<IFileDownloader>(downloader);
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [Artifact(YouTubeId, "youtube", "Launch video package")],
+            [Slot("youtube-thumbnail", YouTubeId,
+                keeperUrl: "https://public.example/keeper.webp",
+                slotId: slotId, keeperVariantId: keeperId)], 0, 1));
+        Http.OnFile(
+            $"api/v1/campaigns/{CampaignId}/image-slots/{slotId}/variants/{keeperId}/download",
+            "castmill-keeper.webp", "image/webp", [4, 5, 6]);
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll(".cm-plan__slot-download").Count == 1,
+            TimeSpan.FromSeconds(5));
+        await view.Find("button[aria-label='Download YouTube thumbnail']").ClickAsync();
+
+        var saved = Assert.Single(downloader.Saved);
+        Assert.Equal("castmill-keeper.webp", saved.FileName);
+        Assert.Equal([4, 5, 6], saved.Bytes);
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private sealed class AutoConfirm(bool accept) : IConfirmService
@@ -305,7 +384,22 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
             DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
             ParentArtifactId: parentArtifactId);
 
-    private static ImageSlotResponse Slot(string kind, Guid artifactId) => new(
-        Guid.NewGuid(), CampaignId, kind, 1200, 675, null, "foundry", null, null, true,
-        "Empty", null, null, DateTimeOffset.UtcNow, ArtifactId: artifactId);
+    private static ImageSlotResponse Slot(
+        string kind, Guid? artifactId, string? publishedUrl = null, string? keeperUrl = null,
+        Guid? slotId = null, Guid? keeperVariantId = null) => new(
+        slotId ?? Guid.NewGuid(), CampaignId, kind, 1200, 675, null, "foundry", null, null, true,
+        publishedUrl is null ? "Empty" : "Filled", publishedUrl, publishedUrl,
+        DateTimeOffset.UtcNow, ArtifactId: artifactId, KeeperThumbUrl: keeperUrl,
+        KeeperVariantId: keeperVariantId);
+
+    private sealed class RecordingDownloader : IFileDownloader
+    {
+        public List<DownloadedFile> Saved { get; } = [];
+
+        public Task SaveAsync(DownloadedFile file)
+        {
+            Saved.Add(file);
+            return Task.CompletedTask;
+        }
+    }
 }

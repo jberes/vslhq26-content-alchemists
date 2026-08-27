@@ -1075,6 +1075,17 @@ button.cm-intent {
     font-size: var(--cm-text-body);
 }
 
+.cm-fanout__group {
+    margin: var(--cm-space-4) 0 0;
+    padding: var(--cm-space-3) 0 0;
+    border: 0;
+    border-block-start: 1px solid var(--cm-rule);
+}
+
+.cm-fanout__group > .cm-meta {
+    margin-block: var(--cm-space-1) var(--cm-space-3);
+}
+
 /* ---- Mill Floor lanes (F5 replaces this with the real canvas) ------------------ */
 
 .cm-floor__note {
@@ -1271,6 +1282,39 @@ button.cm-intent {
     white-space: nowrap;
 }
 
+.cm-plan__slot-image {
+    display: block;
+    inline-size: 100%;
+    block-size: auto;
+    max-block-size: 12rem;
+    object-fit: contain;
+    background: var(--cm-surface-sunken);
+}
+
+.cm-plan__slot-preview {
+    position: relative;
+    grid-column: 1 / -1;
+}
+
+.cm-plan__slot-download {
+    position: absolute;
+    inset-inline-end: var(--cm-space-2);
+    inset-block-end: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule-strong);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font: inherit;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity var(--cm-motion);
+}
+
+.cm-plan__slot-preview:hover .cm-plan__slot-download,
+.cm-plan__slot-preview:focus-within .cm-plan__slot-download {
+    opacity: 1;
+}
+
 .cm-badge {
     padding: 0 var(--cm-space-1);
     border-radius: var(--cm-radius-sm);
@@ -1326,6 +1370,10 @@ button.cm-intent {
     position: relative;
     grid-column: 1;
     grid-row: 1;
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
     /* The manuscript measure: ~72 ch, because whitespace is a feature. */
     inline-size: 100%;
     max-inline-size: 78ch;
@@ -1344,6 +1392,27 @@ button.cm-intent {
     background: color-mix(in srgb, var(--cm-surface) 92%, transparent);
     color: var(--cm-on-surface);
     text-align: center;
+}
+
+.cm-focus__regenerating {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-6);
+    background: color-mix(in srgb, var(--cm-surface) 82%, transparent);
+    color: var(--cm-on-surface);
+    text-align: center;
+}
+
+.cm-focus__manuscript--regenerating > :not(.cm-focus__regenerating) {
+    filter: blur(8px);
+    opacity: 0.2;
+    pointer-events: none;
+    user-select: none;
 }
 
 .cm-focus__list,
@@ -1417,9 +1486,6 @@ button.cm-intent {
     padding: var(--cm-space-2) var(--cm-space-3);
     border-inline-start: 3px solid var(--cm-accent-alt);
     border-block-end: 1px solid var(--cm-rule-strong);
-    position: sticky;
-    inset-block-start: 0;
-    z-index: 1;
     background: var(--cm-accent-alt-wash);
     color: var(--cm-on-surface);
 }
@@ -2153,13 +2219,21 @@ button.cm-intent {
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-6);
-    inline-size: 326px;
+    min-inline-size: 0;
+    min-block-size: 0;
+    inline-size: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: var(--cm-space-4);
     border-inline-start: 1px solid var(--cm-rule);
 }
 
 .cm-focus {
-    grid-template-columns: 240px minmax(0, 1fr) 326px;
+    grid-template-columns: minmax(12rem, 240px) minmax(0, 1fr) minmax(17rem, 326px);
+    grid-template-rows: minmax(0, 1fr);
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-inline-size: 0;
     block-size: 100%;
     min-block-size: 0;
     overflow: hidden;
@@ -2169,6 +2243,10 @@ button.cm-intent {
     grid-column: 1;
     border-inline-start: 0;
     border-inline-end: 1px solid var(--cm-rule);
+    min-inline-size: 0;
+    min-block-size: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 .cm-focus__manuscript {
@@ -2177,13 +2255,23 @@ button.cm-intent {
 
 @media (max-width: 1439.98px) {
     .cm-focus {
-        grid-template-columns: 220px minmax(0, 1fr);
+        grid-template-columns: minmax(11rem, 200px) minmax(0, 1fr) minmax(16rem, 280px);
+    }
+
+}
+
+@media (max-width: 1099.98px) {
+    .cm-focus {
+        grid-template-columns: minmax(11rem, 200px) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        overflow-y: auto;
     }
 
     .cm-focus__producer {
         grid-column: 1 / -1;
         grid-row: 2;
         inline-size: auto;
+        overflow: visible;
         border-inline-start: 0;
         border-block-start: 1px solid var(--cm-rule);
     }
@@ -2193,6 +2281,17 @@ button.cm-intent {
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-2);
+}
+
+.cm-producer__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-2);
+}
+
+.cm-producer__actions > .cm-button {
+    min-inline-size: 0;
+    inline-size: 100%;
 }
 
 .cm-filmstrip {

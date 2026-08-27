@@ -1,7 +1,9 @@
 using Bunit;
 using Castmill.Core.Resources;
+using Castmill.UI.Design;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -15,9 +17,11 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
     private static readonly Guid CampaignId = Guid.Parse("f1111111-1111-1111-1111-111111111111");
     private static readonly Guid SlotId = Guid.Parse("f1111111-1111-1111-1111-222222222222");
     private static readonly Guid TakeId = Guid.Parse("f1111111-1111-1111-1111-333333333333");
+    private readonly RecordingDownloader _downloader = new();
 
     public ImageStudioLightboxTests()
     {
+        Services.AddSingleton<IFileDownloader>(_downloader);
         SignInTestUser();
         Http.OnGet("api/v1/campaigns", new List<CampaignResponse> { Campaign() });
         Http.OnGet("api/v1/ai/status", new Castmill.Core.Ai.AiStatusResponse(
@@ -94,6 +98,37 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         Assert.Contains("\"headlineBackground\":null", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Mark_as_keeper_preserves_placement_as_a_separate_action()
+    {
+        var view = await OpenAsync();
+        Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}",
+            Take() with { State = "Kept" });
+
+        await view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal)).ClickAsync();
+
+        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Patch
+            && body.Path.EndsWith($"variants/{TakeId}", StringComparison.Ordinal)
+            && body.Body.Contains("Kept", StringComparison.Ordinal));
+        Assert.DoesNotContain(Http.Bodies, body => body.Path.EndsWith("/place", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Download_image_saves_the_full_size_take()
+    {
+        var path = $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}/download";
+        Http.OnFile(path, "castmill-take.webp", "image/webp", [1, 2, 3]);
+        var view = await OpenAsync();
+
+        await view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Download image", StringComparison.Ordinal)).ClickAsync();
+
+        var saved = Assert.Single(_downloader.Saved);
+        Assert.Equal("castmill-take.webp", saved.FileName);
+        Assert.Equal([1, 2, 3], saved.Bytes);
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     /// <summary>The drawer is closed until a tile is chosen — open the first real slot tile.</summary>
@@ -123,6 +158,17 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         state == "Filled" ? "https://public.example/x.webp" : null,
         state == "Filled" ? "https://public.example/x.webp" : null,
         DateTimeOffset.UtcNow);
+
+    private sealed class RecordingDownloader : IFileDownloader
+    {
+        public List<DownloadedFile> Saved { get; } = [];
+
+        public Task SaveAsync(DownloadedFile file)
+        {
+            Saved.Add(file);
+            return Task.CompletedTask;
+        }
+    }
 
     private static ImageVariantResponse Take() => new(
         TakeId, SlotId,

@@ -1,4 +1,5 @@
 using Castmill.UI.Editor;
+using System.Text.Json;
 
 namespace Castmill.UI.Tests;
 
@@ -107,5 +108,30 @@ public sealed class YouTubePackageRenderTests
         Assert.Contains("### C · problem-solution · 83/100", markdown, StringComparison.Ordinal);
         Assert.Contains("## Suggested pinned comment", markdown, StringComparison.Ordinal);
         Assert.Contains("where is your biggest delay?", markdown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Rich_editor_shows_only_the_paste_ready_description()
+    {
+        var markdown = StructuredContent.ToEditorMarkdown("youtube", Payload);
+
+        Assert.Equal("Build a React Data Grid with column pinning.\nSee how it works.", markdown);
+        Assert.DoesNotContain("Title options", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Tags", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Editing_the_description_preserves_the_rest_of_the_package()
+    {
+        var updated = StructuredContent.FromEditorMarkdown(
+            "youtube", Payload, "Paste-ready description.\n\n0:00 Opening\n#React");
+        using var document = JsonDocument.Parse(updated);
+        var content = document.RootElement.GetProperty("content");
+
+        Assert.Equal("Paste-ready description.\n\n0:00 Opening\n#React",
+            content.GetProperty("description").GetString());
+        Assert.Equal(3, content.GetProperty("titleVariants").GetArrayLength());
+        Assert.Equal("S02", content.GetProperty("citations")[0].GetString());
+        Assert.True(document.RootElement.GetProperty("validation").GetProperty("passed").GetBoolean());
     }
 }

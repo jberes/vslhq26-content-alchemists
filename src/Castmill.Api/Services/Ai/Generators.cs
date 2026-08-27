@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Castmill.Core.Ai;
 
@@ -465,6 +466,79 @@ public static partial class Generators
 
     /// <summary>The complete YouTube package contract. These checks are deterministic so a
     /// polished audit response cannot silently omit the A/B/C experiment or pinned comment.</summary>
+    internal static JsonElement NormalizeYoutubeTitleOptions(JsonElement json)
+    {
+        if (!json.TryGetProperty("titleOptions", out var optionsElement)
+            || optionsElement.ValueKind != JsonValueKind.Array
+            || optionsElement.GetArrayLength() != 3
+            || JsonNode.Parse(json.GetRawText()) is not JsonObject root
+            || root["titleOptions"] is not JsonArray options
+            || options.Any(option => option is not JsonObject))
+        {
+            return json;
+        }
+
+        var expectedSlots = new[] { "A", "B", "C" };
+        var titleOptions = options.Select(option => (JsonObject)option!.DeepClone()).ToList();
+        var bySlot = titleOptions
+            .Select(option => (Option: option, Slot: CanonicalSlot(NodeString(option["slot"]))))
+            .Where(item => item.Slot is not null)
+            .ToList();
+        if (bySlot.Count == 3 && bySlot.Select(item => item.Slot).Distinct(StringComparer.Ordinal).Count() == 3)
+        {
+            titleOptions = expectedSlots
+                .Select(slot => bySlot.Single(item => item.Slot == slot).Option)
+                .ToList();
+        }
+
+        var seenAngles = new HashSet<string>(StringComparer.Ordinal);
+        var fallbackAngles = new[] { "seo", "curiosity", "problem-solution" };
+        for (var index = 0; index < titleOptions.Count; index++)
+        {
+            var option = titleOptions[index];
+            option["slot"] = expectedSlots[index];
+            var angle = CanonicalAngle(NodeString(option["angle"]));
+            if (angle is null || !seenAngles.Add(angle))
+            {
+                angle = fallbackAngles.First(candidate => !seenAngles.Contains(candidate));
+                seenAngles.Add(angle);
+            }
+            option["angle"] = angle;
+        }
+
+        root["titleOptions"] = new JsonArray(titleOptions.Select(option => (JsonNode)option).ToArray());
+        return JsonSerializer.SerializeToElement(root);
+    }
+
+    private static string? NodeString(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private static string? CanonicalSlot(string? value) => value?.Trim().ToUpperInvariant() switch
+    {
+        "A" => "A",
+        "B" => "B",
+        "C" => "C",
+        _ => null,
+    };
+
+    private static string? CanonicalAngle(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant()
+            .Replace('_', '-')
+            .Replace(' ', '-')
+            .Replace('/', '-');
+        return normalized switch
+        {
+            "seo" or "seo-focused" or "seo-optimized" or "seo-optimised"
+                or "search-engine-optimization" or "search-engine-optimisation" => "seo",
+            "curiosity" or "curiosity-gap" => "curiosity",
+            "how-to" or "howto" => "how-to",
+            "problem-solution" => "problem-solution",
+            "thought-leadership" => "thought-leadership",
+            _ => null,
+        };
+    }
+
     internal static ValidationOutcome ValidateYoutube(JsonElement json, GenerationEvidenceContext evidence)
     {
         var common = ValidateCommon(json, evidence, requireString: "description");

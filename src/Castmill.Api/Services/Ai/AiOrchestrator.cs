@@ -360,7 +360,8 @@ public sealed class AiOrchestrator(
                 {{draftJson.GetRawText()}}
                 """, brief, evidence, brand, "youtube"), ct);
 
-            var json = CitationMarkers.Strip(ParseModelJson(audited));
+            var json = Generators.NormalizeYoutubeTitleOptions(
+                CitationMarkers.Strip(ParseModelJson(audited)));
             json = await SubstituteLinksAsync(userId, json, ct);
             if (!evidence.TryNormalizeCitations(json, out json, out var citationError))
             {

@@ -146,7 +146,11 @@ public sealed record ImageSlotResponse(
     /// preview a slot that has generated work but nothing placed yet. Null when no takes.</summary>
     string? LatestTakeThumbUrl = null,
     /// <summary>Candidate + kept takes. Discarded takes do not satisfy a future batch target.</summary>
-    int ActiveTakeCount = 0);
+    int ActiveTakeCount = 0,
+    /// <summary>The take explicitly marked Kept, even when it has not been placed yet.</summary>
+    string? KeeperThumbUrl = null,
+    /// <summary>Keeper id used by authenticated full-resolution download actions.</summary>
+    Guid? KeeperVariantId = null);
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,

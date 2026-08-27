@@ -39,6 +39,7 @@ public static class ImageSlotEndpoints
         // Persisted takes: the gallery lists them, keep/discard flips state, steer
         // makes a new take from an old one. Blobs are never deleted (immutable cache).
         group.MapGet("/{slotId:guid}/variants", ListVariantsAsync);
+        group.MapGet("/{slotId:guid}/variants/{variantId:guid}/download", DownloadVariantAsync);
         group.MapPatch("/{slotId:guid}/variants/{variantId:guid}", SetVariantStateAsync)
             .Validate<VariantStateRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/variants/{variantId:guid}/steer", SteerAsync)
@@ -193,6 +194,31 @@ public static class ImageSlotEndpoints
         slot.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return Results.Ok(ToResponse(slot));
+    }
+
+    private static async Task<IResult> DownloadVariantAsync(
+        Guid campaignId,
+        Guid slotId,
+        Guid variantId,
+        IPublicContentStore publicStore,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var variant = await db.ImageVariants
+            .Where(item => item.CampaignId == campaignId
+                && item.SlotId == slotId
+                && item.Id == variantId)
+            .Select(item => new { item.BlobPath })
+            .SingleOrDefaultAsync(ct);
+        if (variant is null)
+        {
+            return Results.NotFound();
+        }
+
+        var bytes = await publicStore.ReadAsync(variant.BlobPath, ct);
+        return bytes is null
+            ? Results.NotFound()
+            : Results.File(bytes, "image/webp", $"castmill-{variantId:N}.webp");
     }
 
     private static async Task<IResult> CreateAsync(

@@ -9,6 +9,8 @@ namespace Castmill.UI.Design;
 public interface IClipboardService
 {
     Task<bool> CopyTextAsync(string text);
+
+    Task<bool> CopyFormattedAsync(string text, string html);
 }
 
 public sealed class ClipboardService(IJSRuntime js) : IClipboardService, IAsyncDisposable
@@ -24,6 +26,22 @@ public sealed class ClipboardService(IJSRuntime js) : IClipboardService, IAsyncD
         {
             _module ??= await js.InvokeAsync<IJSObjectReference>("import", ModulePath);
             return await _module.InvokeAsync<bool>("copyText", text);
+        }
+        catch (JSException)
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> CopyFormattedAsync(string text, string html)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(html);
+
+        try
+        {
+            _module ??= await js.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            return await _module.InvokeAsync<bool>("copyFormatted", text, html);
         }
         catch (JSException)
         {

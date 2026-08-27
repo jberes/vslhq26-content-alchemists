@@ -297,7 +297,7 @@ public static class CampaignEndpoints
         // one a person chose), then newest. Discarded takes never resurface.
         var activeTakes = await db.ImageVariants
                 .Where(v => v.CampaignId == id && v.State != "Discarded")
-                .Select(v => new { v.SlotId, v.ThumbUrl, v.State, v.CreatedAt })
+            .Select(v => new { v.Id, v.SlotId, v.ThumbUrl, v.State, v.CreatedAt })
             .ToListAsync(ct);
         var latestTakeBySlot = activeTakes
             .GroupBy(v => v.SlotId)
@@ -306,6 +306,12 @@ public static class CampaignEndpoints
                 g => g.OrderBy(v => v.State == "Kept" ? 0 : 1)
                     .ThenByDescending(v => v.CreatedAt)
                     .First().ThumbUrl);
+        var keeperTakeBySlot = activeTakes
+            .Where(variant => variant.State == "Kept")
+            .GroupBy(variant => variant.SlotId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(variant => variant.CreatedAt).First());
 
         var brand = campaign.BrandId is { } brandId
             ? await db.BrandProfiles
@@ -326,6 +332,8 @@ public static class CampaignEndpoints
                 {
                     LatestTakeThumbUrl = latestTakeBySlot.GetValueOrDefault(s.Id),
                     ActiveTakeCount = activeTakes.Count(v => v.SlotId == s.Id),
+                    KeeperThumbUrl = keeperTakeBySlot.GetValueOrDefault(s.Id)?.ThumbUrl,
+                    KeeperVariantId = keeperTakeBySlot.GetValueOrDefault(s.Id)?.Id,
                 })
                 .ToList(),
             imagesFilled = slots.Count(s => s.State == "Filled"),

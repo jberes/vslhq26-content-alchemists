@@ -623,7 +623,7 @@
             <h2 class="cm-front__block-title">Output recipe</h2>
             <p class="cm-meta">Choose the first outputs to produce from this shared strategy. This recipe is saved on the campaign and remains editable before Press Run.</p>
             <ul class="cm-fanout">
-                @foreach (var item in _fanOut)
+                @foreach (var item in _fanOut.Where(item => !item.IsSocial))
                 {
                     <li>
                         <label class="cm-fanout__item">
@@ -634,6 +634,22 @@
                     </li>
                 }
             </ul>
+            <fieldset class="cm-fanout__group">
+                <legend class="cm-kicker">Social channels</legend>
+                <p class="cm-meta">Choose only the networks this campaign needs.</p>
+                <ul class="cm-fanout cm-fanout--social">
+                    @foreach (var item in _fanOut.Where(item => item.IsSocial))
+                    {
+                        <li>
+                            <label class="cm-fanout__item">
+                                <input type="checkbox" checked="@item.Selected"
+                                    @onchange="e => RecipeChangedAsync(item, e)" />
+                                <span>@item.Label</span>
+                            </label>
+                        </li>
+                    }
+                </ul>
+            </fieldset>
 
             @if (_error is not null)
             {
@@ -764,6 +780,8 @@
         public string Label { get; } = label;
 
         public bool Selected { get; set; } = selected;
+
+        public bool IsSocial => Kind.StartsWith("social-", StringComparison.Ordinal);
     }
 
     private readonly List<string> _log = [];
@@ -791,8 +809,12 @@
         {
             new("youtube", "YouTube package"),
             new("blog", "Blog post"),
-            new("social", "Social set (6 platforms)", selected: false),
         };
+
+        items.AddRange(ArtifactDisplay.UserGeneratableKinds
+            .Where(kind => kind.Lane == "Social")
+            .Select(kind => new FanOutItem(
+                kind.Kind, kind.Label, selected: kind.Kind == "social-x")));
 
         items.AddRange(ArtifactDisplay.UserGeneratableKinds
             .Where(k => k.Lane != "Social"
@@ -806,8 +828,7 @@
         // image-prompts always rides along on the initial run: it is what seeds the reserved
         // image slots, and omitting it here is why campaigns sat at 0/6 images until someone
         // pressed "Seed all prompts" by hand.
-        [.. kinds.SelectMany(k => k == "social" ? ArtifactDisplay.SocialKinds : [k]),
-         "thumbnail-concepts", "image-prompts"];
+        [.. kinds, "thumbnail-concepts", "image-prompts"];
 
     private IReadOnlyList<string> SelectedRecipe() =>
         _fanOut.Where(item => item.Selected).Select(item => item.Kind).ToList();
@@ -1518,7 +1539,8 @@
         }
         foreach (var item in _fanOut)
         {
-            item.Selected = recipe.Contains(item.Kind, StringComparer.OrdinalIgnoreCase);
+            item.Selected = recipe.Contains(item.Kind, StringComparer.OrdinalIgnoreCase)
+                || item.IsSocial && recipe.Contains("social", StringComparer.OrdinalIgnoreCase);
         }
     }
 

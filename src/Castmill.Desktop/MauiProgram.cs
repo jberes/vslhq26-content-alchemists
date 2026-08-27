@@ -1,5 +1,6 @@
 using Castmill.Desktop.Platform;
 using Castmill.UI;
+using Castmill.UI.Design;
 using Castmill.UI.Platform;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
@@ -48,6 +49,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IShellInfo, DesktopShellInfo>();
         builder.Services.AddScoped<IAuthTokenProvider, DesktopTokenProvider>();
         builder.Services.AddSingleton<IMediaPipeline, DesktopMediaPipeline>();
+        builder.Services.AddScoped<IFileDownloader, DesktopFileDownloader>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

@@ -72,6 +72,11 @@ public sealed class ImagesClient(ApiClient api)
         api.GetAsync<List<ImageVariantResponse>>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants?includeDiscarded={includeDiscarded}", ct);
 
+    public Task<DownloadedFile> DownloadVariantAsync(
+        Guid campaignId, Guid slotId, Guid variantId, CancellationToken ct = default) =>
+        api.DownloadAsync(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/download", ct);
+
     /// <summary>Keep / discard / restore a take. A state flip — the pixels stay.</summary>
     public Task<ImageVariantResponse> SetVariantStateAsync(
         Guid campaignId, Guid slotId, Guid variantId, string state, CancellationToken ct = default) =>

@@ -141,11 +141,18 @@ public sealed class TestVoiceCaptureService : IVoiceCaptureService
 public sealed class TestClipboardService : IClipboardService
 {
     public List<string> Copies { get; } = [];
+    public List<(string Text, string Html)> FormattedCopies { get; } = [];
     public bool Succeeds { get; set; } = true;
 
     public Task<bool> CopyTextAsync(string text)
     {
         Copies.Add(text);
+        return Task.FromResult(Succeeds);
+    }
+
+    public Task<bool> CopyFormattedAsync(string text, string html)
+    {
+        FormattedCopies.Add((text, html));
         return Task.FromResult(Succeeds);
     }
 }

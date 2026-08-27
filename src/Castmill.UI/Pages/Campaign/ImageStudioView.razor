@@ -24,6 +24,7 @@
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 @inject IConfirmService Confirm
+@inject IFileDownloader Downloader
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
 
@@ -830,9 +831,13 @@
                                 @if (take.State != "Kept")
                                 {
                                     <button type="button" class="cm-button cm-button--quiet"
-                                            title="Keepers sort first in the takes strip"
+                                            title="Show this take in Focus without placing it"
                                             @onclick='() => SetStateAsync(take, "Kept")'>Mark as keeper</button>
                                 }
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        disabled="@_downloading" @onclick="() => DownloadAsync(take)">
+                                    @(_downloading ? "Downloading…" : "↓ Download image")
+                                </button>
                                 @if (take.State != "Discarded")
                                 {
                                     <button type="button" class="cm-button cm-button--quiet"
@@ -995,6 +1000,7 @@
     private Guid? _addingFor;
     private bool _seeding;
     private bool _placing;
+    private bool _downloading;
     private bool _compositing;
     private bool _showDiscarded;
     private string? _generateError;
@@ -2338,6 +2344,25 @@
         finally
         {
             _placing = false;
+        }
+    }
+
+    private async Task DownloadAsync(ImageVariantResponse variant)
+    {
+        _downloading = true;
+        try
+        {
+            await Downloader.SaveAsync(await Images.DownloadVariantAsync(
+                CampaignId, variant.SlotId, variant.Id));
+            Notifier.ShowSuccess("Image downloaded.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _downloading = false;
         }
     }
 

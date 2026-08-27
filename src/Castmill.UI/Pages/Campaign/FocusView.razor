@@ -24,6 +24,7 @@
 @inject IConfirmService Confirm
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@(_artifact?.Title ?? Campaign.Campaign?.Name ?? "Campaign") — Focus</PageTitle>
 
@@ -103,7 +104,16 @@
             }
         </aside>
 
-        <div class="cm-focus__manuscript cm-region">
+        <div class="cm-focus__manuscript cm-region @(_regenerating ? "cm-focus__manuscript--regenerating" : null)"
+             aria-busy="@_regenerating">
+            @if (_regenerating)
+            {
+                <div class="cm-focus__regenerating" role="status" aria-live="polite">
+                    <span class="cm-ai-dot" aria-hidden="true"></span>
+                    <strong>@_regenerationLabel</strong>
+                    <span class="cm-meta">The current take is hidden while the replacement is drafted and checked.</span>
+                </div>
+            }
             @if (_loadingArtifactId is not null)
             {
                 <div class="cm-focus__loading" role="status" aria-live="polite">
@@ -133,6 +143,11 @@
                             @ArtifactDisplay.StatusLabel(_artifact.Status)
                         </span>
                         <span class="cm-meta">@_saveState</span>
+                        <button type="button" class="cm-button cm-button--quiet cm-focus__copy"
+                                title="@CopyActionLabel" aria-label="@CopyActionLabel"
+                                @onclick="CopyArtifactAsync">
+                            <span aria-hidden="true">⧉</span> @CopyActionLabel
+                        </button>
                     </div>
                 </header>
 
@@ -142,12 +157,9 @@
                 }
                 else
                 {
-                @if (IsStructured)
+                @if (IsStructured && !SupportsRichStructuredEditing)
                 {
-                    <p class="cm-meta">
-                        Structured artifact — rendered read-only. Its fields are validated
-                        server-side; a composer for structured kinds is a later phase.
-                    </p>
+                    <p class="cm-meta">This content type has validated fields that are currently shown as a formatted preview.</p>
                     @if (_artifact.Kind is "email-sequence" or "newsletter")
                     {
                         <span class="cm-chip"
@@ -158,7 +170,7 @@
                 }
                 <RichEditor @key="EditorKey"
                             Markdown="@DisplayedMarkdown"
-                            Editable="@(_previewRevision is null && !IsStructured)"
+                            Editable="@(_previewRevision is null && (!IsStructured || SupportsRichStructuredEditing))"
                             Placeholder="Write, or press / for a block."
                             OnCommit="CommitAsync"
                             OnChanged="MarkDirty"
@@ -373,7 +385,7 @@
                         <textarea class="cm-input cm-textarea" rows="3" @bind="_steering"
                                   placeholder="Tighter intro. Lead with the rollback story."></textarea>
                     </label>
-                    <div class="cm-form__actions">
+                    <div class="cm-form__actions cm-producer__actions">
                         <button type="button" class="cm-button cm-button--quiet" disabled="@_regenerating"
                                 @onclick="RegenerateAsync">
                             @(_regenerating ? "Generating…" : SelectedIsPlaceholder ? "Generate draft" : "Regenerate whole")
@@ -390,7 +402,7 @@
                     </div>
                     @if (_artifact.Kind == "youtube")
                     {
-                        <div class="cm-form__actions" aria-label="YouTube title experiment controls">
+                        <div class="cm-form__actions cm-producer__actions" aria-label="YouTube title experiment controls">
                             @foreach (var slot in new[] { "A", "B", "C" })
                             {
                                 <button type="button" class="cm-button cm-button--quiet"
@@ -565,9 +577,27 @@
                         @foreach (var slot in ArtifactImageSlots)
                         {
                             <li class="cm-plan__slot">
+                                @if ((slot.PublishedUrl ?? slot.KeeperThumbUrl) is { } imageUrl)
+                                {
+                                    <div class="cm-plan__slot-preview">
+                                        <img class="cm-plan__slot-image"
+                                             src="@(imageUrl + "?v=" + slot.UpdatedAt.ToUnixTimeSeconds())"
+                                             width="@slot.TargetWidth" height="@slot.TargetHeight"
+                                             alt="@ArtifactDisplay.SlotLabel(slot.Kind) keeper" />
+                                        @if (slot.KeeperVariantId is not null)
+                                        {
+                                            <button type="button" class="cm-plan__slot-download"
+                                                    disabled="@(_downloadingImageSlot == slot.Id)"
+                                                    title="Download image" aria-label="Download @ArtifactDisplay.SlotLabel(slot.Kind)"
+                                                    @onclick="() => DownloadSlotImageAsync(slot)">
+                                                <span aria-hidden="true">↓</span> Download
+                                            </button>
+                                        }
+                                    </div>
+                                }
                                 <span class="cm-plan__slot-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
-                                <span class="cm-badge @(slot.State == "Filled" ? "cm-badge--done" : "cm-badge--empty")">
-                                    @(slot.State == "Filled" ? "DONE" : "EMPTY")
+                                <span class="cm-badge @(slot.State == "Filled" || slot.KeeperThumbUrl is not null ? "cm-badge--done" : "cm-badge--empty")">
+                                    @(slot.State == "Filled" ? "PLACED" : slot.KeeperThumbUrl is not null ? "KEEPER" : "EMPTY")
                                 </span>
                                 <a class="cm-meta"
                                    href="@ImageStudioPath(slot.Id)">Open</a>
@@ -634,6 +664,13 @@
     /// <summary>Structured kinds render formatted but read-only (see StructuredContent).</summary>
     private bool IsStructured => _artifact is not null && StructuredContent.IsStructured(_artifact.Kind);
 
+    private bool SupportsRichStructuredEditing => _artifact is not null
+        && StructuredContent.IsRichEditable(_artifact.Kind);
+
+    private string CopyActionLabel => _artifact?.Kind == "youtube"
+        ? "Copy for YouTube"
+        : "Copy formatted";
+
     private readonly List<EditorHeading> _headings = [];
 
     private readonly List<string> _producerLog = [];
@@ -643,8 +680,10 @@
     private ArtifactRevisionDetailResponse? _previewRevision;
     private string _steering = string.Empty;
     private bool _regenerating;
+    private string _regenerationLabel = "Regenerating content…";
     private bool _generatingSocialSet;
     private bool _addingImage;
+    private Guid? _downloadingImageSlot;
     private bool _savingMetadata;
     private BlogPublishingMetadata _blogMetadata = new();
     private string _blogMetaTab = "Combined";
@@ -864,8 +903,11 @@
 
     private async Task SelectAsync(Guid id)
     {
-        // Keep the URL honest so a reload or a Back lands on the same artifact (ADR-F07).
-        Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={id}");
+        // Keep reload/deep-link behavior without triggering FocusOnNavigate, whose heading
+        // focus scrolls the manuscript when someone selects a rail item.
+        RequestedArtifact = id;
+        await JS.InvokeVoidAsync("history.replaceState", null, string.Empty,
+            $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={id}");
         await LoadArtifactAsync(id);
     }
 
@@ -889,7 +931,7 @@
             _artifactId = id;
             _etag = etag;
             _markdown = StructuredContent.IsStructured(artifact.Kind)
-                ? StructuredContent.ToDisplayMarkdown(artifact.Kind, artifact.ContentJson)
+                ? StructuredContent.ToEditorMarkdown(artifact.Kind, artifact.ContentJson)
                 : ArtifactContent.ToMarkdown(artifact.ContentJson);
             _blogMetadata = artifact.Kind == "blog"
                 ? ArtifactContent.PublishingMetadata(artifact.ContentJson)
@@ -940,7 +982,8 @@
     /// </summary>
     private async Task CommitAsync(string markdown)
     {
-        if (_artifact is null || _artifactId is not { } id || IsStructured)
+        if (_artifact is null || _artifactId is not { } id
+            || IsStructured && !SupportsRichStructuredEditing)
         {
             return;
         }
@@ -956,8 +999,11 @@
 
         try
         {
+            var contentJson = IsStructured
+                ? StructuredContent.FromEditorMarkdown(_artifact.Kind, _artifact.ContentJson, markdown)
+                : ArtifactContent.FromMarkdown(_artifact.ContentJson, markdown);
             var saved = await Campaigns.SaveArtifactAsync(
-                CampaignId, id, _artifact.Title, ArtifactContent.FromMarkdown(_artifact.ContentJson, markdown), _etag);
+                CampaignId, id, _artifact.Title, contentJson, _etag);
 
             _artifact = saved;
             _markdown = markdown;
@@ -982,6 +1028,22 @@
 
         StateHasChanged();
     }
+
+    private async Task CopyArtifactAsync()
+    {
+        var markdown = DisplayedMarkdown;
+        var plain = MarkdownRenderer.ToPlainText(markdown);
+        var html = MarkdownRenderer.ToHtml(markdown).Value;
+        if (await Clipboard.CopyFormattedAsync(plain, html))
+        {
+            Notifier.ShowSuccess("Formatted content copied.");
+        }
+        else
+        {
+            Notifier.ShowError("Clipboard unavailable. Select the content and copy it manually.");
+        }
+    }
+
 
     private async Task SetStatusAsync(string status)
     {
@@ -1025,8 +1087,11 @@
     }
 
     /// <summary>What the editor shows: the live document, or a revision being previewed.</summary>
-    private string DisplayedMarkdown =>
-        _previewRevision is { } preview ? ArtifactContent.ToMarkdown(preview.ContentJson) : _markdown;
+    private string DisplayedMarkdown => _previewRevision is { } preview
+        ? _artifact is { } artifact && StructuredContent.IsStructured(artifact.Kind)
+            ? StructuredContent.ToEditorMarkdown(artifact.Kind, preview.ContentJson)
+            : ArtifactContent.ToMarkdown(preview.ContentJson)
+        : _markdown;
 
     /// <summary>Remounts the editor when switching artifact OR entering/leaving preview.</summary>
     private string EditorKey => $"{_artifactId}:{_previewRevision?.Id.ToString() ?? "live"}";
@@ -1080,7 +1145,9 @@
         {
             var restored = await Campaigns.RestoreRevisionAsync(CampaignId, id, preview.Id, _etag);
             _artifact = restored;
-            _markdown = ArtifactContent.ToMarkdown(restored.ContentJson);
+            _markdown = StructuredContent.IsStructured(restored.Kind)
+                ? StructuredContent.ToEditorMarkdown(restored.Kind, restored.ContentJson)
+                : ArtifactContent.ToMarkdown(restored.ContentJson);
             _etag = $"\"{restored.Version}\"";
             _previewRevision = null;
             _saveState = $"Restored v{preview.Version} · now v{restored.Version}";
@@ -1110,6 +1177,7 @@
             return;
         }
 
+        _regenerationLabel = $"Regenerating {ArtifactDisplay.KindLabel(_artifact.Kind).ToLowerInvariant()}…";
         _regenerating = true;
         _producerLog.Clear();
         _producerLog.Add($"queued {_artifact.Kind} · drafting, then cross-model audit…");
@@ -1172,6 +1240,7 @@
     private async Task RegenerateYoutubeTitleAsync(string slot)
     {
         if (_artifact is null) return;
+        _regenerationLabel = $"Regenerating title {slot}…";
         _regenerating = true;
         try
         {
@@ -1244,6 +1313,7 @@
             return;
         }
 
+        _regenerationLabel = $"Applying the {TechEditProvider} tech edit…";
         _regenerating = true;
         _producerLog.Clear();
         _producerLog.Add(_useKnowledgeBase
@@ -1410,9 +1480,48 @@
 
     /// <summary>Every Producer control follows the selected artifact. Images from a sibling
     /// post are never offered for insertion or shown as though they belong to this item.</summary>
-    private IEnumerable<ImageSlotResponse> ArtifactImageSlots => _artifactId is { } artifactId
-        ? Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId)
-        : [];
+    private IEnumerable<ImageSlotResponse> ArtifactImageSlots
+    {
+        get
+        {
+            if (_artifactId is not { } artifactId || _artifact is null)
+            {
+                return [];
+            }
+
+            var slots = Campaign.ImageSlots.Where(slot => slot.ArtifactId == artifactId).ToList();
+            var legacyChosen = Campaign.ImageSlots
+                .Where(slot => slot.ArtifactId is null
+                    && SlotMatchesArtifact(slot.Kind, _artifact.Kind)
+                    && (slot.PublishedUrl is not null || slot.KeeperThumbUrl is not null))
+                .GroupBy(slot => slot.Kind, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(slot => slot.UpdatedAt).First());
+            foreach (var legacy in legacyChosen)
+            {
+                var ownedIndex = slots.FindIndex(slot =>
+                    slot.Kind.Equals(legacy.Kind, StringComparison.OrdinalIgnoreCase));
+                if (ownedIndex < 0)
+                {
+                    slots.Add(legacy);
+                }
+                else if (slots[ownedIndex].PublishedUrl is null
+                    && slots[ownedIndex].KeeperThumbUrl is null)
+                {
+                    slots[ownedIndex] = legacy;
+                }
+            }
+            return slots;
+        }
+    }
+
+    private static bool SlotMatchesArtifact(string slotKind, string artifactKind) => artifactKind switch
+    {
+        "youtube" => slotKind == "youtube-thumbnail",
+        "blog" => slotKind.StartsWith("blog-", StringComparison.Ordinal)
+            || slotKind == "content-image-1",
+        _ when artifactKind.StartsWith("social-", StringComparison.Ordinal) => slotKind == "social-card",
+        _ => false,
+    };
 
     /// <summary>Filled image slots owned by the open content item.</summary>
     private IEnumerable<ImageSlotResponse> CampaignImages =>
@@ -1423,6 +1532,30 @@
 
     private string ImageStudioForArtifact(Guid artifactId) =>
         $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?artifact={artifactId}";
+
+    private async Task DownloadSlotImageAsync(ImageSlotResponse slot)
+    {
+        if (slot.KeeperVariantId is not { } variantId)
+        {
+            return;
+        }
+
+        _downloadingImageSlot = slot.Id;
+        try
+        {
+            await Downloader.SaveAsync(await Images.DownloadVariantAsync(
+                CampaignId, slot.Id, variantId));
+            Notifier.ShowSuccess("Image saved to Downloads.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _downloadingImageSlot = null;
+        }
+    }
 
     private async Task AddImageAsync()
     {
