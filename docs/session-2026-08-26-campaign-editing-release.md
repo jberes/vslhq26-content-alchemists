@@ -1,9 +1,9 @@
 # Campaign Editing, Generation Resilience, and Release Session
 
-Date: August 26-27, 2026  
-Repository: `jberes/vslhq26-content-alchemists`  
-Branch: `main`  
-Primary implementation commit: `c49bba20f798cb6e0938e57d9edd94c2bd2ef544`
+- Date: August 26-27, 2026
+- Repository: `jberes/vslhq26-content-alchemists`
+- Branch: `main`
+- Primary implementation commit: `c49bba20f798cb6e0938e57d9edd94c2bd2ef544`
 
 ## Summary
 
