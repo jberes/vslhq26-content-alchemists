@@ -163,7 +163,8 @@ echo "Applying production configuration without exposing secret values..."
 dotnet run \
   --project "$REPO_ROOT/tools/Castmill.AzureConfig/Castmill.AzureConfig.csproj" \
   --configuration Release \
-  -- export "$CONFIG_PATH" "$SETTINGS_FILE" "${KEY_ARGUMENT[@]}"
+  -- export "$CONFIG_PATH" "$SETTINGS_FILE" "${KEY_ARGUMENT[@]}" \
+  --web-base-url "$APP_URL"
 az webapp config appsettings set \
   --subscription "$SUBSCRIPTION_ID" \
   --resource-group "$RESOURCE_GROUP" \

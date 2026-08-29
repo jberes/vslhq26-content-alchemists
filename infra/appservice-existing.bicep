@@ -110,6 +110,14 @@ module app 'br/public:avm/res/web/site:0.24.0' = {
           value: storage.name
         }
         {
+          name: 'Storage__PrivateContainer'
+          value: 'private'
+        }
+        {
+          name: 'DataProtection__BlobPath'
+          value: 'system/data-protection/castmill-keyring.xml'
+        }
+        {
           name: 'ConnectionStrings__Castmill'
           value: 'Server=tcp:${existingResources.sqlServerFqdn},1433;Database=${existingResources.sqlDatabaseName};Authentication=Active Directory Managed Identity;User Id=${identity.outputs.clientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;'
         }

@@ -193,7 +193,14 @@
             }
         }
 
-        Add("Action", "Change password", null, () => Go("settings/password"));
+        if (Auth.HasPassword == true)
+        {
+            Add("Action", "Change password", null, () => Go("settings/password"));
+        }
+        else
+        {
+            Add("Action", "Manage sign-in methods", null, () => Go("settings/security"));
+        }
         Add("Action", "Sign out", null, async () =>
         {
             await Auth.SignOutAsync();

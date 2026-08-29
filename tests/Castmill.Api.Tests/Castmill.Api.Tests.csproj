@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Castmill.Api\Castmill.Api.csproj" />
+    <ProjectReference Include="..\..\tools\Castmill.AzureConfig\Castmill.AzureConfig.csproj" />
   </ItemGroup>
 
 </Project>

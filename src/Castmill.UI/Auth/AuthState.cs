@@ -13,6 +13,8 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
 
     public MeResponse? User { get; private set; }
 
+    public bool? HasPassword { get; private set; }
+
     public bool IsSignedIn => tokens.IsSignedIn && User is not null;
 
     /// <summary>False until the cold-start restore attempt has finished, so screens can
@@ -77,6 +79,7 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         }
 
         User = null;
+        HasPassword = null;
         await tokens.ClearAsync();
         Changed?.Invoke();
     }
@@ -99,6 +102,17 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         catch (Http.ApiException)
         {
             User = null;
+            HasPassword = null;
+            return;
+        }
+
+        try
+        {
+            HasPassword = (await auth.ExternalLinksAsync()).HasPassword;
+        }
+        catch (Http.ApiException)
+        {
+            HasPassword = null;
         }
     }
 
@@ -107,6 +121,7 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         if (!tokens.IsSignedIn)
         {
             User = null;
+            HasPassword = null;
         }
 
         Changed?.Invoke();

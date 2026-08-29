@@ -1,14 +1,17 @@
 @* Sign in. Lives in the RCL, so this is the same screen on desktop and web (G1) — only
    where the refresh token lands differs. *@
 @page "/sign-in"
+@implements IDisposable
 @using Castmill.Core.Auth
 @using Castmill.UI.Auth
 @using Castmill.UI.Http
 @layout AuthLayout
 @inject AuthClient Auth
 @inject AuthState State
+@inject ExternalAuthSignInService ExternalSignIn
 @inject ApiClient Api
 @inject Castmill.UI.Platform.IShellInfo Shell
+@inject Castmill.UI.Platform.IExternalBrowserLauncher ExternalBrowser
 @inject NavigationManager Navigation
 
 <PageTitle>Sign in — Castmill</PageTitle>
@@ -17,20 +20,58 @@
     <span class="cm-kicker">Castmill</span>
     <h1>Sign in.</h1>
 
+    <div class="cm-external-auth" aria-label="External sign-in options">
+        <div class="cm-external-auth__option">
+            <button type="button" class="cm-button cm-button--quiet cm-external-auth__button"
+                    disabled="@(!CanUseProvider(ExternalAuthProviders.Microsoft))"
+                    aria-describedby="microsoft-readiness"
+                    @onclick="() => SignInExternalAsync(ExternalAuthProviders.Microsoft)">
+                Continue with Microsoft
+            </button>
+            <span id="microsoft-readiness" class="cm-meta">@ProviderReason(ExternalAuthProviders.Microsoft)</span>
+        </div>
+        <div class="cm-external-auth__option">
+            <button type="button" class="cm-button cm-button--quiet cm-external-auth__button"
+                    disabled="@(!CanUseProvider(ExternalAuthProviders.Google))"
+                    aria-describedby="google-readiness"
+                    @onclick="() => SignInExternalAsync(ExternalAuthProviders.Google)">
+                Continue with Google
+            </button>
+            <span id="google-readiness" class="cm-meta">@ProviderReason(ExternalAuthProviders.Google)</span>
+        </div>
+
+        @if (ExternalSignIn.Snapshot.IsRunning)
+        {
+            <div class="cm-external-auth__waiting" role="status">
+                <span class="cm-ai-dot" aria-hidden="true"></span>
+                <span>@ExternalSignIn.Snapshot.Message</span>
+                <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                    @onclick="ExternalSignIn.CancelAsync">Cancel</button>
+            </div>
+        }
+        else if (ExternalSignIn.Snapshot.CanRetry)
+        {
+            <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                    @onclick="RetryExternalAsync">Retry</button>
+        }
+    </div>
+
+    <div class="cm-auth-divider"><span>or use email</span></div>
+
     <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="cm-form">
         <DataAnnotationsValidator />
 
         <label class="cm-field">
             <span class="cm-field__label">Email</span>
             <InputText @bind-Value="_model.Email" class="cm-input" autocomplete="username"
-                       type="email" disabled="@_busy" />
+                       type="email" disabled="@IsBusy" />
             <ValidationMessage For="() => _model.Email" class="cm-field__error" />
         </label>
 
         <label class="cm-field">
             <span class="cm-field__label">Password</span>
             <InputText @bind-Value="_model.Password" class="cm-input" type="password"
-                       autocomplete="current-password" disabled="@_busy" />
+                       autocomplete="current-password" disabled="@IsBusy" />
             <ValidationMessage For="() => _model.Password" class="cm-field__error" />
         </label>
 
@@ -40,7 +81,7 @@
         }
 
         <div class="cm-form__actions">
-            <button type="submit" class="cm-button" disabled="@_busy">
+            <button type="submit" class="cm-button" disabled="@IsBusy">
                 @(_busy ? "Signing in…" : "Sign in")
             </button>
             <a href="register" class="cm-meta">Create an account</a>
@@ -50,8 +91,13 @@
 
 @code {
     private readonly Model _model = new();
+    private readonly Dictionary<string, bool> _providers = new(StringComparer.Ordinal);
     private bool _busy;
+    private bool _providersLoaded;
+    private string? _providerLoadError;
     private string? _error;
+
+    private bool IsBusy => _busy || ExternalSignIn.Snapshot.IsRunning;
 
     [SupplyParameterFromQuery(Name = "returnUrl")]
     private string? ReturnUrl { get; set; }
@@ -63,23 +109,41 @@
     /// </summary>
     protected override async Task OnInitializedAsync()
     {
-        if (!Shell.IsDevelopment)
+        ExternalSignIn.Changed += OnExternalSignInChanged;
+
+        if (await ExternalBrowser.HasCallbackAsync())
         {
-            return;
+            var result = await ExternalSignIn.ResumeAsync();
+            if (result.Succeeded)
+            {
+                Navigation.NavigateTo(result.ReturnUrl);
+                return;
+            }
+
+            _error = result.ErrorMessage;
+        }
+        else
+        {
+            await ExternalSignIn.ClearExpiredPendingAsync();
         }
 
-        try
+        await LoadProvidersAsync();
+
+        if (Shell.IsDevelopment)
         {
-            var demo = await Api.GetAsync<DemoCredentials>("api/v1/dev/demo-credentials");
-            _model.Email = demo.Email;
-            _model.Password = demo.Password;
-        }
-        catch (ApiException)
-        {
-            // Seeding off, or a prod-shaped API: the form simply starts empty.
-        }
-        catch (HttpRequestException)
-        {
+            try
+            {
+                var demo = await Api.GetAsync<DemoCredentials>("api/v1/dev/demo-credentials");
+                _model.Email = demo.Email;
+                _model.Password = demo.Password;
+            }
+            catch (ApiException)
+            {
+                // Seeding off, or a prod-shaped API: the form simply starts empty.
+            }
+            catch (HttpRequestException)
+            {
+            }
         }
     }
 
@@ -94,7 +158,7 @@
         {
             var response = await Auth.LoginAsync(new LoginRequest(_model.Email, _model.Password));
             await State.SignedInAsync(response);
-            Navigation.NavigateTo(string.IsNullOrWhiteSpace(ReturnUrl) ? "" : ReturnUrl);
+            Navigation.NavigateTo(LocalReturnUrl(ReturnUrl));
         }
         catch (UnauthorizedApiException)
         {
@@ -114,6 +178,110 @@
         {
             _busy = false;
         }
+    }
+
+    private async Task LoadProvidersAsync()
+    {
+        try
+        {
+            var response = await Auth.ProvidersAsync();
+            foreach (var provider in response.Providers)
+            {
+                _providers[provider.Provider] = provider.Enabled;
+            }
+        }
+        catch (ApiException)
+        {
+            _providerLoadError = "Provider availability couldn't be checked.";
+        }
+        catch (HttpRequestException)
+        {
+            _providerLoadError = "Provider availability couldn't be checked.";
+        }
+        finally
+        {
+            _providersLoaded = true;
+        }
+    }
+
+    private async Task SignInExternalAsync(string provider)
+    {
+        _error = null;
+        var result = await ExternalSignIn.SignInAsync(provider, LocalReturnUrl(ReturnUrl));
+        if (result.Succeeded)
+        {
+            Navigation.NavigateTo(result.ReturnUrl);
+            return;
+        }
+
+        if (!result.NavigationStarted)
+        {
+            _error = result.ErrorMessage;
+        }
+    }
+
+    private async Task RetryExternalAsync()
+    {
+        _error = null;
+        var result = await ExternalSignIn.ResumeAsync();
+        if (result.Succeeded)
+        {
+            Navigation.NavigateTo(result.ReturnUrl);
+            return;
+        }
+
+        _error = result.ErrorMessage;
+    }
+
+    private bool CanUseProvider(string provider) =>
+        !IsBusy && ExternalBrowser.IsAvailable && _providers.GetValueOrDefault(provider);
+
+    private string ProviderReason(string provider)
+    {
+        if (!_providersLoaded)
+        {
+            return "Checking availability.";
+        }
+        if (_providerLoadError is not null)
+        {
+            return _providerLoadError;
+        }
+        if (!ExternalBrowser.IsAvailable)
+        {
+            return ExternalBrowser.UnavailableReason ?? "External sign-in isn't available in this app.";
+        }
+        return _providers.GetValueOrDefault(provider)
+            ? "Available."
+            : $"{ProviderName(provider)} sign-in isn't configured for this environment.";
+    }
+
+    private static string ProviderName(string provider) => provider switch
+    {
+        ExternalAuthProviders.Microsoft => "Microsoft",
+        ExternalAuthProviders.Google => "Google",
+        _ => "External",
+    };
+
+    internal static string LocalReturnUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || !Uri.TryCreate(value, UriKind.Relative, out _)
+            || value.StartsWith("//", StringComparison.Ordinal)
+            || value.StartsWith("\\", StringComparison.Ordinal)
+            || value.Contains('\\'))
+        {
+            return string.Empty;
+        }
+
+        return value;
+    }
+
+    private void OnExternalSignInChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ExternalSignIn.Changed -= OnExternalSignInChanged;
+        ExternalSignIn.OnPageDisposed();
     }
 
     private sealed class Model

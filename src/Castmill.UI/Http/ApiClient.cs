@@ -22,6 +22,14 @@ public sealed class ApiClient(HttpClient http)
         return await ReadAsync<T>(response, ct);
     }
 
+    public async Task<T> GetAnonymousAsync<T>(string url, CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Options.Set(CastmillHttpHandler.Anonymous, true);
+        using var response = await http.SendAsync(request, ct);
+        return await ReadAsync<T>(response, ct);
+    }
+
     /// <summary>
     /// GET returning raw bytes and the server's own file name. For downloads: the export
     /// endpoints are authenticated, so a plain link cannot fetch them — the Bearer token
@@ -287,7 +295,7 @@ public sealed class ApiClient(HttpClient http)
         {
             var problem = await response.Content.ReadFromJsonAsync<ProblemBody>(Json, ct);
             return string.IsNullOrWhiteSpace(problem?.Detail)
-                ? (string.IsNullOrWhiteSpace(problem?.Title) ? null : problem!.Title)
+                ? (string.IsNullOrWhiteSpace(problem?.Title) ? problem?.ErrorCode : problem!.Title)
                 : problem!.Detail;
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
@@ -296,7 +304,7 @@ public sealed class ApiClient(HttpClient http)
         }
     }
 
-    private sealed record ProblemBody(string? Title, string? Detail);
+    private sealed record ProblemBody(string? Title, string? Detail, string? ErrorCode);
 
     private static async Task<ApiException> ValidationOrGenericAsync(
         HttpResponseMessage response,

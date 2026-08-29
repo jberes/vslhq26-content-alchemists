@@ -22,6 +22,7 @@ builder.Services.AddCastmillUi(apiBaseAddress);
 // Platform seam (Roadmap §2.2): the web implementations.
 builder.Services.AddSingleton<IShellInfo, WebShellInfo>();
 builder.Services.AddScoped<IAuthTokenProvider, WebTokenProvider>();
+builder.Services.AddScoped<IExternalBrowserLauncher, WebExternalBrowserLauncher>();
 builder.Services.AddSingleton<IMediaPipeline, WebMediaPipeline>();
 
 await builder.Build().RunAsync();

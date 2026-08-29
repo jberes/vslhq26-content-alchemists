@@ -4901,6 +4901,13 @@ button.cm-intent {
     font-weight: 600;
 }
 
+.cm-settings__method-action {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-inline-size: 0;
+}
+
 .cm-settings__secret {
     display: flex;
     flex-direction: column;
@@ -4925,6 +4932,10 @@ button.cm-intent {
     .cm-settings__row {
         grid-template-columns: minmax(0, 1fr);
         gap: var(--cm-space-1);
+    }
+
+    .cm-settings__method-action {
+        justify-content: flex-start;
     }
 }
 

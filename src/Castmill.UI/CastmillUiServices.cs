@@ -72,6 +72,10 @@ public static class CastmillUiServices
 
         services.AddScoped<ApiClient>();
         services.AddScoped<AuthClient>();
+        services.AddScoped<ExternalAuthSignInService>();
+        services.AddScoped<ExternalAuthLinkService>();
+        services.AddScoped<IExternalBrowserLauncher, UnsupportedExternalBrowserLauncher>();
+        services.AddSingleton(TimeProvider.System);
         services.AddScoped<CampaignsClient>();
         services.AddScoped<GenerationClient>();
         services.AddScoped<SeoClient>();

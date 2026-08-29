@@ -48,11 +48,18 @@ cd vslhq26-content-alchemists/src/Castmill.Api
 # All local config lives in ONE gitignored file — copy the template and fill the stubs:
 cp appsettings.Development.template.json appsettings.Development.json
 
+# Desktop external sign-in uses secure OIDC cookies on the HTTPS development endpoint.
+dotnet dev-certs https --trust
+
 dotnet ef database update
 dotnet run
-# → http://localhost:5005/dev/testbed  (zero-framework HTML testbed)
-# → http://localhost:5005/openapi/v1.json  (full API surface)
+# → https://localhost:7105/dev/testbed  (zero-framework HTML testbed)
+# → https://localhost:7105/openapi/v1.json  (full API surface)
 ```
+
+The desktop Debug build calls `https://localhost:7105/`. Keep the API's `https` launch
+profile running and trust the ASP.NET Core development certificate before testing external
+sign-in; the OIDC correlation, nonce, and temporary external-auth cookies are secure-only.
 
 Tests: `dotnet test` (62 tests; spins up SQL Server in Docker via Testcontainers).
 

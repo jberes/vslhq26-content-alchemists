@@ -14,9 +14,9 @@ public static class MauiProgram
     /// configuration value rather than a relative path. Points at the local dev API in a
     /// Debug build; Phase F9 replaces the Release value with the deployed App Service.
     /// </summary>
-        private static readonly Uri ApiBaseAddress = new(
+    private static readonly Uri ApiBaseAddress = new(
 #if DEBUG
-        "http://localhost:5005/"
+        "https://localhost:7105/"
 #else
         typeof(MauiProgram).Assembly
             .GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -48,6 +48,7 @@ public static class MauiProgram
         // Platform seam (Roadmap §2.2): the desktop implementations.
         builder.Services.AddSingleton<IShellInfo, DesktopShellInfo>();
         builder.Services.AddScoped<IAuthTokenProvider, DesktopTokenProvider>();
+        builder.Services.AddScoped<IExternalBrowserLauncher, DesktopExternalBrowserLauncher>();
         builder.Services.AddSingleton<IMediaPipeline, DesktopMediaPipeline>();
         builder.Services.AddScoped<IFileDownloader, DesktopFileDownloader>();
 

@@ -29,6 +29,7 @@ public abstract class CastmillUiTestContext : BunitContext
         Services.AddSingleton<IUiStateStore>(UiState);
         Services.AddSingleton<IShellInfo>(Shell);
         Services.AddSingleton<IAuthTokenProvider>(Tokens);
+        Services.AddSingleton<IExternalBrowserLauncher>(ExternalBrowser);
         Services.AddSingleton<IMediaPipeline>(Media);
         Services.AddSingleton<IClipboardService>(Clipboard);
         Services.AddSingleton<IVoiceCaptureService>(Voice);
@@ -44,6 +45,8 @@ public abstract class CastmillUiTestContext : BunitContext
 
     protected TestAuthTokenProvider Tokens { get; } = new();
 
+    protected TestExternalBrowserLauncher ExternalBrowser { get; } = new();
+
     protected StubHttpHandler Http { get; } = new();
 
     protected TestMediaPipeline Media { get; } = new();
@@ -57,6 +60,74 @@ public abstract class CastmillUiTestContext : BunitContext
     {
         Tokens.SignIn();
         Http.OnGet("api/v1/me", new MeResponse(Guid.NewGuid(), Guid.NewGuid(), email, "Demo user"));
+    }
+}
+
+public sealed class TestExternalBrowserLauncher : IExternalBrowserLauncher
+{
+    public bool IsAvailable { get; set; } = true;
+
+    public string? UnavailableReason { get; set; }
+
+    public bool Succeeds { get; set; } = true;
+
+    public string ClientKind { get; set; } = ExternalAuthClientKinds.Desktop;
+
+    public bool UsesPersistentNavigation { get; set; }
+
+    public ExternalAuthPendingState? PendingState { get; set; }
+
+    public ExternalAuthCallbackResult? CallbackResult { get; set; }
+
+    public Uri? PreparedCallbackUri { get; set; }
+
+    public int ClearPendingCalls { get; private set; }
+
+    public int RemoveCallbackMarkerCalls { get; private set; }
+
+    public List<Uri> OpenedUris { get; } = [];
+
+    public Task<Uri?> PrepareCallbackAsync(CancellationToken ct = default) =>
+        Task.FromResult(PreparedCallbackUri);
+
+    public Task<bool> HasCallbackAsync(CancellationToken ct = default) =>
+        Task.FromResult(CallbackResult is not null);
+
+    public Task<ExternalAuthCallbackResult?> ReceiveCallbackAsync(
+        Guid expectedAttemptId,
+        DateTimeOffset expiresAt,
+        CancellationToken ct = default) => Task.FromResult(CallbackResult);
+
+    public Task<bool> StorePendingAsync(ExternalAuthPendingState state, CancellationToken ct = default)
+    {
+        PendingState = state;
+        return Task.FromResult(Succeeds);
+    }
+
+    public Task<ExternalAuthPendingState?> ReadPendingAsync(CancellationToken ct = default) =>
+        Task.FromResult(PendingState);
+
+    public Task ClearPendingAsync(CancellationToken ct = default)
+    {
+        ClearPendingCalls++;
+        PendingState = null;
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveCallbackMarkerAsync(CancellationToken ct = default)
+    {
+        RemoveCallbackMarkerCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task<ExternalBrowserLaunchStatus> OpenAsync(Uri uri, CancellationToken ct = default)
+    {
+        OpenedUris.Add(uri);
+        return Task.FromResult(!Succeeds
+            ? ExternalBrowserLaunchStatus.Failed
+            : UsesPersistentNavigation
+                ? ExternalBrowserLaunchStatus.NavigationStarted
+                : ExternalBrowserLaunchStatus.Opened);
     }
 }
 

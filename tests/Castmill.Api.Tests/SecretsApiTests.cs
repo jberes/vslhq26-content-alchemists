@@ -57,6 +57,8 @@ public sealed class SecretsApiTests(CastmillApiFactory factory)
         var set = await client.PutAsJsonAsync("/api/v1/settings/secrets/BrokerToken",
             new SecretWriteRequestDto(marker));
         Assert.Equal(HttpStatusCode.NoContent, set.StatusCode);
+        var me = await client.GetFromJsonAsync<MeResponse>("/api/v1/me");
+        Assert.NotNull(me);
 
         // Inspect the raw row bypassing the API: value must be ciphertext.
         using var scope = factory.CreateDbScope();
@@ -64,7 +66,9 @@ public sealed class SecretsApiTests(CastmillApiFactory factory)
         await using var db = new CastmillDbContext(options, new NullTenantProvider());
         var row = await db.UserSettings
             .IgnoreQueryFilters()
-            .SingleAsync(s => s.Key == "secret.BrokerToken" && s.Value != marker);
+            .SingleAsync(s => s.TenantId == me.TenantId
+                && s.Key == "secret.BrokerToken"
+                && s.Value != marker);
         Assert.True(row.IsEncrypted);
         Assert.DoesNotContain(marker, row.Value, StringComparison.Ordinal);
     }

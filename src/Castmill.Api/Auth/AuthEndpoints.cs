@@ -24,42 +24,26 @@ public static class AuthEndpoints
 
     private static async Task<IResult> RegisterAsync(
         RegisterRequest request,
-        UserManager<CastmillUser> users,
+        IAccountService accounts,
         CastmillDbContext db,
-        ITokenService tokens,
+        IAuthTokenIssuer tokenIssuer,
         TimeProvider clock,
         CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-
-        // One tenant per user, created at registration — permanent binding (ADR-011).
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = request.DisplayName, CreatedAt = now };
-        db.Tenants.Add(tenant);
-        await db.SaveChangesAsync(ct);
-
-        var user = new CastmillUser
+        var account = await accounts.CreateAsync(
+            request.Email, request.DisplayName, request.Password, ct: ct);
+        if (!account.Succeeded)
         {
-            Id = Guid.NewGuid(),
-            UserName = request.Email,
-            Email = request.Email,
-            TenantId = tenant.Id,
-            DisplayName = request.DisplayName,
-            CreatedAt = now,
-        };
-
-        var result = await users.CreateAsync(user, request.Password);
-        if (!result.Succeeded)
-        {
-            db.Tenants.Remove(tenant);
-            await db.SaveChangesAsync(ct);
             // Identity's own error descriptions are safe to surface (password policy, duplicate email).
-            return Results.ValidationProblem(result.Errors
+            return Results.ValidationProblem(account.Result.Errors
                 .GroupBy(e => e.Code, e => e.Description)
                 .ToDictionary(g => g.Key, g => g.ToArray()));
         }
 
-        await AuditAsync(db, tenant.Id, user.Id, "auth.register", now, ct);
-        return Results.Ok(await IssueTokensAsync(user, familyId: Guid.NewGuid(), db, tokens, now, ct));
+        var user = account.User!;
+        await AuditAsync(db, user.TenantId, user.Id, "auth.register", now, ct);
+        return Results.Ok(await tokenIssuer.IssueAsync(user, Guid.NewGuid(), now, ct));
     }
 
     private static async Task<IResult> LoginAsync(
@@ -67,7 +51,7 @@ public static class AuthEndpoints
         UserManager<CastmillUser> users,
         SignInManager<CastmillUser> signIn,
         CastmillDbContext db,
-        ITokenService tokens,
+        IAuthTokenIssuer tokenIssuer,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -90,7 +74,7 @@ public static class AuthEndpoints
         }
 
         await AuditAsync(db, user.TenantId, user.Id, "auth.login", now, ct);
-        return Results.Ok(await IssueTokensAsync(user, familyId: Guid.NewGuid(), db, tokens, now, ct));
+    return Results.Ok(await tokenIssuer.IssueAsync(user, Guid.NewGuid(), now, ct));
     }
 
     private static async Task<IResult> RefreshAsync(
@@ -98,6 +82,7 @@ public static class AuthEndpoints
         UserManager<CastmillUser> users,
         CastmillDbContext db,
         ITokenService tokens,
+        IAuthTokenIssuer tokenIssuer,
         Microsoft.Extensions.Options.IOptions<JwtOptions> jwt,
         TimeProvider clock,
         CancellationToken ct)
@@ -146,7 +131,7 @@ public static class AuthEndpoints
         }
 
         stored.UsedAt ??= now; // rotation: each refresh token is single-use (grace keeps the original stamp)
-        var response = await IssueTokensAsync(user, stored.FamilyId, db, tokens, now, ct);
+    var response = await tokenIssuer.IssueAsync(user, stored.FamilyId, now, ct);
         return Results.Ok(response);
     }
 
@@ -172,7 +157,7 @@ public static class AuthEndpoints
         ClaimsPrincipal principal,
         UserManager<CastmillUser> users,
         CastmillDbContext db,
-        ITokenService tokens,
+        IAuthTokenIssuer tokenIssuer,
         TimeProvider clock,
         CancellationToken ct)
     {
@@ -181,6 +166,15 @@ public static class AuthEndpoints
         if (user is null)
         {
             return Results.Unauthorized();
+        }
+
+        if (!await users.HasPasswordAsync(user))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [ExternalAuthErrors.PasswordNotConfigured] =
+                    ["This account does not have a local password."],
+            });
         }
 
         var result = await users.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
@@ -197,22 +191,7 @@ public static class AuthEndpoints
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now), ct);
         await AuditAsync(db, user.TenantId, user.Id, "auth.password-changed", now, ct);
 
-        return Results.Ok(await IssueTokensAsync(user, familyId: Guid.NewGuid(), db, tokens, now, ct));
-    }
-
-    private static async Task<AuthResponse> IssueTokensAsync(
-        CastmillUser user,
-        Guid familyId,
-        CastmillDbContext db,
-        ITokenService tokens,
-        DateTimeOffset now,
-        CancellationToken ct)
-    {
-        var (access, accessExpires) = tokens.CreateAccessToken(user);
-        var (plainRefresh, entity) = tokens.CreateRefreshToken(user.Id, familyId, now);
-        db.RefreshTokens.Add(entity);
-        await db.SaveChangesAsync(ct);
-        return new AuthResponse(access, accessExpires, plainRefresh, entity.ExpiresAt);
+        return Results.Ok(await tokenIssuer.IssueAsync(user, Guid.NewGuid(), now, ct));
     }
 
     private static async Task AuditAsync(

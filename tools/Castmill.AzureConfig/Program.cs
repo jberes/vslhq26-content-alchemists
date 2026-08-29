@@ -1,17 +1,33 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Castmill.AzureConfig;
 
-if (args.Length is < 3 or > 4 || !args[0].Equals("export", StringComparison.Ordinal))
+if (args.Length < 3 || !args[0].Equals("export", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        "Usage: dotnet run --project tools/Castmill.AzureConfig -- export <source-jsonc> <output-json> [--generate-runtime-keys]");
+        "Usage: dotnet run --project tools/Castmill.AzureConfig -- export <source-jsonc> <output-json> [--generate-runtime-keys] [--web-base-url <https-origin>]");
     return 2;
 }
 
 var sourcePath = Path.GetFullPath(args[1]);
 var outputPath = Path.GetFullPath(args[2]);
-var generateRuntimeKeys = args.Length == 4
-    && args[3].Equals("--generate-runtime-keys", StringComparison.Ordinal);
+var generateRuntimeKeys = false;
+string? webBaseUrl = null;
+for (var index = 3; index < args.Length; index++)
+{
+    switch (args[index])
+    {
+        case "--generate-runtime-keys":
+            generateRuntimeKeys = true;
+            break;
+        case "--web-base-url" when index + 1 < args.Length:
+            webBaseUrl = args[++index];
+            break;
+        default:
+            Console.Error.WriteLine("Unknown or incomplete export option.");
+            return 2;
+    }
+}
 
 using var document = JsonDocument.Parse(
     await File.ReadAllTextAsync(sourcePath),
@@ -31,6 +47,7 @@ string[] allowedSections =
     "Publish",
     "Seo",
     "RateLimits",
+    "DataProtection",
 ];
 
 foreach (var sectionName in allowedSections)
@@ -39,6 +56,12 @@ foreach (var sectionName in allowedSections)
     {
         Flatten(section, sectionName, settings);
     }
+}
+
+ExternalAuthSettingsExporter.AddAllowed(document.RootElement, settings);
+if (webBaseUrl is not null)
+{
+    ExternalAuthSettingsExporter.AddProductionWebReturnUris(settings, webBaseUrl);
 }
 
 settings.Remove("Jwt__SigningKey");

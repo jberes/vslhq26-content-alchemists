@@ -6,13 +6,23 @@
    question people actually arrive with; credentials second, because that is the lever that
    answers it. *@
 @page "/settings"
+@page "/settings/security"
+@implements IDisposable
 @using Castmill.Core.Ai
+@using Castmill.Core.Auth
+@using Castmill.UI.Auth
 @using Castmill.UI.Design
 @using Castmill.UI.Http
+@using Castmill.UI.Platform
 @using Castmill.UI.State
+@inject AuthClient Auth
+@inject ExternalAuthLinkService ExternalLink
+@inject IExternalBrowserLauncher ExternalBrowser
+@inject IConfirmService Confirm
 @inject SettingsClient SettingsApi
 @inject ImagesClient Images
 @inject INotifier Notifier
+@inject NavigationManager Navigation
 
 <PageTitle>Settings · Castmill</PageTitle>
 
@@ -36,7 +46,7 @@
         {
             <button type="button" role="tab" class="cm-tabs__tab"
                     aria-selected="@(_tab == id ? "true" : "false")"
-                    @onclick="() => _tab = id">
+                    @onclick="() => SelectTabAsync(id)">
                 @label@TabBadge(id)
             </button>
         }
@@ -48,6 +58,85 @@
             @loadError
             <button type="button" class="cm-button cm-button--quiet" @onclick="LoadAsync">Try again</button>
         </p>
+    }
+
+    @if (_tab == "security")
+    {
+        @if (_security is null && _securityError is null)
+        {
+            <p class="cm-meta">Checking sign-in methods…</p>
+        }
+        else
+        {
+            @if (_securityError is not null)
+            {
+                <p class="cm-form__error" role="alert">@_securityError</p>
+            }
+
+            @if (_security is { } security)
+            {
+                <ul class="cm-settings__list" aria-label="Sign-in methods">
+                    <li class="cm-settings__row">
+                        <span class="cm-settings__name">Password</span>
+                        <span class="@(security.HasPassword ? "cm-badge cm-badge--done" : "cm-badge")">
+                            @(security.HasPassword ? "SET" : "NOT SET")
+                        </span>
+                        <span class="cm-settings__method-action">
+                            @if (security.HasPassword)
+                            {
+                                <a class="cm-button cm-button--quiet" href="settings/password">Change password</a>
+                            }
+                            else
+                            {
+                                <span class="cm-meta">No password is set.</span>
+                            }
+                        </span>
+                    </li>
+                    @foreach (var provider in security.Providers)
+                    {
+                        <li class="cm-settings__row">
+                            <span class="cm-settings__name">@ProviderName(provider.Provider)</span>
+                            <span class="@(provider.Linked ? "cm-badge cm-badge--done" : "cm-badge")">
+                                @(provider.Linked ? "LINKED" : provider.Enabled ? "NOT LINKED" : "UNAVAILABLE")
+                            </span>
+                            <span class="cm-settings__method-action">
+                                @if (provider.Linked)
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@IsSecurityBusy"
+                                            @onclick="() => UnlinkProviderAsync(provider.Provider)">Unlink</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="cm-button"
+                                            disabled="@(!provider.Enabled || IsSecurityBusy || !ExternalBrowser.IsAvailable)"
+                                            @onclick="() => LinkProviderAsync(provider.Provider)">Link</button>
+                                }
+                            </span>
+                        </li>
+                    }
+                </ul>
+
+                @if (!ExternalBrowser.IsAvailable && ExternalBrowser.UnavailableReason is { } unavailable)
+                {
+                    <p class="cm-meta">@unavailable</p>
+                }
+                @if (ExternalLink.Snapshot.IsRunning)
+                {
+                    <div class="cm-external-auth__waiting" role="status">
+                        <span class="cm-ai-dot" aria-hidden="true"></span>
+                        <span>@ExternalLink.Snapshot.Message</span>
+                        <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                @onclick="ExternalLink.CancelAsync">Cancel</button>
+                    </div>
+                }
+                else if (ExternalLink.Snapshot.CanRetry)
+                {
+                    <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                            @onclick="RetryExternalLinkAsync">Retry</button>
+                }
+            }
+        }
     }
 
     @* ---- Credentials: first, because it is the panel people arrive to change. ---- *@
@@ -260,10 +349,15 @@
     private string? _defaultImageModel;
     private string? _defaultImageModelDraft;
     private bool _savingDefaultModel;
+    private ExternalAuthLinksResponse? _security;
+    private string? _securityError;
+    private string? _securityBusyProvider;
+
+    private bool IsSecurityBusy => _securityBusyProvider is not null || ExternalLink.Snapshot.IsRunning;
 
     /// <summary>Credentials first: it is the panel people navigate here to change.</summary>
     private static readonly (string Id, string Label)[] Tabs =
-        [("credentials", "Credentials"), ("links", "Links"),
+        [("credentials", "Credentials"), ("security", "Security"), ("links", "Links"),
          ("readiness", "Readiness"), ("models", "Models")];
 
     private string _tab = "credentials";
@@ -332,7 +426,155 @@
         }
     : null;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        ExternalLink.Changed += OnExternalLinkChanged;
+        if (Navigation.ToBaseRelativePath(Navigation.Uri)
+            .StartsWith("settings/security", StringComparison.Ordinal))
+        {
+            _tab = "security";
+        }
+
+        if (_tab == "security")
+        {
+            if (await ExternalBrowser.HasCallbackAsync())
+            {
+                var result = await ExternalLink.ResumeAsync();
+                var resumeError = result.ErrorMessage;
+                if (result.Succeeded)
+                {
+                    Notifier.ShowSuccess("Sign-in method linked.");
+                }
+                await LoadAsync();
+                await LoadSecurityAsync();
+                _securityError ??= resumeError;
+                return;
+            }
+        }
+
+        await LoadAsync();
+        if (_tab == "security")
+        {
+            await LoadSecurityAsync();
+        }
+    }
+
+    private async Task SelectTabAsync(string tab)
+    {
+        _tab = tab;
+        if (tab == "security" && _security is null)
+        {
+            await LoadSecurityAsync();
+        }
+    }
+
+    private async Task LoadSecurityAsync()
+    {
+        try
+        {
+            _security = await Auth.ExternalLinksAsync();
+            _securityError = null;
+        }
+        catch (ApiException ex)
+        {
+            _securityError = ex.Message;
+        }
+    }
+
+    private async Task LinkProviderAsync(string provider)
+    {
+        _securityBusyProvider = provider;
+        _securityError = null;
+        try
+        {
+            var result = await ExternalLink.LinkAsync(provider);
+            if (result.Succeeded)
+            {
+                await LoadSecurityAsync();
+                Notifier.ShowSuccess($"{ProviderName(provider)} linked.");
+            }
+            else if (!result.NavigationStarted)
+            {
+                _securityError = result.ErrorMessage;
+            }
+        }
+        finally
+        {
+            _securityBusyProvider = null;
+        }
+    }
+
+    private async Task RetryExternalLinkAsync()
+    {
+        _securityError = null;
+        var result = await ExternalLink.ResumeAsync();
+        if (result.Succeeded)
+        {
+            await LoadSecurityAsync();
+            Notifier.ShowSuccess("Sign-in method linked.");
+            return;
+        }
+
+        _securityError = result.ErrorMessage;
+    }
+
+    private async Task UnlinkProviderAsync(string provider)
+    {
+        if (_security is null)
+        {
+            return;
+        }
+        if (!_security.HasPassword && _security.Providers.Count(candidate => candidate.Linked) <= 1)
+        {
+            _securityError = ExternalAuthFailureMessages.For(ExternalAuthErrors.LastLoginMethod);
+            return;
+        }
+
+        var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Unlink {ProviderName(provider)}?",
+            "You will no longer be able to use this provider to sign in.",
+            "Unlink",
+            Destructive: true));
+        if (!accepted)
+        {
+            return;
+        }
+
+        _securityBusyProvider = provider;
+        _securityError = null;
+        try
+        {
+            await Auth.UnlinkAsync(provider);
+            await LoadSecurityAsync();
+            Notifier.ShowSuccess($"{ProviderName(provider)} unlinked.");
+        }
+        catch (ApiException ex)
+        {
+            _securityError = ExternalAuthFailureMessages.For(
+                ExternalAuthFailureMessages.IsKnown(ex.Message)
+                    ? ex.Message
+                    : ExternalAuthErrors.AttemptFailed);
+        }
+        finally
+        {
+            _securityBusyProvider = null;
+        }
+    }
+
+    private void OnExternalLinkChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        ExternalLink.Changed -= OnExternalLinkChanged;
+        ExternalLink.OnPageDisposed();
+    }
+
+    private static string ProviderName(string provider) => provider switch
+    {
+        ExternalAuthProviders.Microsoft => "Microsoft",
+        ExternalAuthProviders.Google => "Google",
+        _ => "Provider",
+    };
 
     private async Task LoadAsync()
     {

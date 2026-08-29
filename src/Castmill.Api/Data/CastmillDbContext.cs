@@ -34,6 +34,7 @@ public sealed class CastmillDbContext(
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ExternalAuthAttempt> ExternalAuthAttempts => Set<ExternalAuthAttempt>();
     public DbSet<ClipJob> ClipJobs => Set<ClipJob>();
     public DbSet<GitRepoProfile> GitRepoProfiles => Set<GitRepoProfile>();
     public DbSet<GitPublication> GitPublications => Set<GitPublication>();
@@ -41,6 +42,10 @@ public sealed class CastmillDbContext(
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<IdentityUserLogin<Guid>>()
+            .HasIndex(login => new { login.UserId, login.LoginProvider })
+            .IsUnique();
 
         builder.Entity<Tenant>(e =>
         {
@@ -384,6 +389,32 @@ public sealed class CastmillDbContext(
             // collision insert fails loudly instead of enabling confusion.
             e.HasIndex(r => r.TokenHash).IsUnique();
             e.HasIndex(r => new { r.UserId, r.FamilyId });
+        });
+
+        builder.Entity<ExternalAuthAttempt>(e =>
+        {
+            e.Property(a => a.Provider).HasMaxLength(20);
+            e.Property(a => a.ClientKind).HasMaxLength(20);
+            e.Property(a => a.ReturnRouteKey).HasMaxLength(50);
+            e.Property(a => a.CodeChallenge).HasMaxLength(128);
+            e.Property(a => a.PollSecretHash).HasMaxLength(64);
+            e.Property(a => a.ExchangeCodeHash).HasMaxLength(64);
+            e.Property(a => a.CandidateProviderKey).HasMaxLength(256);
+            e.Property(a => a.CandidateEmail).HasMaxLength(320);
+            e.Property(a => a.CandidateDisplayName).HasMaxLength(200);
+            e.Property(a => a.LoopbackReturnUri).HasMaxLength(512);
+            e.Property(a => a.Status).HasMaxLength(20);
+            e.Property(a => a.ErrorCode).HasMaxLength(100);
+            e.HasIndex(a => a.ExchangeCodeHash).IsUnique();
+            e.HasIndex(a => new { a.Status, a.ExpiresAt });
+            e.HasOne<CastmillUser>()
+                .WithMany()
+                .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
+            e.HasOne<CastmillUser>()
+                .WithMany()
+                .HasForeignKey(a => a.LinkUserId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 }

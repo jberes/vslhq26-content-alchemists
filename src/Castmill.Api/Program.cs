@@ -7,6 +7,7 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.DataProtection;
 using Castmill.Api.Services.Evidence;
 using Castmill.Api.Services.Export;
 using Castmill.Api.Services.Images;
@@ -57,10 +58,38 @@ var secretCipher = new SecretCipher(builder.Configuration);
 
 builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.AddCastmillDataProtection(builder.Configuration, builder.Environment.IsProduction());
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantProvider, HttpContextTenantProvider>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IAuthTokenIssuer, AuthTokenIssuer>();
+builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();
+builder.Services.AddScoped<IExternalAuthCompletionService, ExternalAuthCompletionService>();
+builder.Services.AddOptions<ExternalAuthOptions>()
+    .Bind(builder.Configuration.GetSection(ExternalAuthOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(
+        options => ExternalAuthEndpoints.IsValidWebSignInReturnUri(
+            options.Clients.Web.SignInReturnUri,
+            builder.Environment.IsProduction()),
+        "ExternalAuth:Clients:Web:SignInReturnUri must be an absolute HTTP(S) URI at '/sign-in', with no query, fragment, or user info, and HTTP is allowed only for localhost outside Production.")
+    .Validate(
+        options => ExternalAuthEndpoints.IsValidWebAccountSettingsReturnUri(
+            options.Clients.Web.AccountSettingsReturnUri,
+            builder.Environment.IsProduction()),
+        "ExternalAuth:Clients:Web:AccountSettingsReturnUri must be an absolute HTTP(S) URI at '/settings/security', with no query, fragment, or user info, and HTTP is allowed only for localhost outside Production.")
+    .Validate(
+        options => !builder.Environment.IsProduction()
+            || ExternalAuthSchemes.IsValidConfiguration(options.Providers.Microsoft),
+        "Enabled Microsoft external authentication requires both ClientId and ClientSecret in Production.")
+    .Validate(
+        options => !builder.Environment.IsProduction()
+            || ExternalAuthSchemes.IsValidConfiguration(options.Providers.Google),
+        "Enabled Google external authentication requires both ClientId and ClientSecret in Production.")
+    .ValidateOnStart();
+builder.Services.AddHostedService<ExternalAuthAttemptCleanupService>();
 builder.Services.AddSingleton<ISecretCipher>(secretCipher);
 builder.Services.AddScoped<IUserSecretsService, UserSecretsService>();
 builder.Services.AddSingleton<IBlobSasService, BlobSasService>();
@@ -232,9 +261,13 @@ builder.Services
     .AddSignInManager()
     .AddEntityFrameworkStores<CastmillDbContext>();
 
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+var authentication = builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    });
+authentication.AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
@@ -250,6 +283,7 @@ builder.Services
             ClockSkew = TimeSpan.FromMinutes(1),
         };
     });
+authentication.AddExternalProviders(builder.Configuration);
 
 builder.Services.AddAuthorization(options =>
 {
@@ -262,6 +296,9 @@ builder.Services.AddAuthorization(options =>
 
 // Fixed-window limits (ADR-009); values are config-tunable, never disabled.
 var authPerMinute = builder.Configuration.GetValue("RateLimits:AuthPerMinute", 10);
+var externalStartsPerMinute = builder.Configuration.GetValue("RateLimits:ExternalAuthStartsPerMinute", 10);
+var externalFlowPerMinute = builder.Configuration.GetValue("RateLimits:ExternalAuthFlowPerMinute", 300);
+var externalPollsPerMinute = builder.Configuration.GetValue("RateLimits:ExternalAuthPollsPerMinute", 300);
 var writesPerMinute = builder.Configuration.GetValue("RateLimits:WritesPerMinute", 60);
 var aiPerMinute = builder.Configuration.GetValue("RateLimits:AiPerMinute", 30);
 
@@ -276,6 +313,33 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = authPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    options.AddPolicy("external-poll", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = externalPollsPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    options.AddPolicy("external-start", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = externalStartsPerMinute,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    options.AddPolicy("external-flow", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = externalFlowPerMinute,
                 Window = TimeSpan.FromMinutes(1),
             }));
 
@@ -440,6 +504,7 @@ app.MapGet("/health/db", async (CastmillDbContext db, CancellationToken ct) =>
 }).AllowAnonymous();
 
 app.MapAuthEndpoints();
+app.MapExternalAuthEndpoints();
 app.MapCampaignEndpoints();
 app.MapArtifactEndpoints();
 app.MapAssetEndpoints();
