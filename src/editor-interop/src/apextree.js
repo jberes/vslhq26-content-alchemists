@@ -150,33 +150,11 @@ export function initContentClusterTree(element, data, dotnet) {
         },
     });
 
-    // Keep ApexTree's fitted viewport, then show it at 70% scale. The extra horizontal
-    // space is split evenly while the fitted top edge stays fixed, so the primary node
-    // remains aligned to the top and the additional vertical room falls below the tree.
-    const fitToViewport = graph => requestAnimationFrame(() => {
-        graph.fitScreen();
-        requestAnimationFrame(() => {
-            const svg = element.querySelector('svg');
-            const viewBox = svg?.getAttribute('viewBox')?.split(/\s+/).map(Number);
-            if (!viewBox || viewBox.length !== 4 || !viewBox[2] || !viewBox[3]) {
-                return;
-            }
-
-            const [x, y, width, height] = viewBox;
-            const nextWidth = width / 0.7;
-            const nextHeight = height / 0.7;
-            graph.updateViewBox(x - (nextWidth - width) / 2, y, nextWidth, nextHeight);
-            graph.resetPanZoomBase();
-        });
-    });
-
     let graph = tree.render(toApexNode(data));
-    fitToViewport(graph);
 
     return {
         update(next) {
             graph = tree.render(toApexNode(next));
-            fitToViewport(graph);
         },
         destroy() {
             tree.destroy();

@@ -73,12 +73,11 @@ describe('ApexTree bundle', () => {
         expect(css).not.toContain('--apex-tree-badge-color');
     });
 
-    it('leaves fitted SVG dimensions under ApexTree control', () => {
+    it('leaves the SVG viewport entirely under ApexTree control', () => {
         const interopSource = readFileSync(apexTreeInterop, 'utf8');
 
-        expect(interopSource).toContain('graph.fitScreen()');
-        expect(interopSource).toContain('const nextWidth = width / 0.7');
-        expect(interopSource).toContain('graph.updateViewBox');
+        expect(interopSource).not.toContain('graph.fitScreen()');
+        expect(interopSource).not.toContain('graph.updateViewBox');
         expect(interopSource).not.toContain('graph.zoom(');
         expect(interopSource).not.toContain("svg.setAttribute('width'");
         expect(interopSource).not.toContain("svg.setAttribute('height'");

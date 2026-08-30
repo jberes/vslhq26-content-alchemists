@@ -5928,7 +5928,7 @@ button.cm-intent {
 
 .cm-cluster__tree {
     inline-size: 100%;
-    block-size: 12.25rem;
+    block-size: 16.25rem;
     min-block-size: 0;
     overflow: auto;
     overscroll-behavior: contain;
@@ -5953,6 +5953,6 @@ button.cm-intent {
 
 @media (max-width: 56.25rem) {
     .cm-cluster__tree {
-        block-size: 10.5rem;
+        block-size: 14rem;
     }
 }
