@@ -146,6 +146,7 @@ module app 'br/public:avm/res/web/site:0.24.0' = {
     tags: {
       application: 'castmill'
       environment: environmentName
+      'hidden-link: /app-insights-resource-id': appInsights.id
     }
   }
 }
