@@ -14,8 +14,15 @@ public sealed class CastmillDbContext(
 {
     private readonly ITenantProvider _tenantProvider = tenantProvider;
 
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        await NormalizeCampaignAggregateTenantsAsync(cancellationToken);
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
+    public DbSet<CampaignCollaborator> CampaignCollaborators => Set<CampaignCollaborator>();
     public DbSet<SourceAsset> SourceAssets => Set<SourceAsset>();
     public DbSet<EvidenceBlock> EvidenceBlocks => Set<EvidenceBlock>();
     public DbSet<ContentDependencySnapshot> ContentDependencySnapshots => Set<ContentDependencySnapshot>();
@@ -67,11 +74,32 @@ public sealed class CastmillDbContext(
             e.Property(c => c.ContentType).HasMaxLength(30);
             e.Property(c => c.Intent).HasMaxLength(30);
             e.Property(c => c.OutputRecipeJson).HasMaxLength(4000);
+            e.Property(c => c.ShareDomain).HasMaxLength(256);
             e.HasIndex(c => new { c.TenantId, c.UpdatedAt });
             e.HasIndex(c => new { c.TenantId, c.BrandId });
-            // Structural tenant isolation (G1): every query is filtered to the
-            // caller's tenant; there is no code path that opts out per-request.
-            e.HasQueryFilter(c => c.TenantId == _tenantProvider.TenantId);
+            e.HasIndex(c => c.ShareDomain);
+            e.HasQueryFilter(c => c.TenantId == _tenantProvider.TenantId
+                || (_tenantProvider.NormalizedEmail != null
+                    && ((c.ShareDomain != null && c.ShareDomain == _tenantProvider.EmailDomain)
+                        || CampaignCollaborators.Any(collaborator =>
+                            collaborator.CampaignId == c.Id
+                            && collaborator.NormalizedEmail == _tenantProvider.NormalizedEmail))));
+        });
+
+        builder.Entity<CampaignCollaborator>(e =>
+        {
+            e.Property(collaborator => collaborator.Email).HasMaxLength(256);
+            e.Property(collaborator => collaborator.NormalizedEmail).HasMaxLength(256);
+            e.HasIndex(collaborator => new { collaborator.CampaignId, collaborator.NormalizedEmail })
+                .IsUnique();
+            e.HasIndex(collaborator => collaborator.NormalizedEmail);
+            e.HasOne<Campaign>()
+                .WithMany()
+                .HasForeignKey(collaborator => collaborator.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(collaborator =>
+                collaborator.TenantId == _tenantProvider.TenantId
+                || collaborator.NormalizedEmail == _tenantProvider.NormalizedEmail);
         });
 
         builder.Entity<SourceAsset>(e =>
@@ -116,7 +144,8 @@ public sealed class CastmillDbContext(
                     "CK_SourceAssets_SizeBytes",
                     "[SizeBytes] IS NULL OR [SizeBytes] >= 0");
             });
-            e.HasQueryFilter(source => source.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(source => source.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == source.CampaignId));
         });
 
         builder.Entity<EvidenceBlock>(e =>
@@ -142,7 +171,8 @@ public sealed class CastmillDbContext(
                     "CK_EvidenceBlocks_ApprovalState",
                     "[ApprovalState] IN ('Draft', 'Approved')");
             });
-            e.HasQueryFilter(block => block.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(block => block.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == block.CampaignId));
         });
 
         builder.Entity<ContentDependencySnapshot>(e =>
@@ -162,7 +192,8 @@ public sealed class CastmillDbContext(
                 .WithMany()
                 .HasForeignKey(snapshot => snapshot.ArtifactId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.HasQueryFilter(snapshot => snapshot.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(snapshot => snapshot.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == snapshot.CampaignId));
         });
 
         builder.Entity<ContentEvidenceDependency>(e =>
@@ -175,7 +206,8 @@ public sealed class CastmillDbContext(
                 .WithMany()
                 .HasForeignKey(marker => marker.SnapshotId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.HasQueryFilter(marker => marker.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(marker => marker.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == marker.CampaignId));
         });
 
         builder.Entity<Artifact>(e =>
@@ -194,7 +226,8 @@ public sealed class CastmillDbContext(
             e.HasIndex(a => new { a.TenantId, a.ParentArtifactId });
             // The Front Page's review queue filters by status across the whole tenant.
             e.HasIndex(a => new { a.TenantId, a.Status });
-            e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == a.CampaignId));
         });
 
         builder.Entity<ArtifactRevision>(e =>
@@ -207,7 +240,8 @@ public sealed class CastmillDbContext(
                 .WithMany()
                 .HasForeignKey(r => r.ContentDependencySnapshotId)
                 .OnDelete(DeleteBehavior.SetNull);
-            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId
+                || Artifacts.Any(artifact => artifact.Id == r.ArtifactId));
         });
 
         builder.Entity<ImageSlot>(e =>
@@ -242,7 +276,8 @@ public sealed class CastmillDbContext(
                 .IsUnique()
                 .HasFilter("[ArtifactId] IS NULL")
                 .HasDatabaseName("IX_ImageSlots_Tenant_Campaign_Kind_NoArtifact");
-            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == s.CampaignId));
         });
 
         builder.Entity<GitRepoProfile>(e =>
@@ -267,7 +302,8 @@ public sealed class CastmillDbContext(
             // Re-publishing an artifact to the same repo updates this row rather than
             // opening a second branch and a second pull request.
             e.HasIndex(p => new { p.TenantId, p.ArtifactId, p.RepoProfileId }).IsUnique();
-            e.HasQueryFilter(p => p.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(p => p.TenantId == _tenantProvider.TenantId
+                || Artifacts.Any(artifact => artifact.Id == p.ArtifactId));
         });
 
         builder.Entity<ScheduleEntry>(e =>
@@ -279,7 +315,8 @@ public sealed class CastmillDbContext(
             e.Property(s => s.Status).HasMaxLength(20);
             e.Property(s => s.Error).HasMaxLength(2000);
             e.HasIndex(s => new { s.TenantId, s.ScheduledAt });
-            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == s.CampaignId));
         });
 
         builder.Entity<GenerationRun>(e =>
@@ -287,7 +324,8 @@ public sealed class CastmillDbContext(
             e.Property(r => r.Status).HasMaxLength(20);
             e.Property(r => r.Kind).HasMaxLength(20).HasDefaultValue("content");
             e.HasIndex(r => new { r.TenantId, r.CampaignId, r.StartedAt });
-            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(r => r.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == r.CampaignId));
         });
 
         builder.Entity<ImageVariant>(e =>
@@ -301,7 +339,8 @@ public sealed class CastmillDbContext(
             e.Property(v => v.SteeringNote).HasMaxLength(1000);
             e.Property(v => v.State).HasMaxLength(20);
             e.HasIndex(v => new { v.TenantId, v.SlotId, v.CreatedAt });
-            e.HasQueryFilter(v => v.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(v => v.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == v.CampaignId));
         });
 
         builder.Entity<Asset>(e =>
@@ -309,7 +348,8 @@ public sealed class CastmillDbContext(
             e.Property(a => a.FileName).HasMaxLength(400);
             e.Property(a => a.ContentType).HasMaxLength(200);
             e.Property(a => a.BlobPath).HasMaxLength(1000);
-            e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId
+                || MediaUploads.Any(upload => upload.AssetId == a.Id));
         });
 
         builder.Entity<MediaUpload>(e =>
@@ -335,7 +375,8 @@ public sealed class CastmillDbContext(
                     "CK_MediaUploads_Status",
                     "[Status] IN ('Uploading', 'Committed', 'Transcribing', 'Completed', 'Cancelled')");
             });
-            e.HasQueryFilter(upload => upload.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(upload => upload.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == upload.CampaignId));
         });
 
         builder.Entity<BrandProfile>(e =>
@@ -405,7 +446,8 @@ public sealed class CastmillDbContext(
             e.Property(j => j.Error).HasMaxLength(2000);
             e.Property(j => j.CallbackTokenHash).HasMaxLength(64);
             e.HasIndex(j => new { j.TenantId, j.CreatedAt });
-            e.HasQueryFilter(j => j.TenantId == _tenantProvider.TenantId);
+            e.HasQueryFilter(j => j.TenantId == _tenantProvider.TenantId
+                || Assets.Any(asset => asset.Id == j.AssetId));
         });
 
         builder.Entity<RefreshToken>(e =>
@@ -445,5 +487,109 @@ public sealed class CastmillDbContext(
                 .HasForeignKey(a => a.LinkUserId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
+    }
+
+    private async Task NormalizeCampaignAggregateTenantsAsync(CancellationToken ct)
+    {
+        var directEntries = ChangeTracker.Entries<ITenantScoped>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => new
+            {
+                Entry = entry,
+                CampaignId = entry.Entity switch
+                {
+                    SourceAsset entity => entity.CampaignId,
+                    EvidenceBlock entity => entity.CampaignId,
+                    ContentDependencySnapshot entity => entity.CampaignId,
+                    ContentEvidenceDependency entity => entity.CampaignId,
+                    Artifact entity => entity.CampaignId,
+                    ImageSlot entity => entity.CampaignId,
+                    ScheduleEntry entity => entity.CampaignId,
+                    GenerationRun entity => entity.CampaignId,
+                    ImageVariant entity => entity.CampaignId,
+                    MediaUpload entity => entity.CampaignId,
+                    _ => (Guid?)null,
+                },
+            })
+            .Where(item => item.CampaignId is not null)
+            .ToList();
+
+        var artifactEntries = ChangeTracker.Entries<ITenantScoped>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => new
+            {
+                Entry = entry,
+                ArtifactId = entry.Entity switch
+                {
+                    ArtifactRevision entity => entity.ArtifactId,
+                    GitPublication entity => entity.ArtifactId,
+                    _ => (Guid?)null,
+                },
+            })
+            .Where(item => item.ArtifactId is not null)
+            .ToList();
+
+        var artifactIds = artifactEntries.Select(item => item.ArtifactId!.Value).Distinct().ToList();
+        var artifactCampaigns = artifactIds.Count == 0
+            ? new Dictionary<Guid, Guid>()
+            : await Artifacts.IgnoreQueryFilters().AsNoTracking()
+                .Where(artifact => artifactIds.Contains(artifact.Id))
+                .ToDictionaryAsync(artifact => artifact.Id, artifact => artifact.CampaignId, ct);
+
+        var campaignIds = directEntries.Select(item => item.CampaignId!.Value)
+            .Concat(artifactEntries
+                .Select(item => artifactCampaigns.GetValueOrDefault(item.ArtifactId!.Value))
+                .Where(id => id != Guid.Empty))
+            .Distinct()
+            .ToList();
+        if (campaignIds.Count == 0)
+        {
+            return;
+        }
+
+        var campaignTenants = ChangeTracker.Entries<Campaign>()
+            .Where(entry => entry.State != EntityState.Deleted && campaignIds.Contains(entry.Entity.Id))
+            .ToDictionary(entry => entry.Entity.Id, entry => entry.Entity.TenantId);
+        var missingCampaignIds = campaignIds.Where(id => !campaignTenants.ContainsKey(id)).ToList();
+        if (missingCampaignIds.Count > 0)
+        {
+            var storedTenants = await Campaigns.IgnoreQueryFilters().AsNoTracking()
+                .Where(campaign => missingCampaignIds.Contains(campaign.Id))
+                .ToDictionaryAsync(campaign => campaign.Id, campaign => campaign.TenantId, ct);
+            foreach (var (campaignId, tenantId) in storedTenants)
+            {
+                campaignTenants[campaignId] = tenantId;
+            }
+        }
+
+        foreach (var item in directEntries)
+        {
+            if (campaignTenants.TryGetValue(item.CampaignId!.Value, out var tenantId))
+            {
+                item.Entry.Entity.TenantId = tenantId;
+            }
+        }
+        foreach (var item in artifactEntries)
+        {
+            if (artifactCampaigns.TryGetValue(item.ArtifactId!.Value, out var campaignId)
+                && campaignTenants.TryGetValue(campaignId, out var tenantId))
+            {
+                item.Entry.Entity.TenantId = tenantId;
+            }
+        }
+
+        var mediaUploadTenants = ChangeTracker.Entries<MediaUpload>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Where(entry => campaignTenants.ContainsKey(entry.Entity.CampaignId))
+            .ToDictionary(entry => entry.Entity.AssetId,
+                entry => campaignTenants[entry.Entity.CampaignId]);
+        foreach (var assetEntry in ChangeTracker.Entries<Asset>()
+            .Where(entry => entry.State == EntityState.Added))
+        {
+            if (mediaUploadTenants.TryGetValue(assetEntry.Entity.Id, out var tenantId))
+            {
+                assetEntry.Entity.TenantId = tenantId;
+            }
+        }
     }
 }

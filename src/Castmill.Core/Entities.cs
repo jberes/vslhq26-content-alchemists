@@ -36,6 +36,12 @@ public sealed class Campaign : ITenantScoped
     /// <summary>Explicit producer choice to generate from approved source evidence without SEO/AEO research.</summary>
     public bool SkipSeoAnalysis { get; set; }
 
+    /// <summary>
+    /// Exact normalized email domain whose signed-in users may edit this campaign.
+    /// Null keeps domain sharing disabled.
+    /// </summary>
+    public string? ShareDomain { get; set; }
+
     /// <summary>The brand steering this campaign's generation — null means "None".
     /// No FK constraint; brand delete detaches campaigns explicitly (house style).</summary>
     public Guid? BrandId { get; set; }
@@ -54,6 +60,21 @@ public sealed class Campaign : ITenantScoped
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Full campaign edit access granted to one normalized email address. The address need not
+/// have a Castmill account yet; the grant becomes active whenever that address signs in.
+/// </summary>
+public sealed class CampaignCollaborator : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid GrantedByUserId { get; set; }
+    public required string Email { get; set; }
+    public required string NormalizedEmail { get; set; }
+    public DateTimeOffset GrantedAt { get; set; }
 }
 
 public static class CampaignStatus

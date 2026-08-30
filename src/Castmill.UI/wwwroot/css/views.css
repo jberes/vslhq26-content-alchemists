@@ -382,7 +382,20 @@
     padding-inline-end: var(--cm-space-2);
 }
 
+.cm-front__aging-list .cm-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 11ch auto;
+    align-items: center;
+}
+
+.cm-front__aging-list .cm-row__age {
+    white-space: nowrap;
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+}
+
 .cm-front__aging-list .cm-row__action {
+    justify-self: end;
     flex: 0 0 auto;
     opacity: 1;
     pointer-events: auto;
@@ -4093,6 +4106,32 @@ button.cm-intent {
     max-inline-size: 56rem;
 }
 
+.cm-campaign-sharing {
+    inline-size: min(42rem, 100%);
+    max-block-size: min(42rem, calc(100vh - 2 * var(--cm-space-6)));
+    overflow-y: auto;
+}
+
+.cm-campaign-sharing :is(.cm-campaign-sharing__head, .cm-campaign-sharing__domain) {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+.cm-campaign-sharing__domain {
+    justify-content: flex-start;
+    padding-block: var(--cm-space-4);
+    margin-block-end: var(--cm-space-4);
+    border-block: 1px solid var(--cm-rule);
+}
+
+.cm-campaign-sharing__domain > span {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
 .cm-brand__share-form {
     display: grid;
     grid-template-columns: minmax(16rem, 1fr) auto;
@@ -5889,7 +5928,8 @@ button.cm-intent {
 
 .cm-cluster__tree {
     inline-size: 100%;
-    min-block-size: 32.5rem;
+    block-size: 12.25rem;
+    min-block-size: 0;
     overflow: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable both-edges;
@@ -5913,6 +5953,6 @@ button.cm-intent {
 
 @media (max-width: 56.25rem) {
     .cm-cluster__tree {
-        min-block-size: 28rem;
+        block-size: 10.5rem;
     }
 }

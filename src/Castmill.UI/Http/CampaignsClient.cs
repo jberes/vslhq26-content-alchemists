@@ -69,6 +69,26 @@ public sealed class CampaignsClient(ApiClient api)
     public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/campaigns/{id}", ct);
 
+    public Task<CampaignSharingResponse> GetSharingAsync(
+        Guid id, CancellationToken ct = default) =>
+        api.GetAsync<CampaignSharingResponse>($"api/v1/campaigns/{id}/sharing", ct);
+
+    public Task<CampaignSharingResponse> UpdateSharingAsync(
+        Guid id, bool domainEnabled, CancellationToken ct = default) =>
+        api.PutAsync<CampaignSharingRequest, CampaignSharingResponse>(
+            $"api/v1/campaigns/{id}/sharing",
+            new CampaignSharingRequest(domainEnabled), etag: null, ct);
+
+    public Task<CampaignCollaboratorResponse> AddCollaboratorAsync(
+        Guid id, string email, CancellationToken ct = default) =>
+        api.PostAsync<CampaignCollaboratorRequest, CampaignCollaboratorResponse>(
+            $"api/v1/campaigns/{id}/collaborators",
+            new CampaignCollaboratorRequest(email), anonymous: false, ct);
+
+    public Task RemoveCollaboratorAsync(
+        Guid id, Guid collaboratorId, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/campaigns/{id}/collaborators/{collaboratorId}", ct);
+
     // ---- Artifacts ---------------------------------------------------------
 
     public Task<List<ArtifactPreviewResponse>> ListArtifactsAsync(Guid campaignId, CancellationToken ct = default) =>

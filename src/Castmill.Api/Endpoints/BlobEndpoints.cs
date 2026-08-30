@@ -165,6 +165,31 @@ public static class BlobEndpoints
             });
         }
 
+        if (access.SharedCampaignId is { } campaignId)
+        {
+            var userId = AuthEndpoints.GetUserId(principal);
+            var tenantId = tenant.TenantId!.Value;
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync<IResult>(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                await CampaignEndpoints.AcquireCampaignLockAsync(db, campaignId, ct);
+                var current = await brandAccess.FindAccessibleAssetAsync(
+                    assetId, userId, tenantId, ct);
+                if (current?.SharedCampaignId != campaignId)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return Results.NotFound();
+                }
+
+                var sharedUrl = await sas.MintAsync(
+                    current.Asset.BlobPath, BlobSasPermissions.Read, minutes, ct);
+                await transaction.CommitAsync(ct);
+                return Results.Ok(new { readUrl = sharedUrl });
+            });
+        }
+
         var url = await sas.MintAsync(access.Asset.BlobPath, BlobSasPermissions.Read, minutes, ct);
         return Results.Ok(new { readUrl = url });
     }
@@ -208,8 +233,14 @@ public static class BlobEndpoints
             .Distinct()
             .Order()
             .ToList();
+        var sharedCampaignIds = preliminary
+            .Select(item => item.SharedCampaignId)
+            .OfType<Guid>()
+            .Distinct()
+            .Order()
+            .ToList();
 
-        if (sharedBrandIds.Count > 0)
+        if (sharedBrandIds.Count > 0 || sharedCampaignIds.Count > 0)
         {
             var strategy = new NonReplayingExecutionStrategy(db);
             return await strategy.ExecuteAsync<IResult>(async () =>
@@ -220,10 +251,17 @@ public static class BlobEndpoints
                 {
                     await BrandEndpoints.AcquireBrandLockAsync(db, brandId, ct);
                 }
+                foreach (var campaignId in sharedCampaignIds)
+                {
+                    await CampaignEndpoints.AcquireCampaignLockAsync(db, campaignId, ct);
+                }
 
                 var current = await brandAccess.ListAccessibleAssetsAsync(ids, userId, tenantId, ct);
-                var locked = current.Where(item => item.SharedBrandId is null
-                    || sharedBrandIds.Contains(item.SharedBrandId.Value));
+                var locked = current.Where(item =>
+                    (item.SharedBrandId is null
+                        || sharedBrandIds.Contains(item.SharedBrandId.Value))
+                    && (item.SharedCampaignId is null
+                        || sharedCampaignIds.Contains(item.SharedCampaignId.Value)));
                 var result = await MintThumbsCoreAsync(locked, minutes, sas, composer, logger, ct);
                 await transaction.CommitAsync(ct);
                 return result;

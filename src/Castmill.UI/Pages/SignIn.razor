@@ -64,14 +64,14 @@
         <label class="cm-field">
             <span class="cm-field__label">Email</span>
             <InputText @bind-Value="_model.Email" class="cm-input" autocomplete="username"
-                       type="email" disabled="@IsBusy" />
+                       type="email" tabindex="1" disabled="@IsBusy" />
             <ValidationMessage For="() => _model.Email" class="cm-field__error" />
         </label>
 
         <label class="cm-field">
             <span class="cm-field__label">Password</span>
             <InputText @bind-Value="_model.Password" class="cm-input" type="password"
-                       autocomplete="current-password" disabled="@IsBusy" />
+                       autocomplete="current-password" tabindex="2" disabled="@IsBusy" />
             <ValidationMessage For="() => _model.Password" class="cm-field__error" />
         </label>
 

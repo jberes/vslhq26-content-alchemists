@@ -30,6 +30,15 @@ public static class CampaignEndpoints
         // One call feeds the campaign header counter, the front page's "slots
         // waiting" block and Focus Mode's slot list (G9) — no per-surface polling.
         group.MapGet("/{id:guid}/preview", PreviewAsync);
+        group.MapGet("/{id:guid}/sharing", GetSharingAsync);
+        group.MapPut("/{id:guid}/sharing", UpdateSharingAsync)
+            .Validate<CampaignSharingRequest>().RequireRateLimiting("writes")
+            .SerializeCampaignSharingWrite();
+        group.MapPost("/{id:guid}/collaborators", AddCollaboratorAsync)
+            .Validate<CampaignCollaboratorRequest>().RequireRateLimiting("writes")
+            .SerializeCampaignSharingWrite();
+        group.MapDelete("/{id:guid}/collaborators/{collaboratorId:guid}", RemoveCollaboratorAsync)
+            .RequireRateLimiting("writes").SerializeCampaignSharingWrite();
         group.MapPost("/", CreateAsync).Validate<CampaignCreateRequest>()
             .RequireRateLimiting("writes").SerializeBrandReferenceWrite();
         group.MapPut("/{id:guid}", UpdateAsync).Validate<CampaignUpdateRequest>()
@@ -43,6 +52,45 @@ public static class CampaignEndpoints
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
         return routes;
     }
+
+    private static RouteHandlerBuilder SerializeCampaignSharingWrite(this RouteHandlerBuilder route) =>
+        route.AddEndpointFilter(async (context, next) =>
+        {
+            if (!Guid.TryParse(context.HttpContext.Request.RouteValues["id"]?.ToString(),
+                out var campaignId))
+            {
+                return Results.NotFound();
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<CastmillDbContext>();
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(
+                    IsolationLevel.Serializable, context.HttpContext.RequestAborted);
+                await AcquireCampaignLockAsync(
+                    db, campaignId, context.HttpContext.RequestAborted);
+                var result = await next(context);
+                await transaction.CommitAsync(context.HttpContext.RequestAborted);
+                return result;
+            });
+        });
+
+    internal static Task AcquireCampaignLockAsync(
+        CastmillDbContext db,
+        Guid campaignId,
+        CancellationToken ct) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = {"castmill:campaign:" + campaignId.ToString("N")},
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 30000;
+            IF @result < 0
+                THROW 51000, 'Could not acquire the Campaign mutation lock.', 1;
+            """, ct);
 
     private static RouteHandlerBuilder SerializeBrandReferenceWrite(this RouteHandlerBuilder route) =>
         route.AddEndpointFilter(async (context, next) =>
@@ -81,10 +129,11 @@ public static class CampaignEndpoints
     private static readonly System.Text.Json.JsonSerializerOptions Json =
         new(System.Text.Json.JsonSerializerDefaults.Web);
 
-    internal static CampaignResponse ToResponse(Campaign c) =>
+    internal static CampaignResponse ToResponse(Campaign c, Guid? actorUserId = null) =>
         new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId,
             ParseLinks(c.ContextJson), c.Status, c.ContentType, c.Intent,
-            ParseOutputRecipe(c.OutputRecipeJson), c.SkipSeoAnalysis);
+            ParseOutputRecipe(c.OutputRecipeJson), c.SkipSeoAnalysis,
+            actorUserId is null || c.OwnerId == actorUserId, c.ShareDomain);
 
     private static readonly JsonSerializerOptions TargetsJson = new(JsonSerializerDefaults.Web);
 
@@ -291,20 +340,24 @@ public static class CampaignEndpoints
         return null;
     }
 
-    private static async Task<IResult> ListAsync(CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        ITenantProvider tenant, CastmillDbContext db, CancellationToken ct)
     {
         var campaigns = await db.Campaigns
             .OrderByDescending(c => c.UpdatedAt)
             .ToListAsync(ct);
-        return Results.Ok(campaigns.Select(ToResponse).ToList());
+        return Results.Ok(campaigns.Select(campaign => ToResponse(campaign, tenant.UserId)).ToList());
     }
 
-    private static async Task<IResult> GetAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> GetAsync(
+        Guid id, ITenantProvider tenant, CastmillDbContext db, CancellationToken ct)
     {
         // The tenant query filter makes another tenant's campaign a plain 404 —
         // indistinguishable from "does not exist", so nothing leaks.
         var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
-        return campaign is null ? Results.NotFound() : Results.Ok(ToResponse(campaign));
+        return campaign is null
+            ? Results.NotFound()
+            : Results.Ok(ToResponse(campaign, tenant.UserId));
     }
 
     /// <summary>
@@ -374,7 +427,7 @@ public static class CampaignEndpoints
 
         return Results.Ok(new
         {
-            campaign = ToResponse(campaign),
+            campaign = ToResponse(campaign, tenant.UserId),
             brand,
             artifacts,
             sources = sources.Select(EvidenceEndpoints.ToSourceResponse).ToList(),
@@ -713,7 +766,153 @@ public static class CampaignEndpoints
                 campaign.Id, db, campaign.UpdatedAt, inputs: true, ct: ct);
         }
         await db.SaveChangesAsync(ct);
-        return Results.Ok(ToResponse(campaign));
+        return Results.Ok(ToResponse(campaign, tenant.UserId));
+    }
+
+    private static async Task<IResult> GetSharingAsync(
+        Guid id,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        return Results.Ok(await ToSharingResponseAsync(campaign, db, ct));
+    }
+
+    private static async Task<IResult> UpdateSharingAsync(
+        Guid id,
+        CampaignSharingRequest request,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+        if (request.DomainEnabled && tenant.EmailDomain is null)
+        {
+            return Results.Problem(
+                "Your account needs a valid email domain before domain sharing can be enabled.",
+                statusCode: 400);
+        }
+
+        campaign.ShareDomain = request.DomainEnabled ? tenant.EmailDomain : null;
+        campaign.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(await ToSharingResponseAsync(campaign, db, ct));
+    }
+
+    private static async Task<IResult> AddCollaboratorAsync(
+        Guid id,
+        CampaignCollaboratorRequest request,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var email = request.Email.Trim();
+        var normalizedEmail = email.ToUpperInvariant();
+        if (string.Equals(normalizedEmail, tenant.NormalizedEmail, StringComparison.Ordinal))
+        {
+            return Results.Problem("The campaign owner already has access.", statusCode: 409);
+        }
+        if (await db.CampaignCollaborators.AnyAsync(
+            collaborator => collaborator.CampaignId == id
+                && collaborator.NormalizedEmail == normalizedEmail, ct))
+        {
+            return Results.Problem("That email already has access.", statusCode: 409);
+        }
+
+        var collaborator = new CampaignCollaborator
+        {
+            Id = Guid.NewGuid(),
+            TenantId = campaign.TenantId,
+            CampaignId = campaign.Id,
+            GrantedByUserId = tenant.UserId!.Value,
+            Email = email,
+            NormalizedEmail = normalizedEmail,
+            GrantedAt = clock.GetUtcNow(),
+        };
+        db.CampaignCollaborators.Add(collaborator);
+        campaign.UpdatedAt = collaborator.GrantedAt;
+        await db.SaveChangesAsync(ct);
+
+        var displayName = await db.Users.AsNoTracking()
+            .Where(user => user.NormalizedEmail == normalizedEmail)
+            .Select(user => user.DisplayName)
+            .SingleOrDefaultAsync(ct);
+        return Results.Created(
+            $"/api/v1/campaigns/{id}/collaborators/{collaborator.Id}",
+            new CampaignCollaboratorResponse(
+                collaborator.Id, collaborator.Email, displayName, collaborator.GrantedAt));
+    }
+
+    private static async Task<IResult> RemoveCollaboratorAsync(
+        Guid id,
+        Guid collaboratorId,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
+        if (campaign is null)
+        {
+            return Results.NotFound();
+        }
+
+        var collaborator = await db.CampaignCollaborators.SingleOrDefaultAsync(
+            item => item.Id == collaboratorId && item.CampaignId == id, ct);
+        if (collaborator is null)
+        {
+            return Results.NotFound();
+        }
+
+        db.CampaignCollaborators.Remove(collaborator);
+        campaign.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static Task<Campaign?> FindOwnedCampaignAsync(
+        Guid id, ITenantProvider tenant, CastmillDbContext db, CancellationToken ct) =>
+        db.Campaigns.SingleOrDefaultAsync(
+            campaign => campaign.Id == id && campaign.OwnerId == tenant.UserId, ct);
+
+    private static async Task<CampaignSharingResponse> ToSharingResponseAsync(
+        Campaign campaign, CastmillDbContext db, CancellationToken ct)
+    {
+        var collaborators = await db.CampaignCollaborators.AsNoTracking()
+            .Where(collaborator => collaborator.CampaignId == campaign.Id)
+            .OrderBy(collaborator => collaborator.Email)
+            .ToListAsync(ct);
+        var normalizedEmails = collaborators.Select(item => item.NormalizedEmail).ToList();
+        var displayNames = await db.Users.AsNoTracking()
+            .Where(user => user.NormalizedEmail != null
+                && normalizedEmails.Contains(user.NormalizedEmail))
+            .ToDictionaryAsync(user => user.NormalizedEmail!, user => user.DisplayName, ct);
+        return new CampaignSharingResponse(
+            campaign.ShareDomain is not null,
+            campaign.ShareDomain?.ToLowerInvariant(),
+            collaborators.Select(collaborator => new CampaignCollaboratorResponse(
+                collaborator.Id,
+                collaborator.Email,
+                displayNames.GetValueOrDefault(collaborator.NormalizedEmail),
+                collaborator.GrantedAt)).ToList());
     }
 
     internal static async Task MarkLatestReportStaleAsync(
@@ -760,9 +959,10 @@ public static class CampaignEndpoints
         }
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(
+        Guid id, ITenantProvider tenant, CastmillDbContext db, CancellationToken ct)
     {
-        var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
+        var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
         if (campaign is null)
         {
             return Results.NotFound();

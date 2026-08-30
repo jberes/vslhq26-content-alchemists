@@ -527,9 +527,7 @@ public static class ImageSlotEndpoints
             db.ChangeTracker.Clear();
             await using var startLock = await db.Database.BeginTransactionAsync(
                 IsolationLevel.ReadCommitted, requestCt);
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE Campaigns WITH (ROWLOCK, UPDLOCK) SET UpdatedAt = UpdatedAt WHERE Id = {campaignId} AND TenantId = {tenant.TenantId!.Value}",
-                requestCt);
+            await CampaignEndpoints.AcquireCampaignLockAsync(db, campaignId, requestCt);
             activeBatch = await db.GenerationRuns
                 .Where(candidate => candidate.CampaignId == campaignId
                     && candidate.Kind == "image-batch" && candidate.Status == "Running")
@@ -934,9 +932,7 @@ public static class ImageSlotEndpoints
             db.ChangeTracker.Clear();
             await using var startLock = await db.Database.BeginTransactionAsync(
                 IsolationLevel.ReadCommitted, ct);
-            await db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE Campaigns WITH (ROWLOCK, UPDLOCK) SET UpdatedAt = UpdatedAt WHERE Id = {slot.CampaignId} AND TenantId = {tenant.TenantId!.Value}",
-                ct);
+            await CampaignEndpoints.AcquireCampaignLockAsync(db, slot.CampaignId, ct);
             if (await db.GenerationRuns.AnyAsync(candidate => candidate.CampaignId == slot.CampaignId
                 && candidate.Kind == "image-batch" && candidate.Status == "Running", ct))
             {

@@ -174,8 +174,8 @@
                             @foreach (var item in _aging)
                             {
                                 <li class="cm-row">
-                                    <span class="cm-row__label">@item.Title</span>
-                                    <span class="cm-meta">@ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
+                                    <span class="cm-row__label" title="@item.Title">@item.Title</span>
+                                    <span class="cm-meta cm-row__age">@ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
                                     <button type="button" class="cm-button cm-button--quiet cm-row__action"
                                             aria-label="Edit @item.Title"
                                             @onclick="() => OpenFocus(item)">

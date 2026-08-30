@@ -34,7 +34,25 @@ public sealed record CampaignResponse(
     string? ContentType = null,
     string? Intent = null,
     IReadOnlyList<string>? OutputRecipe = null,
-    bool SkipSeoAnalysis = false);
+    bool SkipSeoAnalysis = false,
+    bool IsOwner = true,
+    string? ShareDomain = null);
+
+public sealed record CampaignSharingRequest(bool DomainEnabled);
+
+public sealed record CampaignCollaboratorRequest(
+    [property: Required, EmailAddress, MaxLength(256)] string Email);
+
+public sealed record CampaignCollaboratorResponse(
+    Guid Id,
+    string Email,
+    string? DisplayName,
+    DateTimeOffset GrantedAt);
+
+public sealed record CampaignSharingResponse(
+    bool DomainEnabled,
+    string? Domain,
+    IReadOnlyList<CampaignCollaboratorResponse> Collaborators);
 
 /// <summary>One artifact row on the workspace dashboard (review queue / aging drafts).</summary>
 public sealed record DashboardArtifact(

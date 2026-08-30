@@ -139,6 +139,8 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
         Assert.NotNull(page.Find(".cm-front__aging"));
         Assert.Equal("UL", page.Find(".cm-front__aging-list").TagName);
         Assert.NotNull(page.Find(".cm-front__aging-list[data-cm-scroll]"));
+        Assert.Equal("Stale October letter",
+            page.Find(".cm-front__aging-list .cm-row__label").GetAttribute("title"));
     }
 
     [Fact]

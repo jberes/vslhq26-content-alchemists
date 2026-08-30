@@ -5,6 +5,7 @@
    disagree with the front page's "slots waiting" block or Focus Mode's slot list (G9). *@
 @using Castmill.UI.State
 @using Castmill.Core
+@using Castmill.Core.Resources
 @using Castmill.UI.Http
 @using Castmill.UI.Design
 @implements IDisposable
@@ -56,6 +57,17 @@
                     title="Toggle campaign readiness" @onclick="ToggleReadyAsync">
                 @(campaign.Status == CampaignStatus.Ready ? "Ready" : "Draft")
             </button>
+            @if (campaign.IsOwner)
+            {
+                <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                        aria-label="Manage campaign sharing" @onclick="OpenSharingAsync">
+                    Share
+                </button>
+            }
+            else
+            {
+                <span class="cm-chip cm-mono" title="You can edit this campaign">Shared campaign</span>
+            }
         }
 
         <span class="cm-mono cm-meta" title="Image slots filled">
@@ -98,12 +110,215 @@
     </div>
 </header>
 
+@if (_sharingOpen && Campaign.Campaign is { IsOwner: true } sharedCampaign)
+{
+    <div class="cm-modal" role="presentation" @onclick="CloseSharing">
+        <section class="cm-modal__panel cm-campaign-sharing" role="dialog" aria-modal="true"
+                 aria-labelledby="cm-campaign-sharing-title" @onclick:stopPropagation>
+            <div class="cm-campaign-sharing__head">
+                <div>
+                    <span class="cm-kicker">Campaign access</span>
+                    <h2 id="cm-campaign-sharing-title" class="cm-modal__title">Share @sharedCampaign.Name</h2>
+                </div>
+                <button type="button" class="cm-tree__delete" aria-label="Close sharing"
+                        @onclick="CloseSharing">✕</button>
+            </div>
+
+            @if (_sharingLoading)
+            {
+                <p class="cm-meta" role="status">Loading access…</p>
+            }
+            else
+            {
+                <label class="cm-campaign-sharing__domain">
+                    <input type="checkbox" checked="@_domainEnabled" disabled="@_sharingBusy"
+                           @onchange="SetDomainSharingAsync" />
+                    <span>
+                        <strong>Anyone at @(_shareDomain ?? "your email domain")</strong>
+                        <span class="cm-meta">Signed-in Castmill users at this exact domain can edit the campaign.</span>
+                    </span>
+                </label>
+
+                <div class="cm-brand__share-form">
+                    <label class="cm-field">
+                        <span class="cm-field__label">Share with any email</span>
+                        <input class="cm-input" type="email" maxlength="256"
+                               placeholder="person@company.com" disabled="@_sharingBusy"
+                               @bind="_shareEmail" @bind:event="oninput"
+                               @onkeydown="ShareKeyDownAsync" />
+                        <span class="cm-meta">They get access when they sign in with this address.</span>
+                    </label>
+                    <button type="button" class="cm-button"
+                            disabled="@(_sharingBusy || string.IsNullOrWhiteSpace(_shareEmail))"
+                            @onclick="AddCollaboratorAsync">Add</button>
+                </div>
+
+                @if (_sharingError is { } sharingError)
+                {
+                    <p class="cm-form__error" role="alert">@sharingError</p>
+                }
+
+                @if (_collaborators.Count == 0)
+                {
+                    <p class="cm-meta">No individual email shares.</p>
+                }
+                else
+                {
+                    <ul class="cm-brand__collaborators">
+                        @foreach (var collaborator in _collaborators)
+                        {
+                            <li @key="collaborator.Id">
+                                <span>
+                                    <strong>@(string.IsNullOrWhiteSpace(collaborator.DisplayName)
+                                        ? collaborator.Email
+                                        : collaborator.DisplayName)</strong>
+                                    <span class="cm-meta">@collaborator.Email</span>
+                                </span>
+                                <button type="button" class="cm-tree__delete"
+                                        aria-label="Remove @collaborator.Email"
+                                        disabled="@(_removingCollaborator == collaborator.Id)"
+                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">✕</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        </section>
+    </div>
+}
+
 @code {
     /// <summary>The view currently shown, supplied by the campaign layout.</summary>
     [Parameter, EditorRequired] public CampaignView Current { get; set; }
     private bool _renaming;
     private bool _saving;
     private string _name = string.Empty;
+    private bool _sharingOpen;
+    private bool _sharingLoading;
+    private bool _sharingBusy;
+    private bool _domainEnabled;
+    private string? _shareDomain;
+    private string _shareEmail = string.Empty;
+    private string? _sharingError;
+    private Guid? _removingCollaborator;
+    private readonly List<CampaignCollaboratorResponse> _collaborators = [];
+
+    private async Task OpenSharingAsync()
+    {
+        if (Campaign.Campaign is not { IsOwner: true } campaign)
+        {
+            return;
+        }
+
+        _sharingOpen = true;
+        _sharingLoading = true;
+        _sharingError = null;
+        try
+        {
+            var sharing = await Campaigns.GetSharingAsync(campaign.Id);
+            ApplySharing(sharing);
+        }
+        catch (ApiException ex)
+        {
+            _sharingError = ex.Message;
+        }
+        finally
+        {
+            _sharingLoading = false;
+        }
+    }
+
+    private void CloseSharing() => _sharingOpen = false;
+
+    private async Task SetDomainSharingAsync(ChangeEventArgs args)
+    {
+        if (_sharingBusy || Campaign.Campaign is not { IsOwner: true } campaign)
+        {
+            return;
+        }
+
+        var enabled = args.Value is true || string.Equals(args.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        _sharingBusy = true;
+        _sharingError = null;
+        try
+        {
+            ApplySharing(await Campaigns.UpdateSharingAsync(campaign.Id, enabled));
+            Notifier.ShowSuccess(enabled ? "Domain access enabled." : "Domain access disabled.");
+        }
+        catch (ApiException ex)
+        {
+            _sharingError = ex.Message;
+        }
+        finally
+        {
+            _sharingBusy = false;
+        }
+    }
+
+    private Task ShareKeyDownAsync(KeyboardEventArgs args) =>
+        args.Key == "Enter" ? AddCollaboratorAsync() : Task.CompletedTask;
+
+    private async Task AddCollaboratorAsync()
+    {
+        if (_sharingBusy || string.IsNullOrWhiteSpace(_shareEmail)
+            || Campaign.Campaign is not { IsOwner: true } campaign)
+        {
+            return;
+        }
+
+        _sharingBusy = true;
+        _sharingError = null;
+        try
+        {
+            var collaborator = await Campaigns.AddCollaboratorAsync(
+                campaign.Id, _shareEmail.Trim());
+            _collaborators.Add(collaborator);
+            _collaborators.Sort((left, right) =>
+                StringComparer.OrdinalIgnoreCase.Compare(left.Email, right.Email));
+            _shareEmail = string.Empty;
+            Notifier.ShowSuccess($"Shared with {collaborator.Email}.");
+        }
+        catch (ApiException ex)
+        {
+            _sharingError = ex.Message;
+        }
+        finally
+        {
+            _sharingBusy = false;
+        }
+    }
+
+    private async Task RemoveCollaboratorAsync(CampaignCollaboratorResponse collaborator)
+    {
+        if (Campaign.Campaign is not { IsOwner: true } campaign)
+        {
+            return;
+        }
+
+        _removingCollaborator = collaborator.Id;
+        try
+        {
+            await Campaigns.RemoveCollaboratorAsync(campaign.Id, collaborator.Id);
+            _collaborators.RemoveAll(item => item.Id == collaborator.Id);
+            Notifier.ShowSuccess($"Removed {collaborator.Email}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _removingCollaborator = null;
+        }
+    }
+
+    private void ApplySharing(CampaignSharingResponse sharing)
+    {
+        _domainEnabled = sharing.DomainEnabled;
+        _shareDomain = sharing.Domain;
+        _collaborators.Clear();
+        _collaborators.AddRange(sharing.Collaborators);
+    }
 
     private void BeginRename()
     {

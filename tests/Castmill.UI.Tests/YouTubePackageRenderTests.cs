@@ -152,6 +152,30 @@ public sealed class YouTubePackageRenderTests
     }
 
     [Fact]
+    public void Chapter_lines_below_a_plain_heading_get_explicit_markdown_breaks()
+    {
+        const string description = """
+            Chapters:
+            00:00 Ignite UI CLI with Claude Code
+            00:21 Scaffold a React App with MCP Servers
+            01:34 Prompt an Enterprise React CRM
+            03:13 MCP Component Skills for AI Agents
+            05:17 React CRM Grid, Docking, and CRUD
+            """;
+
+        var markdown = StructuredContent.NormalizeGeneratedMarkdown(description);
+
+        Assert.Equal(
+            "## Chapters\n\n"
+            + "00:00 Ignite UI CLI with Claude Code  \n"
+            + "00:21 Scaffold a React App with MCP Servers  \n"
+            + "01:34 Prompt an Enterprise React CRM  \n"
+            + "03:13 MCP Component Skills for AI Agents  \n"
+            + "05:17 React CRM Grid, Docking, and CRUD",
+            markdown);
+    }
+
+    [Fact]
     public void Valid_markdown_is_not_rewritten()
     {
         const string markdown = "Intro\n\n- First\n- Second\n\n## Chapters\n\n00:00 Intro  \n00:30 Demo";

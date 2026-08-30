@@ -33,8 +33,8 @@ public sealed class ExternalAuthSignInTests : CastmillUiTestContext
             Assert.False(microsoft.HasAttribute("disabled"));
             Assert.True(google.HasAttribute("disabled"));
             Assert.Contains("Google sign-in isn't configured", app.Markup, StringComparison.Ordinal);
-            Assert.NotNull(app.Find("input[type=email]"));
-            Assert.NotNull(app.Find("input[type=password]"));
+            Assert.Equal("1", app.Find("input[type=email]").GetAttribute("tabindex"));
+            Assert.Equal("2", app.Find("input[type=password]").GetAttribute("tabindex"));
         });
     }
 

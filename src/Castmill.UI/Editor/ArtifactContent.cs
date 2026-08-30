@@ -544,8 +544,10 @@ public static class StructuredContent
         }
 
         var output = new System.Text.StringBuilder(markdown.Length + 32);
-        foreach (var line in markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        var lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
         {
+            var line = lines[lineIndex];
             var bulletParts = line.Split('•');
             if (bulletParts.Length >= 3
                 || bulletParts.Length == 2 && string.IsNullOrWhiteSpace(bulletParts[0]))
@@ -564,24 +566,62 @@ public static class StructuredContent
             }
 
             var timestamps = Regex.Matches(line, @"(?<![\d:])(?:\d{1,2}:)?\d{1,2}:\d{2}(?=\s)");
-            var prefix = timestamps.Count > 0 ? line[..timestamps[0].Index].Trim().TrimEnd(':') : string.Empty;
-            if (timestamps.Count >= 2 && string.Equals(prefix, "Chapters", StringComparison.OrdinalIgnoreCase))
+            var prefix = (timestamps.Count > 0 ? line[..timestamps[0].Index] : line).Trim().TrimEnd(':');
+            if (string.Equals(prefix, "Chapters", StringComparison.OrdinalIgnoreCase))
             {
-                output.AppendLine("## Chapters");
-                output.AppendLine();
-                for (var index = 0; index < timestamps.Count; index++)
+                var chapterEntries = new List<string>();
+                AppendTimestampEntries(line, timestamps, chapterEntries);
+
+                var chapterEndIndex = lineIndex;
+                for (var candidateIndex = lineIndex + 1; candidateIndex < lines.Length; candidateIndex++)
                 {
-                    var match = timestamps[index];
-                    var end = index + 1 < timestamps.Count ? timestamps[index + 1].Index : line.Length;
-                    output.Append(line.AsSpan(match.Index, end - match.Index).Trim()).AppendLine("  ");
+                    var candidate = lines[candidateIndex];
+                    if (string.IsNullOrWhiteSpace(candidate) && chapterEntries.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var candidateTimestamps = Regex.Matches(
+                        candidate, @"(?<![\d:])(?:\d{1,2}:)?\d{1,2}:\d{2}(?=\s)");
+                    var candidatePrefix = candidateTimestamps.Count > 0
+                        ? candidate[..candidateTimestamps[0].Index].Trim()
+                        : candidate.Trim();
+                    if (candidateTimestamps.Count == 0 || candidatePrefix.Length > 0)
+                    {
+                        break;
+                    }
+
+                    AppendTimestampEntries(candidate, candidateTimestamps, chapterEntries);
+                    chapterEndIndex = candidateIndex;
                 }
-                continue;
+
+                if (chapterEntries.Count >= 2)
+                {
+                    output.AppendLine("## Chapters");
+                    output.AppendLine();
+                    foreach (var entry in chapterEntries)
+                    {
+                        output.Append(entry).AppendLine("  ");
+                    }
+                    lineIndex = chapterEndIndex;
+                    continue;
+                }
             }
 
             output.AppendLine(line);
         }
 
         return output.ToString().TrimEnd() + (markdown.EndsWith('\n') ? "\n" : string.Empty);
+    }
+
+    private static void AppendTimestampEntries(string line, MatchCollection timestamps, List<string> entries)
+    {
+        for (var timestampIndex = 0; timestampIndex < timestamps.Count; timestampIndex++)
+        {
+            var match = timestamps[timestampIndex];
+            var end = timestampIndex + 1 < timestamps.Count ? timestamps[timestampIndex + 1].Index : line.Length;
+            entries.Add(line.AsSpan(match.Index, end - match.Index).Trim().ToString());
+        }
     }
 
     private static void AppendList(

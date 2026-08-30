@@ -87,7 +87,7 @@ public static class MediaEndpoints
         var job = new ClipJob
         {
             Id = jobId,
-            TenantId = tenant.TenantId!.Value,
+            TenantId = asset.TenantId,
             AssetId = asset.Id,
             Mode = "clip",
             InSeconds = request.InSeconds,
@@ -146,7 +146,7 @@ public static class MediaEndpoints
         var job = new ClipJob
         {
             Id = jobId,
-            TenantId = tenant.TenantId!.Value,
+            TenantId = asset.TenantId,
             AssetId = asset.Id,
             Mode = "frame",
             InSeconds = request.AtSeconds,

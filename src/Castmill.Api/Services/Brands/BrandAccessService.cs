@@ -1,11 +1,12 @@
 using Castmill.Api.Data;
+using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Microsoft.EntityFrameworkCore;
 
 namespace Castmill.Api.Services.Brands;
 
 public sealed record BrandAccess(BrandProfile Brand, bool IsOwner);
-public sealed record AssetAccess(Asset Asset, Guid? SharedBrandId);
+public sealed record AssetAccess(Asset Asset, Guid? SharedBrandId, Guid? SharedCampaignId = null);
 
 public interface IBrandAccessService
 {
@@ -34,7 +35,7 @@ public interface IBrandAccessService
         CancellationToken ct);
 }
 
-public sealed class BrandAccessService(CastmillDbContext db) : IBrandAccessService
+public sealed class BrandAccessService(CastmillDbContext db, ITenantProvider tenant) : IBrandAccessService
 {
     public async Task<BrandAccess?> FindAsync(
         Guid brandId,
@@ -102,6 +103,40 @@ public sealed class BrandAccessService(CastmillDbContext db) : IBrandAccessServi
             return owned.Select(asset => new AssetAccess(asset, null)).ToList();
         }
 
+        var accessibleCampaignIds = db.Campaigns.IgnoreQueryFilters()
+            .Where(campaign => campaign.TenantId == tenantId
+                || (tenant.NormalizedEmail != null
+                    && ((campaign.ShareDomain != null
+                            && campaign.ShareDomain == tenant.EmailDomain)
+                        || db.CampaignCollaborators.IgnoreQueryFilters().Any(collaborator =>
+                            collaborator.CampaignId == campaign.Id
+                            && collaborator.NormalizedEmail == tenant.NormalizedEmail))))
+            .Select(campaign => campaign.Id);
+
+        var campaignAssets = await db.MediaUploads.IgnoreQueryFilters().AsNoTracking()
+            .Where(upload => missingIds.Contains(upload.AssetId)
+                && accessibleCampaignIds.Contains(upload.CampaignId))
+            .Join(db.Assets.IgnoreQueryFilters().AsNoTracking(),
+                upload => upload.AssetId,
+                asset => asset.Id,
+                (upload, asset) => new { asset, upload.CampaignId })
+            .ToListAsync(ct);
+        var campaignAssetIds = campaignAssets.Select(item => item.asset.Id).ToHashSet();
+        missingIds = missingIds.Where(assetId => !campaignAssetIds.Contains(assetId)).ToList();
+
+        var campaignBrandAssets = await (
+            from link in db.BrandAssets.IgnoreQueryFilters().AsNoTracking()
+            where missingIds.Contains(link.AssetId)
+            from campaign in db.Campaigns.IgnoreQueryFilters()
+                .Where(campaign => campaign.BrandId == link.BrandId
+                    && accessibleCampaignIds.Contains(campaign.Id))
+            join asset in db.Assets.IgnoreQueryFilters().AsNoTracking()
+                on link.AssetId equals asset.Id
+            select new { asset, campaign.Id })
+            .ToListAsync(ct);
+        var campaignBrandAssetIds = campaignBrandAssets.Select(item => item.asset.Id).ToHashSet();
+        missingIds = missingIds.Where(assetId => !campaignBrandAssetIds.Contains(assetId)).ToList();
+
         var shared = await db.BrandAssets.IgnoreQueryFilters().AsNoTracking()
             .Where(link => missingIds.Contains(link.AssetId)
                 && (db.BrandProfiles.IgnoreQueryFilters().Any(brand =>
@@ -116,6 +151,12 @@ public sealed class BrandAccessService(CastmillDbContext db) : IBrandAccessServi
             .ToListAsync(ct);
 
         return owned.Select(asset => new AssetAccess(asset, null))
+            .Concat(campaignAssets
+                .DistinctBy(item => item.asset.Id)
+                .Select(item => new AssetAccess(item.asset, null, item.CampaignId)))
+            .Concat(campaignBrandAssets
+                .DistinctBy(item => item.asset.Id)
+                .Select(item => new AssetAccess(item.asset, null, item.Id)))
             .Concat(shared
                 .DistinctBy(item => item.asset.Id)
                 .Select(item => new AssetAccess(item.asset, item.BrandId)))

@@ -72,4 +72,15 @@ describe('ApexTree bundle', () => {
         expect(interopSource).toContain('escapeHtml(content.badge.text)');
         expect(css).not.toContain('--apex-tree-badge-color');
     });
+
+    it('leaves fitted SVG dimensions under ApexTree control', () => {
+        const interopSource = readFileSync(apexTreeInterop, 'utf8');
+
+        expect(interopSource).toContain('graph.fitScreen()');
+        expect(interopSource).toContain('const nextWidth = width / 0.7');
+        expect(interopSource).toContain('graph.updateViewBox');
+        expect(interopSource).not.toContain('graph.zoom(');
+        expect(interopSource).not.toContain("svg.setAttribute('width'");
+        expect(interopSource).not.toContain("svg.setAttribute('height'");
+    });
 });

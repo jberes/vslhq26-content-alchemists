@@ -105,10 +105,7 @@ export function initContentClusterTree(element, data, dotnet) {
 
     const tree = new ApexTree(element, {
         width: '100%',
-        // Sized to content: with grouped leaves the cluster is tall and narrow, and a
-        // fixed viewport forced it behind zoom/pan. At natural size the page scrolls
-        // and every card is readable at 1:1.
-        height: 'auto',
+        height: '100%',
         direction: 'top',
         contentKey: 'data',
         nodeTemplate: nodeCard,
@@ -153,32 +150,33 @@ export function initContentClusterTree(element, data, dotnet) {
         },
     });
 
-    // A 100%-width svg with a narrow-tall viewBox (the grouped-leaf layout) upscales to
-    // fill the container — giant cards. Pin the svg to its natural content size instead,
-    // shrinking only when the cluster is wider than the container, never enlarging.
-    const sizeToContent = graph => requestAnimationFrame(() => {
+    // Keep ApexTree's fitted viewport, then show it at 70% scale. The extra horizontal
+    // space is split evenly while the fitted top edge stays fixed, so the primary node
+    // remains aligned to the top and the additional vertical room falls below the tree.
+    const fitToViewport = graph => requestAnimationFrame(() => {
         graph.fitScreen();
         requestAnimationFrame(() => {
-        const svg = element.querySelector('svg');
-        const viewBox = svg?.getAttribute('viewBox')?.split(' ').map(Number);
-        if (!svg || !viewBox || viewBox.length !== 4 || !viewBox[2] || !viewBox[3]) {
-            return;
-        }
-        const scale = Math.min(1, (element.clientWidth || viewBox[2]) / viewBox[2]);
-        svg.setAttribute('width', Math.round(viewBox[2] * scale));
-        svg.setAttribute('height', Math.round(viewBox[3] * scale));
-        svg.style.display = 'block';
-        svg.style.margin = '0 auto';
+            const svg = element.querySelector('svg');
+            const viewBox = svg?.getAttribute('viewBox')?.split(/\s+/).map(Number);
+            if (!viewBox || viewBox.length !== 4 || !viewBox[2] || !viewBox[3]) {
+                return;
+            }
+
+            const [x, y, width, height] = viewBox;
+            const nextWidth = width / 0.7;
+            const nextHeight = height / 0.7;
+            graph.updateViewBox(x - (nextWidth - width) / 2, y, nextWidth, nextHeight);
+            graph.resetPanZoomBase();
         });
     });
 
     let graph = tree.render(toApexNode(data));
-    sizeToContent(graph);
+    fitToViewport(graph);
 
     return {
         update(next) {
             graph = tree.render(toApexNode(next));
-            sizeToContent(graph);
+            fitToViewport(graph);
         },
         destroy() {
             tree.destroy();
