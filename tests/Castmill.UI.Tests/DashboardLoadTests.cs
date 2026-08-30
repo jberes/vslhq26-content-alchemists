@@ -2,6 +2,7 @@ using Bunit;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Pages;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
@@ -15,6 +16,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
 {
     private static readonly Guid CampaignA = Guid.Parse("61111111-1111-1111-1111-111111111111");
     private static readonly Guid CampaignB = Guid.Parse("61111111-1111-1111-1111-222222222222");
+    private static readonly Guid AgingArtifact = Guid.Parse("61111111-1111-1111-1111-333333333333");
 
     public DashboardLoadTests()
     {
@@ -33,7 +35,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
              // JSON as a Focus-mode manuscript.
              new DashboardArtifact(CampaignA, "Webinar campaign", Guid.NewGuid(),
                 "seo-report", "Internal deep report", ArtifactStatus.InReview, DateTimeOffset.UtcNow)],
-            [new DashboardArtifact(CampaignB, "Podcast campaign", Guid.NewGuid(),
+            [new DashboardArtifact(CampaignB, "Podcast campaign", AgingArtifact,
                 "newsletter", "Stale October letter", ArtifactStatus.Draft, DateTimeOffset.UtcNow.AddDays(-9))],
             [
                 new CampaignCounts(CampaignA, 5, 1, 2, 6,
@@ -137,6 +139,22 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
         Assert.NotNull(page.Find(".cm-front__aging"));
         Assert.Equal("UL", page.Find(".cm-front__aging-list").TagName);
         Assert.NotNull(page.Find(".cm-front__aging-list[data-cm-scroll]"));
+    }
+
+    [Fact]
+    public async Task Aging_draft_edit_opens_that_artifact_in_focus_mode()
+    {
+        var page = Render<FrontPage>();
+        await page.WaitForStateAsync(
+            () => page.Markup.Contains("Stale October letter", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+
+        await page.Find("button[aria-label='Edit Stale October letter']").ClickAsync();
+
+        Assert.EndsWith(
+            $"/campaigns/{CampaignB}/focus?artifact={AgingArtifact}",
+            Services.GetRequiredService<NavigationManager>().Uri,
+            StringComparison.Ordinal);
     }
 
     [Fact]

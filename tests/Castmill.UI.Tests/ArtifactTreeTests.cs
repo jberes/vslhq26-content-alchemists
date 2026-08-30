@@ -67,6 +67,22 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Producer_can_expand_and_restore_without_hiding_the_manuscript()
+    {
+        var view = Render<FocusView>(parameters => parameters.Add(component => component.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-focus__producer")));
+
+        var expand = view.Find("button[aria-label='Expand Producer']");
+        await expand.ClickAsync();
+
+        Assert.Contains("cm-focus--producer-wide", view.Find(".cm-focus").ClassList);
+        Assert.NotNull(view.Find(".cm-focus__manuscript"));
+        var restore = view.Find("button[aria-label='Restore Producer width']");
+        await restore.ClickAsync();
+        Assert.DoesNotContain("cm-focus--producer-wide", view.Find(".cm-focus").ClassList);
+    }
+
+    [Fact]
     public async Task Artifact_rows_show_their_review_state_with_text_and_color_modifier()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));

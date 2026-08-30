@@ -156,7 +156,9 @@ export function initContentClusterTree(element, data, dotnet) {
     // A 100%-width svg with a narrow-tall viewBox (the grouped-leaf layout) upscales to
     // fill the container — giant cards. Pin the svg to its natural content size instead,
     // shrinking only when the cluster is wider than the container, never enlarging.
-    const sizeToContent = () => requestAnimationFrame(() => {
+    const sizeToContent = graph => requestAnimationFrame(() => {
+        graph.fitScreen();
+        requestAnimationFrame(() => {
         const svg = element.querySelector('svg');
         const viewBox = svg?.getAttribute('viewBox')?.split(' ').map(Number);
         if (!svg || !viewBox || viewBox.length !== 4 || !viewBox[2] || !viewBox[3]) {
@@ -167,15 +169,16 @@ export function initContentClusterTree(element, data, dotnet) {
         svg.setAttribute('height', Math.round(viewBox[3] * scale));
         svg.style.display = 'block';
         svg.style.margin = '0 auto';
+        });
     });
 
-    tree.render(toApexNode(data));
-    sizeToContent();
+    let graph = tree.render(toApexNode(data));
+    sizeToContent(graph);
 
     return {
         update(next) {
-            tree.render(toApexNode(next));
-            sizeToContent();
+            graph = tree.render(toApexNode(next));
+            sizeToContent(graph);
         },
         destroy() {
             tree.destroy();

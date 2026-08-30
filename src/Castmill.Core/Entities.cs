@@ -423,6 +423,21 @@ public sealed class BrandProfile : ITenantScoped
 }
 
 /// <summary>
+/// Full edit access to one Brand aggregate for an existing Castmill user. TenantId is the
+/// Brand owner's tenant, so ordinary tenant queries never expose grants from another owner.
+/// </summary>
+public sealed class BrandCollaborator : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid GrantedByUserId { get; set; }
+    public required string Email { get; set; }
+    public DateTimeOffset GrantedAt { get; set; }
+}
+
+/// <summary>
 /// A GitHub repository generated content is published into (ADR-021, optional feature).
 ///
 /// Scoped to a brand rather than a campaign: a repo is a property of the SITE, and a brand

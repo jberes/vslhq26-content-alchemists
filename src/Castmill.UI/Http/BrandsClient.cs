@@ -38,6 +38,21 @@ public sealed class BrandsClient(ApiClient api)
     public Task DeleteAsync(Guid id, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{id}", ct);
 
+    public Task<List<BrandCollaboratorResponse>> ListCollaboratorsAsync(
+        Guid brandId, CancellationToken ct = default) =>
+        api.GetAsync<List<BrandCollaboratorResponse>>(
+            $"api/v1/brands/{brandId}/collaborators", ct);
+
+    public Task<BrandCollaboratorResponse> AddCollaboratorAsync(
+        Guid brandId, string email, CancellationToken ct = default) =>
+        api.PostAsync<BrandCollaboratorRequest, BrandCollaboratorResponse>(
+            $"api/v1/brands/{brandId}/collaborators",
+            new BrandCollaboratorRequest(email), anonymous: false, ct);
+
+    public Task RemoveCollaboratorAsync(
+        Guid brandId, Guid collaboratorId, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/brands/{brandId}/collaborators/{collaboratorId}", ct);
+
     // ---- Asset kit --------------------------------------------------------------
 
     public Task<List<BrandAssetResponse>> ListAssetsAsync(Guid brandId, CancellationToken ct = default) =>

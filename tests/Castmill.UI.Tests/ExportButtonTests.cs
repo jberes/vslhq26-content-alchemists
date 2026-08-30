@@ -43,7 +43,7 @@ public sealed class ExportButtonTests : CastmillUiTestContext
             "launch-day-blog-post.md", "text/markdown", "# Launch"u8.ToArray());
 
         var view = await OpenAsync();
-        await ButtonAsync(view, "Download .md").ClickAsync();
+        await ButtonAsync(view, "Markdown (.md)").ClickAsync();
         await view.WaitForStateAsync(() => _downloader.Saved.Count == 1, TimeSpan.FromSeconds(5));
 
         var request = Http.Requests.Last(r => r.RequestUri!.AbsolutePath.EndsWith("/export", StringComparison.Ordinal));
@@ -55,6 +55,19 @@ public sealed class ExportButtonTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Download_disclosure_reports_collapsed_and_expanded_states()
+    {
+        var view = await OpenAsync(openMenu: false);
+        var download = ButtonAsync(view, "Download");
+        Assert.Equal("false", download.GetAttribute("aria-expanded"));
+
+        await download.ClickAsync();
+
+        Assert.Equal("true", ButtonAsync(view, "Download").GetAttribute("aria-expanded"));
+        Assert.NotNull(view.Find("#cm-focus-downloads"));
+    }
+
+    [Fact]
     public async Task The_docx_button_asks_for_docx()
     {
         StubFile($"api/v1/campaigns/{CampaignId}/artifacts/{BlogId}/export",
@@ -63,7 +76,7 @@ public sealed class ExportButtonTests : CastmillUiTestContext
             [0x50, 0x4B, 0x03, 0x04]);
 
         var view = await OpenAsync();
-        await ButtonAsync(view, ".docx").ClickAsync();
+        await ButtonAsync(view, "Word (.docx)").ClickAsync();
         await view.WaitForStateAsync(() => _downloader.Saved.Count == 1, TimeSpan.FromSeconds(5));
 
         var request = Http.Requests.Last(r => r.RequestUri!.AbsolutePath.EndsWith("/export", StringComparison.Ordinal));
@@ -112,12 +125,16 @@ public sealed class ExportButtonTests : CastmillUiTestContext
 
     // ---- helpers ---------------------------------------------------------------
 
-    private async Task<IRenderedComponent<FocusView>> OpenAsync()
+    private async Task<IRenderedComponent<FocusView>> OpenAsync(bool openMenu = true)
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll("button").Any(b => b.TextContent.Contains("Download .md", StringComparison.Ordinal)),
+            () => view.FindAll("button").Any(b => b.TextContent.TrimStart().StartsWith("Download", StringComparison.Ordinal)),
             TimeSpan.FromSeconds(5));
+        if (openMenu)
+        {
+            await ButtonAsync(view, "Download").ClickAsync();
+        }
         return view;
     }
 

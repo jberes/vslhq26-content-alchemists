@@ -93,6 +93,10 @@ export function filterItems(query) {
     return scored.sort((a, b) => b.score - a.score).map(entry => entry.item);
 }
 
+export function keepActiveOptionVisible(option) {
+    option?.scrollIntoView?.({ block: 'nearest' });
+}
+
 /**
  * Mounts the palette into `host`.
  *
@@ -159,6 +163,9 @@ export function mountSlashMenu(editor, host, hooks = {}) {
                 choose(i);
             });
             menu.appendChild(option);
+            if (i === index) {
+                keepActiveOptionVisible(option);
+            }
         });
     }
 

@@ -19,6 +19,10 @@
     <header class="cm-front__head">
         <a class="cm-meta" href="brands">Brands /</a>
         <h1>@(_name.Length > 0 ? _name : "Brand")</h1>
+        @if (_loaded && !_isOwner)
+        {
+            <span class="cm-meta">Shared with you · full editing access</span>
+        }
     </header>
 
     @if (!_loaded)
@@ -35,7 +39,7 @@
            templates) stacked into a single 72ch strip left half the window empty and put the
            templates a full page-height below the fold. Same pattern as Settings. *@
         <div class="cm-tabs" role="tablist" aria-label="Brand sections">
-            @foreach (var (id, label) in BrandTabs)
+            @foreach (var (id, label) in VisibleBrandTabs)
             {
                 <button type="button" role="tab" class="cm-tabs__tab"
                         aria-selected="@(_brandTab == id ? "true" : "false")"
@@ -292,6 +296,60 @@
                           @onblur="SaveTemplateAsync"></textarea>
             </section>
         }
+        @if (_brandTab == "sharing" && _isOwner)
+        {
+            <section class="cm-brand__section cm-brand__sharing">
+                <h2 class="cm-front__block-title">Collaborators</h2>
+                <p class="cm-meta">
+                    Collaborators can edit this Brand's profile, asset kit, and templates,
+                    and use it in their own campaigns.
+                </p>
+                <div class="cm-brand__share-form">
+                    <label class="cm-field">
+                        <span class="cm-field__label">Castmill account email</span>
+                        <input class="cm-input" type="email" maxlength="256"
+                               placeholder="person@company.com"
+                               disabled="@_sharing"
+                               @bind="_shareEmail" @bind:event="oninput"
+                               @onkeydown="ShareKeyDownAsync" />
+                    </label>
+                    <button type="button" class="cm-button"
+                            disabled="@(_sharing || string.IsNullOrWhiteSpace(_shareEmail))"
+                            @onclick="ShareAsync">
+                        @(_sharing ? "Adding…" : "Add collaborator")
+                    </button>
+                </div>
+                @if (_shareError is { } shareError)
+                {
+                    <p class="cm-form__error" role="alert">@shareError</p>
+                }
+
+                @if (_collaborators.Count == 0)
+                {
+                    <p class="cm-meta">No collaborators.</p>
+                }
+                else
+                {
+                    <ul class="cm-brand__collaborators">
+                        @foreach (var collaborator in _collaborators)
+                        {
+                            <li @key="collaborator.Id">
+                                <span>
+                                    <strong>@(string.IsNullOrWhiteSpace(collaborator.DisplayName)
+                                        ? collaborator.Email
+                                        : collaborator.DisplayName)</strong>
+                                    <span class="cm-meta">@collaborator.Email</span>
+                                </span>
+                                <button type="button" class="cm-tree__delete"
+                                        aria-label="Remove @collaborator.Email"
+                                        disabled="@(_removingCollaborator == collaborator.Id)"
+                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">✕</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
 
         </div>
     }
@@ -310,7 +368,10 @@
 
     private static readonly (string Id, string Label)[] BrandTabs =
         [("identity", "Identity & voice"), ("style", "Colours & type"),
-         ("assets", "Asset kit"), ("templates", "Templates")];
+         ("assets", "Asset kit"), ("templates", "Templates"), ("sharing", "Sharing")];
+
+    private IEnumerable<(string Id, string Label)> VisibleBrandTabs =>
+        _isOwner ? BrandTabs : BrandTabs.Where(tab => tab.Id != "sharing");
 
     private string _brandTab = "identity";
 
@@ -323,6 +384,83 @@
         if (tab == "templates" && _tplTemplateId is null)
         {
             await SelectTemplateKindAsync(_tplKind);
+        }
+        if (tab == "sharing" && _isOwner)
+        {
+            await LoadCollaboratorsAsync();
+        }
+    }
+
+    // ---- Collaborators -------------------------------------------------------------
+
+    private readonly List<BrandCollaboratorResponse> _collaborators = [];
+    private string _shareEmail = string.Empty;
+    private string? _shareError;
+    private bool _sharing;
+    private Guid? _removingCollaborator;
+
+    private async Task LoadCollaboratorsAsync()
+    {
+        try
+        {
+            var collaborators = await Brands.ListCollaboratorsAsync(BrandId);
+            _collaborators.Clear();
+            _collaborators.AddRange(collaborators);
+            _shareError = null;
+        }
+        catch (ApiException ex)
+        {
+            _shareError = ex.Message;
+        }
+    }
+
+    private Task ShareKeyDownAsync(KeyboardEventArgs args) =>
+        args.Key == "Enter" ? ShareAsync() : Task.CompletedTask;
+
+    private async Task ShareAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_shareEmail) || _sharing)
+        {
+            return;
+        }
+
+        _sharing = true;
+        _shareError = null;
+        try
+        {
+            var collaborator = await Brands.AddCollaboratorAsync(BrandId, _shareEmail.Trim());
+            _collaborators.Add(collaborator);
+            _collaborators.Sort((left, right) =>
+                StringComparer.OrdinalIgnoreCase.Compare(left.Email, right.Email));
+            _shareEmail = string.Empty;
+            Notifier.ShowSuccess($"Shared with {collaborator.Email}.");
+        }
+        catch (ApiException ex)
+        {
+            _shareError = ex.Message;
+        }
+        finally
+        {
+            _sharing = false;
+        }
+    }
+
+    private async Task RemoveCollaboratorAsync(BrandCollaboratorResponse collaborator)
+    {
+        _removingCollaborator = collaborator.Id;
+        try
+        {
+            await Brands.RemoveCollaboratorAsync(BrandId, collaborator.Id);
+            _collaborators.RemoveAll(item => item.Id == collaborator.Id);
+            Notifier.ShowSuccess($"Removed {collaborator.Email}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _removingCollaborator = null;
         }
     }
 
@@ -488,6 +626,7 @@
     private readonly Dictionary<Guid, string> _assetPreviews = [];
 
     private bool _loaded;
+    private bool _isOwner;
     private bool _saving;
     private bool _uploading;
     private Guid? _retypingAsset;
@@ -584,6 +723,7 @@
         {
             var brand = await Brands.GetAsync(BrandId);
             _name = brand.Name;
+            _isOwner = brand.IsOwner;
 
             if (brand.StyleCard is { } card)
             {

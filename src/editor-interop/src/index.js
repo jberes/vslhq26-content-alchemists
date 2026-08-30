@@ -9,11 +9,11 @@
 import { Editor, Extension } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import { extensions, parse, serialize, roundTrip } from './markdown.js';
-import { mountSlashMenu, filterItems, SLASH_GROUPS } from './slash.js';
+import { mountSlashMenu, filterItems, keepActiveOptionVisible, SLASH_GROUPS } from './slash.js';
 import { mountGutter, blockMoveShortcuts } from './gutter.js';
 import { bubbleExtension } from './bubble.js';
 
-export { parse, serialize, roundTrip, filterItems, SLASH_GROUPS };
+export { parse, serialize, roundTrip, filterItems, keepActiveOptionVisible, SLASH_GROUPS };
 
 /**
  * Mounts an editor into `element`.

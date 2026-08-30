@@ -382,6 +382,25 @@
     padding-inline-end: var(--cm-space-2);
 }
 
+.cm-front__aging-list .cm-row__action {
+    flex: 0 0 auto;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .cm-front__aging-list .cm-row__action {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .cm-front__aging-list .cm-row:hover .cm-row__action,
+    .cm-front__aging-list .cm-row:focus-within .cm-row__action {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
 /* Below md the columns stack, so the page itself becomes the one scroll region again —
    two stacked scroll boxes on a narrow window is worse than a single honest scroll. */
 @media (max-width: 1179.98px) {
@@ -1550,17 +1569,45 @@ button.cm-intent {
 .cm-focus__status {
     display: flex;
     align-items: center;
-    gap: var(--cm-space-4);
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
     margin-block-start: var(--cm-space-2);
 }
 
-.cm-focus__foot {
+.cm-focus__download {
+    position: relative;
+}
+
+.cm-focus__download-menu {
+    position: absolute;
+    z-index: 18;
+    inset-block-start: calc(100% + var(--cm-space-1));
+    inset-inline-end: 0;
     display: flex;
-    align-items: center;
-    gap: var(--cm-space-3);
-    margin-block-start: var(--cm-space-8);
-    padding-block-start: var(--cm-space-4);
-    border-block-start: 1px solid var(--cm-rule);
+    flex-direction: column;
+    min-inline-size: 13rem;
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    box-shadow: var(--cm-shadow-lg);
+}
+
+.cm-focus__download-menu button {
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 0;
+    background: transparent;
+    color: var(--cm-on-surface);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.cm-focus__download-menu button:hover,
+.cm-focus__download-menu button:focus-visible {
+    background: var(--cm-accent-wash);
+    color: var(--cm-on-surface);
+    outline: none;
 }
 
 /* The editor surface. Prose styling lives here rather than in the bundle, so the manuscript
@@ -1603,6 +1650,20 @@ button.cm-intent {
     border-radius: var(--cm-radius-sm);
     background: var(--cm-surface-sunken);
     overflow-x: auto;
+}
+
+.cm-editor__surface ul:not([data-type="taskList"]) {
+    list-style: disc outside;
+    padding-inline-start: 1.5em;
+}
+
+.cm-editor__surface ol {
+    list-style: decimal outside;
+    padding-inline-start: 1.75em;
+}
+
+.cm-editor__surface li + li {
+    margin-block-start: var(--cm-space-1);
 }
 
 .cm-editor__surface ul[data-type="taskList"] {
@@ -2228,8 +2289,19 @@ button.cm-intent {
     border-inline-start: 1px solid var(--cm-rule);
 }
 
+.cm-focus__producer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+}
+
+.cm-focus__producer-head .cm-kicker {
+    margin: 0;
+}
+
 .cm-focus {
-    grid-template-columns: minmax(12rem, 240px) minmax(0, 1fr) minmax(17rem, 326px);
+    grid-template-columns: minmax(12rem, 240px) minmax(0, 1fr) minmax(20rem, 390px);
     grid-template-rows: minmax(0, 1fr);
     inline-size: 100%;
     max-inline-size: 100%;
@@ -2237,6 +2309,10 @@ button.cm-intent {
     block-size: 100%;
     min-block-size: 0;
     overflow: hidden;
+}
+
+.cm-focus.cm-focus--producer-wide {
+    grid-template-columns: minmax(11rem, 220px) minmax(22rem, 1fr) clamp(24rem, 42vw, 44rem);
 }
 
 .cm-focus__outline {
@@ -2255,7 +2331,11 @@ button.cm-intent {
 
 @media (max-width: 1439.98px) {
     .cm-focus {
-        grid-template-columns: minmax(11rem, 200px) minmax(0, 1fr) minmax(16rem, 280px);
+        grid-template-columns: minmax(11rem, 200px) minmax(0, 1fr) minmax(18rem, 336px);
+    }
+
+    .cm-focus.cm-focus--producer-wide {
+        grid-template-columns: minmax(10rem, 180px) minmax(20rem, 1fr) clamp(22rem, 42vw, 36rem);
     }
 
 }
@@ -2267,6 +2347,10 @@ button.cm-intent {
         overflow-y: auto;
     }
 
+    .cm-focus.cm-focus--producer-wide {
+        grid-template-columns: minmax(11rem, 200px) minmax(0, 1fr);
+    }
+
     .cm-focus__producer {
         grid-column: 1 / -1;
         grid-row: 2;
@@ -2274,6 +2358,10 @@ button.cm-intent {
         overflow: visible;
         border-inline-start: 0;
         border-block-start: 1px solid var(--cm-rule);
+    }
+
+    .cm-focus__producer-head .cm-button {
+        display: none;
     }
 }
 
@@ -4001,6 +4089,55 @@ button.cm-intent {
     flex-wrap: wrap;
 }
 
+.cm-brand__sharing {
+    max-inline-size: 56rem;
+}
+
+.cm-brand__share-form {
+    display: grid;
+    grid-template-columns: minmax(16rem, 1fr) auto;
+    align-items: end;
+    gap: var(--cm-space-3);
+}
+
+.cm-brand__collaborators {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding: 0;
+    margin: var(--cm-space-2) 0 0;
+    list-style: none;
+}
+
+.cm-brand__collaborators li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-3);
+    min-block-size: 3.5rem;
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-block-start: 1px solid var(--cm-rule);
+}
+
+.cm-brand__collaborators li > span {
+    display: flex;
+    flex-direction: column;
+    min-inline-size: 0;
+}
+
+.cm-brand__collaborators .cm-tree__delete {
+    position: static;
+    flex: 0 0 auto;
+    opacity: 1;
+}
+
+@media (max-width: 42rem) {
+    .cm-brand__share-form {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+}
+
 .cm-brand-card {
     position: relative;
     display: flex;
@@ -4638,15 +4775,6 @@ button.cm-intent {
     color: var(--cm-on-surface);
     font-size: var(--cm-text-meta);
     text-align: center;
-}
-
-/* Export actions sit at the end of the Focus footer, pushed away from the status controls
-   so "Back to draft" and "Download .docx" are never adjacent by accident. */
-.cm-focus__export {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--cm-space-2);
-    margin-inline-start: auto;
 }
 
 /* Publish preview: the exact paths and front matter, before anything is committed. */
@@ -5762,7 +5890,9 @@ button.cm-intent {
 .cm-cluster__tree {
     inline-size: 100%;
     min-block-size: 32.5rem;
-    overflow: hidden;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable both-edges;
     border: 1px solid var(--cm-rule);
     background: var(--cm-surface-sunken);
     border-radius: var(--cm-radius-lg);

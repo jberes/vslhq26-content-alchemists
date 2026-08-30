@@ -44,10 +44,21 @@ public sealed record BrandProfileUpsertRequest(
 /// <summary>StyleCard is null when the stored JSON predates the schema and does not
 /// parse; RawStyleCardJson always carries what is stored, so nothing is ever a 500.</summary>
 public sealed record BrandProfileDetailResponse(
-    Guid Id, string Name, BrandStyleCard? StyleCard, string? RawStyleCardJson, DateTimeOffset UpdatedAt);
+    Guid Id, string Name, BrandStyleCard? StyleCard, string? RawStyleCardJson,
+    DateTimeOffset UpdatedAt, bool IsOwner = true);
 
 /// <summary>The light shape carried on campaign payloads and pickers.</summary>
 public sealed record BrandSummaryResponse(Guid Id, string Name);
+
+public sealed record BrandCollaboratorRequest(
+    [property: Required, EmailAddress, MaxLength(256)] string Email);
+
+public sealed record BrandCollaboratorResponse(
+    Guid Id,
+    Guid UserId,
+    string Email,
+    string DisplayName,
+    DateTimeOffset GrantedAt);
 
 public sealed record BrandAssetLinkRequest(
     [property: Required] Guid AssetId,

@@ -31,6 +31,7 @@ public sealed class CastmillDbContext(
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
     public DbSet<BrandAsset> BrandAssets => Set<BrandAsset>();
     public DbSet<BrandTemplate> BrandTemplates => Set<BrandTemplate>();
+    public DbSet<BrandCollaborator> BrandCollaborators => Set<BrandCollaborator>();
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
@@ -341,6 +342,24 @@ public sealed class CastmillDbContext(
         {
             e.Property(b => b.Name).HasMaxLength(200);
             e.HasQueryFilter(b => b.TenantId == _tenantProvider.TenantId);
+        });
+
+        builder.Entity<BrandCollaborator>(entity =>
+        {
+            entity.Property(collaborator => collaborator.Email).HasMaxLength(256);
+            entity.HasIndex(collaborator => new { collaborator.BrandId, collaborator.UserId })
+                .IsUnique();
+            entity.HasIndex(collaborator => collaborator.UserId);
+            entity.HasOne<BrandProfile>()
+                .WithMany()
+                .HasForeignKey(collaborator => collaborator.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<CastmillUser>()
+                .WithMany()
+                .HasForeignKey(collaborator => collaborator.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasQueryFilter(collaborator =>
+                collaborator.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<BrandAsset>(e =>

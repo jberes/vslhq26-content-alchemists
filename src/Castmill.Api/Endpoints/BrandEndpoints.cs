@@ -1,9 +1,11 @@
 using System.Security.Claims;
+using System.Data;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
+using Castmill.Api.Services.Brands;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Resources;
@@ -34,30 +36,75 @@ public static partial class BrandEndpoints
         group.MapGet("/", ListAsync);
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPost("/", CreateAsync).Validate<BrandProfileUpsertRequest>().RequireRateLimiting("writes");
-        group.MapPut("/{id:guid}", UpdateAsync).Validate<BrandProfileUpsertRequest>().RequireRateLimiting("writes");
-        group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
+        group.MapPut("/{id:guid}", UpdateAsync).Validate<BrandProfileUpsertRequest>()
+            .RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapGet("/{id:guid}/collaborators", ListCollaboratorsAsync);
+        group.MapPost("/{id:guid}/collaborators", AddCollaboratorAsync)
+            .Validate<BrandCollaboratorRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapDelete("/{id:guid}/collaborators/{collaboratorId:guid}", RemoveCollaboratorAsync)
+            .RequireRateLimiting("writes").SerializeBrandWrite();
 
         // "ai" limiter, not "writes": this spends a model call and fetches a third-party URL.
         group.MapPost("/lookup", LookupAsync).Validate<BrandLookupRequest>().RequireRateLimiting("ai");
 
         group.MapGet("/{id:guid}/assets", ListAssetsAsync);
         group.MapPost("/{id:guid}/assets", LinkAssetAsync)
-            .Validate<BrandAssetLinkRequest>().RequireRateLimiting("writes");
-        group.MapDelete("/{id:guid}/assets/{brandAssetId:guid}", UnlinkAssetAsync).RequireRateLimiting("writes");
+            .Validate<BrandAssetLinkRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapDelete("/{id:guid}/assets/{brandAssetId:guid}", UnlinkAssetAsync)
+            .RequireRateLimiting("writes").SerializeBrandWrite();
         group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}", RenameAssetAsync)
-            .Validate<BrandAssetLabelRequest>().RequireRateLimiting("writes");
+            .Validate<BrandAssetLabelRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
         group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}/kind", ChangeAssetKindAsync)
-            .Validate<BrandAssetKindRequest>().RequireRateLimiting("writes");
+            .Validate<BrandAssetKindRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
 
         group.MapGet("/{id:guid}/templates", ListTemplatesAsync);
         group.MapPost("/{id:guid}/templates", CreateTemplateAsync)
-            .Validate<BrandTemplateRequest>().RequireRateLimiting("writes");
+            .Validate<BrandTemplateRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
         group.MapPut("/{id:guid}/templates/{templateId:guid}", UpdateTemplateAsync)
-            .Validate<BrandTemplateRequest>().RequireRateLimiting("writes");
-        group.MapDelete("/{id:guid}/templates/{templateId:guid}", DeleteTemplateAsync).RequireRateLimiting("writes");
+            .Validate<BrandTemplateRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapDelete("/{id:guid}/templates/{templateId:guid}", DeleteTemplateAsync)
+            .RequireRateLimiting("writes").SerializeBrandWrite();
 
         return routes;
     }
+
+    private static RouteHandlerBuilder SerializeBrandWrite(this RouteHandlerBuilder route) =>
+        route.AddEndpointFilter(async (context, next) =>
+        {
+            if (!Guid.TryParse(context.HttpContext.Request.RouteValues["id"]?.ToString(), out var brandId))
+            {
+                return Results.NotFound();
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<CastmillDbContext>();
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(
+                    IsolationLevel.Serializable, context.HttpContext.RequestAborted);
+                await AcquireBrandLockAsync(db, brandId, context.HttpContext.RequestAborted);
+                var result = await next(context);
+                await transaction.CommitAsync(context.HttpContext.RequestAborted);
+                return result;
+            });
+        });
+
+    internal static Task AcquireBrandLockAsync(
+        CastmillDbContext db,
+        Guid brandId,
+        CancellationToken ct) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = {"castmill:brand:" + brandId.ToString("N")},
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 30000;
+            IF @result < 0
+                THROW 51000, 'Could not acquire the Brand mutation lock.', 1;
+            """, ct);
 
     /// <summary>Write-side validation only: legacy JSON that predates the schema still
     /// reads back (as RawStyleCardJson with StyleCard = null), never a 500.</summary>
@@ -78,8 +125,23 @@ public static partial class BrandEndpoints
         }
     }
 
-    private static BrandProfileDetailResponse ToResponse(BrandProfile b) =>
-        new(b.Id, b.Name, ParseStyleCard(b.StyleCardJson), b.StyleCardJson, b.UpdatedAt);
+    private static BrandProfileDetailResponse ToResponse(BrandProfile brand, bool isOwner = true) =>
+        new(brand.Id, brand.Name, ParseStyleCard(brand.StyleCardJson), brand.StyleCardJson,
+            brand.UpdatedAt, isOwner);
+
+    private static Task<BrandAccess?> FindAccessAsync(
+        Guid brandId,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        bool tracking,
+        CancellationToken ct) =>
+        access.FindAsync(
+            brandId,
+            AuthEndpoints.GetUserId(principal),
+            tenant.TenantId!.Value,
+            tracking,
+            ct);
 
     private static IResult? ValidateStyleCard(BrandStyleCard? card)
     {
@@ -140,16 +202,28 @@ public static partial class BrandEndpoints
         }
     }
 
-    private static async Task<IResult> ListAsync(CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CancellationToken ct)
     {
-        var brands = await db.BrandProfiles.OrderBy(b => b.Name).ToListAsync(ct);
-        return Results.Ok(brands.Select(ToResponse).ToList());
+        var brands = await access.ListAsync(
+            AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value, ct);
+        return Results.Ok(brands.Select(item => ToResponse(item.Brand, item.IsOwner)).ToList());
     }
 
-    private static async Task<IResult> GetAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> GetAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CancellationToken ct)
     {
-        var brand = await db.BrandProfiles.SingleOrDefaultAsync(b => b.Id == id, ct);
-        return brand is null ? Results.NotFound() : Results.Ok(ToResponse(brand));
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        return grant is null
+            ? Results.NotFound()
+            : Results.Ok(ToResponse(grant.Brand, grant.IsOwner));
     }
 
     private static async Task<IResult> CreateAsync(
@@ -180,12 +254,15 @@ public static partial class BrandEndpoints
     private static async Task<IResult> UpdateAsync(
         Guid id,
         BrandProfileUpsertRequest request,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
     {
-        var brand = await db.BrandProfiles.SingleOrDefaultAsync(b => b.Id == id, ct);
-        if (brand is null)
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: true, ct);
+        if (grant is null)
         {
             return Results.NotFound();
         }
@@ -195,44 +272,192 @@ public static partial class BrandEndpoints
             return invalid;
         }
 
-        brand.Name = request.Name;
-        brand.StyleCardJson = request.StyleCard is null ? null : JsonSerializer.Serialize(request.StyleCard, Json);
-        brand.UpdatedAt = clock.GetUtcNow();
+        grant.Brand.Name = request.Name;
+        grant.Brand.StyleCardJson = request.StyleCard is null
+            ? null
+            : JsonSerializer.Serialize(request.StyleCard, Json);
+        grant.Brand.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return Results.Ok(ToResponse(brand));
+        return Results.Ok(ToResponse(grant.Brand, grant.IsOwner));
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        CancellationToken ct)
     {
-        var brand = await db.BrandProfiles.SingleOrDefaultAsync(b => b.Id == id, ct);
-        if (brand is null)
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: true, ct);
+        if (grant is null || !grant.IsOwner)
         {
             return Results.NotFound();
         }
 
         // Campaigns keep working brandless; the kit rows are meaningless without the brand.
-        await db.Campaigns.Where(c => c.BrandId == id)
+        await db.Campaigns.IgnoreQueryFilters().Where(c => c.BrandId == id)
             .ExecuteUpdateAsync(s => s.SetProperty(c => c.BrandId, (Guid?)null), ct);
-        await db.BrandAssets.Where(a => a.BrandId == id).ExecuteDeleteAsync(ct);
-        await db.BrandTemplates.Where(t => t.BrandId == id).ExecuteDeleteAsync(ct);
+        await db.BrandAssets.IgnoreQueryFilters()
+            .Where(item => item.BrandId == id && item.TenantId == grant.Brand.TenantId)
+            .ExecuteDeleteAsync(ct);
+        await db.BrandTemplates.IgnoreQueryFilters()
+            .Where(item => item.BrandId == id && item.TenantId == grant.Brand.TenantId)
+            .ExecuteDeleteAsync(ct);
 
-        db.BrandProfiles.Remove(brand);
+        db.BrandProfiles.Remove(grant.Brand);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> ListCollaboratorsAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null || !grant.IsOwner)
+        {
+            return Results.NotFound();
+        }
+
+        var collaborators = await db.BrandCollaborators
+            .Where(item => item.BrandId == id)
+            .Join(db.Users, item => item.UserId, user => user.Id, (item, user) => new
+            {
+                item.Id,
+                item.UserId,
+                item.Email,
+                user.DisplayName,
+                item.GrantedAt,
+            })
+            .OrderBy(item => item.Email)
+            .Select(item => new BrandCollaboratorResponse(
+                item.Id, item.UserId, item.Email, item.DisplayName, item.GrantedAt))
+            .ToListAsync(ct);
+        return Results.Ok(collaborators);
+    }
+
+    private static async Task<IResult> AddCollaboratorAsync(
+        Guid id,
+        BrandCollaboratorRequest request,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var ownerId = AuthEndpoints.GetUserId(principal);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null || !grant.IsOwner)
+        {
+            return Results.NotFound();
+        }
+
+        var normalizedEmail = request.Email.Trim().ToUpperInvariant();
+        var user = await db.Users.AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.NormalizedEmail == normalizedEmail, ct);
+        if (user is null || user.Id == ownerId || user.TenantId == grant.Brand.TenantId)
+        {
+            return Results.Problem(
+                "That account is not available for sharing.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (await db.BrandCollaborators.AnyAsync(
+                item => item.BrandId == id && item.UserId == user.Id, ct))
+        {
+            return Results.Conflict(new { detail = "That account already has access." });
+        }
+
+        var collaborator = new BrandCollaborator
+        {
+            Id = Guid.NewGuid(),
+            TenantId = grant.Brand.TenantId,
+            BrandId = id,
+            UserId = user.Id,
+            GrantedByUserId = ownerId,
+            Email = user.Email ?? request.Email.Trim(),
+            GrantedAt = clock.GetUtcNow(),
+        };
+        db.BrandCollaborators.Add(collaborator);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/v1/brands/{id}/collaborators/{collaborator.Id}",
+            new BrandCollaboratorResponse(
+                collaborator.Id, user.Id, collaborator.Email, user.DisplayName,
+                collaborator.GrantedAt));
+    }
+
+    private static async Task<IResult> RemoveCollaboratorAsync(
+        Guid id,
+        Guid collaboratorId,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null || !grant.IsOwner)
+        {
+            return Results.NotFound();
+        }
+
+        var collaborator = await db.BrandCollaborators.SingleOrDefaultAsync(
+            item => item.Id == collaboratorId && item.BrandId == id, ct);
+        if (collaborator is null)
+        {
+            return Results.NotFound();
+        }
+
+        var collaboratorTenantId = await db.Users
+            .Where(user => user.Id == collaborator.UserId)
+            .Select(user => user.TenantId)
+            .SingleAsync(ct);
+        await db.Campaigns.IgnoreQueryFilters()
+            .Where(campaign => campaign.TenantId == collaboratorTenantId
+                && campaign.BrandId == id)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(campaign => campaign.BrandId, (Guid?)null), ct);
+        var collaboratorAssetIds = db.Assets.IgnoreQueryFilters()
+            .Where(asset => asset.TenantId == collaboratorTenantId)
+            .Select(asset => asset.Id);
+        await db.BrandAssets.IgnoreQueryFilters()
+            .Where(link => link.BrandId == id
+                && link.TenantId == grant.Brand.TenantId
+                && collaboratorAssetIds.Contains(link.AssetId))
+            .ExecuteDeleteAsync(ct);
+
+        db.BrandCollaborators.Remove(collaborator);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
     }
 
     // ---- Asset kit --------------------------------------------------------------
 
-    private static async Task<IResult> ListAssetsAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAssetsAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        CancellationToken ct)
     {
-        if (!await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
         {
             return Results.NotFound();
         }
 
-        var rows = await db.BrandAssets
-            .Where(a => a.BrandId == id)
-            .Join(db.Assets, ba => ba.AssetId, a => a.Id, (ba, a) => new { ba, a })
+        var rows = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(item => item.BrandId == id && item.TenantId == grant.Brand.TenantId)
+            .Join(db.Assets.IgnoreQueryFilters(), item => item.AssetId, asset => asset.Id,
+                (item, asset) => new { ba = item, a = asset })
             .OrderBy(x => x.ba.Kind).ThenBy(x => x.ba.CreatedAt)
             .ToListAsync(ct);
 
@@ -244,12 +469,15 @@ public static partial class BrandEndpoints
     private static async Task<IResult> LinkAssetAsync(
         Guid id,
         BrandAssetLinkRequest request,
+        ClaimsPrincipal principal,
         ITenantProvider tenant,
+        IBrandAccessService access,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
     {
-        if (!await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
         {
             return Results.NotFound();
         }
@@ -266,7 +494,8 @@ public static partial class BrandEndpoints
             return Results.NotFound();
         }
 
-        if (await db.BrandAssets.AnyAsync(a => a.BrandId == id && a.AssetId == request.AssetId, ct))
+        if (await db.BrandAssets.IgnoreQueryFilters().AnyAsync(
+            item => item.BrandId == id && item.AssetId == request.AssetId, ct))
         {
             return Results.Conflict();
         }
@@ -274,7 +503,7 @@ public static partial class BrandEndpoints
         var link = new BrandAsset
         {
             Id = Guid.NewGuid(),
-            TenantId = tenant.TenantId!.Value,
+            TenantId = grant.Brand.TenantId,
             BrandId = id,
             AssetId = request.AssetId,
             Kind = request.Kind,
@@ -295,10 +524,17 @@ public static partial class BrandEndpoints
     /// </summary>
     private static async Task<IResult> RenameAssetAsync(
         Guid id, Guid brandAssetId, BrandAssetLabelRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
         CastmillDbContext db, CancellationToken ct)
     {
-        var link = await db.BrandAssets.SingleOrDefaultAsync(
-            a => a.Id == brandAssetId && a.BrandId == id, ct);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var link = await db.BrandAssets.IgnoreQueryFilters().SingleOrDefaultAsync(
+            item => item.Id == brandAssetId && item.BrandId == id
+                && item.TenantId == grant.Brand.TenantId, ct);
         if (link is null)
         {
             return Results.NotFound();
@@ -312,6 +548,7 @@ public static partial class BrandEndpoints
     /// <summary>The file stays put; only its role in the Brand kit changes.</summary>
     private static async Task<IResult> ChangeAssetKindAsync(
         Guid id, Guid brandAssetId, BrandAssetKindRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
         CastmillDbContext db, CancellationToken ct)
     {
         var kind = request.Kind.Trim().ToLowerInvariant();
@@ -321,8 +558,14 @@ public static partial class BrandEndpoints
                 $"Kind must be one of: {string.Join(", ", AssetKinds)}.", statusCode: 400);
         }
 
-        var link = await db.BrandAssets.SingleOrDefaultAsync(
-            asset => asset.Id == brandAssetId && asset.BrandId == id, ct);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var link = await db.BrandAssets.IgnoreQueryFilters().SingleOrDefaultAsync(
+            item => item.Id == brandAssetId && item.BrandId == id
+                && item.TenantId == grant.Brand.TenantId, ct);
         if (link is null)
         {
             return Results.NotFound();
@@ -331,17 +574,25 @@ public static partial class BrandEndpoints
         link.Kind = kind;
         await db.SaveChangesAsync(ct);
 
-        var asset = await db.Assets.SingleAsync(item => item.Id == link.AssetId, ct);
+        var asset = await db.Assets.IgnoreQueryFilters().SingleAsync(item => item.Id == link.AssetId, ct);
         return Results.Ok(new BrandAssetResponse(
             link.Id, link.BrandId, link.AssetId, link.Kind, link.Label,
             asset.FileName, asset.ContentType, link.CreatedAt));
     }
 
     private static async Task<IResult> UnlinkAssetAsync(
-        Guid id, Guid brandAssetId, CastmillDbContext db, CancellationToken ct)
+        Guid id, Guid brandAssetId,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
     {
-        var link = await db.BrandAssets
-            .SingleOrDefaultAsync(a => a.Id == brandAssetId && a.BrandId == id, ct);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var link = await db.BrandAssets.IgnoreQueryFilters().SingleOrDefaultAsync(
+            item => item.Id == brandAssetId && item.BrandId == id
+                && item.TenantId == grant.Brand.TenantId, ct);
         if (link is null)
         {
             return Results.NotFound();
@@ -362,15 +613,19 @@ public static partial class BrandEndpoints
         ArtifactKinds.IsUserContent(Generators.Normalize(kind))
         && (Generators.Find(kind) is not null || Generators.Normalize(kind) == "blog");
 
-    private static async Task<IResult> ListTemplatesAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListTemplatesAsync(
+        Guid id,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
     {
-        if (!await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
         {
             return Results.NotFound();
         }
 
-        var templates = await db.BrandTemplates
-            .Where(t => t.BrandId == id)
+        var templates = await db.BrandTemplates.IgnoreQueryFilters()
+            .Where(item => item.BrandId == id && item.TenantId == grant.Brand.TenantId)
             .OrderBy(t => t.Kind).ThenBy(t => t.Name)
             .ToListAsync(ct);
         return Results.Ok(templates.Select(ToResponse).ToList());
@@ -379,12 +634,13 @@ public static partial class BrandEndpoints
     private static async Task<IResult> CreateTemplateAsync(
         Guid id,
         BrandTemplateRequest request,
-        ITenantProvider tenant,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
     {
-        if (!await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
         {
             return Results.NotFound();
         }
@@ -399,15 +655,16 @@ public static partial class BrandEndpoints
         if (request.IsDefault)
         {
             // At most one default per (brand, kind) — the new default displaces the old.
-            await db.BrandTemplates
-                .Where(t => t.BrandId == id && t.Kind == kind && t.IsDefault)
+            await db.BrandTemplates.IgnoreQueryFilters()
+                .Where(t => t.BrandId == id && t.TenantId == grant.Brand.TenantId
+                    && t.Kind == kind && t.IsDefault)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.IsDefault, false), ct);
         }
 
         var template = new BrandTemplate
         {
             Id = Guid.NewGuid(),
-            TenantId = tenant.TenantId!.Value,
+            TenantId = grant.Brand.TenantId,
             BrandId = id,
             Kind = kind,
             Name = request.Name,
@@ -425,12 +682,19 @@ public static partial class BrandEndpoints
         Guid id,
         Guid templateId,
         BrandTemplateRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
     {
-        var template = await db.BrandTemplates
-            .SingleOrDefaultAsync(t => t.Id == templateId && t.BrandId == id, ct);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var template = await db.BrandTemplates.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(item => item.Id == templateId && item.BrandId == id
+                && item.TenantId == grant.Brand.TenantId, ct);
         if (template is null)
         {
             return Results.NotFound();
@@ -444,8 +708,9 @@ public static partial class BrandEndpoints
 
         if (request.IsDefault && (!template.IsDefault || template.Kind != kind))
         {
-            await db.BrandTemplates
-                .Where(t => t.BrandId == id && t.Kind == kind && t.IsDefault && t.Id != templateId)
+            await db.BrandTemplates.IgnoreQueryFilters()
+                .Where(t => t.BrandId == id && t.TenantId == grant.Brand.TenantId
+                    && t.Kind == kind && t.IsDefault && t.Id != templateId)
                 .ExecuteUpdateAsync(s => s.SetProperty(t => t.IsDefault, false), ct);
         }
 
@@ -459,10 +724,18 @@ public static partial class BrandEndpoints
     }
 
     private static async Task<IResult> DeleteTemplateAsync(
-        Guid id, Guid templateId, CastmillDbContext db, CancellationToken ct)
+        Guid id, Guid templateId,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
     {
-        var template = await db.BrandTemplates
-            .SingleOrDefaultAsync(t => t.Id == templateId && t.BrandId == id, ct);
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var template = await db.BrandTemplates.IgnoreQueryFilters()
+            .SingleOrDefaultAsync(item => item.Id == templateId && item.BrandId == id
+                && item.TenantId == grant.Brand.TenantId, ct);
         if (template is null)
         {
             return Results.NotFound();

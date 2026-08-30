@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Brands;
 using Castmill.Core;
 using Microsoft.EntityFrameworkCore;
 using SkiaSharp;
@@ -21,6 +22,7 @@ public interface IImageReferenceResolver
 public sealed class ImageReferenceResolver(
     CastmillDbContext db,
     IBlobSasService blobs,
+    IBrandAccessService brandAccess,
     ILogger<ImageReferenceResolver> logger) : IImageReferenceResolver
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -33,11 +35,19 @@ public sealed class ImageReferenceResolver(
             return [];
         }
 
+        var grant = await brandAccess.FindAsync(
+            brandId, campaign.OwnerId, campaign.TenantId, tracking: false, ct);
+        if (grant is null)
+        {
+            return [];
+        }
+
         var selected = ParseIds(slot.ReferenceAssetIdsJson);
-        var links = await db.BrandAssets
+        var links = await db.BrandAssets.IgnoreQueryFilters()
             .Where(a => a.BrandId == brandId
+                && a.TenantId == grant.Brand.TenantId
                 && (selected.Contains(a.Id) || a.Kind == "product"))
-            .Join(db.Assets, link => link.AssetId, asset => asset.Id,
+            .Join(db.Assets.IgnoreQueryFilters(), link => link.AssetId, asset => asset.Id,
                 (link, asset) => new { Link = link, Asset = asset })
             .OrderByDescending(x => x.Link.Kind == "product")
             .ThenBy(x => x.Link.CreatedAt)

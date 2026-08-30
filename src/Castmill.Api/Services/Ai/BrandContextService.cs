@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Globalization;
 using Castmill.Api.Data;
 using Castmill.Api.Endpoints;
+using Castmill.Api.Services.Brands;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
@@ -34,7 +35,9 @@ public interface IBrandContextService
 /// image generation gets the image block; campaign links become a labeled facts section.
 /// A future URL scraper would enrich <see cref="BuildCampaignContextBlock"/> — nothing else.
 /// </summary>
-public sealed class BrandContextService(CastmillDbContext db) : IBrandContextService
+public sealed class BrandContextService(
+    CastmillDbContext db,
+    IBrandAccessService brandAccess) : IBrandContextService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -63,8 +66,9 @@ public sealed class BrandContextService(CastmillDbContext db) : IBrandContextSer
             };
         }
 
-        var brand = await db.BrandProfiles.SingleOrDefaultAsync(b => b.Id == brandId, ct);
-        if (brand is null)
+        var grant = await brandAccess.FindAsync(
+            brandId, campaign.OwnerId, campaign.TenantId, tracking: false, ct);
+        if (grant is null)
         {
             return BrandContext.Empty with
             {
@@ -73,21 +77,23 @@ public sealed class BrandContextService(CastmillDbContext db) : IBrandContextSer
             };
         }
 
-        var card = BrandEndpoints.ParseStyleCard(brand.StyleCardJson);
+        var card = BrandEndpoints.ParseStyleCard(grant.Brand.StyleCardJson);
 
-        var templates = await db.BrandTemplates
-            .Where(t => t.BrandId == brandId && t.IsDefault)
+        var templates = await db.BrandTemplates.IgnoreQueryFilters()
+            .Where(t => t.BrandId == brandId
+                && t.TenantId == grant.Brand.TenantId && t.IsDefault)
             .ToDictionaryAsync(t => t.Kind, t => t.SteeringPrompt, StringComparer.Ordinal, ct);
 
-        var imageAssets = await db.BrandAssets
+        var imageAssets = await db.BrandAssets.IgnoreQueryFilters()
             .Where(a => a.BrandId == brandId
+            && a.TenantId == grant.Brand.TenantId
                 && (a.Kind == "background" || a.Kind == "face")
                 && a.Label != null)
             .Select(a => new { a.Kind, a.Label })
             .ToListAsync(ct);
 
         return new BrandContext(
-            BuildStyleBlock(brand.Name, card),
+            BuildStyleBlock(grant.Brand.Name, card),
             BuildImageStyleBlock(card, imageAssets.Select(a => (a.Kind, a.Label!))),
             templates,
             contextBlock,

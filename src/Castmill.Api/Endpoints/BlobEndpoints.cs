@@ -1,7 +1,11 @@
 using Azure.Storage.Sas;
+using System.Security.Claims;
+using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Images;
+using Castmill.Api.Services.Brands;
+using Castmill.Api.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace Castmill.Api.Endpoints;
@@ -117,19 +121,51 @@ public static class BlobEndpoints
     }
 
     private static async Task<IResult> MintReadAsync(
-        Guid assetId, int? minutes, IBlobSasService sas, CastmillDbContext db, CancellationToken ct)
+        Guid assetId,
+        int? minutes,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
+        IBlobSasService sas,
+        CastmillDbContext db,
+        CancellationToken ct)
     {
         if (!sas.IsConfigured)
         {
             return NotConfigured();
         }
-        var asset = await db.Assets.SingleOrDefaultAsync(a => a.Id == assetId, ct);
-        if (asset is null)
+        var access = await brandAccess.FindAccessibleAssetAsync(
+            assetId, AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value, ct);
+        if (access is null)
         {
             return Results.NotFound();
         }
 
-        var url = await sas.MintAsync(asset.BlobPath, BlobSasPermissions.Read, minutes, ct);
+        if (access.SharedBrandId is { } brandId)
+        {
+            var userId = AuthEndpoints.GetUserId(principal);
+            var tenantId = tenant.TenantId!.Value;
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync<IResult>(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                await BrandEndpoints.AcquireBrandLockAsync(db, brandId, ct);
+                var current = await brandAccess.FindAccessibleAssetAsync(assetId, userId, tenantId, ct);
+                if (current?.SharedBrandId != brandId)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return Results.NotFound();
+                }
+
+                var sharedUrl = await sas.MintAsync(
+                    current.Asset.BlobPath, BlobSasPermissions.Read, minutes, ct);
+                await transaction.CommitAsync(ct);
+                return Results.Ok(new { readUrl = sharedUrl });
+            });
+        }
+
+        var url = await sas.MintAsync(access.Asset.BlobPath, BlobSasPermissions.Read, minutes, ct);
         return Results.Ok(new { readUrl = url });
     }
 
@@ -144,6 +180,9 @@ public static class BlobEndpoints
     private static async Task<IResult> MintThumbsAsync(
         AssetThumbsRequest request,
         int? minutes,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
         IBlobSasService sas,
         IImageComposer composer,
         CastmillDbContext db,
@@ -159,12 +198,54 @@ public static class BlobEndpoints
             return Results.Ok(Array.Empty<AssetThumb>());
         }
 
-        // One query, tenant-filtered: ids belonging to another tenant simply do not come back.
         var ids = requested.Distinct().Take(200).ToList();
-        var assets = await db.Assets
-            .Where(a => ids.Contains(a.Id) && a.ContentType.StartsWith("image/"))
-            .Select(a => new { a.Id, a.BlobPath })
-            .ToListAsync(ct);
+        var userId = AuthEndpoints.GetUserId(principal);
+        var tenantId = tenant.TenantId!.Value;
+        var preliminary = await brandAccess.ListAccessibleAssetsAsync(ids, userId, tenantId, ct);
+        var sharedBrandIds = preliminary
+            .Select(item => item.SharedBrandId)
+            .OfType<Guid>()
+            .Distinct()
+            .Order()
+            .ToList();
+
+        if (sharedBrandIds.Count > 0)
+        {
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync<IResult>(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                foreach (var brandId in sharedBrandIds)
+                {
+                    await BrandEndpoints.AcquireBrandLockAsync(db, brandId, ct);
+                }
+
+                var current = await brandAccess.ListAccessibleAssetsAsync(ids, userId, tenantId, ct);
+                var locked = current.Where(item => item.SharedBrandId is null
+                    || sharedBrandIds.Contains(item.SharedBrandId.Value));
+                var result = await MintThumbsCoreAsync(locked, minutes, sas, composer, logger, ct);
+                await transaction.CommitAsync(ct);
+                return result;
+            });
+        }
+
+        return await MintThumbsCoreAsync(preliminary, minutes, sas, composer, logger, ct);
+    }
+
+    private static async Task<IResult> MintThumbsCoreAsync(
+        IEnumerable<AssetAccess> accesses,
+        int? minutes,
+        IBlobSasService sas,
+        IImageComposer composer,
+        ILogger<AssetThumbsRequest> logger,
+        CancellationToken ct)
+    {
+        var assets = accesses
+            .Select(item => item.Asset)
+            .Where(asset => asset.ContentType.StartsWith("image/", StringComparison.Ordinal))
+            .Select(asset => new { asset.Id, asset.BlobPath })
+            .ToList();
 
         var results = new List<AssetThumb>(assets.Count);
         foreach (var asset in assets)

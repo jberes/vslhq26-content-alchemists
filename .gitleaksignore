@@ -1,0 +1,13 @@
+# Expired local Castmill test JWTs captured in one historical Playwright trace.
+# Keep these exact fingerprints narrow so every new finding still fails CI.
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:240
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:243
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:244
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:482
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:486
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:487
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:488
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:489
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:490
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:491
+dc9e58244b7329326c0bcb5e649a24cd50fff1e7:tests/e2e/tmp/1-trace.network:jwt:492

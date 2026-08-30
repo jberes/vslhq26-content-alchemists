@@ -176,6 +176,11 @@
                                 <li class="cm-row">
                                     <span class="cm-row__label">@item.Title</span>
                                     <span class="cm-meta">@ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
+                                    <button type="button" class="cm-button cm-button--quiet cm-row__action"
+                                            aria-label="Edit @item.Title"
+                                            @onclick="() => OpenFocus(item)">
+                                        Edit
+                                    </button>
                                 </li>
                             }
                         </ul>

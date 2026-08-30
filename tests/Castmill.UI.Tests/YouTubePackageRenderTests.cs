@@ -134,4 +134,28 @@ public sealed class YouTubePackageRenderTests
         Assert.Equal("S02", content.GetProperty("citations")[0].GetString());
         Assert.True(document.RootElement.GetProperty("validation").GetProperty("passed").GetBoolean());
     }
+
+    [Fact]
+    public void Inline_bullets_and_run_on_chapters_become_real_markdown_blocks()
+    {
+        const string malformed = """
+            {"content":{"title":"Toolchain","description":"In this video, you'll learn: • First capability • Second capability • Third capability\n\nChapters 00:00 Overview 00:23 Setup 1:01:31 Extended demo"}}
+            """;
+
+        var markdown = StructuredContent.ToEditorMarkdown("youtube", malformed);
+
+        Assert.Contains("you'll learn:\n\n- First capability\n- Second capability\n- Third capability", markdown,
+            StringComparison.Ordinal);
+        Assert.Contains("## Chapters\n\n00:00 Overview  \n00:23 Setup  \n1:01:31 Extended demo", markdown,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain('•', markdown);
+    }
+
+    [Fact]
+    public void Valid_markdown_is_not_rewritten()
+    {
+        const string markdown = "Intro\n\n- First\n- Second\n\n## Chapters\n\n00:00 Intro  \n00:30 Demo";
+
+        Assert.Equal(markdown, StructuredContent.NormalizeGeneratedMarkdown(markdown));
+    }
 }

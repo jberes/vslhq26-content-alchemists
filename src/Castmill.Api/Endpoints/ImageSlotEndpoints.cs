@@ -4,6 +4,7 @@ using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Brands;
 using Castmill.Api.Services.Images;
 using Castmill.Api.Tenancy;
 using Castmill.Core;
@@ -117,6 +118,9 @@ public static class ImageSlotEndpoints
         Guid campaignId,
         Guid slotId,
         ImageSlotPatchRequest request,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
@@ -146,9 +150,16 @@ public static class ImageSlotEndpoints
                 .Where(c => c.Id == campaignId)
                 .Select(c => c.BrandId)
                 .SingleAsync(ct);
-            var valid = brandId is { } id
-                ? await db.BrandAssets.CountAsync(
-                    a => a.BrandId == id && requestedReferences.Contains(a.Id), ct)
+            var grant = brandId is { } id
+                ? await brandAccess.FindAsync(
+                    id, AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value,
+                    tracking: false, ct)
+                : null;
+            var valid = grant is not null
+                ? await db.BrandAssets.IgnoreQueryFilters().CountAsync(
+                    item => item.BrandId == grant.Brand.Id
+                        && item.TenantId == grant.Brand.TenantId
+                        && requestedReferences.Contains(item.Id), ct)
                 : 0;
             if (valid != requestedReferences.Distinct().Count())
             {

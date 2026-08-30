@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Security.Claims;
+using System.Data;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Tenancy;
+using Castmill.Api.Services.Brands;
 using Castmill.Api.Services.Evidence;
 using Castmill.Core;
 using Castmill.Core.Resources;
@@ -12,6 +14,7 @@ namespace Castmill.Api.Endpoints;
 
 public static class CampaignEndpoints
 {
+    private static readonly object StableCampaignIdKey = new();
     private static readonly string[] DashboardHiddenArtifactKinds =
         ["transcript", "image-prompts", "thumbnail-concepts", "seo-brief", "seo-keyword-plan", "seo-report"];
     public static IEndpointRouteBuilder MapCampaignEndpoints(this IEndpointRouteBuilder routes)
@@ -27,8 +30,10 @@ public static class CampaignEndpoints
         // One call feeds the campaign header counter, the front page's "slots
         // waiting" block and Focus Mode's slot list (G9) — no per-surface polling.
         group.MapGet("/{id:guid}/preview", PreviewAsync);
-        group.MapPost("/", CreateAsync).Validate<CampaignCreateRequest>().RequireRateLimiting("writes");
-        group.MapPut("/{id:guid}", UpdateAsync).Validate<CampaignUpdateRequest>().RequireRateLimiting("writes");
+        group.MapPost("/", CreateAsync).Validate<CampaignCreateRequest>()
+            .RequireRateLimiting("writes").SerializeBrandReferenceWrite();
+        group.MapPut("/{id:guid}", UpdateAsync).Validate<CampaignUpdateRequest>()
+            .RequireRateLimiting("writes").SerializeBrandReferenceWrite();
 
         // The chosen SEO/AEO targets. Separate from the campaign PUT because they are written
         // by a different step, by a different decision, and read by every generator.
@@ -38,6 +43,40 @@ public static class CampaignEndpoints
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
         return routes;
     }
+
+    private static RouteHandlerBuilder SerializeBrandReferenceWrite(this RouteHandlerBuilder route) =>
+        route.AddEndpointFilter(async (context, next) =>
+        {
+            if (context.Arguments.Any(argument => argument is CampaignCreateRequest))
+            {
+                context.HttpContext.Items.TryAdd(StableCampaignIdKey, Guid.NewGuid());
+            }
+            var brandId = context.Arguments.FirstOrDefault(argument =>
+                    argument is CampaignCreateRequest or CampaignUpdateRequest) switch
+            {
+                CampaignCreateRequest create => create.BrandId,
+                CampaignUpdateRequest update => update.BrandId,
+                _ => null,
+            };
+            if (brandId is null)
+            {
+                return await next(context);
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<CastmillDbContext>();
+            var strategy = new NonReplayingExecutionStrategy(db);
+            return await strategy.ExecuteAsync(async () =>
+            {
+                db.ChangeTracker.Clear();
+                await using var transaction = await db.Database.BeginTransactionAsync(
+                    IsolationLevel.Serializable, context.HttpContext.RequestAborted);
+                await BrandEndpoints.AcquireBrandLockAsync(
+                    db, brandId.Value, context.HttpContext.RequestAborted);
+                var result = await next(context);
+                await transaction.CommitAsync(context.HttpContext.RequestAborted);
+                return result;
+            });
+        });
 
     private static readonly System.Text.Json.JsonSerializerOptions Json =
         new(System.Text.Json.JsonSerializerDefaults.Web);
@@ -218,7 +257,12 @@ public static class CampaignEndpoints
 
     /// <summary>Validates the brand/links half of a create or update; null means valid.</summary>
     private static async Task<IResult?> ValidateBrandAndLinksAsync(
-        Guid? brandId, IReadOnlyList<CampaignLink>? links, CastmillDbContext db, CancellationToken ct,
+        Guid? brandId,
+        IReadOnlyList<CampaignLink>? links,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
+        CancellationToken ct,
         string? status = null, string? contentType = null)
     {
         if (links is { Count: > 10 })
@@ -226,8 +270,9 @@ public static class CampaignEndpoints
             return Results.Problem("A campaign holds at most 10 context links.", statusCode: 400);
         }
 
-        // The tenant filter makes a foreign brand indistinguishable from a missing one.
-        if (brandId is { } id && !await db.BrandProfiles.AnyAsync(b => b.Id == id, ct))
+        if (brandId is { } id && await brandAccess.FindAsync(
+            id, AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value,
+            tracking: false, ct) is null)
         {
             return Results.Problem("That brand does not exist.", statusCode: 400);
         }
@@ -266,7 +311,13 @@ public static class CampaignEndpoints
     /// Campaign + artifact previews + image-slot state in one payload (ADR-003 keeps
     /// the heavy content out). This is what every image counter reads.
     /// </summary>
-    private static async Task<IResult> PreviewAsync(Guid id, CastmillDbContext db, CancellationToken ct)
+    private static async Task<IResult> PreviewAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
+        CastmillDbContext db,
+        CancellationToken ct)
     {
         var campaign = await db.Campaigns.SingleOrDefaultAsync(c => c.Id == id, ct);
         if (campaign is null)
@@ -314,10 +365,11 @@ public static class CampaignEndpoints
                 group => group.OrderByDescending(variant => variant.CreatedAt).First());
 
         var brand = campaign.BrandId is { } brandId
-            ? await db.BrandProfiles
-                .Where(b => b.Id == brandId)
-                .Select(b => new BrandSummaryResponse(b.Id, b.Name))
-                .SingleOrDefaultAsync(ct)
+            ? (await brandAccess.FindAsync(
+                brandId, AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value,
+                tracking: false, ct))?.Brand is { } accessibleBrand
+                ? new BrandSummaryResponse(accessibleBrand.Id, accessibleBrand.Name)
+                : null
             : null;
 
         return Results.Ok(new
@@ -551,14 +603,28 @@ public static class CampaignEndpoints
 
     private static async Task<IResult> CreateAsync(
         CampaignCreateRequest request,
+        HttpContext httpContext,
         ClaimsPrincipal principal,
         ITenantProvider tenant,
+        IBrandAccessService brandAccess,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
     {
+        var campaignId = httpContext.Items.TryGetValue(StableCampaignIdKey, out var stableId)
+            && stableId is Guid value
+                ? value
+                : Guid.NewGuid();
+        var committed = await db.Campaigns.AsNoTracking()
+            .SingleOrDefaultAsync(campaign => campaign.Id == campaignId, ct);
+        if (committed is not null)
+        {
+            return Results.Created($"/api/v1/campaigns/{committed.Id}", ToResponse(committed));
+        }
+
         if (await ValidateBrandAndLinksAsync(
-                request.BrandId, request.Links, db, ct, contentType: request.ContentType) is { } invalid)
+            request.BrandId, request.Links, principal, tenant, brandAccess, ct,
+            contentType: request.ContentType) is { } invalid)
         {
             return invalid;
         }
@@ -570,7 +636,7 @@ public static class CampaignEndpoints
         var now = clock.GetUtcNow();
         var campaign = new Campaign
         {
-            Id = Guid.NewGuid(),
+            Id = campaignId,
             TenantId = tenant.TenantId!.Value,
             OwnerId = AuthEndpoints.GetUserId(principal),
             Name = request.Name,
@@ -596,6 +662,9 @@ public static class CampaignEndpoints
     private static async Task<IResult> UpdateAsync(
         Guid id,
         CampaignUpdateRequest request,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService brandAccess,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
@@ -607,7 +676,8 @@ public static class CampaignEndpoints
         }
 
         if (await ValidateBrandAndLinksAsync(
-                request.BrandId, request.Links, db, ct, request.Status, request.ContentType) is { } invalid)
+            request.BrandId, request.Links, principal, tenant, brandAccess, ct,
+            request.Status, request.ContentType) is { } invalid)
         {
             return invalid;
         }

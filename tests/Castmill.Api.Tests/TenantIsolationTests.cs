@@ -56,6 +56,7 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
         var sourceId = Guid.NewGuid();
         var revisionId = Guid.NewGuid();
         var snapshotId = Guid.NewGuid();
+        var brandId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         await using (var aliceDb = CreateContextForTenant(scope, alice.TenantId))
         {
@@ -138,6 +139,23 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
                 Hash = new string('b', 64),
                 ApprovedAt = now,
             });
+            aliceDb.BrandProfiles.Add(new BrandProfile
+            {
+                Id = brandId,
+                TenantId = alice.TenantId,
+                Name = "Alice's shared Brand",
+                UpdatedAt = now,
+            });
+            aliceDb.BrandCollaborators.Add(new BrandCollaborator
+            {
+                Id = Guid.NewGuid(),
+                TenantId = alice.TenantId,
+                BrandId = brandId,
+                UserId = bob.UserId,
+                GrantedByUserId = alice.UserId,
+                Email = bob.Email,
+                GrantedAt = now,
+            });
             await aliceDb.SaveChangesAsync();
         }
 
@@ -148,6 +166,7 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
             Assert.Equal(1, await aliceDb.EvidenceBlocks.CountAsync());
             Assert.Equal(1, await aliceDb.ContentDependencySnapshots.CountAsync());
             Assert.Equal(1, await aliceDb.ContentEvidenceDependencies.CountAsync());
+            Assert.Equal(1, await aliceDb.BrandCollaborators.CountAsync());
         }
 
         // Bob's tenant sees nothing; no tenant sees nothing.
@@ -158,6 +177,7 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
             Assert.Equal(0, await bobDb.EvidenceBlocks.CountAsync());
             Assert.Equal(0, await bobDb.ContentDependencySnapshots.CountAsync());
             Assert.Equal(0, await bobDb.ContentEvidenceDependencies.CountAsync());
+            Assert.Equal(0, await bobDb.BrandCollaborators.CountAsync());
         }
 
         await using (var anonDb = CreateContextForTenant(scope, null))
@@ -167,6 +187,7 @@ public sealed class TenantIsolationTests(CastmillApiFactory factory)
             Assert.Equal(0, await anonDb.EvidenceBlocks.CountAsync());
             Assert.Equal(0, await anonDb.ContentDependencySnapshots.CountAsync());
             Assert.Equal(0, await anonDb.ContentEvidenceDependencies.CountAsync());
+            Assert.Equal(0, await anonDb.BrandCollaborators.CountAsync());
         }
     }
 }

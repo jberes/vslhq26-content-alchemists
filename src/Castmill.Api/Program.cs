@@ -7,6 +7,7 @@ using Castmill.Api.Endpoints;
 using Castmill.Api.Middleware;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Brands;
 using Castmill.Api.Services.DataProtection;
 using Castmill.Api.Services.Evidence;
 using Castmill.Api.Services.Export;
@@ -65,6 +66,7 @@ builder.Services.AddScoped<ITenantProvider, HttpContextTenantProvider>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthTokenIssuer, AuthTokenIssuer>();
 builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IBrandAccessService, BrandAccessService>();
 builder.Services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();
 builder.Services.AddScoped<IExternalAuthCompletionService, ExternalAuthCompletionService>();
 builder.Services.AddHttpClient<IExternalAvatarCaptureService, ExternalAvatarCaptureService>(client =>

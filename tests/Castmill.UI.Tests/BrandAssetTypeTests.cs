@@ -41,7 +41,7 @@ public sealed class BrandAssetTypeTests : CastmillUiTestContext
     {
         var view = Render<BrandEditor>(parameters => parameters.Add(page => page.BrandId, BrandId));
         await view.WaitForStateAsync(
-            () => view.FindAll("[role=tab]").Count == 4, TimeSpan.FromSeconds(5));
+            () => view.FindAll("[role=tab]").Count == 5, TimeSpan.FromSeconds(5));
 
         await view.FindAll("[role=tab]")[2].ClickAsync();
         var type = view.Find("select[aria-label='Type for Studio wall']");

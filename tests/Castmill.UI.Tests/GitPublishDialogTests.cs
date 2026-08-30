@@ -50,7 +50,7 @@ public sealed class GitPublishDialogTests : CastmillUiTestContext
         StubPreview();
 
         var view = await OpenAsync();
-        await PublishButton(view).ClickAsync();
+        await (await PublishButtonAsync(view)).ClickAsync();
         await view.WaitForStateAsync(
             () => view.Markup.Contains("Front matter", StringComparison.Ordinal), TimeSpan.FromSeconds(5));
 
@@ -76,7 +76,7 @@ public sealed class GitPublishDialogTests : CastmillUiTestContext
                 "https://github.com/acme/site/pull/42", ["content/posts/how-we-ship-faster.md"]));
 
         var view = await OpenAsync();
-        await PublishButton(view).ClickAsync();
+        await (await PublishButtonAsync(view)).ClickAsync();
         await view.WaitForStateAsync(
             () => view.Markup.Contains("Open pull request", StringComparison.Ordinal), TimeSpan.FromSeconds(5));
 
@@ -104,7 +104,7 @@ public sealed class GitPublishDialogTests : CastmillUiTestContext
             new GitPublishOutcome("main", "abc1234def", null, null, ["content/posts/how-we-ship-faster.md"]));
 
         var view = await OpenAsync();
-        await PublishButton(view).ClickAsync();
+        await (await PublishButtonAsync(view)).ClickAsync();
         await view.WaitForStateAsync(
             () => view.FindAll("input[name=cm-publish-mode]").Count == 2, TimeSpan.FromSeconds(5));
 
@@ -128,13 +128,21 @@ public sealed class GitPublishDialogTests : CastmillUiTestContext
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll("button").Any(b => b.TextContent.Contains("Download .md", StringComparison.Ordinal)),
+            () => view.FindAll("button").Any(b => b.TextContent.TrimStart().StartsWith("Download", StringComparison.Ordinal)),
             TimeSpan.FromSeconds(5));
         return view;
     }
 
-    private static AngleSharp.Dom.IElement PublishButton(IRenderedComponent<FocusView> view) =>
-        view.FindAll("button").First(b => b.TextContent.Contains("Publish to GitHub", StringComparison.Ordinal));
+    private static async Task<AngleSharp.Dom.IElement> PublishButtonAsync(
+        IRenderedComponent<FocusView> view)
+    {
+        await view.WaitForStateAsync(
+            () => view.FindAll("button").Any(button =>
+                button.TextContent.Contains("Publish to GitHub", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(5));
+        return view.FindAll("button").First(button =>
+            button.TextContent.Contains("Publish to GitHub", StringComparison.Ordinal));
+    }
 
     private void StubRepos() =>
         Http.OnGet("api/v1/git/repos", new List<GitRepo>

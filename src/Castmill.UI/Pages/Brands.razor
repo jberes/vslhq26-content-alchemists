@@ -91,7 +91,7 @@
                 <li>
                     <div class="cm-brand-card">
                         <button type="button" class="cm-brand-card__open" @onclick="() => Open(brand.Id)">
-                            <span class="cm-kicker">Brand</span>
+                            <span class="cm-kicker">@(brand.IsOwner ? "Brand" : "Shared brand")</span>
                             <span class="cm-campaign-card__title">@brand.Name</span>
                             @if (!string.IsNullOrWhiteSpace(brand.StyleCard?.Voice))
                             {
@@ -109,8 +109,11 @@
                             }
                             <span class="cm-meta">Updated @Castmill.UI.State.ArtifactDisplay.Ago(brand.UpdatedAt, DateTimeOffset.Now)</span>
                         </button>
-                        <button type="button" class="cm-tree__delete" aria-label="Delete @brand.Name"
+                        @if (brand.IsOwner)
+                        {
+                            <button type="button" class="cm-tree__delete" aria-label="Delete @brand.Name"
                                 @onclick="() => DeleteAsync(brand)">✕</button>
+                        }
                     </div>
                 </li>
             }

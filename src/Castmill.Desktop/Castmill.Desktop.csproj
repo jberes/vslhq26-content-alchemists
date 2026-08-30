@@ -19,9 +19,9 @@
         <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
         <ApplicationVersion>1</ApplicationVersion>
 
-           <!-- Release desktop builds are thin clients of the deployed API. Override with
-               -p:CastmillApiBaseAddress=https://.../ for another environment. -->
-           <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == ''">https://azappdzrs2vrhk6ote.azurewebsites.net/</CastmillApiBaseAddress>
+        <!-- Desktop builds are thin clients of the deployed API. Override with
+             -p:CastmillApiBaseAddress=https://.../ for another environment. -->
+        <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == ''">https://azappdzrs2vrhk6ote.azurewebsites.net/</CastmillApiBaseAddress>
 
         <!-- Unpackaged on Windows until Phase F9 does MSIX packaging (E10.4). -->
         <WindowsPackageType>None</WindowsPackageType>
@@ -50,10 +50,10 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
         <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
-           <!-- IgniteUI.Blazor.Lite's cross-platform RuntimeHelper carries a DynamicDependency
-               targeting this assembly. Catalyst never executes WASM, but the Release linker
-               must resolve that metadata target to trim the shared component graph safely. -->
-           <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
+        <!-- IgniteUI.Blazor.Lite's cross-platform RuntimeHelper carries a DynamicDependency
+             targeting this assembly. Catalyst never executes WASM, but the Release linker
+             must resolve that metadata target to trim the shared component graph safely. -->
+        <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.10" />
         <!-- Whisper.net.Runtime ships its Mac Catalyst static libs through build/ targets,
              which only import into DIRECT referencers — a transitive reference through

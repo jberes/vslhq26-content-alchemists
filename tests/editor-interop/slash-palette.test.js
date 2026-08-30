@@ -3,7 +3,7 @@
 // the affordance is for. These pin the behaviour people actually expect from it.
 
 import { describe, expect, it } from 'vitest';
-import { filterItems, SLASH_GROUPS } from 'castmill-editor-interop';
+import { filterItems, keepActiveOptionVisible, SLASH_GROUPS } from 'castmill-editor-interop';
 
 const labels = query => filterItems(query).map(item => item.label);
 
@@ -64,5 +64,16 @@ describe('the slash palette', () => {
                 expect(typeof item.run).toBe('function');
             }
         }
+    });
+
+    it('keeps keyboard selection inside the scroll viewport', () => {
+        let options;
+        keepActiveOptionVisible({
+            scrollIntoView(value) {
+                options = value;
+            },
+        });
+
+        expect(options).toEqual({ block: 'nearest' });
     });
 });

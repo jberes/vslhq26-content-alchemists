@@ -82,11 +82,12 @@
 html {
     /* Never a fixed page canvas (ADR-F10). */
     block-size: 100%;
+    font-size: 100%;
+}
 
-    /* 20px rem base. The handoff's 15px body / 11.5px meta read unreadably small on a
-       retina display at default zoom; 18px was still too small (owner feedback ×2,
-       2026-07-29). The type tokens are rem-based ratios, so lifting the base scales the
-       whole hierarchy — and Ignite UI's theme is rem-based too, so components keep pace. */
+/* Catalyst's CSS-pixel density is visually smaller on the same Retina display. Keep the
+   accepted Desktop scale there without forcing browser users to zoom the Web shell out. */
+html.cm-shell-desktop {
     font-size: 125%;
 }
 

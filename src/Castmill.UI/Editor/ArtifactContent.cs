@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace Castmill.UI.Editor;
 
@@ -77,7 +78,7 @@ public static class ArtifactContent
                 if (FindMarkdownHost(obj) is { } host
                     && host.TryGetPropertyValue(MarkdownProperty, out var markdown) && markdown is not null)
                 {
-                    return markdown.GetValue<string>();
+                    return StructuredContent.NormalizeGeneratedMarkdown(markdown.GetValue<string>());
                 }
 
                 // Some kinds (clip suggestions, keyword plans) are structured data with no
@@ -260,7 +261,7 @@ public static class StructuredContent
             using var document = JsonDocument.Parse(contentJson ?? "{}");
             var root = document.RootElement;
             var content = root.TryGetProperty("content", out var nested) ? nested : root;
-            return Str(content, "description");
+            return NormalizeGeneratedMarkdown(Str(content, "description"));
         }
         catch (JsonException)
         {
@@ -458,7 +459,7 @@ public static class StructuredContent
 
                 md.AppendLine("## Description");
                 md.AppendLine();
-                md.AppendLine(Str(c, "description"));
+                md.AppendLine(NormalizeGeneratedMarkdown(Str(c, "description")));
                 md.AppendLine();
 
                 var pinnedComment = Str(c, "suggestedPinnedComment");
@@ -528,6 +529,60 @@ public static class StructuredContent
         element.TryGetProperty(property, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String
             ? value.GetString() ?? string.Empty
             : string.Empty;
+
+    /// <summary>
+    /// Repairs two model-output shapes that look like lists but are one paragraph: repeated
+    /// Unicode bullet separators and YouTube chapter timestamps emitted on one line.
+    /// Existing Markdown is left unchanged.
+    /// </summary>
+    public static string NormalizeGeneratedMarkdown(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown)
+            || (!markdown.Contains('•') && !markdown.Contains("Chapters", StringComparison.OrdinalIgnoreCase)))
+        {
+            return markdown;
+        }
+
+        var output = new System.Text.StringBuilder(markdown.Length + 32);
+        foreach (var line in markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            var bulletParts = line.Split('•');
+            if (bulletParts.Length >= 3
+                || bulletParts.Length == 2 && string.IsNullOrWhiteSpace(bulletParts[0]))
+            {
+                var lead = bulletParts[0].TrimEnd();
+                if (lead.Length > 0)
+                {
+                    output.AppendLine(lead);
+                    output.AppendLine();
+                }
+                foreach (var item in bulletParts.Skip(1).Select(part => part.Trim()).Where(part => part.Length > 0))
+                {
+                    output.Append("- ").AppendLine(item);
+                }
+                continue;
+            }
+
+            var timestamps = Regex.Matches(line, @"(?<![\d:])(?:\d{1,2}:)?\d{1,2}:\d{2}(?=\s)");
+            var prefix = timestamps.Count > 0 ? line[..timestamps[0].Index].Trim().TrimEnd(':') : string.Empty;
+            if (timestamps.Count >= 2 && string.Equals(prefix, "Chapters", StringComparison.OrdinalIgnoreCase))
+            {
+                output.AppendLine("## Chapters");
+                output.AppendLine();
+                for (var index = 0; index < timestamps.Count; index++)
+                {
+                    var match = timestamps[index];
+                    var end = index + 1 < timestamps.Count ? timestamps[index + 1].Index : line.Length;
+                    output.Append(line.AsSpan(match.Index, end - match.Index).Trim()).AppendLine("  ");
+                }
+                continue;
+            }
+
+            output.AppendLine(line);
+        }
+
+        return output.ToString().TrimEnd() + (markdown.EndsWith('\n') ? "\n" : string.Empty);
+    }
 
     private static void AppendList(
         System.Text.StringBuilder md, System.Text.Json.JsonElement element, string property, string bullet)

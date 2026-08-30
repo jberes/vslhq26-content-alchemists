@@ -297,7 +297,7 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
     private sealed record IngestResponse(Guid TranscriptArtifactId, int SegmentCount);
 
     /// <summary>The AiGenerationTests fake, plus prompt capture for injection asserts.</summary>
-    private sealed class CapturingFoundryFactory : IFoundryClientFactory
+    internal sealed class CapturingFoundryFactory : IFoundryClientFactory
     {
         public List<string> Prompts { get; } = [];
 

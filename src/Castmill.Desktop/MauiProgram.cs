@@ -11,18 +11,14 @@ public static class MauiProgram
 {
     /// <summary>
     /// Where the API lives. The desktop shell has no origin of its own, so this is a real
-    /// configuration value rather than a relative path. Points at the local dev API in a
-    /// Debug build; Phase F9 replaces the Release value with the deployed App Service.
+    /// configuration value rather than a relative path. MSBuild defaults every configuration
+    /// to production; local API work opts in with -p:CastmillApiBaseAddress=https://localhost:7105/.
     /// </summary>
     private static readonly Uri ApiBaseAddress = new(
-#if DEBUG
-        "https://localhost:7105/"
-#else
         typeof(MauiProgram).Assembly
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .Single(attribute => attribute.Key == "CastmillApiBaseAddress")
             .Value ?? throw new InvalidOperationException("CastmillApiBaseAddress is not configured.")
-#endif
         );
 
     public static MauiApp CreateMauiApp()

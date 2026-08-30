@@ -74,6 +74,14 @@ public static class AssetEndpoints
             return Results.NotFound();
         }
 
+        if (await db.BrandAssets.IgnoreQueryFilters().AnyAsync(link => link.AssetId == id, ct))
+        {
+            return Results.Conflict(new
+            {
+                detail = "Remove this asset from every brand kit before deleting it.",
+            });
+        }
+
         db.Assets.Remove(asset);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();

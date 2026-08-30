@@ -29,7 +29,7 @@
 <PageTitle>@(_artifact?.Title ?? Campaign.Campaign?.Name ?? "Campaign") — Focus</PageTitle>
 
 <CampaignShell CampaignId="CampaignId" View="CampaignView.Focus">
-    <div class="cm-focus cm-region">
+    <div class="cm-focus cm-region @(_producerWide ? "cm-focus--producer-wide" : null)">
         <aside class="cm-focus__outline cm-region">
             <h2 class="cm-kicker">Artifacts</h2>
             @if (Campaign.Artifacts.Count == 0)
@@ -143,11 +143,55 @@
                             @ArtifactDisplay.StatusLabel(_artifact.Status)
                         </span>
                         <span class="cm-meta">@_saveState</span>
+                        @if (_artifact.Status == ArtifactStatus.Draft)
+                        {
+                            <button type="button" class="cm-button"
+                                    @onclick="() => SetStatusAsync(ArtifactStatus.InReview)">
+                                Send to review
+                            </button>
+                        }
+                        else if (_artifact.Status == ArtifactStatus.InReview)
+                        {
+                            <button type="button" class="cm-button"
+                                    @onclick="() => SetStatusAsync(ArtifactStatus.Queued)">
+                                Mark reviewed
+                            </button>
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="() => SetStatusAsync(ArtifactStatus.Draft)">
+                                Back to draft
+                            </button>
+                        }
                         <button type="button" class="cm-button cm-button--quiet cm-focus__copy"
                                 title="@CopyActionLabel" aria-label="@CopyActionLabel"
                                 @onclick="CopyArtifactAsync">
                             <span aria-hidden="true">⧉</span> @CopyActionLabel
                         </button>
+                        <div class="cm-focus__download">
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    aria-expanded="@(_downloadOpen ? "true" : "false")"
+                                    aria-controls="cm-focus-downloads"
+                                    disabled="@_exporting" @onclick="() => _downloadOpen = !_downloadOpen">
+                                Download <span aria-hidden="true">⌄</span>
+                            </button>
+                            @if (_downloadOpen)
+                            {
+                                <div class="cm-focus__download-menu" id="cm-focus-downloads">
+                                    <button type="button" disabled="@_exporting"
+                                            @onclick="@(() => ExportFromMenuAsync("md"))">Markdown (.md)</button>
+                                    <button type="button" disabled="@_exporting"
+                                            @onclick="@(() => ExportFromMenuAsync("docx"))">Word (.docx)</button>
+                                    <button type="button" disabled="@_exporting"
+                                            @onclick="ExportCampaignFromMenuAsync">Whole campaign (.zip)</button>
+                                </div>
+                            }
+                        </div>
+                        @if (_repos.Count > 0)
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick="OpenPublishAsync">
+                                Publish to GitHub
+                            </button>
+                        }
                     </div>
                 </header>
 
@@ -321,61 +365,20 @@
                 }
                 }
 
-                <footer class="cm-focus__foot">
-                    @* The review gate: advancing status is a distinct action from saving
-                       (E6.9). The full validator line arrives with F5. *@
-                    @if (_artifact.Status == ArtifactStatus.Draft)
-                    {
-                        <button type="button" class="cm-button" @onclick="() => SetStatusAsync(ArtifactStatus.InReview)">
-                            Send to review
-                        </button>
-                    }
-                    else if (_artifact.Status == ArtifactStatus.InReview)
-                    {
-                        <button type="button" class="cm-button" @onclick="() => SetStatusAsync(ArtifactStatus.Queued)">
-                            Mark reviewed
-                        </button>
-                        <button type="button" class="cm-button cm-button--quiet" @onclick="() => SetStatusAsync(ArtifactStatus.Draft)">
-                            Back to draft
-                        </button>
-                    }
-                    else
-                    {
-                        <span class="cm-meta">
-                            @ArtifactDisplay.StatusLabel(_artifact.Status). Scheduling lives on the Wire (F8).
-                        </span>
-                    }
-
-                    @* Getting the work out (roadmap 5.6). The markdown IS the stored format,
-                       so .md is a copy rather than a conversion — which is the whole reason
-                       the editor's contract was kept to markdown. *@
-                    <span class="cm-focus__export">
-                        <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@_exporting" @onclick="@(() => ExportArtifactAsync("md"))">
-                            Download .md
-                        </button>
-                        <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@_exporting" @onclick="@(() => ExportArtifactAsync("docx"))">
-                            .docx
-                        </button>
-                        <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@_exporting" @onclick="ExportCampaignAsync">
-                            Whole campaign (.zip)
-                        </button>
-                        @if (_repos.Count > 0)
-                        {
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    @onclick="OpenPublishAsync">
-                                Publish to GitHub
-                            </button>
-                        }
-                    </span>
-                </footer>
             }
         </div>
 
         <aside class="cm-focus__producer cm-region">
-            <h2 class="cm-kicker">Producer</h2>
+            <div class="cm-focus__producer-head">
+                <h2 class="cm-kicker">Producer</h2>
+                <button type="button" class="cm-button cm-button--icon cm-button--quiet"
+                        title="@(_producerWide ? "Restore Producer width" : "Expand Producer")"
+                        aria-label="@(_producerWide ? "Restore Producer width" : "Expand Producer")"
+                        aria-pressed="@(_producerWide ? "true" : "false")"
+                        @onclick="() => _producerWide = !_producerWide">
+                    <span aria-hidden="true">@(_producerWide ? "↦↤" : "↤↦")</span>
+                </button>
+            </div>
 
             @if (_artifact is not null)
             {
@@ -661,6 +664,8 @@
 </CampaignShell>
 
 @code {
+    private bool _producerWide;
+
     /// <summary>Structured kinds render formatted but read-only (see StructuredContent).</summary>
     private bool IsStructured => _artifact is not null && StructuredContent.IsStructured(_artifact.Kind);
 
@@ -1369,12 +1374,25 @@
     // ---- Exports (roadmap 5.6) ------------------------------------------------
 
     private bool _exporting;
+    private bool _downloadOpen;
 
     private Task ExportArtifactAsync(string format) =>
         _artifact is null ? Task.CompletedTask
             : DownloadAsync(() => Exports.ArtifactAsync(CampaignId, _artifact.Id, format));
 
     private Task ExportCampaignAsync() => DownloadAsync(() => Exports.CampaignAsync(CampaignId));
+
+    private async Task ExportFromMenuAsync(string format)
+    {
+        _downloadOpen = false;
+        await ExportArtifactAsync(format);
+    }
+
+    private async Task ExportCampaignFromMenuAsync()
+    {
+        _downloadOpen = false;
+        await ExportCampaignAsync();
+    }
 
     private async Task DownloadAsync(Func<Task<DownloadedFile>> fetch)
     {
