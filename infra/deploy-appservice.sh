@@ -70,6 +70,7 @@ if [[ "$ACTION" == "code" ]]; then
     --src-path "$PACKAGE_FILE" \
     --type zip \
     --async true \
+    --track-status false \
     --clean true \
     --restart true \
     --output none
@@ -240,6 +241,7 @@ az webapp deploy \
   --src-path "$PACKAGE_FILE" \
   --type zip \
   --async true \
+  --track-status false \
   --clean true \
   --restart true \
   --output none
