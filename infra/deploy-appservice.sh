@@ -25,6 +25,7 @@ command -v az >/dev/null || { echo "Azure CLI is required." >&2; exit 1; }
 command -v dotnet >/dev/null || { echo ".NET SDK is required." >&2; exit 1; }
 if [[ "$ACTION" == "deploy" || "$ACTION" == "code" ]]; then
   command -v npm >/dev/null || { echo "npm is required to build the editor bundle." >&2; exit 1; }
+  command -v jq >/dev/null || { echo "jq is required to merge protected App Service settings." >&2; exit 1; }
   command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
   command -v sqlcmd >/dev/null || { echo "sqlcmd is required for the managed-identity database grant." >&2; exit 1; }
   command -v zip >/dev/null || { echo "zip is required." >&2; exit 1; }
@@ -117,9 +118,28 @@ umask 077
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/castmill-deploy.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 SETTINGS_FILE="$WORK_DIR/appsettings.json"
+EXPORTED_SETTINGS_FILE="$WORK_DIR/exported-appsettings.json"
+PRESERVED_SETTINGS_FILE="$WORK_DIR/preserved-external-auth-settings.json"
 PUBLISH_DIR="$WORK_DIR/publish"
 PACKAGE_FILE="$WORK_DIR/castmill.zip"
 MIGRATION_FILE="$WORK_DIR/migrations.sql"
+
+printf '[]' > "$PRESERVED_SETTINGS_FILE"
+EXISTING_APP_NAME="$(az deployment group show \
+  --subscription "$SUBSCRIPTION_ID" \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$DEPLOYMENT_NAME" \
+  --query properties.outputs.deployment.value.appName \
+  --output tsv 2>/dev/null || true)"
+if [[ -n "$EXISTING_APP_NAME" ]]; then
+  echo "Preserving protected external-provider settings..."
+  az webapp config appsettings list \
+    --subscription "$SUBSCRIPTION_ID" \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$EXISTING_APP_NAME" \
+    --query "[?starts_with(name, 'ExternalAuth__Providers__')]" \
+    --output json > "$PRESERVED_SETTINGS_FILE"
+fi
 
 echo "Creating App Service resources..."
 az deployment group create \
@@ -165,8 +185,13 @@ echo "Applying production configuration without exposing secret values..."
 dotnet run \
   --project "$REPO_ROOT/tools/Castmill.AzureConfig/Castmill.AzureConfig.csproj" \
   --configuration Release \
-  -- export "$CONFIG_PATH" "$SETTINGS_FILE" "${KEY_ARGUMENT[@]}" \
+  -- export "$CONFIG_PATH" "$EXPORTED_SETTINGS_FILE" "${KEY_ARGUMENT[@]}" \
   --web-base-url "$APP_URL"
+jq -s '
+  reduce (.[0] + .[1])[] as $setting
+    ({}; .[$setting.name] = $setting)
+  | [.[]]
+' "$PRESERVED_SETTINGS_FILE" "$EXPORTED_SETTINGS_FILE" > "$SETTINGS_FILE"
 az webapp config appsettings set \
   --subscription "$SUBSCRIPTION_ID" \
   --resource-group "$RESOURCE_GROUP" \
