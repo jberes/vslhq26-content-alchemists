@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using Castmill.Api.Data;
 using Castmill.Core;
@@ -89,50 +90,88 @@ public static class AuthEndpoints
     {
         var now = clock.GetUtcNow();
         var hash = tokens.HashRefreshToken(request.RefreshToken);
-        var stored = await db.RefreshTokens.SingleOrDefaultAsync(t => t.TokenHash == hash, ct);
-        if (stored is null)
+        var userId = await db.RefreshTokens.AsNoTracking()
+            .Where(token => token.TokenHash == hash)
+            .Select(token => (Guid?)token.UserId)
+            .SingleOrDefaultAsync(ct);
+        if (userId is null)
         {
             return Results.Unauthorized();
         }
 
-        var grace = TimeSpan.FromSeconds(Math.Max(0, jwt.Value.RefreshReuseGraceSeconds));
-        var withinGrace = !stored.IsActive(now) && stored.IsWithinReuseGrace(now, grace);
-
-        if (!stored.IsActive(now) && !withinGrace)
+        var strategy = db.Database.CreateExecutionStrategy();
+        var response = await strategy.ExecuteAsync(async () =>
         {
-            // Reuse of a rotated/revoked token means the token may be stolen:
-            // revoke the entire family so neither party can continue the session.
-            await db.RefreshTokens
-                .Where(t => t.FamilyId == stored.FamilyId && t.RevokedAt == null)
-                .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now), ct);
-            var owner = await users.FindByIdAsync(stored.UserId.ToString());
-            if (owner is not null)
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                ct);
+            await AcquireRefreshTokenLockAsync(db, userId.Value, ct);
+
+            var stored = await db.RefreshTokens
+                .SingleOrDefaultAsync(token => token.TokenHash == hash, ct);
+            if (stored is null)
             {
-                await AuditAsync(db, owner.TenantId, owner.Id, "auth.refresh.reuse-detected", now, ct);
+                await transaction.RollbackAsync(ct);
+                return null;
             }
-            return Results.Unauthorized();
-        }
 
-        var user = await users.FindByIdAsync(stored.UserId.ToString());
-        if (user is null)
-        {
-            return Results.Unauthorized();
-        }
+            var grace = TimeSpan.FromSeconds(Math.Max(0, jwt.Value.RefreshReuseGraceSeconds));
+            var withinGrace = !stored.IsActive(now) && stored.IsWithinReuseGrace(now, grace);
 
-        // Within the grace, a replay of a just-consumed token rotates AGAIN rather than
-        // revoking the family. That converts the crash-mid-rotation, the two-window race and
-        // the retried request from "your session has expired" into a non-event, at the cost
-        // of a thief who replays within the window ALSO getting a token — after which the
-        // next collision falls outside the grace and trips reuse detection as before. The
-        // audit row keeps the event observable either way.
-        if (withinGrace)
-        {
-            await AuditAsync(db, user.TenantId, user.Id, "auth.refresh.reused-within-grace", now, ct);
-        }
+            if (!stored.IsActive(now) && !withinGrace)
+            {
+                // Reuse of a rotated/revoked token means the token may be stolen:
+                // revoke the entire family so neither party can continue the session.
+                await db.RefreshTokens
+                    .Where(token => token.FamilyId == stored.FamilyId && token.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.RevokedAt, now), ct);
+                var owner = await users.FindByIdAsync(stored.UserId.ToString());
+                if (owner is not null)
+                {
+                    await AuditAsync(
+                        db,
+                        owner.TenantId,
+                        owner.Id,
+                        "auth.refresh.reuse-detected",
+                        now,
+                        ct);
+                }
+                await transaction.CommitAsync(ct);
+                return null;
+            }
 
-        stored.UsedAt ??= now; // rotation: each refresh token is single-use (grace keeps the original stamp)
-    var response = await tokenIssuer.IssueAsync(user, stored.FamilyId, now, ct);
-        return Results.Ok(response);
+            var user = await users.FindByIdAsync(stored.UserId.ToString());
+            if (user is null)
+            {
+                await transaction.RollbackAsync(ct);
+                return null;
+            }
+
+            // Within the grace, a replay of a just-consumed token rotates AGAIN rather than
+            // revoking the family. That converts the crash-mid-rotation, the two-window race and
+            // the retried request from "your session has expired" into a non-event, at the cost
+            // of a thief who replays within the window ALSO getting a token — after which the
+            // next collision falls outside the grace and trips reuse detection as before. The
+            // audit row keeps the event observable either way.
+            if (withinGrace)
+            {
+                await AuditAsync(
+                    db,
+                    user.TenantId,
+                    user.Id,
+                    "auth.refresh.reused-within-grace",
+                    now,
+                    ct);
+            }
+
+            stored.UsedAt ??= now;
+            var issued = await tokenIssuer.IssueAsync(user, stored.FamilyId, now, ct);
+            await transaction.CommitAsync(ct);
+            return issued;
+        });
+
+        return response is null ? Results.Unauthorized() : Results.Ok(response);
     }
 
     private static async Task<IResult> LogoutAsync(
@@ -143,12 +182,23 @@ public static class AuthEndpoints
     {
         var now = clock.GetUtcNow();
         var userId = GetUserId(principal);
-        // Revoke every active refresh token for the user; the short-lived access
-        // token simply expires (≤15 min) — nothing longer-lived survives logout.
-        await db.RefreshTokens
-            .Where(t => t.UserId == userId && t.RevokedAt == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now), ct);
-        await AuditAsync(db, GetTenantId(principal), userId, "auth.logout", now, ct);
+        var tenantId = GetTenantId(principal);
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                ct);
+            await AcquireRefreshTokenLockAsync(db, userId, ct);
+            // Revoke every active refresh token for the user; the short-lived access
+            // token simply expires (≤15 min) — nothing longer-lived survives logout.
+            await db.RefreshTokens
+                .Where(token => token.UserId == userId && token.RevokedAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.RevokedAt, now), ct);
+            await AuditAsync(db, tenantId, userId, "auth.logout", now, ct);
+            await transaction.CommitAsync(ct);
+        });
         return Results.NoContent();
     }
 
@@ -185,14 +235,42 @@ public static class AuthEndpoints
                 .ToDictionary(g => g.Key, g => g.ToArray()));
         }
 
-        // Credential change invalidates every outstanding session.
-        await db.RefreshTokens
-            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, now), ct);
-        await AuditAsync(db, user.TenantId, user.Id, "auth.password-changed", now, ct);
+        var strategy = db.Database.CreateExecutionStrategy();
+        var response = await strategy.ExecuteAsync(async () =>
+        {
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                ct);
+            await AcquireRefreshTokenLockAsync(db, user.Id, ct);
+            // Credential change invalidates every outstanding session before issuing the
+            // replacement session returned to the user who changed the password.
+            await db.RefreshTokens
+                .Where(token => token.UserId == user.Id && token.RevokedAt == null)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.RevokedAt, now), ct);
+            await AuditAsync(db, user.TenantId, user.Id, "auth.password-changed", now, ct);
+            var issued = await tokenIssuer.IssueAsync(user, Guid.NewGuid(), now, ct);
+            await transaction.CommitAsync(ct);
+            return issued;
+        });
 
-        return Results.Ok(await tokenIssuer.IssueAsync(user, Guid.NewGuid(), now, ct));
+        return Results.Ok(response);
     }
+
+    internal static Task AcquireRefreshTokenLockAsync(
+        CastmillDbContext db,
+        Guid userId,
+        CancellationToken ct) =>
+        db.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock
+                @Resource = {"castmill:refresh-token:" + userId.ToString("N")},
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction',
+                @LockTimeout = 30000;
+            IF @result < 0
+                THROW 51000, 'Could not acquire the refresh-token session lock.', 1;
+            """, ct);
 
     private static async Task AuditAsync(
         CastmillDbContext db, Guid tenantId, Guid? userId, string action, DateTimeOffset now, CancellationToken ct)

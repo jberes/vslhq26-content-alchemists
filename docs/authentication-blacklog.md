@@ -112,14 +112,14 @@ Legend:
 - ✅ Add concurrency tests proving one-time exchange permits one success.
 - ✅ Add cross-tenant and account-linking isolation tests.
 - ✅ Add no-secret/no-provider-token response checks.
-- ✅ Run the complete Docker-backed API/UI/Media suite after real-provider and deployment fixes (758/758 passed).
+- ✅ Run the complete Docker-backed API/UI/Media suite after the logout-race fix (759/759 passed).
 - ✅ Run browser/editor external-auth tests after callback retry and fragment hardening (53/53 passed).
 - ✅ Build Web and Mac Catalyst arm64 with zero warnings/errors and verify packaged static assets.
 - ⏳ Build and validate Windows x64 on a real Windows host.
 - ✅ Execute real Microsoft login E2E with a home-tenant work account through the Desktop protocol.
 - ⏳ Execute real Microsoft login E2E with external-tenant and personal accounts.
 - ⛔ Execute real Google Gmail and Workspace E2E after a Google OAuth client and test accounts are available.
-- ⏳ Validate App Service callbacks, restart survival, and durable Data Protection.
+- ✅ Validate App Service callback, OIDC restart survival, and durable Blob Data Protection with a real Microsoft account.
 - ⏳ Verify normal business APIs reject raw Microsoft and Google tokens.
 
 ## Release gates
@@ -131,5 +131,5 @@ Legend:
 - ⏳ Enable and validate Desktop Microsoft first.
 - ⏳ Enable Desktop Google after real-provider E2E.
 - ⏳ Validate Web provider flows.
-- 🟢 → Run final regression tests, deploy, and execute production smoke tests.
+- ✅ Run final regression tests, deploy, migrate, and execute production authentication smoke tests.
 - ⏳ Commit and push only after all available gates are green.

@@ -1,6 +1,11 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Castmill.Api.Auth;
+using Castmill.Api.Data;
 using Castmill.Core.Auth;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Castmill.Api.Tests;
@@ -88,5 +93,42 @@ public sealed class RefreshReuseGraceTests(CastmillApiFactory factory)
 
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await RefreshAsync(client, login.RefreshToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Concurrent_refresh_and_logout_leave_no_active_tokens()
+    {
+        var client = factory.CreateClient();
+        var login = await RegisterAsync(client);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", login.AccessToken);
+        var me = await client.GetFromJsonAsync<MeResponse>("/api/v1/me");
+        Assert.NotNull(me);
+
+        await using var lockScope = factory.Services.CreateAsyncScope();
+        var lockDb = lockScope.ServiceProvider.GetRequiredService<CastmillDbContext>();
+        await using var lockTransaction = await lockDb.Database.BeginTransactionAsync();
+        await AuthEndpoints.AcquireRefreshTokenLockAsync(
+            lockDb,
+            me.UserId,
+            TestContext.Current.CancellationToken);
+
+        var refreshTask = RefreshAsync(client, login.RefreshToken);
+        var logoutTask = client.PostAsJsonAsync("/api/v1/auth/logout", new { });
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        await lockTransaction.CommitAsync(TestContext.Current.CancellationToken);
+
+        var responses = await Task.WhenAll(refreshTask, logoutTask);
+        Assert.True(responses[0].StatusCode is HttpStatusCode.OK or HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.NoContent, responses[1].StatusCode);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<CastmillDbContext>();
+        Assert.Equal(0, await verifyDb.RefreshTokens.CountAsync(
+            token => token.UserId == me.UserId
+                && token.RevokedAt == null
+                && token.UsedAt == null
+                && token.ExpiresAt > DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken));
     }
 }

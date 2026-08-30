@@ -24,6 +24,7 @@ DEPLOYMENT_NAME="castmill-appservice"
 command -v az >/dev/null || { echo "Azure CLI is required." >&2; exit 1; }
 command -v dotnet >/dev/null || { echo ".NET SDK is required." >&2; exit 1; }
 if [[ "$ACTION" == "deploy" || "$ACTION" == "code" ]]; then
+  command -v npm >/dev/null || { echo "npm is required to build the editor bundle." >&2; exit 1; }
   command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
   command -v sqlcmd >/dev/null || { echo "sqlcmd is required for the managed-identity database grant." >&2; exit 1; }
   command -v zip >/dev/null || { echo "zip is required." >&2; exit 1; }
@@ -118,6 +119,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 SETTINGS_FILE="$WORK_DIR/appsettings.json"
 PUBLISH_DIR="$WORK_DIR/publish"
 PACKAGE_FILE="$WORK_DIR/castmill.zip"
+MIGRATION_FILE="$WORK_DIR/migrations.sql"
 
 echo "Creating App Service resources..."
 az deployment group create \
@@ -184,8 +186,17 @@ sqlcmd \
 echo "Applying EF Core migrations with the local Entra identity..."
 (
   cd "$REPO_ROOT/src/Castmill.Api"
-  ASPNETCORE_ENVIRONMENT=Development dotnet ef database update
+  ASPNETCORE_ENVIRONMENT=Development dotnet ef migrations script \
+    --idempotent \
+    --output "$MIGRATION_FILE"
 )
+sqlcmd \
+  -S jberes.database.windows.net \
+  -d castmill \
+  -G \
+  -b \
+  -l 60 \
+  -i "$MIGRATION_FILE"
 
 echo "Publishing the combined API and Blazor client..."
 dotnet publish "$REPO_ROOT/src/Castmill.Api/Castmill.Api.csproj" \
