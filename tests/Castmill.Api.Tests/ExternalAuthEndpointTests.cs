@@ -71,15 +71,18 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
             Assert.False(options.MapInboundClaims);
             Assert.True(options.TokenValidationParameters.ValidateIssuer);
             Assert.NotNull(options.TokenValidationParameters.IssuerValidator);
-            Assert.Equal(
-                new[] { "email", "openid", "profile" },
-                options.Scope.Order(StringComparer.Ordinal));
             Assert.Equal(CookieSecurePolicy.Always, options.CorrelationCookie.SecurePolicy);
             Assert.Equal(SameSiteMode.None, options.CorrelationCookie.SameSite);
             Assert.Equal(CookieSecurePolicy.Always, options.NonceCookie.SecurePolicy);
             Assert.Equal(SameSiteMode.None, options.NonceCookie.SameSite);
             Assert.NotNull(options.Events.OnTicketReceived);
         });
+        Assert.Equal(
+            new[] { "User.Read", "email", "openid", "profile" },
+            microsoft.Scope.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "email", "openid", "profile" },
+            google.Scope.Order(StringComparer.Ordinal));
 
         var schemes = app.Services.GetRequiredService<IAuthenticationSchemeProvider>();
         Assert.Null(await schemes.GetSchemeAsync("Castmill.External.Microsoft"));
@@ -168,6 +171,12 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
         Assert.False(await db.Users.AnyAsync(user => user.Email == email));
         var exchangeCode = CallbackCode(location);
         Assert.Equal(ExternalAuthEndpoints.HashSecret(exchangeCode), attempt.ExchangeCodeHash);
+        byte[] avatar = [0xFF, 0xD8, 0xFF, 0xE0];
+        await db.ExternalAuthAttempts
+            .Where(candidate => candidate.Id == start.AttemptId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(candidate => candidate.CandidateAvatarImage, avatar)
+                .SetProperty(candidate => candidate.CandidateAvatarContentType, "image/jpeg"));
 
         var exchange = await client.PostAsJsonAsync(
             "/api/v1/auth/external/exchange",
@@ -175,6 +184,8 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
         db.ChangeTracker.Clear();
         var user = await db.Users.SingleAsync(candidate => candidate.Email == email);
+        Assert.Equal(avatar, user.AvatarImage);
+        Assert.Equal("image/jpeg", user.AvatarContentType);
         Assert.Equal(user.Id, (await db.UserLogins.SingleAsync(login =>
             login.LoginProvider == ExternalAuthProviders.Google
             && login.ProviderKey == providerKey)).UserId);
@@ -501,12 +512,24 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
         var (verifier, request) = StartRequestWithVerifier();
         var start = await StartAsync(client, request);
         var user = await CreateUserAsync(app.Services, password: true);
-        var exchangeCode = await CompleteAttemptAsync(app.Services, start.AttemptId, user.Id);
+        byte[] avatar = [0xFF, 0xD8, 0xFF, 0xE0];
+        var exchangeCode = await CompleteAttemptAsync(
+            app.Services,
+            start.AttemptId,
+            user.Id,
+            avatar);
         var exchange = new ExternalAuthExchangeRequest(start.AttemptId, exchangeCode, verifier);
 
         var first = await client.PostAsJsonAsync("/api/v1/auth/external/exchange", exchange);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.NotNull(await first.Content.ReadFromJsonAsync<AuthResponse>());
+        await using (var scope = app.Services.CreateAsyncScope())
+        {
+            var updated = await scope.ServiceProvider.GetRequiredService<CastmillDbContext>()
+                .Users.AsNoTracking().SingleAsync(candidate => candidate.Id == user.Id);
+            Assert.Equal(avatar, updated.AvatarImage);
+            Assert.Equal("image/jpeg", updated.AvatarContentType);
+        }
 
         var replay = await client.PostAsJsonAsync("/api/v1/auth/external/exchange", exchange);
         Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
@@ -979,7 +1002,8 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
     private static async Task<string> CompleteAttemptAsync(
         IServiceProvider services,
         Guid attemptId,
-        Guid userId)
+        Guid userId,
+        byte[]? avatar = null)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CastmillDbContext>();
@@ -1000,6 +1024,10 @@ public sealed class ExternalAuthEndpointTests(CastmillApiFactory factory)
                 .SetProperty(attempt => attempt.CandidateProviderKey, providerKey)
                 .SetProperty(attempt => attempt.CandidateEmail, user.Email)
                 .SetProperty(attempt => attempt.CandidateDisplayName, user.DisplayName)
+                .SetProperty(attempt => attempt.CandidateAvatarImage, avatar)
+                .SetProperty(
+                    attempt => attempt.CandidateAvatarContentType,
+                    avatar == null ? null : "image/jpeg")
                 .SetProperty(attempt => attempt.CompletedAt, DateTimeOffset.UtcNow));
         return exchangeCode;
     }

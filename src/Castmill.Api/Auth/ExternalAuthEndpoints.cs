@@ -538,6 +538,7 @@ public static class ExternalAuthEndpoints
 
             var resolvedUser = user
                 ?? throw new InvalidOperationException("External account creation returned no user.");
+            await UpdateAvatarAsync(db, resolvedUser.Id, current, ct);
             var tokens = await tokenIssuer.IssueAsync(resolvedUser, Guid.NewGuid(), now, ct);
             await db.ExternalAuthAttempts.Where(candidate => candidate.Id == current.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.UserId, resolvedUser.Id), ct);
@@ -659,6 +660,7 @@ public static class ExternalAuthEndpoints
                 await transaction.RollbackAsync(ct);
                 return ExternalAuthErrors.LoginAlreadyAssociated;
             }
+            await UpdateAvatarAsync(db, user.Id, current, ct);
             db.AuditEvents.Add(new AuditEvent
             {
                 Id = Guid.NewGuid(),
@@ -754,6 +756,25 @@ public static class ExternalAuthEndpoints
                 Error(StatusCodes.Status404NotFound, ExternalAuthErrors.LoginNotLinked),
             _ => Error(StatusCodes.Status409Conflict, ExternalAuthErrors.LastLoginMethod),
         };
+    }
+
+    private static Task UpdateAvatarAsync(
+        CastmillDbContext db,
+        Guid userId,
+        ExternalAuthAttempt attempt,
+        CancellationToken ct)
+    {
+        if (attempt.CandidateAvatarImage is not { Length: > 0 } image
+            || string.IsNullOrWhiteSpace(attempt.CandidateAvatarContentType))
+        {
+            return Task.CompletedTask;
+        }
+
+        return db.Users
+            .Where(user => user.Id == userId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(user => user.AvatarImage, image)
+                .SetProperty(user => user.AvatarContentType, attempt.CandidateAvatarContentType), ct);
     }
 
     private static ExternalAuthProviderCredentials? CredentialsFor(

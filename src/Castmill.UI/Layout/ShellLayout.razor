@@ -41,6 +41,16 @@ else
                 <span class="cm-kicker">@PhaseLabel</span>
                 <div class="cm-topbar__spacer"></div>
                 <a class="cm-meta" href="dev/style-guide">Style guide</a>
+                @if (Auth.AvatarDataUrl is { } avatarUrl)
+                {
+                    <img class="cm-user-avatar" src="@avatarUrl" alt="" />
+                }
+                else
+                {
+                    <span class="cm-user-avatar cm-user-avatar--fallback" aria-hidden="true">
+                        @UserInitials
+                    </span>
+                }
                 <span class="cm-meta">@Auth.User?.Email</span>
                 <button type="button" class="cm-button cm-button--quiet" @onclick="SignOutAsync">
                     Sign out
@@ -60,6 +70,26 @@ else
 
 @code {
     private const string PhaseLabel = "the mill · F5–F7";
+
+    private string UserInitials
+    {
+        get
+        {
+            var source = Auth.User?.DisplayName;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                source = Auth.User?.Email?.Split('@')[0];
+            }
+
+            var parts = source?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
+            return parts.Length switch
+            {
+                0 => "?",
+                1 => parts[0][..1].ToUpperInvariant(),
+                _ => string.Concat(parts[0][0], parts[^1][0]).ToUpperInvariant(),
+            };
+        }
+    }
 
     private bool _railOpen;
 

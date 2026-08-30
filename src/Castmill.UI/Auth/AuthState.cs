@@ -13,6 +13,8 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
 
     public MeResponse? User { get; private set; }
 
+    public string? AvatarDataUrl { get; private set; }
+
     public bool? HasPassword { get; private set; }
 
     public bool IsSignedIn => tokens.IsSignedIn && User is not null;
@@ -79,6 +81,7 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         }
 
         User = null;
+        AvatarDataUrl = null;
         HasPassword = null;
         await tokens.ClearAsync();
         Changed?.Invoke();
@@ -98,10 +101,12 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         try
         {
             User = await auth.MeAsync();
+            AvatarDataUrl = User.HasAvatar ? await LoadAvatarAsync() : null;
         }
         catch (Http.ApiException)
         {
             User = null;
+            AvatarDataUrl = null;
             HasPassword = null;
             return;
         }
@@ -116,11 +121,31 @@ public sealed class AuthState(IAuthTokenProvider tokens, AuthClient auth) : IDis
         }
     }
 
+    private async Task<string?> LoadAvatarAsync()
+    {
+        try
+        {
+            var avatar = await auth.AvatarAsync();
+            if (avatar.Bytes.Length > 256 * 1024
+                || avatar.ContentType is not ("image/jpeg" or "image/png" or "image/webp" or "image/gif"))
+            {
+                return null;
+            }
+
+            return $"data:{avatar.ContentType};base64,{Convert.ToBase64String(avatar.Bytes)}";
+        }
+        catch (Exception exception) when (exception is Http.ApiException or HttpRequestException)
+        {
+            return null;
+        }
+    }
+
     private void OnTokensChanged()
     {
         if (!tokens.IsSignedIn)
         {
             User = null;
+            AvatarDataUrl = null;
             HasPassword = null;
         }
 

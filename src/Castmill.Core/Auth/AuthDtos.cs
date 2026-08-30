@@ -28,4 +28,9 @@ public sealed record AuthResponse(
     string RefreshToken,
     DateTimeOffset RefreshTokenExpiresAt);
 
-public sealed record MeResponse(Guid UserId, Guid TenantId, string Email, string DisplayName);
+public sealed record MeResponse(
+    Guid UserId,
+    Guid TenantId,
+    string Email,
+    string DisplayName,
+    bool HasAvatar = false);

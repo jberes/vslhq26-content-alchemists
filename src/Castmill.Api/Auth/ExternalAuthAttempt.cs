@@ -12,6 +12,8 @@ public sealed class ExternalAuthAttempt
     public string? CandidateProviderKey { get; set; }
     public string? CandidateEmail { get; set; }
     public string? CandidateDisplayName { get; set; }
+    public byte[]? CandidateAvatarImage { get; set; }
+    public string? CandidateAvatarContentType { get; set; }
     public string? LoopbackReturnUri { get; set; }
     public required string Status { get; set; }
     public string? ErrorCode { get; set; }

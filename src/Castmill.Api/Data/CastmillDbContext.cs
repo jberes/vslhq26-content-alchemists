@@ -43,6 +43,13 @@ public sealed class CastmillDbContext(
     {
         base.OnModelCreating(builder);
 
+        builder.Entity<CastmillUser>(entity =>
+        {
+            entity.Property(user => user.AvatarImage)
+                .HasMaxLength(ExternalAvatarCaptureService.MaxAvatarBytes);
+            entity.Property(user => user.AvatarContentType).HasMaxLength(50);
+        });
+
         builder.Entity<IdentityUserLogin<Guid>>()
             .HasIndex(login => new { login.UserId, login.LoginProvider })
             .IsUnique();
@@ -402,6 +409,9 @@ public sealed class CastmillDbContext(
             e.Property(a => a.CandidateProviderKey).HasMaxLength(256);
             e.Property(a => a.CandidateEmail).HasMaxLength(320);
             e.Property(a => a.CandidateDisplayName).HasMaxLength(200);
+            e.Property(a => a.CandidateAvatarImage)
+                .HasMaxLength(ExternalAvatarCaptureService.MaxAvatarBytes);
+            e.Property(a => a.CandidateAvatarContentType).HasMaxLength(50);
             e.Property(a => a.LoopbackReturnUri).HasMaxLength(512);
             e.Property(a => a.Status).HasMaxLength(20);
             e.Property(a => a.ErrorCode).HasMaxLength(100);

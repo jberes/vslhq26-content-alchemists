@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Castmill.Api.Data;
 using Castmill.Core.Auth;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.Api.Tests;
 
@@ -74,6 +77,41 @@ public sealed class AuthFlowTests(CastmillApiFactory factory)
     public async Task Me_without_token_returns_401()
     {
         var response = await _client.GetAsync("/api/v1/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Me_reports_and_serves_the_authenticated_users_avatar()
+    {
+        var (user, tokens) = await RegisterAsync();
+        byte[] avatar = [0xFF, 0xD8, 0xFF, 0xE0];
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CastmillDbContext>();
+            await db.Users.Where(candidate => candidate.Email == user.Email)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(candidate => candidate.AvatarImage, avatar)
+                    .SetProperty(candidate => candidate.AvatarContentType, "image/jpeg"));
+        }
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+        var me = await _client.GetFromJsonAsync<MeResponse>("/api/v1/me");
+        Assert.NotNull(me);
+        Assert.True(me.HasAvatar);
+
+        var response = await _client.GetAsync("/api/v1/me/avatar");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("image/jpeg", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(response.Headers.CacheControl?.Private);
+        Assert.Equal(TimeSpan.FromMinutes(5), response.Headers.CacheControl?.MaxAge);
+        Assert.Equal(avatar, await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task Avatar_without_token_returns_401()
+    {
+        var response = await _client.GetAsync("/api/v1/me/avatar");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

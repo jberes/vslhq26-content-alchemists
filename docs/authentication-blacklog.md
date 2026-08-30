@@ -68,6 +68,7 @@ Legend:
 - ✅ Handle denial, cancellation, expiry, duplicate completion, and provider outage.
 - ✅ Add Microsoft and Google controls to the shared sign-in screen, with readiness states.
 - ✅ Add linked-login management and external-only password UX.
+- ✅ Capture Microsoft 365 and Google avatars without persisting provider tokens, and render a shared initials fallback.
 - ✅ Validate real Microsoft Desktop OIDC, loopback proof, PKCE exchange, JWT `/me`, refresh rotation, logout, and SQL persistence.
 - ⏳ Validate the CoreGraphics-confirmed Mac Catalyst window with real provider sign-in.
 - ⏳ Validate Windows x64 on a real Windows host.
@@ -112,7 +113,7 @@ Legend:
 - ✅ Add concurrency tests proving one-time exchange permits one success.
 - ✅ Add cross-tenant and account-linking isolation tests.
 - ✅ Add no-secret/no-provider-token response checks.
-- ✅ Run the complete Docker-backed API/UI/Media suite after the logout-race fix (759/759 passed).
+- ✅ Run the complete Docker-backed API/UI/Media suite after provider-avatar support (770/770 passed).
 - ✅ Run browser/editor external-auth tests after callback retry and fragment hardening (53/53 passed).
 - ✅ Build Web and Mac Catalyst arm64 with zero warnings/errors and verify packaged static assets.
 - ⏳ Build and validate Windows x64 on a real Windows host.

@@ -29,6 +29,9 @@ public sealed class AuthClient(ApiClient api, HttpClient http)
     public Task<MeResponse> MeAsync(CancellationToken ct = default) =>
         api.GetAsync<MeResponse>("api/v1/me", ct);
 
+    public Task<DownloadedFile> AvatarAsync(CancellationToken ct = default) =>
+        api.DownloadAsync("api/v1/me/avatar", ct);
+
     public Task<ExternalAuthProviderStatusResponse> ProvidersAsync(CancellationToken ct = default) =>
         api.GetAnonymousAsync<ExternalAuthProviderStatusResponse>("api/v1/auth/external/providers", ct);
 

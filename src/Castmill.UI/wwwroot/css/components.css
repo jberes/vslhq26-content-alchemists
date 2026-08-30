@@ -313,6 +313,24 @@
     flex: 1 1 auto;
 }
 
+.cm-user-avatar {
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 2rem;
+    border: 1px solid var(--cm-rule);
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.cm-user-avatar--fallback {
+    display: inline-grid;
+    place-items: center;
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
 /* The rail toggle only exists below the sm breakpoint, where the rail is an overlay. */
 .cm-topbar__rail-toggle {
     display: none;

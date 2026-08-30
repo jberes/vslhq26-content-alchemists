@@ -67,6 +67,12 @@ builder.Services.AddScoped<IAuthTokenIssuer, AuthTokenIssuer>();
 builder.Services.AddScoped<IAccountService, AccountService>();
 builder.Services.AddScoped<IExternalIdentityResolver, ExternalIdentityResolver>();
 builder.Services.AddScoped<IExternalAuthCompletionService, ExternalAuthCompletionService>();
+builder.Services.AddHttpClient<IExternalAvatarCaptureService, ExternalAvatarCaptureService>(client =>
+    client.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+    });
 builder.Services.AddOptions<ExternalAuthOptions>()
     .Bind(builder.Configuration.GetSection(ExternalAuthOptions.SectionName))
     .ValidateDataAnnotations()
@@ -525,15 +531,45 @@ app.MapGitPublishEndpoints();
 app.MapScheduleEndpoints();
 app.MapSeoEndpoints();
 
-app.MapGet("/api/v1/me", (ClaimsPrincipal principal) =>
+app.MapGet("/api/v1/me", async (
+    ClaimsPrincipal principal,
+    CastmillDbContext db,
+    CancellationToken ct) =>
     {
+        var userId = AuthEndpoints.GetUserId(principal);
+        var hasAvatar = await db.Users.AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.AvatarImage != null)
+            .SingleAsync(ct);
         var email = principal.FindFirstValue(ClaimTypes.Email) ?? principal.FindFirstValue("email") ?? string.Empty;
         var name = principal.FindFirstValue("name") ?? string.Empty;
         return Results.Ok(new MeResponse(
-            AuthEndpoints.GetUserId(principal),
+            userId,
             AuthEndpoints.GetTenantId(principal),
             email,
-            name));
+            name,
+            hasAvatar));
+    })
+    .RequireAuthorization("TenantAllowed");
+
+app.MapGet("/api/v1/me/avatar", async (
+    ClaimsPrincipal principal,
+    CastmillDbContext db,
+    HttpContext context,
+    CancellationToken ct) =>
+    {
+        var avatar = await db.Users.AsNoTracking()
+            .Where(user => user.Id == AuthEndpoints.GetUserId(principal))
+            .Select(user => new { user.AvatarImage, user.AvatarContentType })
+            .SingleAsync(ct);
+        if (avatar.AvatarImage is not { Length: > 0 } image
+            || ExternalAvatarCaptureService.CanonicalContentType(avatar.AvatarContentType) is not { } contentType)
+        {
+            return Results.NotFound();
+        }
+
+        context.Response.Headers.CacheControl = "private, max-age=300";
+        return Results.File(image, contentType);
     })
     .RequireAuthorization("TenantAllowed");
 

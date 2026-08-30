@@ -38,6 +38,7 @@ public static class ExternalAuthSchemes
                 options.Authority = "https://login.microsoftonline.com/common/v2.0";
                 options.ClientId = external.Providers.Microsoft.ClientId;
                 options.ClientSecret = external.Providers.Microsoft.ClientSecret;
+                options.Scope.Add("User.Read");
                 options.TokenValidationParameters.IssuerValidator =
                     ExternalIdentityResolver.ValidateMicrosoftIssuer;
             });
@@ -111,12 +112,24 @@ public static class ExternalAuthSchemes
         options.NonceCookie.SameSite = SameSiteMode.None;
         options.NonceCookie.SecurePolicy = CookieSecurePolicy.Always;
 
-        options.Events.OnTokenValidated = context =>
+        options.Events.OnTokenValidated = async context =>
         {
             ExternalIdentityResolver.AddValidatedIssuerClaim(
                 context.Principal,
                 context.SecurityToken.Issuer);
-            return Task.CompletedTask;
+            if (context.Properties is { } properties
+                && properties.Items.TryGetValue(AttemptIdProperty, out var value)
+                && Guid.TryParse(value, out var attemptId)
+                && context.TokenEndpointResponse?.AccessToken is { Length: > 0 } accessToken)
+            {
+                var avatars = context.HttpContext.RequestServices
+                    .GetRequiredService<IExternalAvatarCaptureService>();
+                await avatars.CaptureAsync(
+                    attemptId,
+                    provider,
+                    accessToken,
+                    context.HttpContext.RequestAborted);
+            }
         };
         options.Events.OnTicketReceived = context => CompleteTicketAsync(context, provider);
 
