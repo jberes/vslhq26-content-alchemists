@@ -310,10 +310,28 @@ This document records the product, interaction, API, persistence, test, and depl
 ## Release state at document creation
 
 - The feature and regression gates above are complete.
-- The disposable local SQL container remains temporary and is not part of the release.
-- This document must be committed with the source, migrations, tests, E2E baseline, and approved Wire design handoff.
-- Git diff, whitespace, secret scanning, Azure preflight, push, migration application, deployment, and production smoke verification follow this document and should be recorded below when complete.
+- The disposable local SQL container remained temporary and was not part of the release.
+- This document was committed with the source, migrations, tests, E2E baseline, and approved Wire design handoff.
+- The validated feature commit is `871df8832b5c22c9bf8588d1c088b4701086b624` (`Ship The Wire and scheduling polish`).
+- The feature commit was pushed to `origin/main` before deployment.
 
 ## Deployment result
 
-- Pending at document creation.
+- Confirmed the production target as subscription `Dean Guida Credit Card`, resource group `rg-apps-demo`, region East US.
+- Confirmed East US App Service availability for the existing target.
+- Compiled the App Service Bicep with zero diagnostics.
+- Passed `infra/deploy-appservice.sh validate` and Bicep linting.
+- Reviewed ARM what-if: 0 creates, 0 deletes, 6 metadata/config convergences, 1 unchanged resource, and 39 ignored resources.
+- Verified the production App Service was Running, HTTPS-only, on .NET 10, with the intended user-assigned managed identity attached.
+- Verified live Storage RBAC for that identity: Blob Data Contributor, Blob Delegator, and Queue Data Contributor at Storage-account scope.
+- Passed Release publish and combined API/Blazor package inspection.
+- Generated and inspected an idempotent migration script containing both new migration IDs and expected columns with no secret markers.
+- Applied migrations `20260831010942_ImageVariantLocks` and `20260831042547_WireSentDeliveryContract` to production Azure SQL.
+- Deployed the combined package to the existing App Service.
+- Active Kudu deployment: `05fd8cab-ca0b-418f-ab66-d3c572878105`, status successful and complete.
+- Production URL: [https://azappdzrs2vrhk6ote.azurewebsites.net](https://azappdzrs2vrhk6ote.azurewebsites.net).
+- Verified production `/health` and `/health/db` both return HTTP 200 and healthy payloads.
+- Verified root, deep `/wire`, and the current `castmill-wire.js?v=2` asset return HTTP 200.
+- Verified the development demo-credentials endpoint returns HTTP 404 in Production.
+- Verified in a real browser that `/wire` boots Blazor and redirects to `/sign-in?returnUrl=wire`.
+- Verified the production sign-in page renders, Microsoft sign-in is available, and the page has no horizontal overflow.
