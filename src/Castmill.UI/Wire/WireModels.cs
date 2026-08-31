@@ -13,19 +13,10 @@ public enum WireDeliveryStatus
     Blocked,
 }
 
-public enum WirePipelineColumn
-{
-    Ready,
-    Queued,
-    Sent,
-    Attention,
-}
-
 public enum WireViewMode
 {
     RunOfShow,
     Pipeline,
-    Agenda,
 }
 
 public sealed record WireMetrics(

@@ -1,3 +1,6 @@
+@* The Wire (workspace scope): what leaves the mill, and when — all campaigns. Two
+   projections of one loaded data set: Run of show (time × day) and Pipeline (status).
+   Always a 7-day window; Prev/Next move a week at a time. *@
 @page "/wire"
 @using System.Globalization
 @using Castmill.Core.Resources
@@ -12,8 +15,6 @@
 @inject NavigationManager Navigation
 @inject WorkspaceState Workspace
 @inject TimeProvider Clock
-@inject IJSRuntime JS
-@implements IAsyncDisposable
 
 <PageTitle>The Wire — Castmill</PageTitle>
 
@@ -29,83 +30,67 @@
     }
     else if (_data is not null)
     {
-        <section @ref="_wireSurface" class="cm-run-show @(_view == WireViewMode.Pipeline ? "cm-run-show--pipeline" : null)"
-                 aria-labelledby="cm-wire-title">
-            <header class="cm-run-show__header">
-                <div>
-                    <span class="cm-run-show__kicker">@(_view == WireViewMode.Pipeline ? "The Wire · Pipeline" : "The Wire")</span>
-                    <h1 id="cm-wire-title">@ViewTitle</h1>
-                    @if (_view != WireViewMode.Pipeline)
-                    {
-                        <div class="cm-run-show__states" aria-label="Schedule summary">
-                            <IgbChip class="cm-run-show__chip" Outlined="true">@Count(WireDeliveryStatus.Queued, WireDeliveryStatus.Staged) queued</IgbChip>
-                            <IgbChip>@Count(WireDeliveryStatus.Sent) sent</IgbChip>
-                            <IgbChip class="cm-run-show__chip cm-run-show__chip--accent">@_data.Queue.Count ready to schedule</IgbChip>
-                            <span class="cm-run-show__zone">@_data.TimeZone</span>
-                        </div>
-                    }
+        <section class="cm-run-show" aria-labelledby="cm-wire-title">
+            <div class="cm-run-show__measure">
+            <header class="cm-front__head cm-run-show__head">
+                <div class="cm-run-show__titles">
+                    <span class="cm-kicker">Workspace</span>
+                    <h1 id="cm-wire-title">The Wire</h1>
+                    <p class="cm-run-show__sub">What leaves the mill, and when — every campaign on one timeline. Times in @_data.TimeZone.</p>
                 </div>
-                <div class="cm-run-show__controls" aria-label="Wire controls">
-                    <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Wire view">
-                        <IgbToggleButton Value="run" Selected="@(_view == WireViewMode.RunOfShow)" Disabled="@_narrow"
-                                         @onclick="() => SelectView(WireViewMode.RunOfShow)">Run of show</IgbToggleButton>
-                        <IgbToggleButton Value="pipeline" Selected="@(_view == WireViewMode.Pipeline)" Disabled="@_narrow"
-                                         @onclick="() => SelectView(WireViewMode.Pipeline)">Pipeline</IgbToggleButton>
-                        <IgbToggleButton Value="agenda" Selected="@(_view == WireViewMode.Agenda)"
-                                         @onclick="() => SelectView(WireViewMode.Agenda)">Agenda</IgbToggleButton>
-                    </IgbButtonGroup>
-                    @if (_view != WireViewMode.Pipeline)
-                    {
-                        <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Schedule range">
-                            <IgbToggleButton Value="week" Selected="@(_data.RangeDays == 7)" @onclick="() => ChangeRangeAsync(7)">Week</IgbToggleButton>
-                            <IgbToggleButton Value="fortnight" Selected="@(_data.RangeDays == 14)" @onclick="() => ChangeRangeAsync(14)">Fortnight</IgbToggleButton>
-                        </IgbButtonGroup>
-                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(-1)">← Prev</IgbButton>
-                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(1)">Next →</IgbButton>
-                    }
-                </div>
+                <IgbButtonGroup class="cm-run-show__controls" Selection="ButtonGroupSelection.Single" aria-label="Wire view">
+                    <IgbToggleButton Value="run" Selected="@(_view == WireViewMode.RunOfShow)"
+                                     @onclick="() => _view = WireViewMode.RunOfShow">Run of show</IgbToggleButton>
+                    <IgbToggleButton Value="pipeline" Selected="@(_view == WireViewMode.Pipeline)"
+                                     @onclick="() => _view = WireViewMode.Pipeline">Pipeline</IgbToggleButton>
+                </IgbButtonGroup>
             </header>
 
-            @switch (_view)
+            @if (_view != WireViewMode.Pipeline)
             {
-                case WireViewMode.Pipeline:
-                    <PipelineView Data="_data"
-                                  CampaignOnly="_campaignOnly"
-                                  CampaignId="Workspace.Active?.Id"
-                                  CampaignOnlyChanged="SetCampaignOnly"
-                                  EditQueue="EditQueueAsync"
-                                  Edit="EditScheduleAsync"
-                                  Export="EditScheduleAsync"
-                                  Slot="ApplySlotAsync"
-                                  Retry="RetryAsync"
-                                  Unschedule="UnscheduleAsync"
-                                  ConnectBroker="OpenSettings" />
-                    break;
-                case WireViewMode.Agenda:
-                    <AgendaView Data="_data"
-                                Narrow="_narrow"
-                                EditQueue="EditQueueAsync"
-                                Edit="EditScheduleAsync"
-                                Export="EditScheduleAsync"
-                                Slot="ApplySlotAsync" />
-                    break;
-                default:
-                    <RunOfShowView Data="_data"
-                                   ShowHeader="false"
-                                   Edit="EditQueueAsync"
-                                   Slot="ApplySlotAsync"
-                                   Retry="RetryAsync"
-                                   RangeDaysChanged="ChangeRangeAsync"
-                                   NavigateRange="NavigateRangeAsync"
-                                   ConnectBroker="OpenSettings" />
-                    break;
+                <div class="cm-run-show__range">
+                    <h2 id="cm-wire-range">Week of @_data.RangeStart.ToString("d MMM", CultureInfo.CurrentCulture)</h2>
+                    <div class="cm-run-show__states" aria-label="Schedule summary">
+                        <IgbChip class="cm-run-show__chip" Outlined="true">@Count(WireDeliveryStatus.Queued, WireDeliveryStatus.Staged) queued</IgbChip>
+                        <IgbChip>@Count(WireDeliveryStatus.Sent) sent</IgbChip>
+                        <IgbChip class="cm-run-show__chip cm-run-show__chip--accent">@_data.Queue.Count ready to schedule</IgbChip>
+                    </div>
+                    <div class="cm-run-show__nav" aria-label="Schedule range">
+                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(-1)">← Prev</IgbButton>
+                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(1)">Next →</IgbButton>
+                    </div>
+                </div>
             }
+
+            @if (_view == WireViewMode.Pipeline)
+            {
+                <PipelineView Data="_data"
+                              CampaignOnly="_campaignOnly"
+                              CampaignId="Workspace.Active?.Id"
+                              CampaignOnlyChanged="SetCampaignOnly"
+                              EditQueue="EditQueueAsync"
+                              Edit="EditScheduleAsync"
+                              Export="EditScheduleAsync"
+                              Slot="ApplySlotAsync"
+                              Retry="RetryAsync"
+                              Unschedule="UnscheduleAsync"
+                              ConnectBroker="OpenSettings" />
+            }
+            else
+            {
+                <RunOfShowView Data="_data"
+                               Edit="EditQueueAsync"
+                               Slot="ApplySlotAsync"
+                               Retry="RetryAsync"
+                               ConnectBroker="OpenSettings" />
+            }
+            </div>
         </section>
     }
     else
     {
         <section class="cm-run-show" role="alert">
-            <span class="cm-run-show__kicker">The Wire</span>
+            <span class="cm-kicker">The Wire</span>
             <p>@(_loadError ?? "The schedule could not be loaded.")</p>
             <IgbButton Variant="ButtonVariant.Outlined" @onclick="LoadInitialAsync">Retry</IgbButton>
         </section>
@@ -113,7 +98,7 @@
 </div>
 
 @code {
-    private const string WireModulePath = "./_content/Castmill.UI/js/castmill-wire.js?v=2";
+    private const int RangeDays = 7;
     private readonly TimeZoneInfo _zone = TimeZoneInfo.Local;
     private DashboardResponse? _dashboard;
     private List<ScheduleEntryResponse> _schedule = [];
@@ -121,16 +106,10 @@
     private IReadOnlyList<PublishChannel> _channels = [];
     private WireBoardData? _data;
     private DateOnly _rangeStart;
-    private int _rangeDays = 7;
     private bool _loading = true;
-    private bool _narrow;
     private bool _campaignOnly;
     private string? _loadError;
     private WireViewMode _view = WireViewMode.RunOfShow;
-    private ElementReference _wireSurface;
-    private IJSObjectReference? _wireModule;
-    private IJSObjectReference? _resizeObserver;
-    private DotNetObjectReference<Wire>? _selfReference;
 
     protected override async Task OnInitializedAsync()
     {
@@ -139,32 +118,13 @@
         await LoadInitialAsync();
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_data is null || _wireModule is not null)
-        {
-            return;
-        }
-
-        try
-        {
-            _wireModule = await JS.InvokeAsync<IJSObjectReference>("import", WireModulePath);
-            _selfReference = DotNetObjectReference.Create(this);
-            _resizeObserver = await _wireModule.InvokeAsync<IJSObjectReference>(
-                "observeWidth", _wireSurface, _selfReference, 1100d);
-        }
-        catch (JSException)
-        {
-        }
-    }
-
     private async Task LoadInitialAsync()
     {
         _loading = true;
         _loadError = null;
         try
         {
-            var bounds = WireBoardMapper.UtcRange(_rangeStart, _rangeDays, _zone);
+            var bounds = WireBoardMapper.UtcRange(_rangeStart, RangeDays, _zone);
             var dashboardTask = Campaigns.GetDashboardAsync();
             var scheduleTask = Schedule.ListAsync(bounds.From, bounds.To);
             var readinessTask = Publish.GetReadinessAsync();
@@ -190,7 +150,7 @@
     {
         try
         {
-            var bounds = WireBoardMapper.UtcRange(_rangeStart, _rangeDays, _zone);
+            var bounds = WireBoardMapper.UtcRange(_rangeStart, RangeDays, _zone);
             _schedule = await Schedule.ListAsync(bounds.From, bounds.To);
             RebuildData();
         }
@@ -209,7 +169,7 @@
 
         _data = WireBoardMapper.Create(
             _rangeStart,
-            _rangeDays,
+            RangeDays,
             _dashboard,
             _schedule,
             _readiness,
@@ -311,19 +271,9 @@
         }
     }
 
-    private async Task ChangeRangeAsync(int days)
-    {
-        if (_rangeDays == days)
-        {
-            return;
-        }
-        _rangeDays = days;
-        await LoadRangeAsync();
-    }
-
     private async Task NavigateRangeAsync(int direction)
     {
-        _rangeStart = _rangeStart.AddDays(direction * _rangeDays);
+        _rangeStart = _rangeStart.AddDays(direction * RangeDays);
         await LoadRangeAsync();
     }
 
@@ -349,74 +299,14 @@
 
     private void OpenSettings() => Navigation.NavigateTo("/settings");
 
-    private string ViewTitle => _view == WireViewMode.Pipeline
-        ? $"{_data!.Queue.Count + _data.Items.Count} items in flight"
-        : $"{(_data!.RangeDays == 14 ? "Fortnight" : "Week")} of {_data.RangeStart.ToString("d MMM", CultureInfo.CurrentCulture)}";
-
     private int Count(params WireDeliveryStatus[] states) =>
         _data?.Items.Count(item => states.Contains(item.Status)) ?? 0;
 
-    private void SelectView(WireViewMode view)
-    {
-        if (_narrow && view != WireViewMode.Agenda)
-        {
-            return;
-        }
-
-        _view = view;
-    }
-
     private void SetCampaignOnly(bool campaignOnly) => _campaignOnly = campaignOnly;
-
-    [JSInvokable]
-    public Task WireWidthChanged(double width)
-    {
-        var narrow = width < 1100d;
-        if (_narrow == narrow)
-        {
-            return Task.CompletedTask;
-        }
-
-        _narrow = narrow;
-        if (_narrow && _view != WireViewMode.Agenda)
-        {
-            _view = WireViewMode.Agenda;
-        }
-
-        return InvokeAsync(StateHasChanged);
-    }
 
     private static DateOnly StartOfWeek(DateOnly date)
     {
         var offset = ((int)date.DayOfWeek + 6) % 7;
         return date.AddDays(-offset);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_resizeObserver is not null)
-        {
-            try
-            {
-                await _resizeObserver.InvokeVoidAsync("dispose");
-                await _resizeObserver.DisposeAsync();
-            }
-            catch (JSDisconnectedException)
-            {
-            }
-        }
-
-        if (_wireModule is not null)
-        {
-            try
-            {
-                await _wireModule.DisposeAsync();
-            }
-            catch (JSDisconnectedException)
-            {
-            }
-        }
-
-        _selfReference?.Dispose();
     }
 }

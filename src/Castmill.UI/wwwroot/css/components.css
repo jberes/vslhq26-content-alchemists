@@ -468,7 +468,8 @@
 .cm-authframe {
     display: grid;
     place-items: center;
-    min-block-size: 100dvh;
+    /* %, not dvh — see .cm-app in layout.css. */
+    min-block-size: 100%;
     padding: var(--cm-space-6);
 }
 

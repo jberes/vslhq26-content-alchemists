@@ -31,7 +31,10 @@
 .cm-app {
     display: grid;
     grid-template-columns: var(--cm-rail-width) minmax(0, 1fr);
-    grid-template-rows: 100dvh;
+    /* Percentage, not dvh: viewport units ignore the desktop shells' zoom/font scale,
+       which left a dead strip under the app. The % chain runs html → body → here. */
+    grid-template-rows: minmax(0, 1fr);
+    block-size: 100%;
     /* min-inline-size 0 on the content track is what actually prevents page-level
        horizontal scroll: without it a wide child (the swimlane board, a keyword table)
        sets the track's intrinsic width and the whole page scrolls sideways. */

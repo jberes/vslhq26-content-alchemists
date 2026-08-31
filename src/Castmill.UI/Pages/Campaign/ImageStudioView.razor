@@ -147,6 +147,22 @@
                                 <header class="cm-studio__group-head">
                                     <span class="cm-kicker">@ArtifactDisplay.KindLabel(item.Kind)</span>
                                     <p class="cm-studio__content-title">@item.Title</p>
+                                    @{ var groupPlan = PlanFor(slots); }
+                                    @if (StudioRun.IsBatchRunning && StudioRun.BatchArtifactId == item.Id)
+                                    {
+                                        <span class="cm-studio__group-progress cm-mono" role="status" aria-live="polite">
+                                            generating @(StudioRun.BatchProgress?.Completed ?? 0)/@(StudioRun.BatchProgress?.TotalKinds ?? groupPlan.TotalEvents)
+                                        </span>
+                                    }
+                                    else if (groupPlan.MissingVariants > 0)
+                                    {
+                                        <button type="button" class="cm-studio__group-generate"
+                                                disabled="@(StudioRun.IsRunning || StudioRun.IsBatchRunning)"
+                                                title="Generate the @groupPlan.MissingVariants missing @(groupPlan.MissingVariants == 1 ? "image" : "images") for this content piece"
+                                                @onclick="() => GeneratePendingForAsync(item.Id)">
+                                            Generate @groupPlan.MissingVariants
+                                        </button>
+                                    }
                                     <span class="cm-studio__fill cm-mono">@slots.Count(s => s.State == "Filled")/@slots.Count</span>
                                 </header>
                                 <div class="cm-studio__tiles">
@@ -1421,16 +1437,17 @@
         public int TotalEvents => MissingVariants + SkippedSlots;
     }
 
-    private BatchPlan CurrentBatchPlan
+    private BatchPlan CurrentBatchPlan => PlanFor(Campaign.ImageSlots);
+
+    private BatchPlan PlanFor(IEnumerable<ImageSlotResponse> slots)
     {
-        get
         {
             var eligible = 0;
             var missing = 0;
             var skipped = 0;
             var baselineEstimate = true;
             var modelValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var slot in Campaign.ImageSlots)
+            foreach (var slot in slots)
             {
                 var remaining = Math.Max(0, _batchTakeTarget - slot.ActiveTakeCount);
                 var references = ProductAssets.Count > 0 || slot.ReferenceAssetIds is { Count: > 0 };
@@ -1457,6 +1474,18 @@
                 eligible, missing, skipped,
                 baselineEstimate && modelValues.Count == 1);
         }
+    }
+
+    /// <summary>Starts the pending-image batch narrowed to one content piece (§group header).</summary>
+    private async Task GeneratePendingForAsync(Guid artifactId)
+    {
+        if (PlanFor(SlotsFor(artifactId)).MissingVariants == 0)
+        {
+            return;
+        }
+        await SavePromptAsync();
+        _handledBatchRun = null;
+        StudioRun.StartBatch(CampaignId, _batchTakeTarget, artifactId);
     }
 
     private ImageModelChoice? BatchModel(ImageSlotResponse slot)

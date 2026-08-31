@@ -44,6 +44,9 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
 
     public bool IsBatchRunning { get; private set; }
 
+    /// <summary>The content item a running batch was narrowed to; null = whole campaign.</summary>
+    public Guid? BatchArtifactId { get; private set; }
+
     public string? BatchError { get; private set; }
 
     public event Action? Changed;
@@ -83,6 +86,7 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
         BatchProgress = null;
         BatchResult = null;
         BatchError = null;
+        BatchArtifactId = artifactId;
         IsBatchRunning = true;
         _clock.Restart();
         Changed?.Invoke();
@@ -120,6 +124,8 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
         BatchProgress = latest;
         BatchResult = null;
         BatchError = null;
+        // An adopted run's original scope is unknown — treat it as campaign-wide.
+        BatchArtifactId = null;
         IsBatchRunning = true;
         _clock.Restart();
         Changed?.Invoke();

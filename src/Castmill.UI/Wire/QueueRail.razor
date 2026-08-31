@@ -1,46 +1,25 @@
 @namespace Castmill.UI.Scheduling
 
-<aside class="cm-run-show__queue cm-wire-queue @(Compact ? "cm-wire-queue--compact" : null)" aria-label="Ready to schedule">
-    @if (Compact)
-    {
-        <button type="button" class="cm-wire-queue__bar"
-            aria-expanded="@(_expanded ? "true" : "false")" aria-controls="cm-wire-queue-content"
-                @onclick="ToggleExpanded">
-            <span>@Items.Count unscheduled</span>
-            <span aria-hidden="true">@(_expanded ? "−" : "+")</span>
-        </button>
-    }
-
-    <div id="cm-wire-queue-content" class="cm-wire-queue__content" hidden="@(Compact && !_expanded)">
-        <header class="cm-run-show__section-head">
-            <span>Ready to schedule</span>
-            <span>@Items.Count</span>
-        </header>
-        <ul class="cm-run-show__queue-list">
-            @foreach (var item in Items)
-            {
-                <QueueCard Item="item"
-                           Edit="Edit"
-                           Slot="Slot"
-                           DragStarted="DragStarted"
-                           DragEnded="DragEnded" />
-            }
-        </ul>
-        <div class="cm-run-show__footnote blueprint">
-            Clips need a durable published URL before scheduling. Local paths and worker links are never sent to the broker.
-        </div>
+<aside class="cm-run-show__queue cm-wire-queue" aria-label="Ready to schedule">
+    <header class="cm-run-show__section-head">
+        <span>Ready to schedule</span>
+        <span>@Items.Count</span>
+    </header>
+    <ul class="cm-run-show__queue-list">
+        @foreach (var item in Items)
+        {
+            <QueueCard Item="item"
+                       Edit="Edit"
+                       Slot="Slot" />
+        }
+    </ul>
+    <div class="cm-run-show__footnote blueprint">
+        Clips need a durable published URL before scheduling. Local paths and worker links are never sent to the broker.
     </div>
 </aside>
 
 @code {
-    private bool _expanded;
-
     [Parameter, EditorRequired] public IReadOnlyList<WireQueueItem> Items { get; set; } = [];
-    [Parameter] public bool Compact { get; set; }
     [Parameter] public EventCallback<WireQueueItem> Edit { get; set; }
     [Parameter] public EventCallback<WireQueueItem> Slot { get; set; }
-    [Parameter] public EventCallback<WireQueueItem> DragStarted { get; set; }
-    [Parameter] public EventCallback DragEnded { get; set; }
-
-    private void ToggleExpanded() => _expanded = !_expanded;
 }

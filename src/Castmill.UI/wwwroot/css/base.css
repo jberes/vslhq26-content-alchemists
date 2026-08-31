@@ -86,14 +86,39 @@ html {
 }
 
 /* Catalyst's CSS-pixel density is visually smaller on the same Retina display. Keep the
-   accepted Desktop scale there without forcing browser users to zoom the Web shell out. */
-html.cm-shell-desktop {
+   accepted Desktop scale there without forcing browser users to zoom the Web shell out.
+   Mac only: Windows WebView2 already applies the OS display scale, so this bump on top
+   of it oversizes everything (the shell stamps data-cm-platform pre-paint). */
+html.cm-shell-desktop[data-cm-platform="mac"] {
     font-size: 125%;
+}
+
+/* The accepted Windows density is one browser-zoom tick below default (Ctrl+minus, 90%).
+   zoom rather than a root font-size because the design's px-sized chrome must scale too;
+   Windows-only, so only Chromium (WebView2) ever evaluates it. */
+html.cm-shell-desktop[data-cm-platform="windows"] body {
+    zoom: 0.9;
+}
+
+/* Windows paints classic gutter scrollbars where macOS overlays them. Thin, tinted
+   scrollbars keep every scroll region reading the same on both platforms. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--cm-on-surface) 28%, transparent) transparent;
 }
 
 body {
     margin: 0;
+    block-size: 100%;
     min-block-size: 100%;
+    /* The app owns all scrolling; the document itself must never scroll sideways. */
+    overflow-x: clip;
+}
+
+/* Both shells mount Blazor at #app, which sits between body and .cm-app — the 100%
+   height chain must pass through it or the app frame collapses to content height. */
+#app {
+    block-size: 100%;
     background: var(--cm-surface);
     color: var(--cm-on-surface);
     font-family: var(--cm-font-body);

@@ -3682,6 +3682,37 @@ button.cm-intent {
     font-variant-numeric: tabular-nums;
 }
 
+/* Per-piece batch: a compact generate control in the group header; while its run is
+   live the button gives way to an n/m increment readout (no spinners — ADR-F13). */
+.cm-studio__group-generate {
+    flex: none;
+    padding: 2px 10px;
+    border: 1px solid var(--cm-rule-strong);
+    background: transparent;
+    color: var(--cm-on-surface);
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-kicker);
+    cursor: pointer;
+    transition: border-color 200ms ease-out, color 200ms ease-out;
+}
+
+.cm-studio__group-generate:hover:not(:disabled) {
+    border-color: var(--cm-accent);
+    color: var(--cm-accent);
+}
+
+.cm-studio__group-generate:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.cm-studio__group-progress {
+    flex: none;
+    color: var(--cm-accent);
+    font-size: var(--cm-text-kicker);
+    font-variant-numeric: tabular-nums;
+}
+
 .cm-studio__tiles {
     display: flex;
     flex-wrap: wrap;
@@ -4816,55 +4847,95 @@ button.cm-intent {
 
 /* ---- The Wire (workspace scope) -------------------------------------------------- */
 
+/* The page never scrolls as a whole (G8): the header stays put and the queue rail and
+   timeline own their scrolling independently, so a drop target further down the week is
+   reachable mid-drag. */
 .cm-run-show {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
     min-inline-size: 0;
     min-block-size: 100%;
-    padding: 18px 22px 20px;
-    overflow: auto;
+    padding: var(--cm-space-4) var(--cm-space-6) var(--cm-space-6);
+    overflow: hidden;
     background: var(--cm-wire-bg);
     color: var(--cm-wire-ink);
 }
 
-.cm-run-show__header {
+/* Same capped, centred measure as the workspace dashboards (layout.css). */
+.cm-run-show__measure {
     display: flex;
-    align-items: flex-end;
-    gap: var(--cm-space-4);
-    margin-block-end: var(--cm-space-4);
+    flex-direction: column;
+    max-inline-size: var(--cm-content-max);
+    margin-inline: auto;
+    inline-size: 100%;
+    min-inline-size: 0;
+    min-block-size: 0;
 }
 
-.cm-run-show__projection {
+/* Below the fill tier the page scrolls normally (layout.css) — undo the inner scrolling. */
+@media (max-width: 1179.98px) {
+    .cm-run-show {
+        overflow: visible;
+    }
+
+    .cm-run-show__queue,
+    .cm-run-show__timeline,
+    .cm-pipeline {
+        max-block-size: none;
+        overflow: visible;
+    }
+}
+
+/* Same page anatomy as Front page and Campaigns (.cm-front__head): kicker → h1 → one
+   subtitle sentence, with the view switch hanging off the header's end. */
+.cm-run-show__head {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
+}
+
+.cm-run-show__titles {
     min-inline-size: 0;
 }
 
-.cm-run-show--pipeline {
-    background: var(--cm-wire-dark-bg);
-    color: var(--cm-wire-dark-ink);
+.cm-run-show__sub {
+    margin: var(--cm-space-2) 0 0;
+    color: color-mix(in srgb, var(--cm-wire-ink) 62%, transparent);
+    font-size: var(--cm-text-meta);
 }
 
-.cm-run-show--pipeline .cm-run-show__header h1 {
-    color: var(--cm-wire-dark-title);
+/* The week strip under the page header: range title, status chips, Prev/Next. */
+.cm-run-show__range {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-3);
+    margin-block-end: var(--cm-space-4);
 }
 
-.cm-run-show--pipeline .cm-run-show__kicker {
-    color: var(--cm-wire-dark-accent);
-}
-
-.cm-run-show__header h1 {
-    margin: 4px 0 3px;
-    color: var(--cm-wire-ink);
+.cm-run-show__range h2 {
+    margin: 0;
     font-family: var(--cm-font-display);
     font-size: var(--cm-text-h3);
     font-weight: 600;
 }
 
-.cm-run-show__kicker {
-    color: var(--cm-wire-accent);
-    font-family: var(--cm-font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    line-height: 1;
-    text-transform: uppercase;
+.cm-run-show__nav {
+    display: flex;
+    gap: var(--cm-space-2);
+    margin-inline-start: auto;
+}
+
+.cm-run-show__projection {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-inline-size: 0;
+    min-block-size: 0;
 }
 
 .cm-run-show__states {
@@ -4873,19 +4944,8 @@ button.cm-intent {
     gap: var(--cm-space-2);
 }
 
-.cm-run-show__zone {
-    color: color-mix(in srgb, var(--cm-wire-ink) 48%, transparent);
-    font-family: var(--cm-font-mono);
-    font-size: 10px;
-}
-
 .cm-run-show__controls {
-    display: flex;
-    align-items: center;
-    gap: var(--cm-space-2);
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    margin-inline-start: auto;
+    flex: none;
 }
 
 .cm-run-show__chip--accent {
@@ -4921,14 +4981,20 @@ button.cm-intent {
 
 .cm-run-show__frame {
     display: flex;
-    align-items: flex-start;
-    gap: 22px;
+    align-items: stretch;
+    gap: 28px;
+    flex: 1;
     min-inline-size: 0;
+    min-block-size: 0;
 }
 
+/* The rail and the timeline scroll independently: mid-drag, the timeline can be
+   scrolled to a day further down without losing the queue. */
 .cm-run-show__queue {
     flex: none;
     inline-size: 288px;
+    max-block-size: 100%;
+    overflow: hidden auto;
 }
 
 .cm-run-show__section-head {
@@ -4965,7 +5031,7 @@ button.cm-intent {
     align-items: flex-start;
     gap: 10px;
     min-inline-size: 0;
-    padding: 9px 11px;
+    padding: 11px 12px;
     border-inline-start: 3px solid var(--cm-wire-draft);
     background: transparent;
     transition: background 200ms ease-out, border-color 200ms ease-out;
@@ -4978,14 +5044,57 @@ button.cm-intent {
     min-inline-size: 0;
 }
 
-.cm-run-show__queue-actions,
-.cm-run-show__item-actions {
+/* Icon-only card actions (WireIconButton): a card action never carries a word, never
+   grows its card, and never overlaps a neighbour — the overlays float on the card. */
+.cm-wire-icon-btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    inline-size: 26px;
+    block-size: 26px;
+    padding: 0;
+    border: 1px solid var(--cm-wire-divider);
+    background: var(--cm-wire-bg);
+    color: color-mix(in srgb, var(--cm-wire-ink) 72%, transparent);
+    cursor: pointer;
+    transition: color 200ms ease-out, border-color 200ms ease-out, background 200ms ease-out;
+}
+
+.cm-wire-icon-btn:hover {
+    border-color: var(--cm-wire-accent);
+    color: var(--cm-wire-accent);
+}
+
+.cm-wire-icon-btn:focus-visible {
+    outline: 2px solid var(--cm-wire-accent);
+    outline-offset: 1px;
+}
+
+.cm-wire-icon-btn svg {
+    inline-size: 14px;
+    block-size: 14px;
+}
+
+.cm-run-show__queue-actions {
     display: flex;
     flex: none;
     flex-direction: column;
     gap: 4px;
-    inline-size: 52px;
     opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease-out;
+}
+
+/* Scheduled-item actions overlay the card's top-right corner instead of widening it. */
+.cm-run-show__item-actions {
+    position: absolute;
+    inset-block-start: 4px;
+    inset-inline-end: 4px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    pointer-events: none;
     transition: opacity 200ms ease-out;
 }
 
@@ -4994,6 +5103,7 @@ button.cm-intent {
 .cm-run-show__item:hover .cm-run-show__item-actions,
 .cm-run-show__item:focus-within .cm-run-show__item-actions {
     opacity: 1;
+    pointer-events: auto;
 }
 
 .cm-run-show__queue-card:focus-within,
@@ -5039,14 +5149,21 @@ button.cm-intent {
 .cm-run-show__timeline {
     flex: 1;
     min-inline-size: 0;
+    max-block-size: 100%;
+    overflow: hidden auto;
 }
 
 .cm-run-show__ruler {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: var(--cm-space-4);
-    margin-block-end: 6px;
-    padding-inline-start: 106px;
+    padding-block-end: 8px;
+    /* Day gutter (108px) + day gap (20px): the ruler starts where the lanes start. */
+    padding-inline-start: 128px;
+    background: var(--cm-wire-bg);
     color: color-mix(in srgb, var(--cm-wire-ink) 42%, transparent);
     font-family: var(--cm-font-mono);
     font-size: 10.5px;
@@ -5068,8 +5185,8 @@ button.cm-intent {
 .cm-run-show__day {
     display: flex;
     align-items: stretch;
-    gap: 14px;
-    padding-block: 9px;
+    gap: 20px;
+    padding-block: 14px;
     border-block-end: 1px solid var(--cm-wire-hairline);
 }
 
@@ -5084,15 +5201,15 @@ button.cm-intent {
 .cm-run-show__day--empty {
     align-items: center;
     box-sizing: border-box;
-    block-size: 30px;
-    padding-block: 5px;
+    block-size: 36px;
+    padding-block: 7px;
 }
 
 .cm-run-show__day--weekend {
     align-items: center;
     box-sizing: border-box;
-    block-size: 30px;
-    padding-block: 5px;
+    block-size: 36px;
+    padding-block: 7px;
     opacity: 0.5;
 }
 
@@ -5100,7 +5217,7 @@ button.cm-intent {
     display: flex;
     flex: none;
     flex-direction: column;
-    inline-size: 92px;
+    inline-size: 108px;
 }
 
 .cm-run-show__day-gutter strong {
@@ -5134,7 +5251,35 @@ button.cm-intent {
     transition: background 200ms ease-out, border-color 200ms ease-out;
 }
 
-.cm-run-show__lane--drop {
+/* Pointer-drag chrome (castmill-wire.js): the source card is cloned as a fixed ghost
+   that follows the pointer; the lane or column under it takes the drop tint. */
+[data-wire-drag] {
+    cursor: grab;
+    touch-action: none;
+}
+
+body.cm-wire-dragging,
+body.cm-wire-dragging [data-wire-drag] {
+    cursor: grabbing;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.cm-wire-drag-ghost {
+    position: fixed;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    z-index: 1000;
+    margin: 0;
+    border: 1px solid var(--cm-wire-accent);
+    background: var(--cm-wire-bg);
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--cm-wire-ink) 22%, transparent);
+    opacity: 0.9;
+    pointer-events: none;
+    list-style: none;
+}
+
+.cm-wire-drop-target {
     outline: 1px solid var(--cm-wire-accent);
     background: color-mix(in srgb, var(--cm-wire-accent) 14%, transparent);
 }
@@ -5155,20 +5300,20 @@ button.cm-intent {
 
 .cm-run-show__lane-spacer {
     display: block;
-    block-size: calc(52px + (var(--cm-wire-rows, 1) - 1) * 62px);
+    block-size: calc(56px + (var(--cm-wire-rows, 1) - 1) * 68px);
 }
 
 .cm-run-show__item {
     --cm-wire-left: 0%;
     position: absolute;
-    inset-block-start: calc(var(--cm-wire-level, 0) * 62px);
+    inset-block-start: calc(var(--cm-wire-level, 0) * 68px);
     inset-inline-start: clamp(0px, var(--cm-wire-left), calc(100% - min(15.625rem, 100%)));
     display: flex;
     align-items: flex-start;
     gap: 7px;
     inline-size: min(15.625rem, 100%);
     min-inline-size: 0;
-    padding: 6px 9px;
+    padding: 7px 10px;
     border: 1px solid var(--cm-wire-divider);
     border-inline-start: 3px solid var(--cm-wire-queued);
     background: var(--cm-wire-bg);
@@ -5213,6 +5358,7 @@ button.cm-intent {
 }
 
 .cm-run-show__status-chip {
+    --ig-size: var(--ig-size-small);
     flex: none;
     margin-inline-start: auto;
 }
@@ -5299,182 +5445,15 @@ button.cm-intent {
     -webkit-line-clamp: 2;
 }
 
-.cm-agenda {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 288px;
-    align-items: start;
-    gap: 22px;
-    min-inline-size: 0;
-}
-
-.cm-agenda__list {
-    min-inline-size: 0;
-}
-
-.cm-agenda__day + .cm-agenda__day {
-    margin-block-start: var(--cm-space-4);
-}
-
-.cm-agenda__day-head {
-    display: flex;
-    align-items: baseline;
-    gap: var(--cm-space-3);
-    padding-block-end: var(--cm-space-2);
-    border-block-end: 1px solid var(--cm-wire-divider);
-}
-
-.cm-agenda__day-head h2 {
-    margin: 0;
-    color: var(--cm-wire-ink);
-    font-family: var(--cm-font-display);
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-}
-
-.cm-agenda__day-head span {
-    margin-inline-start: auto;
-    color: color-mix(in srgb, var(--cm-wire-ink) 48%, transparent);
-    font-family: var(--cm-font-mono);
-    font-size: 10px;
-}
-
-.cm-agenda__day--today .cm-agenda__day-head h2 {
-    color: var(--cm-wire-accent);
-}
-
-.cm-agenda__rows {
-    min-block-size: 30px;
-    transition: background 200ms ease-out, border-color 200ms ease-out;
-}
-
-.cm-agenda__rows--drop {
-    outline: 1px solid var(--cm-wire-accent);
-    background: color-mix(in srgb, var(--cm-wire-accent) 14%, transparent);
-}
-
-.cm-agenda__row {
-    display: flex;
-    align-items: center;
-    gap: var(--cm-space-2);
-    min-inline-size: 0;
-    padding: 9px 4px;
-    border-block-end: 1px solid var(--cm-wire-hairline);
-    border-inline-start: 3px solid var(--cm-wire-queued);
-    transition: background 200ms ease-out, border-color 200ms ease-out, opacity 200ms ease-out;
-}
-
-.cm-agenda__row--draft {
-    border-inline-start-color: var(--cm-wire-draft);
-}
-
-.cm-agenda__row--sent {
-    border-inline-start-color: var(--cm-wire-sent);
-    background: var(--cm-wire-surface);
-}
-
-.cm-agenda__row--error,
-.cm-agenda__row--blocked {
-    border-inline-start-color: var(--cm-wire-error);
-}
-
-.cm-agenda__row:focus-within {
-    outline: 2px solid var(--cm-wire-accent);
-    outline-offset: 2px;
-}
-
-.cm-agenda__time {
-    flex: none;
-    inline-size: 44px;
-    font-family: var(--cm-font-mono);
-    font-size: 11px;
-}
-
-.cm-agenda__channel {
-    flex: none;
-    inline-size: 74px;
-    overflow: hidden;
-    color: color-mix(in srgb, var(--cm-wire-ink) 50%, transparent);
-    font-family: var(--cm-font-display);
-    font-size: 10px;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    text-transform: uppercase;
-    white-space: nowrap;
-}
-
-.cm-agenda__title {
-    flex: 1;
-    min-inline-size: 0;
-    font-size: 13.5px;
-}
-
-.cm-agenda__status {
-    flex: none;
-}
-
-.cm-agenda__actions {
-    display: flex;
-    flex: none;
-    gap: 4px;
-    inline-size: 108px;
-    justify-content: flex-end;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 200ms ease-out;
-}
-
-.cm-agenda__row:hover .cm-agenda__actions,
-.cm-agenda__row:focus-within .cm-agenda__actions {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.cm-agenda__empty {
-    box-sizing: border-box;
-    min-block-size: 30px;
-    padding: 9px 4px;
-    color: color-mix(in srgb, var(--cm-wire-ink) 40%, transparent);
-    font-size: 11.5px;
-}
-
-.cm-wire-queue__bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    inline-size: 100%;
-    padding: var(--cm-space-2) var(--cm-space-3);
-    border: 1px solid var(--cm-wire-divider);
-    border-inline-start: 3px solid var(--cm-wire-draft);
-    background: var(--cm-wire-surface);
-    color: var(--cm-wire-ink);
-    font-family: var(--cm-font-mono);
-    font-size: 11px;
-    cursor: pointer;
-}
-
-.cm-agenda--narrow {
-    grid-template-columns: minmax(0, 1fr);
-}
-
-.cm-agenda--narrow .cm-wire-queue {
-    position: sticky;
-    z-index: 2;
-    inset-block-start: 0;
-    grid-row: 1;
-    inline-size: auto;
-    background: var(--cm-wire-bg);
-}
-
-.cm-agenda--narrow .cm-agenda__list {
-    grid-row: 2;
-}
-
+/* Pipeline sits on the SAME light surface as the rest of The Wire — status is carried
+   by the column rules and card bars, not a tonal shift. */
 .cm-pipeline {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
     min-inline-size: 0;
-    padding: var(--cm-space-4);
-    background: var(--cm-wire-dark-bg);
-    color: var(--cm-wire-dark-ink);
+    min-block-size: 0;
+    overflow-y: auto;
 }
 
 .cm-pipeline__scope {
@@ -5482,7 +5461,7 @@ button.cm-intent {
     align-items: center;
     gap: var(--cm-space-3);
     margin-block-end: var(--cm-space-4);
-    color: color-mix(in srgb, var(--cm-wire-dark-ink) 72%, transparent);
+    color: color-mix(in srgb, var(--cm-wire-ink) 72%, transparent);
     font-size: 12.5px;
 }
 
@@ -5494,7 +5473,7 @@ button.cm-intent {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: start;
-    gap: 14px;
+    gap: 20px;
 }
 
 .cm-pipeline__column {
@@ -5523,7 +5502,7 @@ button.cm-intent {
 
 .cm-pipeline__column-head h2 {
     margin: 0;
-    color: var(--cm-wire-dark-title);
+    color: var(--cm-wire-ink);
     font-family: var(--cm-font-display);
     font-size: 11px;
     font-weight: 600;
@@ -5532,7 +5511,7 @@ button.cm-intent {
 
 .cm-pipeline__column-head span {
     margin-inline-start: auto;
-    color: color-mix(in srgb, var(--cm-wire-dark-ink) 45%, transparent);
+    color: color-mix(in srgb, var(--cm-wire-ink) 45%, transparent);
     font-family: var(--cm-font-mono);
     font-size: 10px;
 }
@@ -5548,22 +5527,18 @@ button.cm-intent {
     transition: background 200ms ease-out, border-color 200ms ease-out;
 }
 
-.cm-pipeline__body--drop {
-    outline: 1px solid var(--cm-wire-dark-accent);
-    background: color-mix(in srgb, var(--cm-wire-dark-accent) 14%, transparent);
-}
-
 .cm-pipeline__card,
 .cm-pipeline .cm-run-show__queue-card {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: var(--cm-space-2);
     min-inline-size: 0;
     padding: 9px 11px;
-    border: 0;
+    border: 1px solid var(--cm-wire-divider);
     border-inline-start: 3px solid var(--cm-wire-queued);
-    background: var(--cm-wire-dark-card);
-    color: var(--cm-wire-dark-ink);
+    background: var(--cm-wire-bg);
+    color: var(--cm-wire-ink);
     transition: background 200ms ease-out, border-color 200ms ease-out, opacity 200ms ease-out;
 }
 
@@ -5572,8 +5547,10 @@ button.cm-intent {
 }
 
 .cm-pipeline__card--sent {
+    border-color: transparent;
     border-inline-start-color: var(--cm-wire-sent);
-    opacity: 0.78;
+    background: var(--cm-wire-surface);
+    opacity: 0.85;
 }
 
 .cm-pipeline__card--error,
@@ -5590,7 +5567,7 @@ button.cm-intent {
 
 .cm-pipeline__title {
     margin-block-start: 3px;
-    color: var(--cm-wire-dark-title);
+    color: var(--cm-wire-ink);
     font-family: var(--cm-font-display);
     font-size: 15px;
     font-weight: 600;
@@ -5609,27 +5586,27 @@ button.cm-intent {
     flex-wrap: wrap;
     gap: var(--cm-space-2);
     margin-block-start: var(--cm-space-2);
-    color: color-mix(in srgb, var(--cm-wire-dark-ink) 68%, transparent);
+    color: color-mix(in srgb, var(--cm-wire-ink) 68%, transparent);
     font-family: var(--cm-font-mono);
     font-size: 10px;
 }
 
 .cm-pipeline__receipt a {
-    color: var(--cm-wire-dark-accent);
+    color: var(--cm-wire-accent);
 }
 
 .cm-pipeline__copy > .cm-pipeline__reason {
-    color: var(--cm-wire-dark-error);
+    color: var(--cm-wire-error);
     font-family: var(--cm-font-body);
     font-size: 11.5px;
 }
 
 .cm-pipeline__actions {
+    position: absolute;
+    inset-block-start: 6px;
+    inset-inline-end: 6px;
     display: flex;
-    flex: none;
-    flex-direction: column;
     gap: 4px;
-    inline-size: 72px;
     opacity: 0;
     pointer-events: none;
     transition: opacity 200ms ease-out;
@@ -5642,17 +5619,8 @@ button.cm-intent {
 }
 
 .cm-pipeline__card:focus-within {
-    outline: 2px solid var(--cm-wire-dark-accent);
+    outline: 2px solid var(--cm-wire-accent);
     outline-offset: 2px;
-}
-
-.cm-pipeline .cm-run-show__channel,
-.cm-pipeline .cm-run-show__meta {
-    color: color-mix(in srgb, var(--cm-wire-dark-ink) 58%, transparent);
-}
-
-.cm-pipeline .cm-run-show__queue-actions {
-    inline-size: 72px;
 }
 
 .cm-wire-queue-card__date {

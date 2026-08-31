@@ -2,8 +2,7 @@
 @using System.Globalization
 
 <article class="cm-pipeline__card cm-pipeline__card--@StatusName(Item.Status)"
-         draggable="@CanDrag"
-         @ondragstart="() => DragStarted.InvokeAsync(Item)" @ondragend="() => DragEnded.InvokeAsync()">
+         data-wire-drag="@(CanDrag ? $"s:{Item.Id}" : null)">
     <span class="cm-pipeline__copy">
         <span class="cm-run-show__channel">@Item.Channel</span>
         <span class="cm-pipeline__title cm-wire-clamp-2">@Item.Title</span>
@@ -33,18 +32,18 @@
         }
     </span>
     <span class="cm-pipeline__actions" aria-label="Pipeline item actions">
-        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Edit.InvokeAsync(Item)">Edit</IgbButton>
+        <WireIconButton Kind="edit" Label="Edit" OnClick="() => Edit.InvokeAsync(Item)" />
         @if (Item.Status == WireDeliveryStatus.Error)
         {
-            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Retry.InvokeAsync(Item)">Retry</IgbButton>
+            <WireIconButton Kind="retry" Label="Retry" OnClick="() => Retry.InvokeAsync(Item)" />
         }
         else if (Item.Status == WireDeliveryStatus.Blocked)
         {
-            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Export.InvokeAsync(Item)">Export clip</IgbButton>
+            <WireIconButton Kind="export" Label="Export clip" OnClick="() => Export.InvokeAsync(Item)" />
         }
         else if (Item.Status != WireDeliveryStatus.Sent)
         {
-            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Move.InvokeAsync(Item)">Move</IgbButton>
+            <WireIconButton Kind="move" Label="Move" OnClick="() => Move.InvokeAsync(Item)" />
         }
     </span>
 </article>
@@ -55,8 +54,6 @@
     [Parameter] public EventCallback<WireScheduleItem> Move { get; set; }
     [Parameter] public EventCallback<WireScheduleItem> Export { get; set; }
     [Parameter] public EventCallback<WireScheduleItem> Retry { get; set; }
-    [Parameter] public EventCallback<WireScheduleItem> DragStarted { get; set; }
-    [Parameter] public EventCallback DragEnded { get; set; }
 
     private string DateChip => WireTime.Local(Item)
         .ToString("ddd HH:mm", CultureInfo.InvariantCulture)

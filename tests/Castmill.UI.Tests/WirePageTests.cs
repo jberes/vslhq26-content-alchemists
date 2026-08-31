@@ -52,17 +52,18 @@ public sealed class WirePageTests : CastmillUiTestContext
         var queueCard = page.Find(".cm-run-show__queue-card");
 
         Assert.Equal(2, queueCard.Children.Length);
-        Assert.Equal(new[] { "Edit", "Slot" }, queueCard.QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
+        // Card actions are icon-only: the accessible name carries the verb, not a word.
+        Assert.Equal(new[] { "Edit", "Slot" }, queueCard.QuerySelectorAll(".cm-wire-icon-btn")
+            .Select(button => button.GetAttribute("aria-label")));
 
-        queueCard.QuerySelectorAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+        queueCard.QuerySelector("[aria-label='Slot']")!.Click();
 
         Assert.NotNull(page.Find("igc-dialog[open]"));
         Assert.NotNull(page.FindComponent<IgbDatePicker>());
         Assert.NotNull(page.FindComponent<IgbDateTimeInput>());
 
         var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
-        Assert.Contains(".cm-run-show__queue-actions,", css, StringComparison.Ordinal);
-        Assert.Contains("inline-size: 52px", css, StringComparison.Ordinal);
+        Assert.Contains("inline-size: 26px", Rule(css, ".cm-wire-icon-btn"), StringComparison.Ordinal);
         Assert.Contains(":focus-within", css, StringComparison.Ordinal);
     }
 
@@ -76,7 +77,7 @@ public sealed class WirePageTests : CastmillUiTestContext
         var page = Render<Wire>();
         await page.WaitForAssertionAsync(() => Assert.Single(page.FindAll(".cm-run-show__queue-card")));
 
-        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+        page.Find("[aria-label='Slot']").Click();
         var date = DateTime.Today.AddDays(2);
         await page.InvokeAsync(() =>
             page.FindComponent<IgbDatePicker>().Instance.ValueChanged.InvokeAsync(date));
@@ -99,7 +100,7 @@ public sealed class WirePageTests : CastmillUiTestContext
         var page = Render<Wire>();
         await page.WaitForAssertionAsync(() => Assert.Single(page.FindAll(".cm-run-show__queue-card")));
 
-        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+        page.Find("[aria-label='Slot']").Click();
         var past = DateTime.Today.AddDays(-1).AddHours(9);
         await page.InvokeAsync(() =>
             page.FindComponent<IgbDatePicker>().Instance.ValueChanged.InvokeAsync(past.Date));
@@ -128,7 +129,7 @@ public sealed class WirePageTests : CastmillUiTestContext
         Assert.Contains("display: -webkit-box", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
         Assert.Contains("-webkit-line-clamp: 2", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
         Assert.Contains("min-inline-size: 0", Rule(css, ".cm-run-show__timeline"), StringComparison.Ordinal);
-        Assert.Contains("block-size: 30px", Rule(css, ".cm-run-show__day--empty"), StringComparison.Ordinal);
+        Assert.Contains("block-size: 36px", Rule(css, ".cm-run-show__day--empty"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -154,10 +155,31 @@ public sealed class WirePageTests : CastmillUiTestContext
             ScheduledAtUtc = items[0].ScheduledAtUtc.AddSeconds(20),
         }, new DateOnly(2026, 8, 31), 9 * 60));
 
-        var board = Board(items, rangeDays: 14);
+        var board = Board(items);
         var page = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, board));
-        Assert.Equal(12, page.FindAll(".cm-run-show__day").Count);
-        Assert.Contains("--cm-wire-rows: 2", page.Find("#cm-wire-lane-2026-08-31").GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Equal(6, page.FindAll(".cm-run-show__day").Count);
+        Assert.Contains("--cm-wire-rows: 2", page.Find("[data-wire-lane='2026-08-31']").GetAttribute("style"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Pointer_drop_on_a_lane_maps_x_to_a_snapped_time()
+    {
+        WireSlotRequest? received = null;
+        var page = Render<RunOfShowView>(parameters => parameters
+            .Add(component => component.Data, Board())
+            .Add(component => component.Slot, request => { received = request; }));
+
+        await page.InvokeAsync(() => page.Instance.DropFromPointerAsync(
+            $"q:{_artifactId}:linkedin", "lane", "2026-09-01", 0.5));
+
+        Assert.NotNull(received);
+        Assert.Equal(new DateOnly(2026, 9, 1), received!.Date);
+        Assert.Equal(14 * 60, received.Minutes);
+        Assert.NotNull(received.QueueItem);
+
+        var script = ReadWorkspaceFile("src/Castmill.UI/wwwroot/js/castmill-wire.js");
+        Assert.Contains("armPointerDrag", script, StringComparison.Ordinal);
+        Assert.Contains("data-wire-lane", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,66 +216,17 @@ public sealed class WirePageTests : CastmillUiTestContext
 
         var runOfShow = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, data));
         var pipeline = Render<PipelineView>(parameters => parameters.Add(component => component.Data, data));
-        var agenda = Render<AgendaView>(parameters => parameters.Add(component => component.Data, data));
         Assert.Contains("STAGED", runOfShow.Markup, StringComparison.Ordinal);
         Assert.Contains("No broker", runOfShow.Markup, StringComparison.Ordinal);
         Assert.Contains("Delivery receipt", runOfShow.Markup, StringComparison.Ordinal);
         Assert.Contains("Live post", runOfShow.Markup, StringComparison.Ordinal);
-        foreach (var markup in new[] { runOfShow.Markup, pipeline.Markup, agenda.Markup })
+        foreach (var markup in new[] { runOfShow.Markup, pipeline.Markup })
         {
             Assert.DoesNotContain("reach", markup, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("engagement", markup, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("984321", markup, StringComparison.Ordinal);
             Assert.DoesNotContain("87654", markup, StringComparison.Ordinal);
         }
-    }
-
-    [Fact]
-    public void Agenda_projects_chronological_rows_with_fixed_actions_and_shared_queue()
-    {
-        var queued = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000010"), 10, 15);
-        var blocked = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000011"), 8, 30) with
-        {
-            Status = WireDeliveryStatus.Blocked,
-            BlockedReason = "A durable published URL is required.",
-        };
-        var page = Render<AgendaView>(parameters => parameters
-            .Add(component => component.Data, Board([queued, blocked])));
-
-        var rows = page.FindAll(".cm-agenda__row");
-        Assert.Equal(new[] { "08:30", "10:15" }, rows.Select(row => row.QuerySelector(".cm-agenda__time")!.TextContent.Trim()));
-        Assert.All(rows, row => Assert.Contains("cm-wire-clamp-1", row.QuerySelector(".cm-agenda__title")!.ClassList));
-        Assert.Equal(new[] { "Edit", "Export" }, rows[0].QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
-        Assert.Equal(new[] { "Edit", "Move" }, rows[1].QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
-        Assert.Contains("Nothing scheduled — drop an item here", page.Markup, StringComparison.Ordinal);
-        Assert.Single(page.FindAll(".cm-wire-queue-card"));
-        Assert.Empty(page.FindAll(".cm-run-show__ruler"));
-
-        var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
-        Assert.Contains("inline-size: 108px", Rule(css, ".cm-agenda__actions"), StringComparison.Ordinal);
-        Assert.Contains("min-inline-size: 0", Rule(css, ".cm-agenda__title"), StringComparison.Ordinal);
-        Assert.Contains(".cm-agenda__row:focus-within .cm-agenda__actions", css, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Agenda_narrow_mode_uses_the_unscheduled_bar_instead_of_the_right_dock()
-    {
-        var page = Render<AgendaView>(parameters => parameters
-            .Add(component => component.Data, Board())
-            .Add(component => component.Narrow, true));
-
-        Assert.Contains("cm-agenda--narrow", page.Find(".cm-agenda").ClassList);
-        Assert.Contains("cm-wire-queue--compact", page.Find(".cm-wire-queue").ClassList);
-        var bar = page.Find(".cm-wire-queue__bar");
-        Assert.Contains("1 unscheduled", bar.TextContent, StringComparison.Ordinal);
-        Assert.Contains("+", bar.TextContent, StringComparison.Ordinal);
-        Assert.Equal("false", bar.GetAttribute("aria-expanded"));
-        Assert.Equal("cm-wire-queue-content", bar.GetAttribute("aria-controls"));
-        Assert.True(page.Find(".cm-wire-queue__content").HasAttribute("hidden"));
-
-        bar.Click();
-        Assert.Equal("true", page.Find(".cm-wire-queue__bar").GetAttribute("aria-expanded"));
-        Assert.False(page.Find(".cm-wire-queue__content").HasAttribute("hidden"));
     }
 
     [Fact]
@@ -283,18 +256,18 @@ public sealed class WirePageTests : CastmillUiTestContext
         Assert.Contains("NO DATE", page.Find(".cm-pipeline__column--ready").TextContent, StringComparison.Ordinal);
         Assert.Contains("MON 10:15", page.Find(".cm-pipeline__column--queued").TextContent, StringComparison.Ordinal);
         Assert.Contains("A durable published URL is required.", page.Find(".cm-pipeline__column--attention").TextContent, StringComparison.Ordinal);
-        Assert.Contains("Export clip", page.Find(".cm-pipeline__column--attention").TextContent, StringComparison.Ordinal);
+        Assert.NotNull(page.Find(".cm-pipeline__column--attention [aria-label='Export clip']"));
         Assert.Contains("broker-42", page.Find(".cm-pipeline__column--sent").TextContent, StringComparison.Ordinal);
         Assert.Contains("Live post", page.Find(".cm-pipeline__column--sent").TextContent, StringComparison.Ordinal);
-        Assert.Null(page.Find(".cm-pipeline__column--sent .cm-pipeline__body").GetAttribute("data-drop-target"));
-        Assert.Equal(3, page.FindAll("[data-drop-target]").Count);
+        Assert.Null(page.Find(".cm-pipeline__column--sent .cm-pipeline__body").GetAttribute("data-wire-col"));
+        Assert.Equal(2, page.FindAll("[data-wire-col]").Count);
         Assert.All(page.FindAll(".cm-pipeline__title"), title => Assert.Contains("cm-wire-clamp-2", title.ClassList));
         Assert.DoesNotContain("reach", page.Markup, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("engagement", page.Markup, StringComparison.OrdinalIgnoreCase);
 
         var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
         Assert.Contains("min-block-size: 120px", Rule(css, ".cm-pipeline__body"), StringComparison.Ordinal);
-        Assert.Contains("inline-size: 72px", Rule(css, ".cm-pipeline__actions"), StringComparison.Ordinal);
+        Assert.Contains("position: absolute", Rule(css, ".cm-pipeline__actions"), StringComparison.Ordinal);
         Assert.Contains(".cm-pipeline__card:focus-within .cm-pipeline__actions", css, StringComparison.Ordinal);
     }
 
@@ -304,56 +277,30 @@ public sealed class WirePageTests : CastmillUiTestContext
         StubWire();
         var page = Render<Wire>();
         await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-run-show__timeline")));
-        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Fortnight").Click();
-        await page.WaitForAssertionAsync(() => Assert.Contains("Fortnight of", page.Markup, StringComparison.Ordinal));
-        var requestsAfterRangeChange = Http.Requests.Count;
+
+        // The page header matches the other workspace pages; the week strip carries the range.
+        Assert.Equal("The Wire", page.Find("#cm-wire-title").TextContent.Trim());
+        Assert.StartsWith("Week of", page.Find("#cm-wire-range").TextContent.Trim(), StringComparison.Ordinal);
+        var requestsAfterLoad = Http.Requests.Count;
 
         page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline").Click();
         await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-pipeline")));
-        Assert.Empty(page.FindAll("[aria-label='Schedule range']"));
+        Assert.Empty(page.FindAll(".cm-run-show__range"));
 
-        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Agenda").Click();
-        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-agenda")));
-        Assert.NotNull(page.Find("[aria-label='Schedule range']"));
-        Assert.Contains("Fortnight of", page.Markup, StringComparison.Ordinal);
-        Assert.Equal(requestsAfterRangeChange, Http.Requests.Count);
-    }
-
-    [Fact]
-    public async Task Narrow_content_forces_agenda_and_disables_run_of_show()
-    {
-        StubWire();
-        var page = Render<Wire>();
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Run of show").Click();
         await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-run-show__timeline")));
-
-        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline").Click();
-        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-pipeline")));
-
-        await page.InvokeAsync(() => page.Instance.WireWidthChanged(1099));
-
-        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-agenda--narrow")));
-        var run = page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Run of show");
-        var pipeline = page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline");
-        Assert.True(run.HasAttribute("disabled"));
-        Assert.True(pipeline.HasAttribute("disabled"));
-        run.Click();
-        Assert.NotNull(page.Find(".cm-agenda"));
-
-        var script = ReadWorkspaceFile("src/Castmill.UI/wwwroot/js/castmill-wire.js");
-        Assert.Contains("new ResizeObserver", script, StringComparison.Ordinal);
-        Assert.Contains("observer.disconnect()", script, StringComparison.Ordinal);
+        Assert.NotNull(page.Find(".cm-run-show__range"));
+        Assert.Equal(requestsAfterLoad, Http.Requests.Count);
     }
 
     [Fact]
-    public async Task Pipeline_ready_drop_opens_the_shared_slot_dialog()
+    public async Task Pipeline_pointer_drop_on_queued_opens_the_shared_slot_dialog()
     {
         var page = Render<PipelineView>(parameters => parameters
             .Add(component => component.Data, Board()));
 
-        await page.Find(".cm-pipeline__column--ready .cm-wire-queue-card")
-            .TriggerEventAsync("ondragstart", new DragEventArgs());
-        await page.Find(".cm-pipeline__column--queued .cm-pipeline__body")
-            .TriggerEventAsync("ondrop", new DragEventArgs());
+        await page.InvokeAsync(() => page.Instance.DropFromPointerAsync(
+            $"q:{_artifactId}:linkedin", "column", "queued", 0));
 
         Assert.NotNull(page.Find("igc-dialog[open]"));
         Assert.NotNull(page.FindComponent<IgbDatePicker>());

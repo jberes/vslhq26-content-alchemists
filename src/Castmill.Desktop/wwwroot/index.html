@@ -6,8 +6,10 @@
     <title>Castmill</title>
     <base href="/" />
     <!-- Same RCL stylesheet the web shell loads — this is what makes the page identical. -->
-    <link rel="stylesheet" href="_content/Castmill.UI/css/castmill.css" />
-    <link rel="stylesheet" href="css/host.css" />
+    <!-- WebView2's HTTP cache survives app restarts; version the stylesheets like the JS
+         modules so a rebuilt app never paints with cached CSS. Bump on RCL CSS changes. -->
+    <link rel="stylesheet" href="_content/Castmill.UI/css/castmill.css?v=2" />
+    <link rel="stylesheet" href="css/host.css?v=2" />
     <!-- Scoped-CSS bundle: see the note in Castmill.Web/wwwroot/index.html. Restore with
          the first component-scoped stylesheet in Phase F1.
     <link rel="stylesheet" href="Castmill.Desktop.styles.css" /> -->
@@ -22,6 +24,8 @@
                 r.setAttribute('data-cm-family', g('family') === 'IndustryBlueprint' ? 'industry-blueprint' : 'warm-editorial');
                 r.setAttribute('data-cm-mode', (g('mode') || (dark ? 'Dark' : 'Light')) === 'Dark' ? 'dark' : 'light');
                 r.setAttribute('data-cm-density', g('density') === 'Compact' ? 'compact' : 'comfortable');
+                // Catalyst needs a root-size compensation Windows must not get (base.css).
+                r.setAttribute('data-cm-platform', /Mac/.test(navigator.platform || navigator.userAgent) ? 'mac' : 'windows');
                 // Rail collapse rides the same pre-paint path — key must match ThemeService.RailKey.
                 if (localStorage.getItem('castmill:cm.rail') === 'icons') { r.setAttribute('data-cm-rail', 'icons'); }
             } catch (e) { /* storage unavailable — the CSS default stands */ }
