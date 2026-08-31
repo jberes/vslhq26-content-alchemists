@@ -119,8 +119,7 @@
         if (AutoScroll && _lastScrolledArtifactId != artifactId)
         {
             _lastScrolledArtifactId = artifactId;
-            await _module.InvokeVoidAsync(
-                "scrollCitationIntoView", Container, citations[0]);
+            await TryScrollCitationIntoViewAsync(_module, Container, citations[0]);
         }
 
         var cardSelector = $"[data-card=\"{artifactId}\"]";
@@ -178,6 +177,22 @@
         }
 
         await EmitHighlightAsync(citations);
+    }
+
+    internal static async ValueTask TryScrollCitationIntoViewAsync(
+        IJSObjectReference module,
+        ElementReference container,
+        string segmentId)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("scrollCitationIntoView", container, segmentId);
+        }
+        catch (JSException)
+        {
+            // Auto-scroll is optional and an open tab can briefly retain the previous
+            // module during deployment. Keep drawing with the exports both versions share.
+        }
     }
 
     /// <summary>
