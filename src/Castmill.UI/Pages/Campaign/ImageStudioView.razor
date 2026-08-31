@@ -1025,6 +1025,7 @@
     private Guid? _batchAttachCampaign;
     private Guid? _handledBatchRun;
     private Guid? _addingFor;
+    private Guid? _deletingSlot;
     private bool _seeding;
     private bool _placing;
     private bool _downloading;
@@ -1476,6 +1477,69 @@
         }
     }
 
+    /// <summary>
+    /// Permanently destroys a slot's imagery: the placed image is removed from the slot and
+    /// every take is deleted with its blobs. Locked takes are refused by the server and
+    /// reported rather than silently skipped. The prompt survives — it is the user's work,
+    /// and this action is about pixels.
+    /// </summary>
+    private async Task DeleteSlotImageryAsync(ImageSlotResponse slot)
+    {
+        var label = ArtifactDisplay.SlotLabel(slot.Kind);
+        if (!await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete the {label} image?",
+            "This permanently deletes the placed image and every generated take for this slot. "
+                + "It cannot be undone, and regenerating costs another render. The prompt is kept.",
+            AcceptLabel: "Delete permanently",
+            Destructive: true)))
+        {
+            return;
+        }
+
+        _deletingSlot = slot.Id;
+        try
+        {
+            // Clear first: the server refuses to delete the take that is currently placed.
+            // (ImagesClient.DeleteAsync on a slot is the CLEAR endpoint, not a row delete.)
+            if (slot.State == "Filled")
+            {
+                await Images.DeleteAsync(CampaignId, slot.Id);
+            }
+
+            var takes = await Images.ListVariantsAsync(CampaignId, slot.Id, includeDiscarded: true);
+            var locked = 0;
+            foreach (var take in takes)
+            {
+                try
+                {
+                    await Images.DeleteVariantAsync(CampaignId, slot.Id, take.Id);
+                }
+                catch (ApiException ex) when (ex.StatusCode == 409)
+                {
+                    locked++;
+                }
+            }
+
+            if (slot.Id == _selectedId)
+            {
+                await ReloadGalleryAsync();
+            }
+            await Campaign.RefreshAsync(CampaignId);
+
+            Notifier.ShowSuccess(locked == 0
+                ? $"Deleted the {label} image."
+                : $"Deleted the {label} image. {locked} locked {(locked == 1 ? "take" : "takes")} were kept — unlock them to delete.");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError(ex is ApiException api ? api.Message : "The image could not be deleted.");
+        }
+        finally
+        {
+            _deletingSlot = null;
+        }
+    }
+
     /// <summary>Starts the pending-image batch narrowed to one content piece (§group header).</summary>
     private async Task GeneratePendingForAsync(Guid artifactId)
     {
@@ -1639,15 +1703,21 @@
             && _handledBatchRun != batchRunId)
         {
             _handledBatchRun = batchRunId;
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
         }
 
-        if (StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
+        // Both branches are about ONE open slot's run. A batch run carries SlotId null, and
+        // _selectedId is null with the drawer closed — comparing them directly made null ==
+        // null true, so every batch poll tick re-ran the finished-run branch below and
+        // force-reloaded the campaign, re-fetching every tile image (endless flashing).
+        var runningSlot = _selectedId is { } selectedId && StudioRun.SlotId == selectedId;
+
+        if (StudioRun.IsRunning && runningSlot)
         {
             await ReloadGalleryAsync();
         }
 
-        if (!StudioRun.IsRunning && StudioRun.SlotId == _selectedId)
+        if (!StudioRun.IsRunning && runningSlot)
         {
             if (StudioRun.Error is { } error)
             {
@@ -1665,7 +1735,7 @@
             }
 
             await ReloadGalleryAsync();
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
         }
     }, Notifier, StateHasChanged, "Loading the takes"));
 
@@ -1771,7 +1841,7 @@
             await Images.DeleteVariantAsync(CampaignId, variant.SlotId, variant.Id);
             _gallery = [.. _gallery.Where(v => v.Id != variant.Id)];
             CloseVariant();
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
             Notifier.ShowSuccess("Take deleted.");
         }
         catch (ApiException ex)
@@ -1838,7 +1908,7 @@
             {
                 _showDiscarded = false;
             }
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
         }
         catch (ApiException ex)
         {
@@ -1966,9 +2036,10 @@
         // A slot with generated-but-unplaced takes previews its best take: work exists,
         // it just hasn't been placed — an empty dashed hole would misreport that.
         var takeThumb = !filled ? slot.LatestTakeThumbUrl : null;
+        var hasImagery = filled || takeThumb is not null;
+        <div class="cm-studio__tile" style="aspect-ratio: @slot.TargetWidth / @slot.TargetHeight; flex-basis: @(TileBasis(slot))px;">
         <button type="button"
-                class="cm-studio__card @(filled || takeThumb is not null ? "cm-studio__card--filled" : null) @(active ? "cm-studio__card--active" : null)"
-                style="aspect-ratio: @slot.TargetWidth / @slot.TargetHeight; flex-basis: @(TileBasis(slot))px;"
+                class="cm-studio__card @(hasImagery ? "cm-studio__card--filled" : null) @(active ? "cm-studio__card--active" : null)"
                 aria-pressed="@(active ? "true" : "false")"
                 @onclick="() => OpenSlotAsync(slot)">
             @if (filled)
@@ -2001,6 +2072,22 @@
                 <span class="cm-studio__card-size cm-mono">@slot.TargetWidth×@slot.TargetHeight</span>
             </span>
         </button>
+        @* Destroying pixels is not a tile-selection side effect: the control sits OUTSIDE
+           the select button so it can never be hit by keyboard traversal of the sheet. *@
+        @if (hasImagery)
+        {
+            <button type="button" class="cm-studio__tile-delete"
+                    title="Delete this image permanently"
+                    aria-label="Delete the @ArtifactDisplay.SlotLabel(slot.Kind) image permanently"
+                    disabled="@(_deletingSlot == slot.Id)"
+                    @onclick="() => DeleteSlotImageryAsync(slot)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" />
+                </svg>
+            </button>
+        }
+        </div>
     };
 
     /// <summary>Tile width scaled from the slot's real published width, clamped to stay
@@ -2098,7 +2185,7 @@
         try
         {
             var slot = await Images.CreateAsync(CampaignId, artifactId);
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
             RequestedArtifact = artifactId;
             RequestedSlot = slot.Id;
             await SelectSlotAsync(slot);
@@ -2128,7 +2215,7 @@
         try
         {
             await Generation.GenerateAsync(CampaignId, transcriptId, null, ["image-prompts"]);
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
             if (Selected is { } refreshed)
             {
                 _prompt = refreshed.Prompt ?? string.Empty;
@@ -2427,7 +2514,7 @@
             Notifier.ShowSuccess(result.BlogVersion is null
                 ? "Placed and published."
                 : "Placed, published, and the blog's stub is now the real image.");
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
             await ReloadGalleryAsync();
         }
         catch (ApiException ex)
@@ -2472,7 +2559,7 @@
             Notifier.ShowSuccess(result.FontFallback == true
                 ? "Headline composited (system typeface — the display font wasn't available server-side)."
                 : "Headline composited.");
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
         }
         catch (ApiException ex)
         {
@@ -2493,7 +2580,7 @@
         try
         {
             await Images.DeleteAsync(CampaignId, slot.Id);
-            await Campaign.LoadAsync(CampaignId, force: true);
+            await Campaign.RefreshAsync(CampaignId);
         }
         catch (ApiException ex)
         {

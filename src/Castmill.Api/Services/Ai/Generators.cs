@@ -224,6 +224,9 @@ public static partial class Generators
             Write image-generation prompts for this campaign: one blog hero image, one YouTube thumbnail (bold, readable at small size), and 2 supporting blog images.
             JSON schema: { "title": string, "images": [ { "slot": string, "prompt": string, "aspectRatio": string } ], "citations": string[] }
             "slot" is one of: "blog-hero", "youtube-thumbnail", "blog-inline-1", "blog-inline-2".
+            Every rendered image is centre-cropped afterwards, so compose each prompt for the
+            centre of the frame: ask for generous clear margins on all four edges, and never
+            place headline text, logos or key subjects near an edge where they would be cut.
             """,
             (json, t) => ValidateCommon(json, t, requireArray: "images", minItems: 3)));
 
@@ -238,7 +241,9 @@ public static partial class Generators
               "name": a short working name;
               "angle": the single idea or tension the image communicates;
               "prompt": a production-ready image prompt with composition, subject, lighting,
-                        negative space and visual hierarchy, but NO rendered words;
+                        negative space and visual hierarchy, but NO rendered words. The render
+                        is centre-cropped, so compose for the centre and demand generous clear
+                        margins on every edge — nothing meaningful may sit near an edge;
               "overlayText": 2-5 words, no more than 32 characters, to composite after generation;
               "reason": why this concept supports the primary query and earns a click without clickbait.
 

@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Castmill.Api.Endpoints;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
+using Castmill.Api.Services.Images;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
 using Microsoft.AspNetCore.Mvc.Testing;

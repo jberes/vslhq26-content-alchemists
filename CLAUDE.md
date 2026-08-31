@@ -13,6 +13,18 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
   - Rail = workspace scope; the four campaign views are header tabs (ADR-F11). No indeterminate spinners anywhere (ADR-F13).
   - Design reference: [docs/design_handoff_castmill_mill_floor/](docs/design_handoff_castmill_mill_floor/README.md) — recreate as Razor components; the prototype's imperative DOM writes are a prototype shortcut, not a pattern.
 
+## Generated images (non-negotiable)
+- **Rendered text is never clipped.** Providers emit only a fixed size set, so every render
+  centre-crops to the slot's aspect and loses up to ~11% of an edge. `ImagePromptRules` is
+  applied inside `ImageRenderer` — the single choke point every render passes through — so
+  no call site or user prompt can bypass the safe-margin rule. New render paths go through
+  `ImageRenderer`; if one ever cannot, it applies `ImagePromptRules.Apply` itself.
+- Any prompt authored by a generator (`Generators.cs`) must ask for clear edge margins and
+  centre-weighted composition. Prompts that place headlines, logos or key subjects near an
+  edge are wrong regardless of how good the image looks before cropping.
+- Headlines that must be exact are composited after generation (`ImageComposer`), never
+  spelled by the model.
+
 ## Security rules (non-negotiable)
 - **No secrets in the repo.** Committed `appsettings.json` holds structure only.
   - Dev config lives in `src/Castmill.Api/appsettings.Development.json` — **gitignored and publish-excluded**; it is the single local source for `ConnectionStrings:Castmill` (Azure SQL) and `Jwt:SigningKey` (≥32 bytes). Keys documented in the committed `appsettings.Development.template.json`. User-secrets are cleared/unused — don't reintroduce them, they silently override the file.

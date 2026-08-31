@@ -86,7 +86,9 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
             () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count == 2,
             TimeSpan.FromSeconds(5));
 
-        var tiles = view.FindAll(".cm-studio__card:not(.cm-studio__card--add)");
+        // The wrapper carries the ratio and sizing so the destructive control can live
+        // outside the select button; the button fills the wrapper.
+        var tiles = view.FindAll(".cm-studio__tile");
 
         var empty = tiles.Single(t => t.TextContent.Contains("Empty", StringComparison.Ordinal));
         Assert.Contains("aspect-ratio: 1600 / 840", empty.GetAttribute("style"), StringComparison.Ordinal);

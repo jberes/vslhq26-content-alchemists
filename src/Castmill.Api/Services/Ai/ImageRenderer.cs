@@ -26,11 +26,15 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
 {
     private const int WebpQuality = 85;
 
+    // Every render path applies ImagePromptRules here, at the one choke point every
+    // generation passes through: the crop below is unconditional, so the safe-margin
+    // rule must be too (a call site or a user prompt cannot opt out of it).
     public async Task<byte[]> RenderWebpAsync(
         Guid userId, string prompt, string aspectRatio, string modelAlias, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
-        var raw = await provider.GenerateAsync(userId, prompt, aspectRatio, modelAlias, ct);
+        var raw = await provider.GenerateAsync(
+            userId, ImagePromptRules.Apply(prompt), aspectRatio, modelAlias, ct);
         return EncodeWebp(raw);
     }
 
@@ -38,7 +42,8 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
-        var raw = await provider.GenerateAsync(userId, prompt, AspectFor(width, height), modelAlias, ct);
+        var raw = await provider.GenerateAsync(
+            userId, ImagePromptRules.Apply(prompt), AspectFor(width, height), modelAlias, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 
@@ -48,7 +53,7 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
     {
         var provider = providers.Resolve(modelAlias);
         var raw = await provider.GenerateAsync(
-            userId, prompt, AspectFor(width, height), modelAlias, references, ct);
+            userId, ImagePromptRules.Apply(prompt), AspectFor(width, height), modelAlias, references, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 

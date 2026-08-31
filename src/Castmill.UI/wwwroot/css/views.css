@@ -3722,6 +3722,21 @@ button.cm-intent {
 /* One slot at its true aspect ratio — the inline style carries aspect-ratio and the
    slot's scaled width as flex-basis, so a 1600-wide header reads wider than a 1280
    thumbnail. An empty slot is a dashed hole; a filled one shows its published image. */
+/* The tile owns the aspect ratio and sizing (inline style) so the delete control can sit
+   OUTSIDE the select button; the button is a flex child that fills it. These rules are
+   scoped to wrapped cards — the unwrapped "Add image" ghost tile keeps its own layout. */
+.cm-studio__tile {
+    position: relative;
+    display: flex;
+    flex: 0 1 auto;
+}
+
+.cm-studio__tile > .cm-studio__card {
+    flex: 1;
+    inline-size: 100%;
+    block-size: 100%;
+}
+
 .cm-studio__card {
     position: relative;
     flex: 0 1 auto;
@@ -3761,22 +3776,25 @@ button.cm-intent {
 }
 
 /* Legibility scrim over an unpredictable generated image — derived from the token
-   layer, no literal colours (ADR-F09). */
+   layer, no literal colours (ADR-F09). A gradient alone is not enough over a bright,
+   busy render, so the labels below also carry their own plate. */
 .cm-studio__card--filled::after {
     content: "";
     position: absolute;
     inset: 0;
     background: linear-gradient(180deg,
-        color-mix(in srgb, var(--cm-surface-inverse) 45%, transparent),
-        transparent 38%,
-        transparent 58%,
-        color-mix(in srgb, var(--cm-surface-inverse) 55%, transparent));
+        color-mix(in srgb, var(--cm-surface-inverse) 62%, transparent),
+        transparent 42%,
+        transparent 54%,
+        color-mix(in srgb, var(--cm-surface-inverse) 68%, transparent));
 }
 
 .cm-studio__card-name {
     position: absolute;
     inset-block-start: var(--cm-space-2);
-    inset-inline: var(--cm-space-2);
+    inset-inline-start: var(--cm-space-2);
+    /* Room for the delete control at the tile's top-right corner. */
+    max-inline-size: calc(100% - var(--cm-space-8));
     z-index: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3808,10 +3826,68 @@ button.cm-intent {
     white-space: nowrap;
 }
 
+/* Over imagery every label gets a solid plate: white-on-white was unreadable whenever a
+   render happened to be bright, which is most of them. */
 .cm-studio__card--filled .cm-studio__card-name,
 .cm-studio__card--filled .cm-studio__card-size,
 .cm-studio__card--filled .cm-studio__card-state {
+    padding: 2px 6px;
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-surface-inverse) 78%, transparent);
     color: var(--cm-on-inverse);
+}
+
+.cm-studio__card--filled .cm-studio__card-state {
+    /* The status chip keeps its own bar/label encoding (ADR-F12) — only the ground changes. */
+    background: color-mix(in srgb, var(--cm-surface-inverse) 82%, transparent);
+}
+
+/* Hover/focus-revealed destructive control. Always reachable by keyboard (focus-visible),
+   never revealed by hover alone on touch. */
+.cm-studio__tile-delete {
+    position: absolute;
+    inset-block-start: var(--cm-space-2);
+    inset-inline-end: var(--cm-space-2);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 26px;
+    block-size: 26px;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--cm-on-inverse) 35%, transparent);
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-surface-inverse) 78%, transparent);
+    color: var(--cm-on-inverse);
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 200ms ease-out, background 200ms ease-out, border-color 200ms ease-out;
+}
+
+.cm-studio__tile:hover .cm-studio__tile-delete,
+.cm-studio__tile-delete:focus-visible {
+    opacity: 1;
+}
+
+.cm-studio__tile-delete:hover:not(:disabled) {
+    border-color: var(--cm-danger);
+    background: var(--cm-danger);
+    color: var(--cm-on-inverse);
+}
+
+.cm-studio__tile-delete:focus-visible {
+    outline: 2px solid var(--cm-accent-strong);
+    outline-offset: 1px;
+}
+
+.cm-studio__tile-delete:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.cm-studio__tile-delete svg {
+    inline-size: 14px;
+    block-size: 14px;
 }
 
 /* "The next slot, not created yet": add is a ghost tile in the content piece's own row. */
