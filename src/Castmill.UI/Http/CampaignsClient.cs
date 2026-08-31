@@ -94,6 +94,14 @@ public sealed class CampaignsClient(ApiClient api)
     public Task<List<ArtifactPreviewResponse>> ListArtifactsAsync(Guid campaignId, CancellationToken ct = default) =>
         api.GetAsync<List<ArtifactPreviewResponse>>($"api/v1/campaigns/{campaignId}/artifacts", ct);
 
+    public Task<ArtifactResponse> CreateArtifactAsync(
+        Guid campaignId, string kind, string title, string contentJson,
+        Guid? parentArtifactId = null, CancellationToken ct = default) =>
+        api.PostAsync<ArtifactCreateRequest, ArtifactResponse>(
+            $"api/v1/campaigns/{campaignId}/artifacts",
+            new ArtifactCreateRequest(kind, title, contentJson, parentArtifactId),
+            anonymous: false, ct);
+
     /// <summary>Loads the full artifact with its ETag — every later save is conditional on it.</summary>
     public Task<(ArtifactResponse Artifact, string? ETag)> GetArtifactAsync(
         Guid campaignId, Guid artifactId, CancellationToken ct = default) =>

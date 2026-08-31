@@ -1,0 +1,82 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="cm-scroll-strip">
+    <button type="button" class="cm-scroll-strip__arrow cm-scroll-strip__arrow--back"
+            aria-label="Scroll @Label left" disabled="@(!_ready || !_canScrollBack)"
+            @onclick="() => ScrollAsync(-1)">
+        <span aria-hidden="true">‹</span>
+    </button>
+    <div class="@Class" data-cm-scroll @ref="_scroller">
+        @ChildContent
+    </div>
+    <button type="button" class="cm-scroll-strip__arrow cm-scroll-strip__arrow--forward"
+            aria-label="Scroll @Label right" disabled="@(!_ready || !_canScrollForward)"
+            @onclick="() => ScrollAsync(1)">
+        <span aria-hidden="true">›</span>
+    </button>
+</div>
+
+@code {
+    private const string ModulePath = "./_content/Castmill.UI/js/castmill-scroll.js?v=1";
+    private ElementReference _scroller;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _observer;
+    private DotNetObjectReference<HorizontalScroller>? _self;
+    private bool _ready;
+    private bool _canScrollBack;
+    private bool _canScrollForward;
+
+    [Parameter] public string Class { get; set; } = string.Empty;
+    [Parameter] public string Label { get; set; } = "items";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+        _self = DotNetObjectReference.Create(this);
+        _observer = await _module.InvokeAsync<IJSObjectReference>("observeOverflow", _scroller, _self);
+    }
+
+    [JSInvokable]
+    public void UpdateOverflow(bool canScrollBack, bool canScrollForward)
+    {
+        _ready = true;
+        _canScrollBack = canScrollBack;
+        _canScrollForward = canScrollForward;
+        StateHasChanged();
+    }
+
+    private async Task ScrollAsync(int direction)
+    {
+        if (_observer is not null)
+        {
+            await _observer.InvokeVoidAsync("scroll", direction);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_observer is not null)
+            {
+                await _observer.InvokeVoidAsync("dispose");
+                await _observer.DisposeAsync();
+            }
+            if (_module is not null)
+            {
+                await _module.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        _self?.Dispose();
+    }
+}

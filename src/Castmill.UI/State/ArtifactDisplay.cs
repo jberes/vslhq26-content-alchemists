@@ -39,6 +39,13 @@ public static class ArtifactDisplay
         _ => string.Empty,
     };
 
+    public static string StatusEdgeModifier(string status) => status switch
+    {
+        ArtifactStatus.InReview => "cm-status-edge--review",
+        ArtifactStatus.Queued or ArtifactStatus.Published => "cm-status-edge--approved",
+        _ => "cm-status-edge--draft",
+    };
+
     /// <summary>
     /// Everything the client knows about one artifact kind. This registry is the single
     /// source of truth — the lane map, the labels, Focus's editable list and the board

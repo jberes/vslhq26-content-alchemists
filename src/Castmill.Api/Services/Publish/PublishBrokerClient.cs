@@ -13,7 +13,14 @@ public sealed class PublishOptions
 }
 
 public sealed record BrokerChannel(string Id, string Name, string Platform);
-public sealed record BrokerPost(string Id, string ChannelId, string Text, DateTimeOffset? ScheduledAt, string Status);
+public sealed record BrokerPost(
+    string Id,
+    string ChannelId,
+    string Text,
+    DateTimeOffset? ScheduledAt,
+    string Status,
+    DateTimeOffset? SentAtUtc = null,
+    string? Permalink = null);
 
 public interface IPublishBrokerClient
 {

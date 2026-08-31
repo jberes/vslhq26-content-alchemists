@@ -1,530 +1,422 @@
-@* The Wire renders the schedule mirror first, then reconciles after first paint. *@
 @page "/wire"
-@using Castmill.Core
-@using Castmill.Core.Ai
+@using System.Globalization
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
-@using Castmill.UI.Publishing
+@using Castmill.UI.Scheduling
 @using Castmill.UI.State
 @inject CampaignsClient Campaigns
 @inject ScheduleClient Schedule
 @inject PublishClient Publish
-@inject WorkspaceState Workspace
-@inject NavigationManager Navigation
 @inject INotifier Notifier
+@inject NavigationManager Navigation
+@inject WorkspaceState Workspace
+@inject TimeProvider Clock
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 
 <PageTitle>The Wire — Castmill</PageTitle>
 
-<div class="cm-page cm-page--fill"><div class="cm-measure--dashboard cm-front__frame">
-    <header class="cm-front__head cm-wire__title">
-        <div>
-            <span class="cm-kicker">The Wire</span>
-            <h1>@PeriodLabel</h1>
-        </div>
-        <div class="cm-wire__broker">
-            @if (_brokerChecking)
-            {
-                <span class="cm-meta" role="status">Checking publishing readiness…</span>
-            }
-            else
-            {
-                <span class="@((_readiness?.Ready ?? false) ? "cm-status cm-status--queued" : "cm-status")">
-                    @((_readiness?.Ready ?? false) ? "Broker ready" : "Local mirror")
-                </span>
-                <span class="cm-meta">@_brokerDetail</span>
-            }
-        </div>
-    </header>
-
-    @if (!_loaded)
+<div class="cm-page cm-page--fill">
+    @if (_loading)
     {
-        <p class="cm-meta">Loading the schedule mirror…</p>
+        <section class="cm-run-show cm-run-show--loading" aria-label="Loading The Wire" aria-busy="true">
+            @foreach (var row in Enumerable.Range(0, 7))
+            {
+                <span class="cm-run-show__skeleton" aria-hidden="true"></span>
+            }
+        </section>
     }
-    else
+    else if (_data is not null)
     {
-        <div class="cm-wire">
-            <aside class="cm-wire__queue cm-region">
-                <div class="cm-wire__queue-head">
-                    <div>
-                        <span class="cm-kicker">Reviewed</span>
-                        <h2 class="cm-front__block-title">Ready to schedule</h2>
-                    </div>
-                    <span class="cm-mono cm-meta">@_queue.Count</span>
-                </div>
-                @if (_queue.Count == 0)
-                {
-                    <p class="cm-meta">
-                        Nothing is waiting for a slot. Distribution artifacts land here after review.
-                    </p>
-                }
-                else
-                {
-                    <ul class="cm-rows">
-                        @foreach (var item in _queue)
-                        {
-                            <li class="cm-row cm-wire__queue-row">
-                                <div class="cm-wire__queue-item">
-                                    <span class="cm-row__label">@item.Title</span>
-                                    <span class="cm-meta">
-                                        @item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)
-                                    </span>
-                                </div>
-                                <div class="cm-wire__queue-actions">
-                                    @if (CanCompose(item))
-                                    {
-                                        <button type="button" class="cm-button" disabled="@(!_channelsResolved)"
-                                            title="@(!_channelsResolved ? "Resolving publishing channels…" : null)"
-                                            @onclick="() => Compose(item)">Compose</button>
-                                    }
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            @onclick="() => OpenFocus(item)">Open</button>
-                                </div>
-                            </li>
-                        }
-                    </ul>
-                }
-
-                <div class="cm-wire__clip-state">
-                    <span class="cm-kicker">Exported clips</span>
-                    <p class="cm-meta">
-                        Scheduling unlocks when an exported clip has a durable published URL.
-                        Local file paths and short-lived worker download links are not sent to the broker.
-                    </p>
-                </div>
-            </aside>
-
-            <section class="cm-wire__week cm-region">
-                <div class="cm-wire__week-head">
-                    <div class="cm-segmented" role="group" aria-label="Schedule view">
-                        <button type="button" class="cm-segmented__option" aria-pressed="@(_viewMode == "Week")"
-                            @onclick="ShowWeekAsync">Week</button>
-                        <button type="button" class="cm-segmented__option" aria-pressed="@(_viewMode == "Day")"
-                            @onclick="ShowDayAsync">Day</button>
-                    </div>
-                    <div class="cm-segmented" role="group" aria-label="Schedule period">
-                        <button type="button" class="cm-segmented__option" @onclick="() => ShiftPeriodAsync(-1)">← Previous</button>
-                        <button type="button" class="cm-segmented__option" aria-pressed="@IsCurrentPeriod"
-                                @onclick="() => ShiftPeriodAsync(0)">@(_viewMode == "Week" ? "This week" : "Today")</button>
-                        <button type="button" class="cm-segmented__option" @onclick="() => ShiftPeriodAsync(1)">Next →</button>
-                    </div>
-                </div>
-
-                <div class="cm-wire__filters" role="group" aria-label="Publishing status">
-                    @foreach (var status in StatusFilters)
+        <section @ref="_wireSurface" class="cm-run-show @(_view == WireViewMode.Pipeline ? "cm-run-show--pipeline" : null)"
+                 aria-labelledby="cm-wire-title">
+            <header class="cm-run-show__header">
+                <div>
+                    <span class="cm-run-show__kicker">@(_view == WireViewMode.Pipeline ? "The Wire · Pipeline" : "The Wire")</span>
+                    <h1 id="cm-wire-title">@ViewTitle</h1>
+                    @if (_view != WireViewMode.Pipeline)
                     {
-                        <button type="button" class="cm-wire__filter" aria-pressed="@(_statusFilter == status)"
-                                @onclick="() => _statusFilter = status">
-                            @status <span class="cm-mono">@StatusCount(status)</span>
-                        </button>
-                    }
-                </div>
-
-                @if (_loadError is { } error)
-                {
-                    <p class="cm-form__error" role="alert">@error</p>
-                }
-
-                <div class="cm-wire__days cm-scroll-x @(_viewMode == "Day" ? "cm-wire__days--day" : "")" data-cm-scroll>
-                    @foreach (var day in Days)
-                    {
-                        var entries = FilteredEntries
-                            .Where(e => e.ScheduledAt.ToLocalTime().Date == day.Date)
-                            .OrderBy(e => e.ScheduledAt)
-                            .ToList();
-
-                        <div class="cm-wire__day @(day.Date == DateTimeOffset.Now.Date ? "cm-wire__day--today" : "")">
-                            <span class="cm-kicker">@day.ToString("ddd d MMM")</span>
-                            @if (entries.Count == 0)
-                            {
-                                <span class="cm-meta cm-wire__day-empty">No @(_statusFilter == "All" ? "posts" : _statusFilter.ToLowerInvariant() + " posts")</span>
-                            }
-                            else
-                            {
-                                <ul class="cm-wire__entries">
-                                    @foreach (var entry in entries)
-                                    {
-                                        var platform = PlatformFor(entry.ChannelId);
-                                        var limit = LimitFor(platform);
-                                        <li class="cm-wire__entry">
-                                            <span class="cm-mono cm-meta">
-                                                @entry.ScheduledAt.ToLocalTime().ToString("HH:mm") · @ChannelLabel(entry.ChannelId)
-                                            </span>
-                                            <span class="cm-wire__entry-text">@Excerpt(entry.Text)</span>
-                                            <span class="@StatusClass(entry.Status)">@entry.Status</span>
-                                            @if (entry.Error is { Length: > 0 } entryError)
-                                            {
-                                                <span class="cm-form__error">@entryError</span>
-                                            }
-
-                                            <div class="cm-wire__entry-preview">
-                                                <span class="cm-kicker">@platform preview</span>
-                                                <p>@entry.Text</p>
-                                                @if (limit is { } characterLimit)
-                                                {
-                                                    <span class="cm-mono cm-meta">@PlatformLimits.CharacterCount(entry.Text) / @characterLimit</span>
-                                                }
-                                                @if (!string.IsNullOrWhiteSpace(entry.MediaUrl))
-                                                {
-                                                    <img src="@entry.MediaUrl" alt="Scheduled attachment" />
-                                                }
-                                            </div>
-
-                                            @if (entry.Status != "Sent")
-                                            {
-                                                <div class="cm-wire__entry-actions">
-                                                    <button type="button" class="cm-button cm-button--quiet"
-                                                            disabled="@IsWorking(entry.Id)" @onclick="() => BeginMove(entry)">Move</button>
-                                                    @if (entry.Status == "Error" && entry.BrokerPostId is null)
-                                                    {
-                                                        <button type="button" class="cm-button cm-button--quiet"
-                                                                disabled="@(IsWorking(entry.Id) || !(_readiness?.CanSchedule ?? false))"
-                                                                @onclick="() => RetryAsync(entry)">Retry</button>
-                                                    }
-                                                    <button type="button" class="cm-button cm-button--quiet"
-                                                            disabled="@IsWorking(entry.Id)" @onclick="() => CancelAsync(entry)">Cancel</button>
-                                                </div>
-                                            }
-
-                                            @if (_movingId == entry.Id)
-                                            {
-                                                <div class="cm-wire__move">
-                                                    <InputDate class="cm-input" Type="InputDateType.DateTimeLocal" @bind-Value="_moveAt" />
-                                                    <button type="button" class="cm-button" disabled="@IsWorking(entry.Id)"
-                                                            @onclick="() => MoveAsync(entry)">Save move</button>
-                                                </div>
-                                            }
-                                        </li>
-                                    }
-                                </ul>
-                            }
+                        <div class="cm-run-show__states" aria-label="Schedule summary">
+                            <IgbChip class="cm-run-show__chip" Outlined="true">@Count(WireDeliveryStatus.Queued, WireDeliveryStatus.Staged) queued</IgbChip>
+                            <IgbChip>@Count(WireDeliveryStatus.Sent) sent</IgbChip>
+                            <IgbChip class="cm-run-show__chip cm-run-show__chip--accent">@_data.Queue.Count ready to schedule</IgbChip>
+                            <span class="cm-run-show__zone">@_data.TimeZone</span>
                         </div>
                     }
                 </div>
-            </section>
-        </div>
-    }
-</div></div>
+                <div class="cm-run-show__controls" aria-label="Wire controls">
+                    <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Wire view">
+                        <IgbToggleButton Value="run" Selected="@(_view == WireViewMode.RunOfShow)" Disabled="@_narrow"
+                                         @onclick="() => SelectView(WireViewMode.RunOfShow)">Run of show</IgbToggleButton>
+                        <IgbToggleButton Value="pipeline" Selected="@(_view == WireViewMode.Pipeline)" Disabled="@_narrow"
+                                         @onclick="() => SelectView(WireViewMode.Pipeline)">Pipeline</IgbToggleButton>
+                        <IgbToggleButton Value="agenda" Selected="@(_view == WireViewMode.Agenda)"
+                                         @onclick="() => SelectView(WireViewMode.Agenda)">Agenda</IgbToggleButton>
+                    </IgbButtonGroup>
+                    @if (_view != WireViewMode.Pipeline)
+                    {
+                        <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Schedule range">
+                            <IgbToggleButton Value="week" Selected="@(_data.RangeDays == 7)" @onclick="() => ChangeRangeAsync(7)">Week</IgbToggleButton>
+                            <IgbToggleButton Value="fortnight" Selected="@(_data.RangeDays == 14)" @onclick="() => ChangeRangeAsync(14)">Fortnight</IgbToggleButton>
+                        </IgbButtonGroup>
+                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(-1)">← Prev</IgbButton>
+                        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRangeAsync(1)">Next →</IgbButton>
+                    }
+                </div>
+            </header>
 
-@if (_composing is { } composing)
-{
-    <div class="cm-modal" role="presentation">
-        <div class="cm-modal__panel cm-modal__panel--wide" role="dialog" aria-modal="true"
-             aria-label="Publishing composer" @onclick:stopPropagation>
-            <PublishingComposer Item="composing" Readiness="_readiness" Channels="_channels"
-                                Closed="CloseComposer" Scheduled="ReloadAfterScheduleAsync" />
-        </div>
-    </div>
-}
+            @switch (_view)
+            {
+                case WireViewMode.Pipeline:
+                    <PipelineView Data="_data"
+                                  CampaignOnly="_campaignOnly"
+                                  CampaignId="Workspace.Active?.Id"
+                                  CampaignOnlyChanged="SetCampaignOnly"
+                                  EditQueue="EditQueueAsync"
+                                  Edit="EditScheduleAsync"
+                                  Export="EditScheduleAsync"
+                                  Slot="ApplySlotAsync"
+                                  Retry="RetryAsync"
+                                  Unschedule="UnscheduleAsync"
+                                  ConnectBroker="OpenSettings" />
+                    break;
+                case WireViewMode.Agenda:
+                    <AgendaView Data="_data"
+                                Narrow="_narrow"
+                                EditQueue="EditQueueAsync"
+                                Edit="EditScheduleAsync"
+                                Export="EditScheduleAsync"
+                                Slot="ApplySlotAsync" />
+                    break;
+                default:
+                    <RunOfShowView Data="_data"
+                                   ShowHeader="false"
+                                   Edit="EditQueueAsync"
+                                   Slot="ApplySlotAsync"
+                                   Retry="RetryAsync"
+                                   RangeDaysChanged="ChangeRangeAsync"
+                                   NavigateRange="NavigateRangeAsync"
+                                   ConnectBroker="OpenSettings" />
+                    break;
+            }
+        </section>
+    }
+    else
+    {
+        <section class="cm-run-show" role="alert">
+            <span class="cm-run-show__kicker">The Wire</span>
+            <p>@(_loadError ?? "The schedule could not be loaded.")</p>
+            <IgbButton Variant="ButtonVariant.Outlined" @onclick="LoadInitialAsync">Retry</IgbButton>
+        </section>
+    }
+</div>
 
 @code {
-    private readonly List<ScheduleEntryResponse> _entries = [];
-    private readonly List<DashboardArtifact> _queue = [];
-    private readonly List<PublishChannel> _channels = [];
-    private static readonly string[] StatusFilters = ["All", "Draft", "Queued", "Sent", "Error"];
-
-    private bool _loaded;
-    private bool _brokerChecking = true;
-    private bool _channelsResolved;
-    private string? _loadError;
-    private string? _brokerDetail;
+    private const string WireModulePath = "./_content/Castmill.UI/js/castmill-wire.js?v=2";
+    private readonly TimeZoneInfo _zone = TimeZoneInfo.Local;
+    private DashboardResponse? _dashboard;
+    private List<ScheduleEntryResponse> _schedule = [];
     private PublishReadinessResponse? _readiness;
-    private DashboardArtifact? _composing;
-    private Guid? _workingEntryId;
-    private Guid? _movingId;
-    private DateTime _moveAt;
-    private string _viewMode = "Week";
-    private string _statusFilter = "All";
-    private int _weekOffset;
-    private int _dayOffset;
-
-    /// <summary>Monday of the displayed week, local time.</summary>
-    private DateTimeOffset WeekStart
-    {
-        get
-        {
-            var today = DateTimeOffset.Now.Date;
-            var sinceMonday = ((int)today.DayOfWeek + 6) % 7;
-            return new DateTimeOffset(today.AddDays(-sinceMonday + (_weekOffset * 7)), DateTimeOffset.Now.Offset);
-        }
-    }
-
-    private DateTimeOffset DayStart => new(DateTimeOffset.Now.Date.AddDays(_dayOffset), DateTimeOffset.Now.Offset);
-
-    private IEnumerable<DateTimeOffset> Days => _viewMode == "Week"
-        ? Enumerable.Range(0, 7).Select(i => WeekStart.AddDays(i))
-        : [DayStart];
-
-    private IEnumerable<ScheduleEntryResponse> FilteredEntries => _statusFilter == "All"
-        ? _entries
-        : _entries.Where(entry => entry.Status == _statusFilter);
-
-    private bool IsCurrentPeriod => _viewMode == "Week" ? _weekOffset == 0 : _dayOffset == 0;
-
-    private string PeriodLabel => _viewMode == "Day"
-        ? DayStart.Date == DateTimeOffset.Now.Date
-            ? "On the wire today."
-            : DayStart.ToString("dddd, d MMMM")
-        : _weekOffset switch
-    {
-        0 => "On the wire this week.",
-        _ => $"The week of {WeekStart:d MMM}.",
-    };
+    private IReadOnlyList<PublishChannel> _channels = [];
+    private WireBoardData? _data;
+    private DateOnly _rangeStart;
+    private int _rangeDays = 7;
+    private bool _loading = true;
+    private bool _narrow;
+    private bool _campaignOnly;
+    private string? _loadError;
+    private WireViewMode _view = WireViewMode.RunOfShow;
+    private ElementReference _wireSurface;
+    private IJSObjectReference? _wireModule;
+    private IJSObjectReference? _resizeObserver;
+    private DotNetObjectReference<Wire>? _selfReference;
 
     protected override async Task OnInitializedAsync()
     {
-        await Workspace.LoadAsync();
-        await LoadAsync();
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(Clock.GetLocalNow(), _zone).DateTime);
+        _rangeStart = StartOfWeek(today);
+        await LoadInitialAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (_data is null || _wireModule is not null)
         {
-            await ReconcileAfterFirstPaintAsync();
+            return;
+        }
+
+        try
+        {
+            _wireModule = await JS.InvokeAsync<IJSObjectReference>("import", WireModulePath);
+            _selfReference = DotNetObjectReference.Create(this);
+            _resizeObserver = await _wireModule.InvokeAsync<IJSObjectReference>(
+                "observeWidth", _wireSurface, _selfReference, 1100d);
+        }
+        catch (JSException)
+        {
         }
     }
 
-    private async Task SetViewAsync(string mode)
+    private async Task LoadInitialAsync()
     {
-        _viewMode = mode;
-        await LoadAsync(loadQueue: false);
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            var bounds = WireBoardMapper.UtcRange(_rangeStart, _rangeDays, _zone);
+            var dashboardTask = Campaigns.GetDashboardAsync();
+            var scheduleTask = Schedule.ListAsync(bounds.From, bounds.To);
+            var readinessTask = Publish.GetReadinessAsync();
+            await Task.WhenAll(dashboardTask, scheduleTask, readinessTask);
+
+            _dashboard = await dashboardTask;
+            _schedule = await scheduleTask;
+            _readiness = await readinessTask;
+            _channels = _readiness.Ready ? await Publish.ListChannelsAsync() : [];
+            RebuildData();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _loadError = ex is ApiException api ? api.Message : "The Castmill API could not be reached.";
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
-    private Task ShowWeekAsync() => SetViewAsync("Week");
-
-    private Task ShowDayAsync() => SetViewAsync("Day");
-
-    private async Task ShiftPeriodAsync(int offset)
+    private async Task LoadRangeAsync()
     {
-        if (_viewMode == "Week")
+        try
         {
-            _weekOffset = offset == 0 ? 0 : _weekOffset + offset;
+            var bounds = WireBoardMapper.UtcRange(_rangeStart, _rangeDays, _zone);
+            _schedule = await Schedule.ListAsync(bounds.From, bounds.To);
+            RebuildData();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError(ex is ApiException api ? api.Message : "The schedule range could not be loaded.");
+        }
+    }
+
+    private void RebuildData()
+    {
+        if (_dashboard is null || _readiness is null)
+        {
+            return;
+        }
+
+        _data = WireBoardMapper.Create(
+            _rangeStart,
+            _rangeDays,
+            _dashboard,
+            _schedule,
+            _readiness,
+            _channels,
+            Clock.GetUtcNow(),
+            _zone);
+    }
+
+    private Task EditQueueAsync(WireQueueItem item) =>
+        NavigateToArtifactAsync(item.CampaignId, item.ArtifactId);
+
+    private Task EditScheduleAsync(WireScheduleItem item) =>
+        NavigateToArtifactAsync(item.CampaignId, item.ArtifactId);
+
+    private Task NavigateToArtifactAsync(Guid campaignId, Guid artifactId)
+    {
+        Workspace.SetActive(campaignId);
+        Navigation.NavigateTo(
+            $"{CampaignViews.PathFor(campaignId, CampaignView.Focus)}?artifact={artifactId}");
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplySlotAsync(WireSlotRequest request)
+    {
+        var utc = WireTime.ToUtc(request.Date, request.Minutes, _zone);
+        if (utc is null)
+        {
+            Notifier.ShowWarning("Choose an unambiguous local time.");
+            return;
+        }
+        if (utc <= Clock.GetUtcNow())
+        {
+            Notifier.ShowWarning("Choose a future time.");
+            return;
+        }
+
+        try
+        {
+            if (request.QueueItem is { } queueItem)
+            {
+                var created = await Schedule.CreateAsync(new ScheduleEntryCreateRequest(
+                    queueItem.CampaignId,
+                    queueItem.ArtifactId,
+                    queueItem.ChannelId,
+                    queueItem.Title,
+                    utc.Value,
+                    MediaUrl: null,
+                    PushToBroker: _readiness?.Ready == true));
+                _schedule.Add(created);
+                RebuildData();
+                Notifier.ShowSuccess(SuccessMessage(queueItem.Title, utc.Value));
+            }
+            else if (request.ScheduleItem is { } scheduleItem)
+            {
+                if (WireTime.IsSameSlot(scheduleItem, request.Date, request.Minutes))
+                {
+                    return;
+                }
+
+                var moved = await Schedule.MoveAsync(scheduleItem.Id, utc.Value);
+                ReplaceSchedule(moved);
+                RebuildData();
+                Notifier.ShowSuccess(SuccessMessage(scheduleItem.Title, utc.Value));
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError(ex is ApiException api ? api.Message : "The schedule could not be updated.");
+        }
+    }
+
+    private async Task RetryAsync(WireScheduleItem item)
+    {
+        try
+        {
+            var retried = await Schedule.RetryAsync(item.Id);
+            ReplaceSchedule(retried);
+            RebuildData();
+            Notifier.ShowSuccess($"{item.Title} queued again.");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError(ex is ApiException api ? api.Message : "The failed delivery could not be retried.");
+        }
+    }
+
+    private async Task UnscheduleAsync(WireScheduleItem item)
+    {
+        try
+        {
+            await Schedule.CancelAsync(item.Id);
+            _schedule.RemoveAll(entry => entry.Id == item.Id);
+            RebuildData();
+            Notifier.ShowSuccess($"{item.Title} returned to Ready.");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            Notifier.ShowError(ex is ApiException api ? api.Message : "The scheduled item could not be returned to Ready.");
+        }
+    }
+
+    private async Task ChangeRangeAsync(int days)
+    {
+        if (_rangeDays == days)
+        {
+            return;
+        }
+        _rangeDays = days;
+        await LoadRangeAsync();
+    }
+
+    private async Task NavigateRangeAsync(int direction)
+    {
+        _rangeStart = _rangeStart.AddDays(direction * _rangeDays);
+        await LoadRangeAsync();
+    }
+
+    private void ReplaceSchedule(ScheduleEntryResponse entry)
+    {
+        var index = _schedule.FindIndex(candidate => candidate.Id == entry.Id);
+        if (index < 0)
+        {
+            _schedule.Add(entry);
         }
         else
         {
-            _dayOffset = offset == 0 ? 0 : _dayOffset + offset;
+            _schedule[index] = entry;
         }
-        await LoadAsync();
     }
 
-    private async Task LoadAsync(bool loadQueue = true)
+    private string SuccessMessage(string title, DateTimeOffset scheduledAt)
     {
-        _loadError = null;
-        var from = _viewMode == "Week" ? WeekStart : DayStart;
-        var to = from.AddDays(_viewMode == "Week" ? 7 : 1);
+        var local = TimeZoneInfo.ConvertTime(scheduledAt, _zone);
+        var destination = _readiness?.Ready == true ? "via broker" : "staged locally";
+        return $"{title} scheduled {local:ddd d MMM HH:mm} {destination}.";
+    }
 
-        try
+    private void OpenSettings() => Navigation.NavigateTo("/settings");
+
+    private string ViewTitle => _view == WireViewMode.Pipeline
+        ? $"{_data!.Queue.Count + _data.Items.Count} items in flight"
+        : $"{(_data!.RangeDays == 14 ? "Fortnight" : "Week")} of {_data.RangeStart.ToString("d MMM", CultureInfo.CurrentCulture)}";
+
+    private int Count(params WireDeliveryStatus[] states) =>
+        _data?.Items.Count(item => states.Contains(item.Status)) ?? 0;
+
+    private void SelectView(WireViewMode view)
+    {
+        if (_narrow && view != WireViewMode.Agenda)
         {
-            var entries = await Schedule.ListAsync(from, to);
-            _entries.Clear();
-            _entries.AddRange(entries);
-        }
-        catch (ApiException ex)
-        {
-            _loadError = ex.Message;
-        }
-        catch (HttpRequestException)
-        {
-            _loadError = "Couldn't reach the Castmill API.";
+            return;
         }
 
-        if (loadQueue)
+        _view = view;
+    }
+
+    private void SetCampaignOnly(bool campaignOnly) => _campaignOnly = campaignOnly;
+
+    [JSInvokable]
+    public Task WireWidthChanged(double width)
+    {
+        var narrow = width < 1100d;
+        if (_narrow == narrow)
+        {
+            return Task.CompletedTask;
+        }
+
+        _narrow = narrow;
+        if (_narrow && _view != WireViewMode.Agenda)
+        {
+            _view = WireViewMode.Agenda;
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static DateOnly StartOfWeek(DateOnly date)
+    {
+        var offset = ((int)date.DayOfWeek + 6) % 7;
+        return date.AddDays(-offset);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_resizeObserver is not null)
         {
             try
             {
-                var dashboard = await Campaigns.GetDashboardAsync();
-                _queue.Clear();
-                _queue.AddRange((dashboard.ReadyToSchedule ?? [])
-                    .Where(item => ArtifactKinds.IsDistributionContent(item.Kind)));
+                await _resizeObserver.InvokeVoidAsync("dispose");
+                await _resizeObserver.DisposeAsync();
             }
-            catch (ApiException)
-            {
-                // The mirror still renders; the queue keeps its last known local state.
-            }
-            catch (HttpRequestException)
+            catch (JSDisconnectedException)
             {
             }
         }
 
-        _loaded = true;
-    }
-
-    private async Task ReconcileAfterFirstPaintAsync()
-    {
-        try
+        if (_wireModule is not null)
         {
-            _readiness = await Publish.GetReadinessAsync();
-            _brokerDetail = _readiness.Detail;
-            if (_readiness.Ready)
+            try
             {
-                _channels.Clear();
-                _channels.AddRange(await Publish.ListChannelsAsync());
-                _channelsResolved = true;
-                await InvokeAsync(StateHasChanged);
-                var result = await Schedule.ReconcileAsync();
-                _brokerDetail = result.UnreachableChannels.Count > 0
-                    ? $"Mirror loaded. Broker could not reconcile {result.UnreachableChannels.Count} channel(s)."
-                    : $"Mirror reconciled with the broker · {result.Updated} update(s).";
-                await LoadAsync(loadQueue: false);
+                await _wireModule.DisposeAsync();
             }
-            else
+            catch (JSDisconnectedException)
             {
-                _channelsResolved = true;
             }
         }
-        catch (ApiException ex)
-        {
-            _brokerDetail = $"The local mirror is available. {ex.Message}";
-            _readiness = _readiness is null
-                ? null
-                : _readiness with { Ready = false, CanSchedule = false, Detail = _brokerDetail };
-            _channelsResolved = true;
-        }
-        catch (HttpRequestException)
-        {
-            _brokerDetail = "The local mirror is available; broker readiness could not be checked.";
-            _readiness = _readiness is null
-                ? null
-                : _readiness with { Ready = false, CanSchedule = false, Detail = _brokerDetail };
-            _channelsResolved = true;
-        }
-        finally
-        {
-            _brokerChecking = false;
-            await InvokeAsync(StateHasChanged);
-        }
+
+        _selfReference?.Dispose();
     }
-
-    private void Compose(DashboardArtifact item) => _composing = item;
-
-    private void CloseComposer() => _composing = null;
-
-    private async Task ReloadAfterScheduleAsync() => await LoadAsync();
-
-    private void OpenFocus(DashboardArtifact item)
-    {
-        Workspace.SetActive(item.CampaignId);
-        Navigation.NavigateTo(
-            $"{CampaignViews.PathFor(item.CampaignId, CampaignView.Focus)}?artifact={item.ArtifactId}");
-    }
-
-    private void BeginMove(ScheduleEntryResponse entry)
-    {
-        _movingId = entry.Id;
-        _moveAt = entry.ScheduledAt.ToLocalTime().DateTime;
-    }
-
-    private async Task MoveAsync(ScheduleEntryResponse entry)
-    {
-        await RunEntryActionAsync(entry.Id, async () =>
-        {
-            var moved = await Schedule.MoveAsync(entry.Id, ToDateTimeOffset(_moveAt));
-            _movingId = null;
-            if (moved.Status == "Error")
-            {
-                Notifier.ShowError(moved.Error ?? "The broker rejected the move.");
-            }
-            else
-            {
-                Notifier.ShowSuccess("Schedule moved.");
-            }
-        });
-    }
-
-    private async Task RetryAsync(ScheduleEntryResponse entry)
-    {
-        await RunEntryActionAsync(entry.Id, async () =>
-        {
-            var retried = await Schedule.RetryAsync(entry.Id);
-            if (retried.Status == "Error")
-            {
-                Notifier.ShowError(retried.Error ?? "The broker rejected the retry.");
-            }
-            else
-            {
-                Notifier.ShowSuccess("Post returned to the broker queue.");
-            }
-        });
-    }
-
-    private async Task CancelAsync(ScheduleEntryResponse entry)
-    {
-        await RunEntryActionAsync(entry.Id, async () =>
-        {
-            await Schedule.CancelAsync(entry.Id);
-            Notifier.ShowSuccess(entry.BrokerPostId is null
-                ? "Local schedule removed."
-                : "Broker post cancelled and mirror entry removed.");
-        });
-    }
-
-    private async Task RunEntryActionAsync(Guid id, Func<Task> action)
-    {
-        _workingEntryId = id;
-        try
-        {
-            await action();
-            await LoadAsync(loadQueue: false);
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-            await LoadAsync(loadQueue: false);
-        }
-        catch (HttpRequestException)
-        {
-            Notifier.ShowError("Couldn't reach the Castmill API.");
-        }
-        finally
-        {
-            _workingEntryId = null;
-        }
-    }
-
-    private int StatusCount(string status) => status == "All"
-        ? _entries.Count
-        : _entries.Count(entry => entry.Status == status);
-
-    private bool IsWorking(Guid id) => _workingEntryId == id;
-
-    private string ChannelLabel(string channelId) =>
-        _channels.FirstOrDefault(channel => channel.Id == channelId)?.Name ?? channelId;
-
-    private string PlatformFor(string channelId) =>
-        NormalizePlatform(_channels.FirstOrDefault(channel => channel.Id == channelId)?.Platform ?? channelId);
-
-    private static int? LimitFor(string platform) =>
-        PlatformLimits.MaxChars.TryGetValue(platform, out var limit) ? limit : null;
-
-    private static bool CanCompose(DashboardArtifact item) =>
-        item.Kind.StartsWith("social-", StringComparison.Ordinal)
-        && ArtifactKinds.IsDistributionContent(item.Kind);
-
-    private static DateTimeOffset ToDateTimeOffset(DateTime local) =>
-        new(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), TimeZoneInfo.Local.GetUtcOffset(local));
-
-    private static string NormalizePlatform(string value)
-    {
-        var platform = value.Trim().ToLowerInvariant();
-        if (platform is "twitter" or "twitter-x")
-        {
-            return "x";
-        }
-
-        return PlatformLimits.MaxChars.Keys.FirstOrDefault(key =>
-            platform.Equals(key, StringComparison.Ordinal)
-            || platform.Contains(key, StringComparison.Ordinal)) ?? platform;
-    }
-
-    private static string StatusClass(string status) => status switch
-    {
-        "Sent" => "cm-status cm-status--published",
-        "Queued" => "cm-status cm-status--queued",
-        "Error" => "cm-status cm-status--review",
-        _ => "cm-status",
-    };
-
-    private static string Excerpt(string text) =>
-        text.Length <= 90 ? text : text[..90].TrimEnd() + "…";
 }

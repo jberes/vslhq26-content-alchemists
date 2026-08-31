@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/industry-5b61f1e6-7c69-463a-b807-18ce7a1e0129/styles.css">
+<script src="_ds/industry-5b61f1e6-7c69-463a-b807-18ce7a1e0129/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#dcdcde;font-family:Barlow,system-ui,sans-serif}
+.dv-turn{padding:38px 42px 30px;border-bottom:1px solid rgba(0,0,0,.08)}
+.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 18px}
+.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1d1f20;color:#fff;text-decoration:none}
+.dv-tname{font:600 13px/1.2 'Barlow Condensed',sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#1d1f20}
+.dv-opts{display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start}
+.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px;scroll-margin-top:16px}
+.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.09);color:#1d1f20;text-decoration:none}
+.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11.5px/1.35 Barlow,sans-serif;color:rgba(0,0,0,.58);max-width:1180px}
+.dv-card{background:#f2f2f3;border:1px solid rgba(0,0,0,.14);overflow:hidden}
+.dv-opt:target .dv-oid{background:#5980a6;color:#fff}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.clamp1{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.table td .clamp1{width:100%}
+.qrow{transition:background .2s ease-out,border-color .2s ease-out}
+.qrow:hover{background:#e9e9ea}
+.qrow:hover .acts{opacity:1}
+.acts{opacity:0;transition:opacity .15s ease-out}
+.slot{transition:background .2s ease-out,border-color .2s ease-out}
+.slot:hover{background:rgba(89,128,166,.08)}
+a{color:#416180}a:hover{color:#2c455d}
+</style></helmet>
+
+<div onDragStart="{{ onDragStart }}" onDragOver="{{ onDragOver }}" onDragLeave="{{ onLeave }}" onDrop="{{ onDrop }}" ref="{{ rootRef }}" style="min-height:100vh">
+
+<div style="padding:38px 42px 6px;max-width:1000px">
+  <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6;margin-bottom:10px">Castmill · §1.3.5 The Wire · replacing the week grid</div>
+  <h2 style="margin:0 0 10px">Three ways to schedule that don't break</h2>
+  <p style="font-size:14px;max-width:70ch;color:rgba(0,0,0,.72);text-wrap:pretty">What's wrong with the grid you sent isn't styling — it's the model. Five equal day columns give every day the same 20% of the width whether it holds four posts or none, so titles wrap one word per line, action buttons land on top of the text, and 80% of the screen is empty ruled paper. A week has ~10 posts in it; a 5-column full-height grid is sized for 200.</p>
+  <p style="font-size:14px;max-width:70ch;color:rgba(0,0,0,.72);text-wrap:pretty">All three below fix the same three things: <strong>titles get real width and clamp to two lines</strong>, <strong>actions live in a fixed column instead of inline</strong>, and <strong>days size to their content</strong>. Drag a queue item onto a slot in any of them.</p>
+  <p style="font-size:13px;max-width:70ch;color:rgba(0,0,0,.5)">Left bar: <span style="border-left:3px solid #b7b7ba;padding-left:6px">draft</span> · <span style="border-left:3px solid #416180;padding-left:6px">queued</span> · <span style="border-left:3px solid #1d2d3d;padding-left:6px">sent</span> · <span style="border-left:3px solid #C15F3C;padding-left:6px">error</span></p>
+</div>
+
+<section class="dv-turn" id="t2">
+<div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Run of Show — the other views it needs</span></div>
+<p style="font:13.5px/1.55 Barlow,sans-serif;color:rgba(0,0,0,.7);max-width:74ch;margin:-6px 0 18px;text-wrap:pretty">Three more views, each answering a question <a href="#1a">1a</a> can't. Not skins — different axes. The <strong>range</strong> switch in 1a's header (Week / Fortnight / Month) covers <a href="#2a">2a</a>; <a href="#2b">2b</a> and <a href="#2c">2c</a> want their own switch next to it: <em>By day · By channel · Sent</em>. Everything keeps 1a's rules — rows size to content, titles clamp, actions in a fixed column.</p>
+<div class="dv-opts">
+
+<div class="dv-opt" id="2a">
+  <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span><strong>Month — cadence</strong>. Past ~10 days the time ruler stops being legible, and the question changes from "what time" to "are there gaps". So the month drops time entirely: one cell per day, count plus status bars. Ship this as the Month position of the range switch.</span></div>
+  <div class="dv-card" style="width:1000px">
+    <div style="padding:18px 22px 20px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div><div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">The Wire · cadence</div><h3 style="margin:4px 0 3px">September 2026</h3><div style="font-size:12.5px;color:rgba(29,31,32,.62)">31 items · 6 days empty · longest gap 4 days</div></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+          <div class="seg" role="group"><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">Week</button><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">Fortnight</button><button type="button" class="seg-opt" style="border:0;font:inherit;background:#5980a6;color:#f2f2f3;cursor:pointer">Month</button></div>
+          <button class="btn btn-secondary" type="button">← Aug</button><button class="btn btn-secondary" type="button">Oct →</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:rgba(29,31,32,.16);border:1px solid rgba(29,31,32,.16)">
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Mon</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Tue</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Wed</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Thu</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.55)">Fri</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.38)">Sat</div>
+        <div style="background:#e9e9ea;padding:6px 8px;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.38)">Sun</div>
+
+        <div class="slot" data-slot="Mon 31 Aug" style="background:#f2f2f3;min-height:72px;padding:6px 8px;opacity:.5"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">31 AUG</div><div style="display:flex;gap:3px;margin-top:7px"><span style="width:100%;height:3px;background:#1d2d3d"></span></div><div style="font-size:11px;color:rgba(29,31,32,.5);margin-top:5px">1 sent</div></div>
+        <div class="slot" data-slot="Tue 1 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px;box-shadow:inset 0 0 0 2px #5980a6"><div style="font:11px ui-monospace,Menlo,monospace;color:#416180">1 · TODAY</div><div style="display:flex;gap:3px;margin-top:7px"><span style="flex:1;height:3px;background:#416180"></span><span style="flex:1;height:3px;background:#416180"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">2 queued</div></div>
+        <div class="slot" data-slot="Wed 2 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">2</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div class="slot" data-slot="Thu 3 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">3</div><div style="display:flex;gap:3px;margin-top:7px"><span style="flex:1;height:3px;background:#C15F3C"></span><span style="flex:1;height:3px;background:#416180"></span></div><div style="font-size:11px;color:#C15F3C;margin-top:5px">1 blocked</div></div>
+        <div class="slot" data-slot="Fri 4 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">4</div><div style="display:flex;gap:3px;margin-top:7px"><span style="width:100%;height:3px;background:#416180"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">1 queued</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">5</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">6</div></div>
+
+        <div class="slot" data-slot="Mon 7 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">7</div><div style="display:flex;gap:3px;margin-top:7px"><span style="flex:1;height:3px;background:#b7b7ba"></span><span style="flex:1;height:3px;background:#b7b7ba"></span><span style="flex:1;height:3px;background:#b7b7ba"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">3 draft</div></div>
+        <div class="slot" data-slot="Tue 8 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">8</div><div style="display:flex;gap:3px;margin-top:7px"><span style="width:100%;height:3px;background:#b7b7ba"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">1 draft</div></div>
+        <div class="slot" data-slot="Wed 9 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">9</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div class="slot" data-slot="Thu 10 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">10</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div class="slot" data-slot="Fri 11 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">11</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">12</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">13</div></div>
+
+        <div class="slot" data-slot="Mon 14 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">14</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div class="slot" data-slot="Tue 15 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">15</div><div style="display:flex;gap:3px;margin-top:7px"><span style="flex:1;height:3px;background:#b7b7ba"></span><span style="flex:1;height:3px;background:#b7b7ba"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">2 draft</div></div>
+        <div class="slot" data-slot="Wed 16 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">16</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div class="slot" data-slot="Thu 17 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">17</div><div style="display:flex;gap:3px;margin-top:7px"><span style="width:100%;height:3px;background:#b7b7ba"></span></div><div style="font-size:11px;color:rgba(29,31,32,.62);margin-top:5px">1 draft</div></div>
+        <div class="slot" data-slot="Fri 18 Sep" style="background:#f2f2f3;min-height:72px;padding:6px 8px"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">18</div><div style="font-size:11px;color:rgba(29,31,32,.32);margin-top:9px">—</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">19</div></div>
+        <div style="background:#e9e9ea;min-height:72px;padding:6px 8px;opacity:.45"><div style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">20</div></div>
+      </div>
+      <div class="blueprint" style="margin-top:14px;padding:10px 12px;background:#e9e9ea;display:flex;align-items:center;gap:12px"><i class="corner tl"></i><i class="corner br"></i>
+        <span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180">GAP</span>
+        <span style="font-size:12.5px;color:rgba(29,31,32,.72)">Nothing scheduled 9–14 Sep. Three campaigns have reviewed artifacts sitting unscheduled.</span>
+        <button class="btn btn-primary" type="button" style="margin-left:auto">Fill the gap</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="2b">
+  <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span><strong>By channel</strong> — same week, rows are channels instead of days. Answers the question days can't: am I hammering LinkedIn and starving the newsletter? Rows still size to content, so a dormant channel is one line and reads as a reproach.</span></div>
+  <div class="dv-card" style="width:1120px">
+    <div style="padding:18px 22px 20px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div><div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">The Wire · balance</div><h3 style="margin:4px 0 3px">Week of 31 Aug, by channel</h3><div style="font-size:12.5px;color:rgba(29,31,32,.62)">7 channels connected · 2 dormant this week</div></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+          <div class="seg" role="group"><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">By day</button><button type="button" class="seg-opt" style="border:0;font:inherit;background:#5980a6;color:#f2f2f3;cursor:pointer">By channel</button><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">Sent</button></div>
+          <button class="btn btn-secondary" type="button">← Prev</button><button class="btn btn-secondary" type="button">Next →</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;padding-left:118px;margin-bottom:5px">
+        <span style="flex:1;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Mon 31</span>
+        <span style="flex:1;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#416180">Tue 1 · today</span>
+        <span style="flex:1;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Wed 2</span>
+        <span style="flex:1;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Thu 3</span>
+        <span style="flex:1;font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Fri 4</span>
+      </div>
+      <div style="border-top:1px solid rgba(29,31,32,.16)">
+        <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:8px 0">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">LinkedIn</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">3 this week</div></div>
+          <div class="slot" data-slot="LinkedIn · Mon" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border-left:3px solid #1d2d3d;background:#e9e9ea;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">09:00</div><div class="clamp1" style="font-size:12px;margin-top:2px">One library, two shells</div></div></div>
+          <div class="slot" data-slot="LinkedIn · Tue" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">11:00</div><div class="clamp1" style="font-size:12px;margin-top:2px">Agents stall on CRM work</div></div></div>
+          <div class="slot" data-slot="LinkedIn · Wed" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="LinkedIn · Thu" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">08:00</div><div class="clamp1" style="font-size:12px;margin-top:2px">Trust is not cheap</div></div></div>
+          <div class="slot" data-slot="LinkedIn · Fri" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:8px 0">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">X</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">1 this week</div></div>
+          <div class="slot" data-slot="X · Mon" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="X · Tue" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">08:30</div><div class="clamp1" style="font-size:12px;margin-top:2px">AOT bought back 30%</div></div></div>
+          <div class="slot" data-slot="X · Wed" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="X · Thu" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="X · Fri" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:8px 0">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">Blog</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">1 this week</div></div>
+          <div class="slot" data-slot="Blog · Mon" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Blog · Tue" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">16:00</div><div class="clamp1" style="font-size:12px;margin-top:2px">Shipping Blazor at Scale</div></div></div>
+          <div class="slot" data-slot="Blog · Wed" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Blog · Thu" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Blog · Fri" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:8px 0">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">Clips</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:#C15F3C;margin-top:2px">1 blocked</div></div>
+          <div class="slot" data-slot="Clips · Mon" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Clips · Tue" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Clips · Wed" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Clips · Thu" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(193,95,60,.5);border-left:3px solid #C15F3C;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#C15F3C">NO URL</div><div class="clamp1" style="font-size:12px;margin-top:2px">4.2s → 900ms</div></div></div>
+          <div class="slot" data-slot="Clips · Fri" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:8px 0">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">Newsletter</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">1 this week</div></div>
+          <div class="slot" data-slot="Newsletter · Mon" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Newsletter · Tue" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Newsletter · Wed" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Newsletter · Thu" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"></div>
+          <div class="slot" data-slot="Newsletter · Fri" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding-left:7px"><div style="border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:5px 7px"><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">07:00</div><div class="clamp1" style="font-size:12px;margin-top:2px">Generation is cheap</div></div></div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;border-bottom:1px solid rgba(29,31,32,.1);padding:6px 0;opacity:.55">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">Threads</div></div>
+          <div style="flex:1;font-size:11.5px;color:rgba(29,31,32,.5)">dormant this week · 1 draft waiting</div>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;padding:6px 0;opacity:.55">
+          <div style="width:104px;flex:none"><div style="font:600 15px/1.1 'Barlow Condensed',sans-serif">Bluesky</div></div>
+          <div style="flex:1;font-size:11.5px;color:rgba(29,31,32,.5)">dormant this week · nothing drafted</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="2c">
+  <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span><strong>Sent</strong> — the same day rows pointed backwards. Status tags become results, and the ruler becomes a performance axis. This is where the Wire stops being a scheduler and starts being evidence; it also feeds the SEO tab.</span></div>
+  <div class="dv-card" style="width:1020px">
+    <div style="padding:18px 22px 20px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div><div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">The Wire · sent</div><h3 style="margin:4px 0 3px">Last 14 days</h3><div style="font-size:12.5px;color:rgba(29,31,32,.62)">11 delivered · 1 failed and retried · best window Tue 08:00–09:00</div></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+          <div class="seg" role="group"><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">By day</button><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">By channel</button><button type="button" class="seg-opt" style="border:0;font:inherit;background:#5980a6;color:#f2f2f3;cursor:pointer">Sent</button></div>
+          <button class="btn btn-secondary" type="button">Export CSV</button>
+        </div>
+      </div>
+      <table class="table">
+        <thead><tr><th style="width:33%">Sent</th><th>Channel</th><th>Time</th><th>Reach</th><th>Engagement</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><span class="clamp1" style="width:100%">One library, two shells, no drift</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Mon 31 Aug</span></td><td>LinkedIn</td><td style="font:11px ui-monospace,Menlo,monospace">09:00</td><td>4,180</td><td>41 reactions · 6 comments</td><td><span class="tag tag-neutral" style="font-size:9px">DELIVERED</span></td></tr>
+          <tr><td><span class="clamp1" style="width:100%">Position 14, cited by 2 of 5 engines</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Sun 30 Aug</span></td><td>SEO report</td><td style="font:11px ui-monospace,Menlo,monospace">22:00</td><td>—</td><td>2 AI citations</td><td><span class="tag tag-neutral" style="font-size:9px">DELIVERED</span></td></tr>
+          <tr><td><span class="clamp1" style="width:100%">Why we killed the settings page</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Thu 27 Aug</span></td><td>Blog</td><td style="font:11px ui-monospace,Menlo,monospace">16:00</td><td>2,640</td><td>3:12 avg read</td><td><span class="tag tag-neutral" style="font-size:9px">DELIVERED</span></td></tr>
+          <tr><td><span class="clamp1" style="width:100%">Nobody opened it</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Wed 26 Aug · retried once</span></td><td>Clip · 9:16</td><td style="font:11px ui-monospace,Menlo,monospace">17:30</td><td>9,050</td><td>62% completion</td><td><span class="tag tag-outline" style="font-size:9px;color:#C15F3C;border-color:#C15F3C">RETRIED</span></td></tr>
+          <tr><td><span class="clamp1" style="width:100%">Defaults are a product opinion</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Tue 25 Aug</span></td><td>X</td><td style="font:11px ui-monospace,Menlo,monospace">08:30</td><td>11,200</td><td>84 reposts</td><td><span class="tag tag-neutral" style="font-size:9px">DELIVERED</span></td></tr>
+          <tr><td><span class="clamp1" style="width:100%">Q3 podcast · ep. 14 newsletter</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45)">Fri 21 Aug</span></td><td>Newsletter</td><td style="font:11px ui-monospace,Menlo,monospace">07:00</td><td>3,410</td><td>38% open · 6% click</td><td><span class="tag tag-neutral" style="font-size:9px">DELIVERED</span></td></tr>
+        </tbody>
+      </table>
+      <div style="display:flex;gap:16px;margin-top:16px;align-items:stretch">
+        <div class="blueprint" style="flex:1;padding:12px 14px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:rgba(29,31,32,.5);margin-bottom:9px">Engagement by send hour</div>
+          <div style="display:flex;align-items:flex-end;gap:5px;height:74px">
+            <div style="flex:1;height:34%;background:#b5d9fd"></div><div style="flex:1;height:88%;background:#416180"></div><div style="flex:1;height:62%;background:#749dc4"></div><div style="flex:1;height:41%;background:#94bce3"></div><div style="flex:1;height:30%;background:#b5d9fd"></div><div style="flex:1;height:55%;background:#749dc4"></div><div style="flex:1;height:22%;background:#b5d9fd"></div>
+          </div>
+          <div style="display:flex;gap:5px;margin-top:5px;font:10px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42)"><span style="flex:1">06</span><span style="flex:1">08</span><span style="flex:1">10</span><span style="flex:1">12</span><span style="flex:1">14</span><span style="flex:1">17</span><span style="flex:1">20</span></div>
+          <span class="tag tag-outline" style="border-style:dashed;font-size:9px;margin-top:9px">IgbCategoryChart</span>
+        </div>
+        <div class="blueprint" style="width:280px;flex:none;padding:12px 14px"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:rgba(29,31,32,.5);margin-bottom:9px">What this changes</div>
+          <div style="font-size:12.5px;color:rgba(29,31,32,.76);line-height:1.5">Tue 08:00–09:00 outperforms every other window by 2.4×. Next run's default slots have been moved there — review before the next Press Run.</div>
+          <button class="btn btn-secondary btn-block" type="button" style="margin-top:12px">Apply to default slots</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+</section>
+
+<section class="dv-turn" id="t1">
+<div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">The Wire — scheduling models</span></div>
+<div class="dv-opts">
+
+<div class="dv-opt" id="1a">
+  <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span><strong>Run of Show</strong> — days are rows, not columns, and each row is only as tall as its content. Time runs left→right as a ruler, so "what goes out when" reads at a glance and an empty day is one thin line instead of a tall void. This is the one I'd ship.</span></div>
+  <div class="dv-card" style="width:1220px">
+    <div style="padding:18px 22px 20px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div>
+          <div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">The Wire</div>
+          <h3 style="margin:4px 0 3px">Week of 31 Aug</h3>
+          <div style="display:flex;gap:6px;align-items:center"><span class="tag tag-outline">4 queued</span><span class="tag tag-neutral">2 sent</span><span class="tag tag-accent">3 ready to schedule</span></div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:9px">
+          <div class="seg" role="group"><button type="button" class="seg-opt" style="border:0;font:inherit;background:#5980a6;color:#f2f2f3;cursor:pointer">Week</button><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">Fortnight</button><button type="button" class="seg-opt" style="border:0;font:inherit;cursor:pointer">Month</button></div>
+          <button class="btn btn-secondary" type="button">← Prev</button><button class="btn btn-secondary" type="button">Next →</button>
+        </div>
+      </div>
+
+      <div class="blueprint" style="padding:9px 12px;display:flex;align-items:center;gap:10px;margin-bottom:14px;background:#e9e9ea"><i class="corner tl"></i><i class="corner br"></i>
+        <span style="font:11px/1 ui-monospace,Menlo,monospace;color:#416180">NO BROKER</span>
+        <span style="font-size:12.5px;color:rgba(29,31,32,.72)">Nothing leaves Castmill until a publishing broker is connected — everything below stages locally.</span>
+        <button class="btn btn-primary" type="button" style="margin-left:auto">Connect broker</button>
+      </div>
+
+      <div style="display:flex;gap:22px;align-items:flex-start">
+        <div style="width:288px;flex:none">
+          <div style="display:flex;align-items:baseline;gap:7px;margin-bottom:8px"><span style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:rgba(29,31,32,.5)">Ready to schedule</span><span style="font:11px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45);margin-left:auto">3</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="qrow blueprint" draggable="true" data-drag="Ignite UI CLI · YouTube" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;display:flex;gap:10px;align-items:flex-start"><i class="corner tl"></i><i class="corner br"></i>
+              <div style="min-width:0;flex:1">
+                <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">YouTube package</div>
+                <div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px">Build a React CRM with Ignite UI CLI and Claude Code</div>
+                <div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45);margin-top:5px">12:41 · thumbnail ✓</div>
+              </div>
+              <div class="acts" style="display:flex;flex-direction:column;gap:4px;flex:none"><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Edit</button><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Slot</button></div>
+            </div>
+            <div class="qrow blueprint" draggable="true" data-drag="Agents stall on CRM · LinkedIn" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;display:flex;gap:10px;align-items:flex-start"><i class="corner tl"></i><i class="corner br"></i>
+              <div style="min-width:0;flex:1">
+                <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">LinkedIn · 1,180 / 3,000</div>
+                <div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px">AI coding agents stall on enterprise CRM work</div>
+                <div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45);margin-top:5px">cites s02 · validators 5/5</div>
+              </div>
+              <div class="acts" style="display:flex;flex-direction:column;gap:4px;flex:none"><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Edit</button><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Slot</button></div>
+            </div>
+            <div class="qrow blueprint" draggable="true" data-drag="Newsletter · 640 words" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;display:flex;gap:10px;align-items:flex-start"><i class="corner tl"></i><i class="corner br"></i>
+              <div style="min-width:0;flex:1">
+                <div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:rgba(29,31,32,.5)">Newsletter · 640 words</div>
+                <div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px">Generation is cheap. Trust is not.</div>
+                <div style="font:11px/1 ui-monospace,Menlo,monospace;color:rgba(29,31,32,.45);margin-top:5px">cites s08 · 1 image empty</div>
+              </div>
+              <div class="acts" style="display:flex;flex-direction:column;gap:4px;flex:none"><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Edit</button><button class="btn btn-secondary" type="button" style="padding:3px 7px;font-size:11px">Slot</button></div>
+            </div>
+          </div>
+          <div class="blueprint" style="margin-top:12px;padding:9px 11px;font-size:11.5px;color:rgba(29,31,32,.62);line-height:1.5"><i class="corner tl"></i><i class="corner br"></i>Clips need a durable published URL before they can be scheduled — local paths and worker links aren't sent to the broker.</div>
+        </div>
+
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:6px;padding-left:106px">
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);flex:1">06:00</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);flex:1">09:00</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);flex:1">12:00</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);flex:1">15:00</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);flex:1">18:00</span>
+            <span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);width:44px">21:00</span>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:0;border-top:1px solid rgba(29,31,32,.16)">
+            <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:9px 0">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif">MON 31</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">1 sent</div></div>
+              <div class="slot" data-slot="Mon 31" style="flex:1;min-width:0;position:relative;border-left:1px dashed rgba(29,31,32,.16);padding:0 0 0 8px">
+                <div style="position:absolute;left:22%;top:0;width:210px;background:#e9e9ea;border-left:3px solid #1d2d3d;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">09:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">LinkedIn</span><span class="tag tag-neutral" style="font-size:9px;margin-left:auto">SENT</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">One library, two shells, no drift</div></div>
+                <div style="height:52px"></div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:9px 0;background:rgba(89,128,166,.05)">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif">TUE 1 SEP</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:#416180;margin-top:2px">today · 2 queued</div></div>
+              <div class="slot" data-slot="Tue 1 Sep" style="flex:1;min-width:0;position:relative;border-left:1px dashed rgba(29,31,32,.16);padding:0 0 0 8px">
+                <div style="position:absolute;left:20%;top:0;width:230px;background:#f2f2f3;border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">08:30</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">X</span><span class="tag tag-outline" style="font-size:9px;margin-left:auto">QUEUED</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">AOT bought back 30% of latency</div></div>
+                <div style="position:absolute;left:57%;top:0;width:230px;background:#f2f2f3;border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">16:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">Blog</span><span class="tag tag-outline" style="font-size:9px;margin-left:auto">QUEUED</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">Shipping Blazor at Scale</div></div>
+                <div style="height:52px"></div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:14px;align-items:center;border-bottom:1px solid rgba(29,31,32,.1);padding:7px 0">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif;color:rgba(29,31,32,.55)">WED 2 SEP</div></div>
+              <div class="slot" data-slot="Wed 2 Sep" style="flex:1;min-width:0;border-left:1px dashed rgba(29,31,32,.16);padding:5px 0 5px 10px;font-size:11.5px;color:rgba(29,31,32,.38)">nothing scheduled — drop here</div>
+            </div>
+
+            <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.1);padding:9px 0">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif">THU 3 SEP</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:#C15F3C;margin-top:2px">1 error</div></div>
+              <div class="slot" data-slot="Thu 3 Sep" style="flex:1;min-width:0;position:relative;border-left:1px dashed rgba(29,31,32,.16);padding:0 0 0 8px">
+                <div style="position:absolute;left:22%;top:0;width:250px;background:#f2f2f3;border:1px solid rgba(193,95,60,.5);border-left:3px solid #C15F3C;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">09:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">Clip · 9:16</span><span class="tag tag-outline" style="font-size:9px;margin-left:auto;color:#C15F3C;border-color:#C15F3C">NO URL</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">4.2s → 900ms — needs export first</div></div>
+                <div style="position:absolute;left:63%;top:0;width:200px;background:#f2f2f3;border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">17:30</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">Threads</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">Offline made us honest</div></div>
+                <div style="height:52px"></div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:14px;align-items:stretch;border-bottom:1px solid rgba(29,31,32,.16);padding:9px 0">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif">FRI 4 SEP</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42);margin-top:2px">1 queued</div></div>
+              <div class="slot" data-slot="Fri 4 Sep" style="flex:1;min-width:0;position:relative;border-left:1px dashed rgba(29,31,32,.16);padding:0 0 0 8px">
+                <div style="position:absolute;left:4%;top:0;width:220px;background:#f2f2f3;border:1px solid rgba(29,31,32,.16);border-left:3px solid #416180;padding:6px 9px"><div style="display:flex;gap:7px;align-items:baseline"><span style="font:10.5px ui-monospace,Menlo,monospace;color:#416180">07:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5)">Newsletter</span></div><div class="clamp1" style="font-size:12.5px;margin-top:3px">Trust is not cheap</div></div>
+                <div style="height:52px"></div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:14px;align-items:center;padding:7px 0;opacity:.5">
+              <div style="width:92px;flex:none"><div style="font:600 16px/1 'Barlow Condensed',sans-serif">SAT–SUN</div></div>
+              <div class="slot" data-slot="Weekend" style="flex:1;border-left:1px dashed rgba(29,31,32,.16);padding:5px 0 5px 10px;font-size:11.5px;color:rgba(29,31,32,.4)">collapsed — no posting window</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="1b">
+  <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span><strong>Broker Board</strong> — columns are pipeline states, not days: Ready → Queued → Sent → Needs attention. Date is a chip on the card. Best when the question is "what's stuck?" rather than "what goes out Thursday". Dark, since it's a monitoring surface.</span></div>
+  <div class="dv-card" style="width:1220px">
+    <div style="background:#191b1c;color:#e7e7ea;padding:18px 22px 22px">
+      <div style="display:flex;align-items:flex-end;gap:16px;margin-bottom:16px">
+        <div><div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#94bce3">The Wire · pipeline</div><h3 style="margin:4px 0 3px;color:#f2f2f3">9 items in flight</h3><div style="font-size:12.5px;color:rgba(231,231,234,.55)">Across all 3 campaigns. Drag between columns to change state; drop on a date chip to reschedule.</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px"><button class="btn btn-secondary" type="button" style="color:#e7e7ea;border-color:rgba(231,231,234,.3)">This campaign only</button><button class="btn btn-primary" type="button" style="background:#5980a6;border-color:#5980a6;color:#fff">Connect broker</button></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px;padding-bottom:7px;border-bottom:2px solid #b7b7ba;margin-bottom:10px"><span style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase">Ready</span><span style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45);margin-left:auto">3</span></div>
+          <div data-slot="Ready" class="slot" style="display:flex;flex-direction:column;gap:9px;min-height:120px">
+            <div class="blueprint" draggable="true" data-drag="YouTube package" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">YouTube</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Build a React CRM with Ignite UI CLI and Claude Code</div><div style="display:flex;gap:6px;margin-top:7px"><span class="tag tag-outline" style="font-size:9px;color:#94bce3;border-color:#94bce3">no date</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.4)">12:41</span></div></div>
+            <div class="blueprint" draggable="true" data-drag="LinkedIn post" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">LinkedIn</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">AI coding agents stall on enterprise CRM work</div><div style="display:flex;gap:6px;margin-top:7px"><span class="tag tag-outline" style="font-size:9px;color:#94bce3;border-color:#94bce3">no date</span></div></div>
+            <div class="blueprint" draggable="true" data-drag="Newsletter" style="padding:9px 11px;border-left:3px solid #b7b7ba;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">Newsletter</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Generation is cheap. Trust is not.</div></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px;padding-bottom:7px;border-bottom:2px solid #416180;margin-bottom:10px"><span style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase">Queued</span><span style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45);margin-left:auto">4</span></div>
+          <div data-slot="Queued" class="slot" style="display:flex;flex-direction:column;gap:9px;min-height:120px">
+            <div class="blueprint" draggable="true" data-drag="X post" style="padding:9px 11px;border-left:3px solid #416180;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">X · 241 / 280</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">AOT bought back 30% of latency</div><div style="margin-top:7px"><span class="tag tag-accent" style="font-size:9px">TUE 08:30</span></div></div>
+            <div class="blueprint" draggable="true" data-drag="Blog post" style="padding:9px 11px;border-left:3px solid #416180;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">Blog · 2,140 words</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Shipping Blazor at Scale</div><div style="margin-top:7px"><span class="tag tag-accent" style="font-size:9px">TUE 16:00</span></div></div>
+            <div class="blueprint" draggable="true" data-drag="Threads post" style="padding:9px 11px;border-left:3px solid #416180;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">Threads</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Offline made us honest</div><div style="margin-top:7px"><span class="tag tag-accent" style="font-size:9px">THU 17:30</span></div></div>
+            <div class="blueprint" draggable="true" data-drag="Newsletter issue" style="padding:9px 11px;border-left:3px solid #416180;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">Newsletter</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Trust is not cheap</div><div style="margin-top:7px"><span class="tag tag-accent" style="font-size:9px">FRI 07:00</span></div></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px;padding-bottom:7px;border-bottom:2px solid #1d2d3d;margin-bottom:10px"><span style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase">Sent</span><span style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45);margin-left:auto">2</span></div>
+          <div data-slot="Sent" class="slot" style="display:flex;flex-direction:column;gap:9px;min-height:120px">
+            <div class="blueprint" style="padding:9px 11px;border-left:3px solid #1d2d3d;background:#222425;opacity:.78"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">LinkedIn</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">One library, two shells, no drift</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.42);margin-top:6px">MON 09:00 · 41 reactions</div></div>
+            <div class="blueprint" style="padding:9px 11px;border-left:3px solid #1d2d3d;background:#222425;opacity:.78"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">SEO report</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">Position 14, cited by 2 of 5</div><div style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.42);margin-top:6px">SUN 22:00</div></div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:baseline;gap:7px;padding-bottom:7px;border-bottom:2px solid #C15F3C;margin-bottom:10px"><span style="font:600 11px/1 'Barlow Condensed',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:#e0a08a">Needs attention</span><span style="font:11px ui-monospace,Menlo,monospace;color:rgba(231,231,234,.45);margin-left:auto">1</span></div>
+          <div data-slot="Needs attention" class="slot" style="display:flex;flex-direction:column;gap:9px;min-height:120px">
+            <div class="blueprint" draggable="true" data-drag="Clip 9:16" style="padding:9px 11px;border-left:3px solid #C15F3C;cursor:grab;background:#222425"><i class="corner tl"></i><i class="corner br"></i><div style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(231,231,234,.5)">Clip · 9:16</div><div class="clamp2" style="font:600 15px/1.18 'Barlow Condensed',sans-serif;margin-top:3px;color:#f2f2f3">4.2s → 900ms</div><div style="font-size:11.5px;color:#e0a08a;margin-top:6px;line-height:1.45">No durable URL — export the clip before it can be scheduled.</div><button class="btn btn-secondary" type="button" style="margin-top:8px;color:#e7e7ea;border-color:rgba(231,231,234,.3);font-size:11px;padding:3px 8px">Export clip</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="dv-opt" id="1c">
+  <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><span><strong>Agenda</strong> — no grid at all: one chronological list, day headers as rules. The densest and the most obviously correct at any content volume; scales to a quarter without redesign, but loses the sense of "shape of the week".</span></div>
+  <div class="dv-card" style="width:880px">
+    <div style="padding:18px 22px 22px">
+      <div style="display:flex;align-items:flex-end;gap:14px;margin-bottom:16px">
+        <div><div style="font:600 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;color:#5980a6">The Wire · agenda</div><h3 style="margin:4px 0 3px">Next 10 days</h3></div>
+        <div style="margin-left:auto;display:flex;gap:7px"><button class="btn btn-secondary" type="button">All channels</button><button class="btn btn-secondary" type="button">Queued only</button></div>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <div style="display:flex;align-items:baseline;gap:9px;padding:0 0 6px;border-bottom:1px solid rgba(29,31,32,.2)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em">MON 31 AUG</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42)">1 sent</span></div>
+        <div class="qrow" data-slot="Mon 31" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #1d2d3d"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">09:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">LinkedIn</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">One library, two shells, no drift</span><span class="tag tag-neutral" style="font-size:9px;flex:none">SENT</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">View</button></span></div>
+
+        <div style="display:flex;align-items:baseline;gap:9px;padding:16px 0 6px;border-bottom:1px solid rgba(29,31,32,.2)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:#416180">TUE 1 SEP · TODAY</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:rgba(29,31,32,.42)">2 queued</span></div>
+        <div class="qrow" data-slot="Tue 1 Sep" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #416180"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">08:30</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">X</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">AOT bought back 30% of latency</span><span class="tag tag-outline" style="font-size:9px;flex:none">QUEUED</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Edit</button><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Move</button></span></div>
+        <div class="qrow" data-slot="Tue 1 Sep" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #416180"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">16:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">Blog</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">Shipping Blazor at Scale: what actually moved the numbers</span><span class="tag tag-outline" style="font-size:9px;flex:none">QUEUED</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Edit</button><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Move</button></span></div>
+
+        <div style="display:flex;align-items:baseline;gap:9px;padding:16px 0 6px;border-bottom:1px solid rgba(29,31,32,.2)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em;color:rgba(29,31,32,.5)">WED 2 SEP</span></div>
+        <div class="slot" data-slot="Wed 2 Sep" style="padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);font-size:12px;color:rgba(29,31,32,.4)">Nothing scheduled — drop an item here</div>
+
+        <div style="display:flex;align-items:baseline;gap:9px;padding:16px 0 6px;border-bottom:1px solid rgba(29,31,32,.2)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em">THU 3 SEP</span><span style="font:10.5px ui-monospace,Menlo,monospace;color:#C15F3C">1 blocked</span></div>
+        <div class="qrow" data-slot="Thu 3 Sep" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #C15F3C"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">09:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">Clip</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">4.2s → 900ms · needs a durable published URL</span><span class="tag tag-outline" style="font-size:9px;flex:none;color:#C15F3C;border-color:#C15F3C">BLOCKED</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Export</button></span></div>
+        <div class="qrow" data-slot="Thu 3 Sep" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #416180"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">17:30</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">Threads</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">Offline made us honest about state</span><span class="tag tag-outline" style="font-size:9px;flex:none">QUEUED</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Edit</button><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Move</button></span></div>
+
+        <div style="display:flex;align-items:baseline;gap:9px;padding:16px 0 6px;border-bottom:1px solid rgba(29,31,32,.2)"><span style="font:600 15px/1 'Barlow Condensed',sans-serif;letter-spacing:.06em">FRI 4 SEP</span></div>
+        <div class="qrow" data-slot="Fri 4 Sep" style="display:flex;gap:12px;align-items:center;padding:9px 4px;border-bottom:1px solid rgba(29,31,32,.08);border-left:3px solid #416180"><span style="font:11px ui-monospace,Menlo,monospace;color:#416180;width:44px;flex:none">07:00</span><span style="font:600 10px/1 'Barlow Condensed',sans-serif;letter-spacing:.09em;text-transform:uppercase;color:rgba(29,31,32,.5);width:74px;flex:none">Newsletter</span><span class="clamp1" style="flex:1;min-width:0;font-size:13.5px">Generation is cheap. Trust is not.</span><span class="tag tag-outline" style="font-size:9px;flex:none">QUEUED</span><span class="acts" style="flex:none;display:flex;gap:5px"><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Edit</button><button class="btn btn-secondary" type="button" style="font-size:11px;padding:3px 8px">Move</button></span></div>
+      </div>
+      <div class="blueprint" style="margin-top:16px;padding:10px 12px;background:#e9e9ea;font-size:12px;color:rgba(29,31,32,.7)"><i class="corner tl"></i><i class="corner br"></i>The ready-to-schedule queue lives in a right dock here (omitted for width) — or as a "3 unscheduled" bar pinned to the top of the list.</div>
+    </div>
+  </div>
+</div>
+
+</div>
+<p style="margin:22px 0 0;font:12px/1.5 Barlow,sans-serif;color:rgba(0,0,0,.5)">Try next: "put <a href="#1a">1a</a> into the prototype's Wire tab" · "<a href="#1a">1a</a> but with <a href="#1b">1b</a>'s error column as a dock" · "show <a href="#1c">1c</a> with the queue dock drawn"</p>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#5980a6&quot;,&quot;options&quot;:[&quot;#5980a6&quot;,&quot;#C15F3C&quot;,&quot;#5F7355&quot;,&quot;#8A7248&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent || '#5980a6';
+    return {
+      rootRef: (el) => { this.root = el; },
+      onDragStart: (e) => {
+        const c = e.target.closest('[data-drag]');
+        if (!c) return;
+        e.dataTransfer.setData('text/plain', c.dataset.drag);
+        this._src = c;
+      },
+      onDragOver: (e) => {
+        const s = e.target.closest('[data-slot]');
+        if (!s) return;
+        e.preventDefault();
+        s.style.background = 'rgba(89,128,166,.14)';
+        s.style.outline = '1px solid ' + accent;
+      },
+      onLeave: (e) => {
+        const s = e.target.closest('[data-slot]');
+        if (s) { s.style.background = ''; s.style.outline = ''; }
+      },
+      onDrop: (e) => {
+        const s = e.target.closest('[data-slot]');
+        if (!s) return;
+        e.preventDefault();
+        s.style.background = ''; s.style.outline = '';
+        const name = e.dataTransfer.getData('text/plain');
+        if (!name) return;
+        if (this._src && s.contains(this._src)) return;
+        const dark = !!e.target.closest('[style*="191b1c"]');
+        const chip = document.createElement('div');
+        chip.style.cssText = 'margin-top:7px;padding:6px 9px;border-left:3px solid ' + accent +
+          ';background:' + (dark ? '#222425' : '#e9e9ea') + ';color:' + (dark ? '#f2f2f3' : '#1d1f20') + ';font-size:12.5px';
+        chip.textContent = name + ' · ' + (s.dataset.slot.match(/^[A-Z]/) && s.dataset.slot.length < 8 ? '' : '09:00 · ') + s.dataset.slot;
+        s.appendChild(chip);
+        if (this._src && this._src.parentElement && this._src.getAttribute('draggable')) this._src.remove();
+        this._src = null;
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

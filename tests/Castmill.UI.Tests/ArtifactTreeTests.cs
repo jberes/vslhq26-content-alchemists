@@ -2,6 +2,7 @@ using Bunit;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Design;
+using Castmill.UI.Editor;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,6 +55,31 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Document_outline_lives_beside_the_editor_and_scrolls_independently()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.FindComponent<RichEditor>()));
+
+        var headings = Enumerable.Range(1, 18)
+            .Select(index => new EditorHeading((index % 3) + 1, $"Section {index}", index * 10))
+            .ToArray();
+        await view.InvokeAsync(() =>
+            view.FindComponent<RichEditor>().Instance.NotifyHeadingsAsync(headings));
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var outline = view.Find(".cm-focus > .cm-focus__document-outline");
+            Assert.Equal("NAV", outline.QuerySelector(".cm-document-outline")!.TagName);
+            Assert.NotNull(outline.QuerySelector(".cm-document-outline__list[data-cm-scroll]"));
+            Assert.Equal(headings.Length, outline.QuerySelectorAll(".cm-document-outline__mark").Length);
+            Assert.Equal(headings.Length, outline.QuerySelectorAll(".cm-document-outline__label").Length);
+            Assert.Null(view.Find(".cm-focus__outline").QuerySelector(".cm-document-outline"));
+            Assert.DoesNotContain("On this page", view.Find(".cm-focus__outline").TextContent,
+                StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task Entering_focus_without_a_deep_link_selects_the_first_displayed_item()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
@@ -83,6 +109,22 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Document_actions_are_grouped_at_the_content_edge_with_a_centered_download_caret()
+    {
+        var view = Render<FocusView>(parameters =>
+            parameters.Add(component => component.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() =>
+            Assert.NotNull(view.Find(".cm-focus__actions")));
+
+        var status = view.Find(".cm-focus__status");
+        var actions = status.QuerySelector(":scope > .cm-focus__actions");
+        Assert.NotNull(actions);
+        Assert.NotNull(actions.QuerySelector(".cm-focus__copy"));
+        Assert.NotNull(actions.QuerySelector(".cm-focus__download-toggle"));
+        Assert.NotNull(actions.QuerySelector(".cm-focus__download-caret"));
+    }
+
+    [Fact]
     public async Task Artifact_rows_show_their_review_state_with_text_and_color_modifier()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
@@ -98,6 +140,9 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Assert.Equal("Draft", blog.QuerySelector(".cm-status")!.TextContent.Trim());
         Assert.Equal("In review", social.QuerySelector(".cm-status--review")!.TextContent.Trim());
         Assert.Equal("Reviewed", youtube.QuerySelector(".cm-status--queued")!.TextContent.Trim());
+        Assert.Contains("cm-status-edge--draft", blog.ClassList);
+        Assert.Contains("cm-status-edge--review", social.ClassList);
+        Assert.Contains("cm-status-edge--approved", youtube.ClassList);
     }
 
     [Fact]
@@ -129,6 +174,103 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Reviewed_content_can_be_scheduled_to_the_wire_with_a_date_and_time()
+    {
+        var scheduledAt = DateTimeOffset.Now.AddDays(2);
+        Http.OnPost("api/v1/schedule", new ScheduleEntryResponse(
+            Guid.NewGuid(), CampaignId, YouTubeId, "youtube", null,
+            "Launch video package", null, scheduledAt, "Draft", null, DateTimeOffset.UtcNow));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() =>
+            Assert.NotNull(view.Find("button[aria-controls='cm-focus-schedule-picker']")));
+
+        await view.Find("button[aria-controls='cm-focus-schedule-picker']").ClickAsync();
+        Assert.NotNull(view.Find(".cm-focus__schedule-picker input[type='datetime-local']"));
+        await view.Find(".cm-focus__schedule-picker input[type='datetime-local']")
+            .ChangeAsync(scheduledAt.LocalDateTime.ToString(
+                "yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        await view.FindAll("button")
+            .Single(button => button.TextContent.Contains("Schedule to The Wire", StringComparison.Ordinal))
+            .ClickAsync();
+
+        await view.WaitForAssertionAsync(() => Assert.Contains(Http.Bodies, body =>
+            body.Method == HttpMethod.Post
+            && body.Path == "api/v1/schedule"
+            && body.Body.Contains($"\"artifactId\":\"{YouTubeId}\"", StringComparison.Ordinal)
+            && body.Body.Contains("\"pushToBroker\":false", StringComparison.Ordinal)));
+
+        var scheduledButton = view.Find("button[aria-controls='cm-focus-schedule-picker']");
+        Assert.Contains("Scheduled", scheduledButton.TextContent, StringComparison.Ordinal);
+        Assert.Contains("cm-focus__schedule-button--scheduled", scheduledButton.ClassList);
+        Assert.Equal("Scheduled", view.Find(".cm-focus__status > .cm-status--queued").TextContent.Trim());
+
+        await scheduledButton.ClickAsync();
+        Assert.Contains("Scheduled for", view.Find(".cm-focus__schedule-picker").TextContent,
+            StringComparison.Ordinal);
+        Assert.Contains(scheduledAt.ToLocalTime().ToString(
+                "MMMM d", System.Globalization.CultureInfo.CurrentCulture),
+            view.Find(".cm-focus__scheduled-at").TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Focus_rejects_an_ambiguous_local_schedule_time()
+    {
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+        Services.AddSingleton<TimeProvider>(new FixedTimeProvider(
+            new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero), eastern));
+        var view = Render<FocusView>(parameters => parameters.Add(component => component.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() =>
+            Assert.NotNull(view.Find("button[aria-controls='cm-focus-schedule-picker']")));
+
+        await view.Find("button[aria-controls='cm-focus-schedule-picker']").ClickAsync();
+        await view.Find(".cm-focus__schedule-picker input[type='datetime-local']")
+            .ChangeAsync("2026-11-01T01:30");
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("Choose an unambiguous local time.", view.Markup, StringComparison.Ordinal);
+            var schedule = view.FindAll("button")
+                .Single(button => button.TextContent.Contains("Schedule to The Wire", StringComparison.Ordinal));
+            Assert.True(schedule.HasAttribute("disabled"));
+        });
+        Assert.DoesNotContain(Http.Bodies,
+            body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule");
+    }
+
+    [Fact]
+    public async Task Existing_wire_entry_restores_the_scheduled_focus_state()
+    {
+        var scheduledAt = DateTimeOffset.Now.AddDays(3).AddHours(2);
+        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse>
+        {
+            new(Guid.NewGuid(), CampaignId, YouTubeId, "youtube", null,
+                "Launch video package", null, scheduledAt, "Draft", null, DateTimeOffset.UtcNow),
+        });
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Equal("Scheduled", view.Find(".cm-focus__status > .cm-status--queued").TextContent.Trim());
+            var button = view.Find("button[aria-controls='cm-focus-schedule-picker']");
+            Assert.Contains("Scheduled", button.TextContent, StringComparison.Ordinal);
+            Assert.Contains("cm-focus__schedule-button--scheduled", button.ClassList);
+        });
+
+        await view.Find("button[aria-controls='cm-focus-schedule-picker']").ClickAsync();
+        Assert.Contains(scheduledAt.ToLocalTime().ToString(
+                "MMMM d", System.Globalization.CultureInfo.CurrentCulture),
+            view.Find(".cm-focus__scheduled-at").TextContent, StringComparison.Ordinal);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow, TimeZoneInfo localTimeZone) : TimeProvider
+    {
+        public override TimeZoneInfo LocalTimeZone => localTimeZone;
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    [Fact]
     public async Task Entering_focus_with_an_artifact_deep_link_opens_that_exact_item()
     {
         var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
@@ -142,6 +284,52 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         var selected = view.FindAll(".cm-focus__list-item")
             .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
         Assert.Equal("true", selected.GetAttribute("aria-current"));
+    }
+
+    [Fact]
+    public async Task Opening_a_new_placeholder_starts_generation_after_the_editor_renders()
+    {
+        var placeholderId = Guid.Parse("41111111-1111-1111-1111-555555555555");
+        var transcriptId = Guid.Parse("41111111-1111-1111-1111-666666666666");
+        var placeholder = Artifact(placeholderId, "newsletter", "New newsletter") with
+        {
+            IsPlaceholder = true,
+        };
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(),
+            [Artifact(transcriptId, "transcript", "Source transcript"), placeholder],
+            [], 0, 0));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{transcriptId}",
+            FullArtifact(transcriptId, "transcript", "Source transcript"));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{placeholderId}",
+            new ArtifactResponse(
+                placeholderId, CampaignId, "newsletter", "New newsletter",
+                """{"markdown":"","placeholder":true,"seedAngle":"Support the launch"}""",
+                ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{placeholderId}/revisions",
+            new List<ArtifactRevisionResponse>());
+        var generation = Http.Gate(
+            HttpMethod.Post, $"api/v1/ai/campaigns/{CampaignId}/generate/newsletter");
+        Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo($"campaigns/{CampaignId}/focus?artifact={placeholderId}&generate=true");
+
+        var view = Render<FocusView>(parameters => parameters
+            .Add(component => component.CampaignId, CampaignId));
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("Generating newsletter", view.Find(".cm-focus__regenerating").TextContent,
+                StringComparison.Ordinal);
+            var body = Http.Bodies.Single(item =>
+                item.Path.EndsWith("generate/newsletter", StringComparison.Ordinal)).Body;
+            Assert.Contains(placeholderId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Support the launch", body, StringComparison.Ordinal);
+        });
+
+        generation.SetResult(StubHttpHandler.Json(
+            new RunItem("newsletter", false, placeholderId, "Generation stopped.", [], 100)));
+        await view.WaitForAssertionAsync(() =>
+            Assert.Empty(view.FindAll(".cm-focus__regenerating")));
     }
 
     [Fact]
@@ -214,7 +402,9 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
 
         var socialRow = view.FindAll(".cm-tree__row")
             .First(r => r.TextContent.Contains("Launch thread", StringComparison.Ordinal));
-        Assert.Contains("🗑", socialRow.QuerySelector(".cm-tree__delete")!.TextContent, StringComparison.Ordinal);
+        Assert.NotNull(socialRow.QuerySelector(".cm-tree__delete svg.cm-icon"));
+        Assert.DoesNotContain("🗑", socialRow.QuerySelector(".cm-tree__delete")!.TextContent,
+            StringComparison.Ordinal);
         await socialRow.QuerySelector(".cm-tree__delete")!.ClickAsync();
 
         Assert.Single(confirm.Requests);

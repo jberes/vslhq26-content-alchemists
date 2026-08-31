@@ -49,9 +49,10 @@
     --cmf-danger: #9c3b2c;
 
     --cmf-status-draft: #b0a48c;
-    --cmf-status-review: #c15f3c;
-    --cmf-status-queued: #8a7248;
-    --cmf-status-published: #5f7355;
+    --cmf-status-review: #b56a24;
+    --cmf-status-queued: #287a45;
+    --cmf-status-published: #287a45;
+    --cmf-on-status-queued: #ffffff;
 
     --cmf-radius-sm: 4px;
     --cmf-radius-md: 5px;
@@ -105,9 +106,10 @@
     --cmf-danger: #e0806f;
 
     --cmf-status-draft: #6b6252;
-    --cmf-status-review: #d97757;
-    --cmf-status-queued: #a98e63;
-    --cmf-status-published: #7e9471;
+    --cmf-status-review: #e0b354;
+    --cmf-status-queued: #91d99a;
+    --cmf-status-published: #91d99a;
+    --cmf-on-status-queued: #102316;
 
     --cmf-radius-sm: 4px;
     --cmf-radius-md: 5px;

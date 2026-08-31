@@ -13,7 +13,9 @@ const palette = {
     ink: 'var(--cm-on-surface)',
     muted: 'var(--cm-on-surface-muted)',
     rule: 'var(--cm-rule-strong)',
-    success: 'var(--cm-success)',
+    statusDraft: 'var(--cm-status-draft)',
+    statusReview: 'var(--cm-status-review)',
+    statusApproved: 'var(--cm-status-queued)',
 };
 
 /**
@@ -22,12 +24,18 @@ const palette = {
  */
 function toApexNode(node) {
     const accent = node.tone === 'success'
-        ? palette.success
+        ? palette.statusApproved
+        : node.tone === 'review'
+            ? palette.statusReview
+            : node.tone === 'draft'
+                ? palette.statusDraft
         : node.tone === 'gap'
             ? palette.rule
             : palette.accent;
     const badgeColor = node.tone === 'success'
-        ? palette.success
+        ? palette.statusApproved
+        : node.tone === 'review'
+            ? palette.statusReview
         : palette.accentStrong;
 
     return {
@@ -65,17 +73,20 @@ function escapeHtml(value) {
 }
 
 function nodeCard(content) {
+    const actionable = content.action && content.action !== 'none';
+    const editableDraft = content.action === 'open'
+        && String(content.badge?.text).toLowerCase() === 'draft';
     const badge = content.badge?.text
-        ? `<span style="align-self:flex-start;flex-shrink:0;font-size:0.72em;padding:3px 7px;border-radius:999px;background:${escapeHtml(content.badge.color)};color:${palette.onAccent};font-weight:700;">${escapeHtml(content.badge.text)}</span>`
+        ? `<span class="cm-cluster-node__badge" style="align-self:flex-start;flex-shrink:0;font-size:0.72em;padding:3px 7px;border-radius:999px;background:${escapeHtml(content.badge.color)};color:${palette.onAccent};font-weight:700;"><span class="cm-cluster-node__badge-default">${escapeHtml(content.badge.text)}</span>${editableDraft ? '<span class="cm-cluster-node__badge-hover">Edit</span>' : ''}</span>`
         : '';
     const title = content.title
-        ? `<div style="font-size:0.85em;color:${palette.muted};line-height:1.25;margin-top:2px;">${escapeHtml(content.title)}</div>`
+        ? `<div class="cm-cluster-node__title" title="${escapeHtml(content.title)}" style="font-size:0.85em;color:${palette.muted};line-height:1.25;margin-top:2px;">${escapeHtml(content.title)}</div>`
         : '';
     const subtitle = content.subtitle
         ? `<div style="font-size:0.78em;color:${palette.muted};line-height:1.25;margin-top:1px;">${escapeHtml(content.subtitle)}</div>`
         : '';
 
-    return `<div style="display:flex;align-items:stretch;height:100%;box-sizing:border-box;text-align:left;overflow:hidden;">
+    return `<div class="cm-cluster-node${actionable ? ' cm-cluster-node--actionable' : ''}${editableDraft ? ' cm-cluster-node--editable-draft' : ''}" style="display:flex;align-items:stretch;height:100%;box-sizing:border-box;text-align:left;overflow:hidden;">
         <span aria-hidden="true" style="flex-shrink:0;align-self:stretch;width:4px;background:${escapeHtml(content.accentColor)};"></span>
         <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:10px 12px;">
             <div style="min-width:0;flex:1;overflow:hidden;">
@@ -109,8 +120,8 @@ export function initContentClusterTree(element, data, dotnet) {
         direction: 'top',
         contentKey: 'data',
         nodeTemplate: nodeCard,
-        nodeWidth: 218,
-        nodeHeight: 108,
+        nodeWidth: 248,
+        nodeHeight: 128,
         siblingSpacing: 28,
         childrenSpacing: 72,
         // A pillar fans out to ~a dozen supporting pieces; spread horizontally they render
@@ -150,13 +161,42 @@ export function initContentClusterTree(element, data, dotnet) {
         },
     });
 
+    const preventFocusedCanvasScroll = event => {
+        if (event.code === 'Space' && event.target instanceof SVGElement) {
+            event.preventDefault();
+        }
+    };
+    element.addEventListener('keydown', preventFocusedCanvasScroll, true);
+
+    const applyInitialView = (graph, rootId) => requestAnimationFrame(() => {
+        const svg = element.querySelector('svg');
+        const root = Array.from(element.querySelectorAll('[data-self]'))
+            .find(node => node.getAttribute('data-self') === rootId);
+        const rootY = Number(root?.getAttribute('data-y'));
+        if (!svg || !Number.isFinite(rootY)) {
+            return;
+        }
+
+        graph.zoom(1.25);
+        const viewBox = svg.getAttribute('viewBox')?.split(/\s+/).map(Number);
+        if (!viewBox || viewBox.length !== 4) {
+            return;
+        }
+
+        graph.updateViewBox(viewBox[0], rootY - 12, viewBox[2], viewBox[3]);
+        graph.resetPanZoomBase();
+    });
+
     let graph = tree.render(toApexNode(data));
+    applyInitialView(graph, data.id);
 
     return {
         update(next) {
             graph = tree.render(toApexNode(next));
+            applyInitialView(graph, next.id);
         },
         destroy() {
+            element.removeEventListener('keydown', preventFocusedCanvasScroll, true);
             tree.destroy();
             element.replaceChildren();
         },

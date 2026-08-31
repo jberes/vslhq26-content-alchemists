@@ -231,7 +231,7 @@
                     @* Every kind is offered, not just the ones missing. A campaign that already
                        has a blog is exactly the campaign that wants a second one on a different
                        angle — hiding the chip once you own one made "add another" unreachable. *@
-                    <div class="cm-board__more-grid">
+                    <HorizontalScroller Class="cm-board__more-grid" Label="content types">
                         @foreach (var kind in AllKinds)
                         {
                             var label = kind == "social" ? "Social set (6)" : ArtifactDisplay.KindLabel(kind);
@@ -248,7 +248,7 @@
                                 }
                             </button>
                         }
-                    </div>
+                    </HorizontalScroller>
 
                     @if (_addKind is { } adding)
                     {
@@ -316,12 +316,11 @@
                                     <ul class="cm-lane__cards">
                                         @foreach (var artifact in kindGroup.OrderBy(a => a.CreatedAt))
                                         {
-                                            <li>
+                                            <li @onmouseenter="() => Hover(artifact)"
+                                                @onmouseleave="Unhover">
                                                 <button type="button"
                                                         class="cm-card cm-card--lane @(artifact.Id == ActiveId ? "cm-card--traced" : "") @(_justPrinted.Contains(artifact.Id) ? "cm-card--printed" : "")"
                                                         data-card="@artifact.Id"
-                                                        @onmouseover="() => Hover(artifact)"
-                                                        @onmouseout="Unhover"
                                                         @onclick="() => TogglePin(artifact)">
                                                     <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
                                                     <span class="cm-card__body">
@@ -348,7 +347,7 @@
                                                             title="Delete @ArtifactDisplay.KindLabel(artifact.Kind)"
                                                             aria-label="Delete @artifact.Title"
                                                             @onclick="() => DeleteAsync(artifact)">
-                                                        <span aria-hidden="true">🗑</span>
+                                                        <AppIcon Name="trash" />
                                                     </button>
                                                 </div>
                                             </li>
@@ -423,6 +422,7 @@
         <ProvenanceOverlay Container="_canvas"
                            ActiveArtifactId="ActiveId"
                            Citations="ActiveCitations"
+                           AutoScroll="@(_hoverId is not null)"
                            Epoch="_geometryEpoch"
                            OnHighlight="OnHighlight" />
 
@@ -674,6 +674,10 @@
 
     private void Hover(ArtifactPreviewResponse artifact)
     {
+        if (_hoverId == artifact.Id)
+        {
+            return;
+        }
         _hoverId = artifact.Id;
         SelectFirstCitedSource(artifact);
         QueueArtifactEvidence(artifact);

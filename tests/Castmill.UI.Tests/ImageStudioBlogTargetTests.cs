@@ -133,7 +133,7 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
     private static async Task PlaceAsync(IRenderedComponent<ImageStudioView> view)
     {
         var place = view.FindAll(".cm-lightbox button")
-            .First(b => b.TextContent.Contains("Place in slot", StringComparison.Ordinal));
+            .First(b => b.TextContent.Contains("Use this image", StringComparison.Ordinal));
         await place.ClickAsync();
     }
 

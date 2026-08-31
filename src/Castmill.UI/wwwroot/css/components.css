@@ -209,6 +209,31 @@
     gap: var(--cm-space-2);
 }
 
+.cm-modal__panel > :is(.cm-modal__actions, .cm-form__actions) {
+    margin-block-start: var(--cm-space-4);
+}
+
+.cm-dialog-close {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    inline-size: 2rem;
+    block-size: 2rem;
+    padding: 0;
+    border: 1px solid var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cm-dialog-close:hover {
+    border-color: var(--cm-accent);
+    color: var(--cm-on-surface);
+}
+
 /* ---- Empty state --------------------------------------------------------------- */
 
 .cm-empty {
@@ -260,6 +285,16 @@
 .cm-status--review::before { background: var(--cm-status-review); }
 .cm-status--queued::before { background: var(--cm-status-queued); }
 .cm-status--published::before { background: var(--cm-status-published); }
+
+.cm-status--queued {
+    color: var(--cm-status-queued);
+    font-weight: 700;
+}
+
+.cm-status--published {
+    color: var(--cm-status-published);
+    font-weight: 700;
+}
 
 /* ---- Shell chrome (F1 placeholder; F3 replaces the rail) ----------------------- */
 

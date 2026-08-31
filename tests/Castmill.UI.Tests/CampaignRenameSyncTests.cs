@@ -40,9 +40,7 @@ public sealed class CampaignRenameSyncTests : CastmillUiTestContext
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
             new CampaignPreview(renamed, [], [], 0, 0));
 
-        await floor.FindAll("button")
-            .Single(button => button.TextContent.Trim() == "Rename")
-            .ClickAsync();
+        await floor.Find("button[aria-label='Rename campaign']").ClickAsync();
         await floor.Find("input[aria-label='Campaign name']")
             .ChangeAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs
             {
@@ -61,6 +59,28 @@ public sealed class CampaignRenameSyncTests : CastmillUiTestContext
             request.Method == HttpMethod.Put
             && request.Path.EndsWith($"campaigns/{CampaignId}", StringComparison.Ordinal)
             && request.Body.Contains("Renamed campaign", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Cancel_exits_rename_without_saving_the_typed_name()
+    {
+        var floor = Render<MillFloorView>(parameters =>
+            parameters.Add(page => page.CampaignId, CampaignId));
+        await floor.WaitForAssertionAsync(() =>
+            Assert.Equal("Original name", floor.Find(".cm-campaign-header__name").TextContent));
+
+        await floor.Find("button[aria-label='Rename campaign']").ClickAsync();
+        await floor.Find("input[aria-label='Campaign name']").ChangeAsync(
+            new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = "Discard me" });
+        await floor.FindAll("button")
+            .Single(button => button.TextContent.Trim() == "Cancel")
+            .ClickAsync();
+
+        Assert.Equal("Original name", floor.Find(".cm-campaign-header__name").TextContent);
+        Assert.Empty(floor.FindAll("input[aria-label='Campaign name']"));
+        Assert.DoesNotContain(Http.Requests, request =>
+            request.Method == HttpMethod.Put
+            && request.RequestUri!.AbsolutePath.EndsWith($"campaigns/{CampaignId}", StringComparison.Ordinal));
     }
 
     private static CampaignResponse Campaign(string name) =>

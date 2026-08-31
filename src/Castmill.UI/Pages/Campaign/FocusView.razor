@@ -11,10 +11,12 @@
 @using Castmill.UI.Editor
 @using Castmill.UI.Platform
 @using Castmill.UI.Http
+@using Castmill.UI.Scheduling
 @using Castmill.UI.State
 @implements IDisposable
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
+@inject ScheduleClient Schedule
 @inject GenerationClient Generation
 @inject ImagesClient Images
 @inject ExportClient Exports
@@ -23,6 +25,7 @@
 @inject IClipboardService Clipboard
 @inject IConfirmService Confirm
 @inject INotifier Notifier
+@inject TimeProvider Clock
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -54,7 +57,7 @@
                                 {
                                     <li class="cm-tree__row">
                                         <button type="button"
-                                                class="cm-focus__list-item @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
+                                            class="cm-focus__list-item @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
                                                 aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
                                                 aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
                                                 @onclick="() => SelectAsync(item.Id)">
@@ -77,7 +80,7 @@
                                                 title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
                                                 aria-label="Delete @item.Title"
                                                 @onclick="() => DeleteArtifactAsync(item)">
-                                            <span aria-hidden="true">🗑</span>
+                                            <AppIcon Name="trash" />
                                         </button>
                                     </li>
                                 }
@@ -87,21 +90,6 @@
                 </div>
             }
 
-            @if (_headings.Count > 0)
-            {
-                <h2 class="cm-kicker">Outline</h2>
-                <ul class="cm-focus__outline-list">
-                    @foreach (var heading in _headings)
-                    {
-                        <li style="padding-inline-start: @((heading.Level - 1) * 10)px">
-                            <button type="button" class="cm-focus__outline-item"
-                                    @onclick="() => GoToAsync(heading)">
-                                @heading.Text
-                            </button>
-                        </li>
-                    }
-                </ul>
-            }
         </aside>
 
         <div class="cm-focus__manuscript cm-region @(_regenerating ? "cm-focus__manuscript--regenerating" : null)"
@@ -139,59 +127,113 @@
                     <span class="cm-kicker">@ArtifactDisplay.KindLabel(_artifact.Kind)</span>
                     <h1>@_artifact.Title</h1>
                     <div class="cm-focus__status">
-                        <span class="@ArtifactDisplay.StatusModifier(_artifact.Status)">
-                            @ArtifactDisplay.StatusLabel(_artifact.Status)
+                        <span class="@(_scheduledEntry is null
+                            ? ArtifactDisplay.StatusModifier(_artifact.Status)
+                            : "cm-status cm-status--queued")">
+                            @(_scheduledEntry is null ? ArtifactDisplay.StatusLabel(_artifact.Status) : "Scheduled")
                         </span>
                         <span class="cm-meta">@_saveState</span>
-                        @if (_artifact.Status == ArtifactStatus.Draft)
-                        {
-                            <button type="button" class="cm-button"
-                                    @onclick="() => SetStatusAsync(ArtifactStatus.InReview)">
-                                Send to review
-                            </button>
-                        }
-                        else if (_artifact.Status == ArtifactStatus.InReview)
-                        {
-                            <button type="button" class="cm-button"
-                                    @onclick="() => SetStatusAsync(ArtifactStatus.Queued)">
-                                Mark reviewed
-                            </button>
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    @onclick="() => SetStatusAsync(ArtifactStatus.Draft)">
-                                Back to draft
-                            </button>
-                        }
-                        <button type="button" class="cm-button cm-button--quiet cm-focus__copy"
-                                title="@CopyActionLabel" aria-label="@CopyActionLabel"
-                                @onclick="CopyArtifactAsync">
-                            <span aria-hidden="true">⧉</span> @CopyActionLabel
-                        </button>
-                        <div class="cm-focus__download">
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    aria-expanded="@(_downloadOpen ? "true" : "false")"
-                                    aria-controls="cm-focus-downloads"
-                                    disabled="@_exporting" @onclick="() => _downloadOpen = !_downloadOpen">
-                                Download <span aria-hidden="true">⌄</span>
-                            </button>
-                            @if (_downloadOpen)
+                        <div class="cm-focus__actions">
+                            @if (_artifact.Status == ArtifactStatus.Draft)
                             {
-                                <div class="cm-focus__download-menu" id="cm-focus-downloads">
-                                    <button type="button" disabled="@_exporting"
-                                            @onclick="@(() => ExportFromMenuAsync("md"))">Markdown (.md)</button>
-                                    <button type="button" disabled="@_exporting"
-                                            @onclick="@(() => ExportFromMenuAsync("docx"))">Word (.docx)</button>
-                                    <button type="button" disabled="@_exporting"
-                                            @onclick="ExportCampaignFromMenuAsync">Whole campaign (.zip)</button>
+                                <button type="button" class="cm-button"
+                                        @onclick="() => SetStatusAsync(ArtifactStatus.InReview)">
+                                    Send to review
+                                </button>
+                            }
+                            else if (_artifact.Status == ArtifactStatus.InReview)
+                            {
+                                <button type="button" class="cm-button"
+                                        @onclick="() => SetStatusAsync(ArtifactStatus.Queued)">
+                                    Mark reviewed
+                                </button>
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick="() => SetStatusAsync(ArtifactStatus.Draft)">
+                                    Back to draft
+                                </button>
+                            }
+                            else if (_artifact.Status == ArtifactStatus.Queued)
+                            {
+                                <div class="cm-focus__schedule">
+                                    <button type="button"
+                                            class="cm-button cm-focus__schedule-button @(_scheduledEntry is not null ? "cm-focus__schedule-button--scheduled" : null)"
+                                            aria-expanded="@_scheduleOpen"
+                                            aria-controls="cm-focus-schedule-picker"
+                                            @onclick="ToggleSchedule">
+                                        <AppIcon Name="calendar" /> @(_scheduledEntry is null ? "Schedule" : "Scheduled")
+                                    </button>
+                                    @if (_scheduleOpen)
+                                    {
+                                        <div class="cm-focus__schedule-picker" id="cm-focus-schedule-picker">
+                                            @if (_scheduledEntry is { } scheduled)
+                                            {
+                                                <span class="cm-kicker">Scheduled for</span>
+                                                <strong class="cm-focus__scheduled-at">
+                                                    @scheduled.ScheduledAt.ToLocalTime().ToString(
+                                                        "dddd, MMMM d · h:mm tt", System.Globalization.CultureInfo.CurrentCulture)
+                                                </strong>
+                                                <div class="cm-focus__schedule-actions">
+                                                    <button type="button" class="cm-button cm-button--quiet"
+                                                            @onclick="CloseSchedule">Close</button>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <label class="cm-field">
+                                                    <span class="cm-field__label">Date and time</span>
+                                                    <InputDate class="cm-input" Type="InputDateType.DateTimeLocal"
+                                                               @bind-Value="_scheduleAt" />
+                                                </label>
+                                                @if (ScheduleValidationMessage is { } scheduleError)
+                                                {
+                                                    <span class="cm-form__error" role="alert">@scheduleError</span>
+                                                }
+                                                <div class="cm-focus__schedule-actions">
+                                                    <button type="button" class="cm-button"
+                                                            disabled="@(_scheduling || !ScheduleTimeIsValid)"
+                                                            @onclick="ScheduleToWireAsync">
+                                                        @(_scheduling ? "Scheduling…" : "Schedule to The Wire")
+                                                    </button>
+                                                    <button type="button" class="cm-button cm-button--quiet"
+                                                            disabled="@_scheduling" @onclick="CloseSchedule">Cancel</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
                                 </div>
                             }
-                        </div>
-                        @if (_repos.Count > 0)
-                        {
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    @onclick="OpenPublishAsync">
-                                Publish to GitHub
+                            <button type="button" class="cm-button cm-button--quiet cm-focus__copy"
+                                    title="@CopyActionLabel" aria-label="@CopyActionLabel"
+                                    @onclick="CopyArtifactAsync">
+                                <span aria-hidden="true">⧉</span> @CopyActionLabel
                             </button>
-                        }
+                            <div class="cm-focus__download">
+                                <button type="button" class="cm-button cm-button--quiet cm-focus__download-toggle"
+                                        aria-expanded="@(_downloadOpen ? "true" : "false")"
+                                        aria-controls="cm-focus-downloads"
+                                        disabled="@_exporting" @onclick="() => _downloadOpen = !_downloadOpen">
+                                    Download <span class="cm-focus__download-caret" aria-hidden="true"></span>
+                                </button>
+                                @if (_downloadOpen)
+                                {
+                                    <div class="cm-focus__download-menu" id="cm-focus-downloads">
+                                        <button type="button" disabled="@_exporting"
+                                                @onclick="@(() => ExportFromMenuAsync("md"))">Markdown (.md)</button>
+                                        <button type="button" disabled="@_exporting"
+                                                @onclick="@(() => ExportFromMenuAsync("docx"))">Word (.docx)</button>
+                                        <button type="button" disabled="@_exporting"
+                                                @onclick="ExportCampaignFromMenuAsync">Whole campaign (.zip)</button>
+                                    </div>
+                                }
+                            </div>
+                            @if (_repos.Count > 0)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet"
+                                        @onclick="OpenPublishAsync">
+                                    Publish to GitHub
+                                </button>
+                            }
+                        </div>
                     </div>
                 </header>
 
@@ -367,6 +409,29 @@
 
             }
         </div>
+
+        @if (_headings.Count > 0)
+        {
+            <aside class="cm-focus__document-outline" aria-label="Document outline">
+                <nav class="cm-document-outline" aria-label="On this page">
+                    <span class="cm-kicker cm-document-outline__title">On this page</span>
+                    <ol class="cm-document-outline__list" data-cm-scroll>
+                        @foreach (var heading in _headings)
+                        {
+                            <li>
+                                <button type="button"
+                                        class="cm-document-outline__item cm-document-outline__item--level-@Math.Clamp(heading.Level, 1, 3)"
+                                        title="@heading.Text"
+                                        @onclick="() => GoToAsync(heading)">
+                                    <span class="cm-document-outline__mark" aria-hidden="true"></span>
+                                    <span class="cm-document-outline__label">@heading.Text</span>
+                                </button>
+                            </li>
+                        }
+                    </ol>
+                </nav>
+            </aside>
+        }
 
         <aside class="cm-focus__producer cm-region">
             <div class="cm-focus__producer-head">
@@ -690,6 +755,10 @@
     private bool _addingImage;
     private Guid? _downloadingImageSlot;
     private bool _savingMetadata;
+    private bool _scheduleOpen;
+    private bool _scheduling;
+    private DateTime _scheduleAt;
+    private ScheduleEntryResponse? _scheduledEntry;
     private BlogPublishingMetadata _blogMetadata = new();
     private string _blogMetaTab = "Combined";
     private static readonly string[] BlogMetaTabs = ["Combined", "HTML head", "JSON-LD only"];
@@ -705,6 +774,7 @@
     private bool _selecting;
     private Guid? _selectionCampaignId;
     private bool _useKnowledgeBase;
+    private Guid? _autoGenerationStartedFor;
     private AiStatusResponse? _aiStatus;
     private SeoAnalysisReportResponse? _seoReport;
     private bool SelectedIsPlaceholder => Campaign.Artifacts.Any(
@@ -738,6 +808,9 @@
     /// <summary>Deep link from the front page's review queue.</summary>
     [SupplyParameterFromQuery(Name = "artifact")]
     private Guid? RequestedArtifact { get; set; }
+
+    [SupplyParameterFromQuery(Name = "generate")]
+    private bool GenerateOnOpen { get; set; }
 
     private IEnumerable<ArtifactPreviewResponse> Editable =>
         Campaign.Artifacts.Where(a => ArtifactDisplay.Editable(a.Kind));
@@ -814,6 +887,16 @@
         {
             return;
         }
+
+        if (GenerateOnOpen && _artifact is { } artifact
+            && SelectedIsPlaceholder && _autoGenerationStartedFor != artifact.Id)
+        {
+            _autoGenerationStartedFor = artifact.Id;
+            await JS.InvokeVoidAsync("history.replaceState", null, string.Empty,
+                $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifact.Id}");
+            _ = InvokeAsync(RegenerateAsync);
+        }
+
         // Broad on purpose: this runs from a lifecycle method, so anything that escapes
         // becomes an unhandled render exception and blanks the page. Model readiness is a
         // nicety — it must never be able to take the editor down.
@@ -949,11 +1032,13 @@
             _headings.Clear();
             _saveState = "Saved on blur";
             _previewRevision = null;
+            _scheduleOpen = false;
+            _scheduledEntry = null;
             _loadingArtifactId = null;
             _loadingArtifactTitle = null;
             StateHasChanged();
 
-            await Task.WhenAll(LoadRevisionsAsync(id), LoadSeoReportAsync());
+            await Task.WhenAll(LoadRevisionsAsync(id), LoadSeoReportAsync(), LoadScheduleAsync(id));
         }
         catch (ApiException ex)
         {
@@ -1076,6 +1161,102 @@
         }
     }
 
+    private DateTimeOffset? ScheduleUtc => WireTime.ToUtc(
+        DateOnly.FromDateTime(_scheduleAt),
+        (_scheduleAt.Hour * 60) + _scheduleAt.Minute,
+        Clock.LocalTimeZone);
+
+    private bool ScheduleTimeIsValid =>
+        ScheduleUtc is { } scheduledAt && scheduledAt > Clock.GetUtcNow();
+
+    private string? ScheduleValidationMessage => ScheduleUtc is null
+        ? "Choose an unambiguous local time."
+        : ScheduleTimeIsValid ? null : "Choose a future time.";
+
+    private async Task LoadScheduleAsync(Guid artifactId)
+    {
+        if (_artifact?.Status != ArtifactStatus.Queued)
+        {
+            _scheduledEntry = null;
+            return;
+        }
+
+        try
+        {
+            var now = Clock.GetLocalNow();
+            _scheduledEntry = (await Schedule.ListAsync(
+                    new DateTimeOffset(now.Date, now.Offset), now.AddYears(1)))
+                .Where(entry => entry.ArtifactId == artifactId)
+                .OrderBy(entry => entry.ScheduledAt)
+                .FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _scheduledEntry = null;
+        }
+
+        StateHasChanged();
+    }
+
+    private void ToggleSchedule()
+    {
+        _scheduleOpen = !_scheduleOpen;
+        if (_scheduleOpen && !ScheduleTimeIsValid)
+        {
+            _scheduleAt = NextScheduleTime();
+        }
+    }
+
+    private void CloseSchedule() => _scheduleOpen = false;
+
+    private async Task ScheduleToWireAsync()
+    {
+        var scheduledAt = ScheduleUtc;
+        if (_artifact is not { } artifact
+            || scheduledAt is null
+            || scheduledAt <= Clock.GetUtcNow())
+        {
+            return;
+        }
+
+        _scheduling = true;
+        try
+        {
+            var text = DisplayedMarkdown.Trim();
+            _scheduledEntry = await Schedule.CreateAsync(new ScheduleEntryCreateRequest(
+                CampaignId,
+                artifact.Id,
+                ScheduleChannel(artifact.Kind),
+                string.IsNullOrWhiteSpace(text) ? artifact.Title : text,
+                scheduledAt.Value,
+                MediaUrl: null,
+                PushToBroker: false));
+            _scheduleOpen = false;
+            Notifier.ShowSuccess($"Scheduled for {_scheduleAt:g} on The Wire.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        catch (HttpRequestException)
+        {
+            Notifier.ShowError("Couldn't reach the Castmill API.");
+        }
+        finally
+        {
+            _scheduling = false;
+        }
+    }
+
+    private static string ScheduleChannel(string kind) =>
+        kind.StartsWith("social-", StringComparison.Ordinal) ? kind["social-".Length..] : kind;
+
+    private DateTime NextScheduleTime()
+    {
+        var next = Clock.GetLocalNow().DateTime.AddHours(1);
+        return new DateTime(next.Year, next.Month, next.Day, next.Hour, 0, 0);
+    }
+
     private void OnHeadings(IReadOnlyList<EditorHeading> headings)
     {
         _headings.Clear();
@@ -1182,7 +1363,11 @@
             return;
         }
 
-        _regenerationLabel = $"Regenerating {ArtifactDisplay.KindLabel(_artifact.Kind).ToLowerInvariant()}…";
+        var preview = Campaign.Artifacts.FirstOrDefault(item => item.Id == _artifact.Id);
+        var replacingPlaceholder = preview?.IsPlaceholder == true;
+        _regenerationLabel = replacingPlaceholder
+            ? $"Generating {ArtifactDisplay.KindLabel(_artifact.Kind).ToLowerInvariant()}…"
+            : $"Regenerating {ArtifactDisplay.KindLabel(_artifact.Kind).ToLowerInvariant()}…";
         _regenerating = true;
         _producerLog.Clear();
         _producerLog.Add($"queued {_artifact.Kind} · drafting, then cross-model audit…");
@@ -1190,12 +1375,11 @@
 
         try
         {
-            var preview = Campaign.Artifacts.FirstOrDefault(item => item.Id == _artifact.Id);
             var result = await Generation.GenerateOneAsync(
                 CampaignId, _artifact.Kind, transcriptId,
                 string.IsNullOrWhiteSpace(_steering)
                     ? ArtifactContent.PlaceholderSeed(_artifact.ContentJson) is { } seed
-                        ? $"Generate the pillar from the approved SEO/AEO angle: {seed}"
+                        ? $"Generate this {ArtifactDisplay.KindLabel(_artifact.Kind).ToLowerInvariant()} from the approved SEO/AEO direction: {seed}"
                         : null
                     : _steering,
                 parentArtifactId: _artifact.ParentArtifactId,

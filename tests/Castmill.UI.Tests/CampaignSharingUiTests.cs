@@ -30,12 +30,23 @@ public sealed class CampaignSharingUiTests : CastmillUiTestContext
             parameters.Add(page => page.CampaignId, CampaignId));
         await floor.WaitForAssertionAsync(() =>
             Assert.NotNull(floor.Find("button[aria-label='Manage campaign sharing']")));
+        var actions = floor.Find(".cm-campaign-header__actions");
+        Assert.NotNull(actions.QuerySelector("button[aria-label='Rename campaign']"));
+        Assert.NotNull(actions.QuerySelector("button[aria-label='Manage campaign sharing']"));
+        Assert.NotNull(actions.QuerySelector("button[aria-label='Manage campaign sharing'] svg.cm-icon"));
+        Assert.Equal(3, actions.QuerySelectorAll(
+            "button[aria-label='Manage campaign sharing'] svg.cm-icon circle").Length);
+        Assert.Null(floor.Find(".cm-campaign-header__meta")
+            .QuerySelector("button[aria-label='Manage campaign sharing']"));
 
         await floor.Find("button[aria-label='Manage campaign sharing']").ClickAsync();
         await floor.WaitForAssertionAsync(() =>
             Assert.Contains("Share Shared campaign", floor.Markup, StringComparison.Ordinal));
         Assert.Contains("They get access when they sign in with this address.",
             floor.Markup, StringComparison.Ordinal);
+        Assert.Contains("No people have been added yet.", floor.Markup, StringComparison.Ordinal);
+        Assert.NotNull(floor.Find("button.cm-dialog-close"));
+        Assert.NotNull(floor.Find(".cm-campaign-sharing__email"));
 
         Http.OnPut($"api/v1/campaigns/{CampaignId}/sharing",
             new CampaignSharingResponse(true, "example.com", []));

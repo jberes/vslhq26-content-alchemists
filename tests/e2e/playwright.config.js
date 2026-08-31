@@ -23,7 +23,7 @@ export default defineConfig({
     },
     webServer: [
         {
-            command: 'dotnet run --project src/Castmill.Api --no-build',
+            command: 'dotnet run --project src/Castmill.Api --no-build --launch-profile https',
             cwd: '../..',
             env: { ...process.env, RateLimits__AuthPerMinute: '1000' },
             url: 'http://localhost:5005/health/db',

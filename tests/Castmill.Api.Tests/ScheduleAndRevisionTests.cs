@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Castmill.Api.Data;
 using Castmill.Api.Services.Media;
 using Castmill.Api.Services.Publish;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -200,11 +202,95 @@ public sealed class ScheduleAndRevisionTests(CastmillApiFactory factory)
         Assert.Equal(1, reconciled.RootElement.GetProperty("updated").GetInt32());
 
         var after = (await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!;
-        Assert.Equal("Sent", Assert.Single(after).Status);
+        var sent = Assert.Single(after);
+        Assert.Equal("Sent", sent.Status);
+        Assert.NotNull(sent.SentAtUtc);
+        Assert.Null(sent.Permalink);
+        Assert.Null(sent.Metrics);
 
         // A sent post cannot be rescheduled.
         var move = await client.PatchAsJsonAsync($"/api/v1/schedule/{entry.Id}", new { scheduledAt = slot.AddDays(2) });
         Assert.Equal(HttpStatusCode.Conflict, move.StatusCode);
+    }
+
+    [Fact]
+    public async Task Reconcile_persists_broker_sent_timestamp_and_permalink_with_null_metrics()
+    {
+        var broker = new TrackingBroker();
+        await using var app = factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Publish:BrokerBaseUrl", "https://broker.example");
+            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Scoped<IPublishBrokerClient>(_ => broker)));
+        });
+        var client = await AuthedClientAsync(app);
+        var campaign = await CampaignAsync(client, "Wire receipt");
+        (await client.PutAsJsonAsync("/api/v1/settings/secrets/BrokerToken", new { value = "t" })).EnsureSuccessStatusCode();
+
+        var entry = (await (await client.PostAsJsonAsync("/api/v1/schedule", new
+        {
+            campaignId = campaign.Id,
+            channelId = "ch-1",
+            text = "Published post",
+            scheduledAt = DateTimeOffset.Parse("2026-08-06T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
+        })).Content.ReadFromJsonAsync<ScheduleEntryResponse>())!;
+        var sentAt = DateTimeOffset.Parse("2026-08-06T09:03:12Z", System.Globalization.CultureInfo.InvariantCulture);
+        const string permalink = "https://social.example/posts/receipt-42";
+        broker.Posts[entry.BrokerPostId!] = broker.Posts[entry.BrokerPostId!] with
+        {
+            Status = "published",
+            SentAtUtc = sentAt,
+            Permalink = permalink,
+        };
+
+        using var reconciled = JsonDocument.Parse(
+            await (await client.PostAsync("/api/v1/schedule/reconcile", null)).Content.ReadAsStringAsync());
+        Assert.Equal(1, reconciled.RootElement.GetProperty("updated").GetInt32());
+
+        var persisted = Assert.Single(
+            (await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!);
+        Assert.Equal("Sent", persisted.Status);
+        Assert.Equal(sentAt, persisted.SentAtUtc);
+        Assert.Equal(permalink, persisted.Permalink);
+        Assert.Null(persisted.Metrics);
+
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CastmillDbContext>();
+            var stored = await db.ScheduleEntries
+                .IgnoreQueryFilters()
+                .SingleAsync(item => item.Id == entry.Id);
+            stored.MetricsJson = "{not valid json";
+            await db.SaveChangesAsync();
+        }
+
+        persisted = Assert.Single(
+            (await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!);
+        Assert.Null(persisted.Metrics);
+
+        broker.Posts[entry.BrokerPostId!] = broker.Posts[entry.BrokerPostId!] with
+        {
+            Status = "scheduled",
+        };
+        await client.PostAsync("/api/v1/schedule/reconcile", null);
+        persisted = Assert.Single(
+            (await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!);
+        Assert.Equal("Queued", persisted.Status);
+        Assert.Null(persisted.SentAtUtc);
+        Assert.Null(persisted.Permalink);
+        Assert.Null(persisted.Metrics);
+
+        broker.Posts[entry.BrokerPostId!] = broker.Posts[entry.BrokerPostId!] with
+        {
+            Status = "published",
+            SentAtUtc = sentAt.AddMinutes(1),
+            Permalink = "javascript:alert('unsafe')",
+        };
+        await client.PostAsync("/api/v1/schedule/reconcile", null);
+        persisted = Assert.Single(
+            (await client.GetFromJsonAsync<List<ScheduleEntryResponse>>("/api/v1/schedule"))!);
+        Assert.Equal("Sent", persisted.Status);
+        Assert.Equal(sentAt.AddMinutes(1), persisted.SentAtUtc);
+        Assert.Null(persisted.Permalink);
     }
 
     [Fact]

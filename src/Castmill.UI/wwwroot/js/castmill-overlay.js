@@ -51,6 +51,42 @@ export function measure(container, selectors) {
 }
 
 /**
+ * Reveals one cited transcript row only when it is outside its own scroll viewport.
+ * Focus is untouched; the overlay's scroll observer redraws while the row moves.
+ */
+export function scrollCitationIntoView(container, segmentId) {
+    if (!(container instanceof HTMLElement) || !segmentId) {
+        return;
+    }
+
+    const escaped = globalThis.CSS?.escape
+        ? globalThis.CSS.escape(segmentId)
+        : String(segmentId).replace(/["\\]/g, '\\$&');
+    const row = container.querySelector(`[data-seg="${escaped}"]`);
+    const scroller = row?.closest('[data-cm-scroll]');
+    if (!(row instanceof HTMLElement) || !(scroller instanceof HTMLElement)) {
+        return;
+    }
+
+    const rowRect = row.getBoundingClientRect();
+    const scrollRect = scroller.getBoundingClientRect();
+    const isVisible = rowRect.top >= scrollRect.top + 2
+        && rowRect.bottom <= scrollRect.bottom - 2;
+    if (isVisible) {
+        return;
+    }
+
+    const target = scroller.scrollTop + rowRect.top - scrollRect.top
+        - (scrollRect.height - rowRect.height) / 2;
+    scroller.scrollTo({
+        top: Math.max(0, target),
+        behavior: globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth',
+    });
+}
+
+/**
  * Watches everything that can move geometry — resize, any inner scroll, zoom (a CSS class
  * change re-lays-out, which ResizeObserver sees) — and calls back into .NET at most once
  * per animation frame.

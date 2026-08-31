@@ -24,11 +24,25 @@
             <input class="cm-input cm-campaign-header__rename" aria-label="Campaign name"
                    @bind="_name" @onkeydown="OnRenameKey" />
             <button type="button" class="cm-button cm-button--quiet" @onclick="SaveRenameAsync">Save</button>
+                 <button type="button" class="cm-button cm-button--quiet" @onclick="CancelRename">Cancel</button>
         }
         else
         {
             <h1 class="cm-campaign-header__name">@(Campaign.Campaign?.Name ?? "…")</h1>
-            <button type="button" class="cm-button cm-button--quiet" @onclick="BeginRename">Rename</button>
+            <div class="cm-campaign-header__actions" aria-label="Campaign actions">
+                <button type="button" class="cm-button cm-button--quiet cm-campaign-header__icon"
+                        title="Rename campaign" aria-label="Rename campaign" @onclick="BeginRename">
+                    <AppIcon Name="pencil" />
+                </button>
+                @if (Campaign.Campaign is { IsOwner: true })
+                {
+                    <button type="button" class="cm-button cm-button--quiet cm-campaign-header__icon"
+                            title="Share campaign" aria-label="Manage campaign sharing"
+                            @onclick="OpenSharingAsync">
+                        <AppIcon Name="share" />
+                    </button>
+                }
+            </div>
         }
     </div>
 
@@ -57,14 +71,7 @@
                     title="Toggle campaign readiness" @onclick="ToggleReadyAsync">
                 @(campaign.Status == CampaignStatus.Ready ? "Ready" : "Draft")
             </button>
-            @if (campaign.IsOwner)
-            {
-                <button type="button" class="cm-button cm-button--quiet cm-button--compact"
-                        aria-label="Manage campaign sharing" @onclick="OpenSharingAsync">
-                    Share
-                </button>
-            }
-            else
+            @if (!campaign.IsOwner)
             {
                 <span class="cm-chip cm-mono" title="You can edit this campaign">Shared campaign</span>
             }
@@ -120,7 +127,7 @@
                     <span class="cm-kicker">Campaign access</span>
                     <h2 id="cm-campaign-sharing-title" class="cm-modal__title">Share @sharedCampaign.Name</h2>
                 </div>
-                <button type="button" class="cm-tree__delete" aria-label="Close sharing"
+                <button type="button" class="cm-dialog-close" aria-label="Close sharing"
                         @onclick="CloseSharing">✕</button>
             </div>
 
@@ -139,19 +146,21 @@
                     </span>
                 </label>
 
-                <div class="cm-brand__share-form">
-                    <label class="cm-field">
+                <div class="cm-campaign-sharing__email">
+                    <label class="cm-field cm-campaign-sharing__email-field">
                         <span class="cm-field__label">Share with any email</span>
                         <input class="cm-input" type="email" maxlength="256"
                                placeholder="person@company.com" disabled="@_sharingBusy"
                                @bind="_shareEmail" @bind:event="oninput"
                                @onkeydown="ShareKeyDownAsync" />
-                        <span class="cm-meta">They get access when they sign in with this address.</span>
                     </label>
                     <button type="button" class="cm-button"
                             disabled="@(_sharingBusy || string.IsNullOrWhiteSpace(_shareEmail))"
                             @onclick="AddCollaboratorAsync">Add</button>
                 </div>
+                <p class="cm-meta cm-campaign-sharing__help">
+                    They get access when they sign in with this address.
+                </p>
 
                 @if (_sharingError is { } sharingError)
                 {
@@ -160,7 +169,7 @@
 
                 @if (_collaborators.Count == 0)
                 {
-                    <p class="cm-meta">No individual email shares.</p>
+                    <p class="cm-meta cm-campaign-sharing__empty">No people have been added yet.</p>
                 }
                 else
                 {
@@ -177,7 +186,9 @@
                                 <button type="button" class="cm-tree__delete"
                                         aria-label="Remove @collaborator.Email"
                                         disabled="@(_removingCollaborator == collaborator.Id)"
-                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">✕</button>
+                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">
+                                    <AppIcon Name="trash" />
+                                </button>
                             </li>
                         }
                     </ul>
@@ -329,7 +340,13 @@
     private async Task OnRenameKey(KeyboardEventArgs args)
     {
         if (args.Key == "Enter") await SaveRenameAsync();
-        else if (args.Key == "Escape") _renaming = false;
+        else if (args.Key == "Escape") CancelRename();
+    }
+
+    private void CancelRename()
+    {
+        _name = Campaign.Campaign?.Name ?? string.Empty;
+        _renaming = false;
     }
 
     private async Task SaveRenameAsync()

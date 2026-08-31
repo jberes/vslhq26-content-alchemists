@@ -114,6 +114,8 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         // The label owns its own row; the actions sit on a grid, so nothing half-wraps.
         Assert.NotNull(view.Find(".cm-board__more > .cm-kicker"));
         var grid = view.Find(".cm-board__more-grid");
+        Assert.NotNull(view.Find("button[aria-label='Scroll content types left']"));
+        Assert.NotNull(view.Find("button[aria-label='Scroll content types right']"));
         var chips = grid.QuerySelectorAll(".cm-print-chip");
 
         // EVERY on-demand kind is offered, including ones the campaign already has: a
@@ -157,7 +159,10 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         Http.OnStatus(HttpMethod.Delete,
             $"api/v1/campaigns/{CampaignId}/artifacts/{artifactId}", System.Net.HttpStatusCode.NoContent);
 
-        await view.Find(".cm-card__tool--danger").ClickAsync();
+        var delete = view.Find(".cm-card__tool--danger");
+        Assert.NotNull(delete.QuerySelector("svg.cm-icon"));
+        Assert.DoesNotContain("🗑", delete.TextContent, StringComparison.Ordinal);
+        await delete.ClickAsync();
 
         Assert.Single(confirm.Requests);
         Assert.Contains(Http.Requests, r =>

@@ -84,6 +84,17 @@ public sealed class ImagesClient(ApiClient api)
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}",
             new { state }, etag: null, ct);
 
+    public Task<ImageVariantResponse> LockVariantAsync(
+        Guid campaignId, Guid slotId, Guid variantId, CancellationToken ct = default) =>
+        api.PutAsync<object, ImageVariantResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/lock",
+            new { }, etag: null, ct);
+
+    public Task UnlockVariantAsync(
+        Guid campaignId, Guid slotId, Guid variantId, CancellationToken ct = default) =>
+        api.DeleteAsync(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/lock", ct);
+
     /// <summary>New take(s) steered from an existing one ("add a face", "warmer background").</summary>
     public Task<VariantBatchResponse> SteerAsync(
         Guid campaignId, Guid slotId, Guid variantId, string note, int variants = 1,

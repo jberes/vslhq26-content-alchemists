@@ -145,26 +145,30 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Marking_a_take_as_keeper_updates_the_take_card_immediately()
+    public async Task Locking_a_take_updates_the_take_card_immediately()
     {
-        StubPatchResult(Take(TakeId, "Kept"));
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}/lock",
+            Take(TakeId, "Candidate") with
+            {
+                IsLocked = true,
+                CanUnlock = true,
+                LockedAt = DateTimeOffset.UtcNow,
+            });
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await OpenFirstSlotAsync(view);
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
 
-        Assert.Empty(view.FindAll(".cm-gallery__keeper"));
+        Assert.Empty(view.FindAll(".cm-gallery__lock"));
         await view.Find(".cm-gallery__tile").ClickAsync();
-        await view.FindAll(".cm-lightbox button")
-            .First(button => button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal))
-            .ClickAsync();
+        await view.Find("button[aria-label='Lock image']").ClickAsync();
 
         await view.WaitForAssertionAsync(() =>
         {
-            Assert.Contains("cm-gallery__tile--keeper", view.Find(".cm-gallery__tile").ClassList);
-            Assert.Equal("✓ Keeper", view.Find(".cm-gallery__keeper").TextContent.Trim());
-            Assert.DoesNotContain(view.FindAll(".cm-lightbox button"), button =>
-                button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal));
+            Assert.Contains("cm-gallery__tile--locked", view.Find(".cm-gallery__tile").ClassList);
+            Assert.Contains("Locked", view.Find(".cm-gallery__lock").TextContent,
+                StringComparison.Ordinal);
+            Assert.NotNull(view.Find("button[aria-label='Unlock image']"));
         });
     }
 
@@ -313,7 +317,7 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         await view.Find(".cm-gallery__tile").ClickAsync();
         var place = view.FindAll(".cm-lightbox button")
-            .First(b => b.TextContent.Contains("Place in slot", StringComparison.Ordinal));
+            .First(b => b.TextContent.Contains("Use this image", StringComparison.Ordinal));
         await place.ClickAsync();
 
         var (_, _, body) = Http.Bodies.Last(b =>

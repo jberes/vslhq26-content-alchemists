@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Publish;
@@ -19,6 +20,8 @@ namespace Castmill.Api.Endpoints;
 /// </summary>
 public static class ScheduleEndpoints
 {
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapScheduleEndpoints(this IEndpointRouteBuilder routes)
     {
         var group = routes.MapGroup("/api/v1/schedule").RequireAuthorization("TenantAllowed");
@@ -34,7 +37,8 @@ public static class ScheduleEndpoints
 
     private static ScheduleEntryResponse ToResponse(ScheduleEntry e) =>
         new(e.Id, e.CampaignId, e.ArtifactId, e.ChannelId, e.BrokerPostId, e.Text, e.MediaUrl,
-            e.ScheduledAt, e.Status, e.Error, e.UpdatedAt);
+            e.ScheduledAt, e.Status, e.Error, e.UpdatedAt, e.SentAtUtc, e.Permalink,
+            DeserializeMetrics(e.MetricsJson));
 
     /// <summary>Week (or any range) query — the Wire's day columns come straight off this.</summary>
     private static async Task<IResult> ListAsync(
@@ -146,8 +150,7 @@ public static class ScheduleEndpoints
                     }
                     var post = await broker.SchedulePostAsync(
                         token, request.ChannelId, request.Text, request.ScheduledAt, request.MediaUrl, ct);
-                    entry.BrokerPostId = post.Id;
-                    entry.Status = "Queued";
+                    ApplyBrokerPost(entry, post);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -209,6 +212,7 @@ public static class ScheduleEndpoints
             {
                 await broker.CancelPostAsync(token, entry.BrokerPostId, CancellationToken.None);
                 entry.BrokerPostId = null;
+                ClearDeliveryReceipt(entry);
                 entry.ScheduledAt = request.ScheduledAt;
                 entry.UpdatedAt = clock.GetUtcNow();
                 entry.Status = "Moving";
@@ -217,9 +221,7 @@ public static class ScheduleEndpoints
 
                 var post = await broker.SchedulePostAsync(
                     token, entry.ChannelId, entry.Text, entry.ScheduledAt, entry.MediaUrl, CancellationToken.None);
-                entry.BrokerPostId = post.Id;
-                entry.Status = "Queued";
-                entry.Error = null;
+                ApplyBrokerPost(entry, post);
             }
             catch (Exception ex)
             {
@@ -230,6 +232,7 @@ public static class ScheduleEndpoints
         }
         else
         {
+            ClearDeliveryReceipt(entry);
             entry.ScheduledAt = request.ScheduledAt;
             entry.UpdatedAt = clock.GetUtcNow();
         }
@@ -291,6 +294,7 @@ public static class ScheduleEndpoints
             }
         }
 
+        ClearDeliveryReceipt(entry);
         db.ScheduleEntries.Remove(entry);
         db.AuditEvents.Add(new AuditEvent
         {
@@ -334,6 +338,9 @@ public static class ScheduleEndpoints
             .ExecuteUpdateAsync(updates => updates
                 .SetProperty(entry => entry.Status, "Retrying")
                 .SetProperty(entry => entry.Error, (string?)null)
+                .SetProperty(entry => entry.SentAtUtc, (DateTimeOffset?)null)
+                .SetProperty(entry => entry.Permalink, (string?)null)
+                .SetProperty(entry => entry.MetricsJson, (string?)null)
                 .SetProperty(entry => entry.UpdatedAt, claimedAt), CancellationToken.None);
         if (claimed == 0)
         {
@@ -350,9 +357,7 @@ public static class ScheduleEndpoints
         {
             var post = await broker.SchedulePostAsync(
                 token, entry.ChannelId, entry.Text, entry.ScheduledAt, entry.MediaUrl, CancellationToken.None);
-            entry.BrokerPostId = post.Id;
-            entry.Status = "Queued";
-            entry.Error = null;
+            ApplyBrokerPost(entry, post);
         }
         catch (Exception ex)
         {
@@ -426,13 +431,31 @@ public static class ScheduleEndpoints
                 var post = queue.FirstOrDefault(p => p.Id == entry.BrokerPostId);
                 var status = post is null ? "Sent" : MapStatus(post.Status);
                 var scheduledAt = post?.ScheduledAt ?? entry.ScheduledAt;
-                if (entry.Status == status && entry.ScheduledAt == scheduledAt)
+                var sentAtUtc = status == "Sent"
+                    ? post is null
+                        ? entry.SentAtUtc ?? now
+                        : post.SentAtUtc ?? entry.SentAtUtc
+                    : null;
+                var permalink = status == "Sent"
+                    ? post is null
+                        ? entry.Permalink ?? AbsoluteHttpUrl(entry.BrokerPostId)
+                        : BrokerPermalink(post) ?? entry.Permalink
+                    : null;
+                var metricsJson = status == "Sent" ? entry.MetricsJson : null;
+                if (entry.Status == status
+                    && entry.ScheduledAt == scheduledAt
+                    && entry.SentAtUtc == sentAtUtc
+                    && entry.Permalink == permalink
+                    && entry.MetricsJson == metricsJson)
                 {
                     continue;
                 }
                 // Broker wins — including "it left the queue", which means it went out.
                 entry.Status = status;
                 entry.ScheduledAt = scheduledAt;
+                entry.SentAtUtc = sentAtUtc;
+                entry.Permalink = permalink;
+                entry.MetricsJson = metricsJson;
                 entry.Error = status == "Error" ? entry.Error ?? "Broker reported an error state." : null;
                 entry.UpdatedAt = now;
                 updated++;
@@ -449,6 +472,58 @@ public static class ScheduleEndpoints
         "error" or "failed" => "Error",
         _ => "Queued",
     };
+
+    private static void ApplyBrokerPost(ScheduleEntry entry, BrokerPost post)
+    {
+        entry.BrokerPostId = post.Id;
+        entry.ScheduledAt = post.ScheduledAt ?? entry.ScheduledAt;
+        entry.Status = MapStatus(post.Status);
+        if (entry.Status == "Sent")
+        {
+            entry.SentAtUtc = post.SentAtUtc;
+            entry.Permalink = BrokerPermalink(post);
+        }
+        else
+        {
+            ClearDeliveryReceipt(entry);
+        }
+        entry.Error = entry.Status == "Error"
+            ? entry.Error ?? "Broker reported an error state."
+            : null;
+    }
+
+    private static void ClearDeliveryReceipt(ScheduleEntry entry)
+    {
+        entry.SentAtUtc = null;
+        entry.Permalink = null;
+        entry.MetricsJson = null;
+    }
+
+    private static string? BrokerPermalink(BrokerPost post) =>
+        AbsoluteHttpUrl(post.Permalink) ?? AbsoluteHttpUrl(post.Id);
+
+    private static string? AbsoluteHttpUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme is "https" or "http"
+                ? uri.AbsoluteUri
+                : null;
+
+    private static ScheduleMetricsResponse? DeserializeMetrics(string? metricsJson)
+    {
+        if (string.IsNullOrWhiteSpace(metricsJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ScheduleMetricsResponse>(metricsJson, Json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static string NormalizePlatform(string value)
     {

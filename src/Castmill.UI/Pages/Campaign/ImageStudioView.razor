@@ -436,8 +436,8 @@
                                 <p class="cm-form__error" role="alert">@_generateError</p>
                             }
 
-                            @* The take gallery: every persisted variant for this slot, kept
-                               first. In-flight renders show one shimmering tile each, with
+                                     @* The take gallery: every persisted variant for this slot.
+                                         In-flight renders show one shimmering tile each, with
                                already-finished takes filling in as the run reports progress. *@
                             <div>
                                 <span class="cm-kicker">Takes</span>
@@ -490,10 +490,11 @@
                                             <img src="@variant.ThumbUrl" width="@variant.Width" height="@variant.Height"
                                                  loading="lazy" decoding="async"
                                                  alt="Take for @ArtifactDisplay.SlotLabel(slot2.Kind)" />
-                                            @if (variant.State == "Kept")
+                                            @if (variant.IsLocked)
                                             {
-                                                <span class="cm-gallery__keeper" aria-label="Keeper take">
-                                                    <span aria-hidden="true">✓</span> Keeper
+                                                <span class="cm-gallery__lock" aria-label="Locked take"
+                                                      title="Protected from deletion">
+                                                    <span aria-hidden="true">🔒</span> Locked
                                                 </span>
                                             }
                                             <span class="cm-gallery__meta">
@@ -647,9 +648,49 @@
 
                         @* The image is the subject, so it gets the room. Everything else is
                            a rail beside it rather than a form the picture sits inside. *@
-                        <figure class="cm-lightbox__stage">
-                            <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
-                        </figure>
+                        <div class="cm-lightbox__stage">
+                            <div class="cm-lightbox__toolbar" role="toolbar" aria-label="Image actions">
+                                <div class="cm-lightbox__toolbar-actions">
+                                    <button type="button" class="cm-button" disabled="@_placing"
+                                            title="Publish this take into the image slot and update linked content"
+                                            @onclick="() => PlaceAsync(take)">
+                                        @(_placing ? "Using…" : "Use this image")
+                                    </button>
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@_downloading" @onclick="() => DownloadAsync(take)">
+                                        @(_downloading ? "Downloading…" : "↓ Download image")
+                                    </button>
+                                    @if (take.State != "Discarded")
+                                    {
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                title="Hide this take; it can be restored from discarded takes"
+                                                @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="cm-button cm-button--quiet"
+                                                @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
+                                    }
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--danger"
+                                            disabled="@take.IsLocked"
+                                            title="@(take.IsLocked ? "Unlock this image before deleting it" : "Delete this image permanently")"
+                                            @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
+                                </div>
+                                <button type="button"
+                                        class="cm-button cm-button--quiet cm-button--icon cm-lightbox__lock"
+                                        disabled="@(_lockingVariant is not null || take.IsLocked && !take.CanUnlock)"
+                                        title="@LockTitle(take)" aria-label="@LockTitle(take)"
+                                        @onclick="() => ToggleLockAsync(take)">
+                                    <span aria-hidden="true">@(take.IsLocked ? "🔒" : "🔓")</span>
+                                </button>
+                            </div>
+                            <figure class="cm-lightbox__canvas">
+                                <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                            </figure>
+                        </div>
+
+                        <button type="button" class="cm-dialog-close cm-lightbox__close"
+                                aria-label="Close image" title="Close (Esc)" @onclick="CloseVariant">✕</button>
 
                         <div class="cm-lightbox__rail">
                             <header class="cm-lightbox__head">
@@ -823,36 +864,6 @@
                                 }
                             </section>
 
-                            <footer class="cm-lightbox__actions">
-                                <button type="button" class="cm-button" disabled="@_placing"
-                                        @onclick="() => PlaceAsync(take)">
-                                    @(_placing ? "Placing…" : "Place in slot")
-                                </button>
-                                @if (take.State != "Kept")
-                                {
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            title="Show this take in Focus without placing it"
-                                            @onclick='() => SetStateAsync(take, "Kept")'>Mark as keeper</button>
-                                }
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        disabled="@_downloading" @onclick="() => DownloadAsync(take)">
-                                    @(_downloading ? "Downloading…" : "↓ Download image")
-                                </button>
-                                @if (take.State != "Discarded")
-                                {
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            title="Hides the take — recoverable from “Show discarded takes”"
-                                            @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
-                                }
-                                else
-                                {
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
-                                }
-                                <button type="button" class="cm-button cm-button--quiet cm-button--danger"
-                                        @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
-                                <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
-                            </footer>
                         </div>
                     </div>
                 </div>
@@ -1463,17 +1474,26 @@
     private bool HasDiscardedTakes =>
         _gallery.Any(v => string.Equals(v.State, "Discarded", StringComparison.Ordinal));
 
-    /// <summary>Kept takes lead, then candidates, then (when shown) discarded — newest first.</summary>
+    /// <summary>Active takes lead, discarded takes follow when requested — newest first.</summary>
     private IEnumerable<ImageVariantResponse> OrderedGallery =>
         _gallery
             .Where(v => _showDiscarded || !string.Equals(v.State, "Discarded", StringComparison.Ordinal))
-            .OrderBy(v => v.State switch { "Kept" => 0, "Candidate" => 1, _ => 2 })
+            .OrderBy(v => string.Equals(v.State, "Discarded", StringComparison.Ordinal) ? 1 : 0)
             .ThenByDescending(v => v.CreatedAt);
 
     private static string GalleryTileClass(ImageVariantResponse variant) =>
-        string.Equals(variant.State, "Kept", StringComparison.Ordinal)
-            ? "cm-gallery__tile cm-gallery__tile--keeper"
+        variant.IsLocked
+            ? "cm-gallery__tile cm-gallery__tile--locked"
             : "cm-gallery__tile";
+
+    private Guid? _lockingVariant;
+
+    private static string LockTitle(ImageVariantResponse variant) => variant switch
+    {
+        { IsLocked: false } => "Lock image",
+        { CanUnlock: true } => "Unlock image",
+        _ => "Locked by another collaborator",
+    };
 
     protected override void OnInitialized()
     {
@@ -1699,6 +1719,12 @@
     /// removes the row and the blobs, so the dialog says exactly that.</summary>
     private async Task DeleteTakeAsync(ImageVariantResponse variant)
     {
+        if (variant.IsLocked)
+        {
+            Notifier.ShowError("Unlock this image before deleting it.");
+            return;
+        }
+
         var accepted = await Confirm.ConfirmAsync(new ConfirmRequest(
             "Delete this take forever?",
             "The image and its thumbnail are removed from storage. This is not the same as "
@@ -1722,6 +1748,44 @@
         catch (ApiException ex)
         {
             Notifier.ShowError(ex.Message);
+        }
+    }
+
+    private async Task ToggleLockAsync(ImageVariantResponse variant)
+    {
+        if (_lockingVariant is not null || variant.IsLocked && !variant.CanUnlock)
+        {
+            return;
+        }
+
+        _lockingVariant = variant.Id;
+        try
+        {
+            ImageVariantResponse updated;
+            if (variant.IsLocked)
+            {
+                await Images.UnlockVariantAsync(CampaignId, variant.SlotId, variant.Id);
+                updated = variant with { IsLocked = false, CanUnlock = false, LockedAt = null };
+            }
+            else
+            {
+                updated = await Images.LockVariantAsync(
+                    CampaignId, variant.SlotId, variant.Id);
+            }
+
+            _gallery = [.. _gallery.Select(item => item.Id == updated.Id ? updated : item)];
+            if (_openVariant?.Id == updated.Id)
+            {
+                _openVariant = updated;
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _lockingVariant = null;
         }
     }
 

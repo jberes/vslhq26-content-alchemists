@@ -1187,6 +1187,12 @@ namespace Castmill.Api.Migrations
                     b.Property<int>("Height")
                         .HasColumnType("int");
 
+                    b.Property<DateTimeOffset?>("LockedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("LockedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Model")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1234,6 +1240,8 @@ namespace Castmill.Api.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LockedByUserId");
 
                     b.HasIndex("TenantId", "SlotId", "CreatedAt");
 
@@ -1335,7 +1343,17 @@ namespace Castmill.Api.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("MetricsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Permalink")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<DateTimeOffset>("ScheduledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("SentAtUtc")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Status")

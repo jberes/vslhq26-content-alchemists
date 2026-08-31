@@ -17,6 +17,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
     private static readonly Guid CampaignA = Guid.Parse("61111111-1111-1111-1111-111111111111");
     private static readonly Guid CampaignB = Guid.Parse("61111111-1111-1111-1111-222222222222");
     private static readonly Guid AgingArtifact = Guid.Parse("61111111-1111-1111-1111-333333333333");
+    private static readonly Guid ReviewedArtifact = Guid.Parse("61111111-1111-1111-1111-444444444444");
 
     public DashboardLoadTests()
     {
@@ -65,6 +66,14 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
                 [new DashboardArtifact(CampaignA, "Webinar campaign", Guid.NewGuid(),
                     "blog", "Second draft page", ArtifactStatus.Draft,
                     DateTimeOffset.UtcNow.AddMinutes(-1))]));
+        Http.OnGetQuery(
+            "api/v1/campaigns/review-desk?status=Queued&skip=0&take=12",
+            new ReviewDeskResponse(
+                ArtifactStatus.Queued,
+                1,
+                [new DashboardArtifact(CampaignA, "Webinar campaign", ReviewedArtifact,
+                    "social-linkedin", "Scheduled launch post", ArtifactStatus.Queued,
+                    DateTimeOffset.UtcNow)]));
     }
 
     [Fact]
@@ -157,6 +166,32 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             $"/campaigns/{CampaignB}/focus?artifact={AgingArtifact}",
             Services.GetRequiredService<NavigationManager>().Uri,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reviewed_card_shows_its_scheduled_date_and_time_in_green()
+    {
+        var scheduledAt = DateTimeOffset.Now.AddDays(2).AddHours(3);
+        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse>
+        {
+            new(Guid.NewGuid(), CampaignA, ReviewedArtifact, "linkedin", null,
+                "Scheduled launch post", null, scheduledAt, "Draft", null, DateTimeOffset.UtcNow),
+        });
+
+        var page = Render<FrontPage>();
+        await page.WaitForStateAsync(
+            () => page.Markup.Contains("Review desk", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5));
+        await page.FindAll(".cm-review-bin")[2].ClickAsync();
+
+        await page.WaitForAssertionAsync(() =>
+        {
+            var scheduled = page.Find(".cm-front__scheduled");
+            Assert.StartsWith("Scheduled:", scheduled.TextContent.Trim(), StringComparison.Ordinal);
+                Assert.Contains(scheduledAt.ToLocalTime().ToString(
+                    "MMM d, yyyy · h:mm tt", System.Globalization.CultureInfo.CurrentCulture),
+                scheduled.TextContent, StringComparison.Ordinal);
+        });
     }
 
     [Fact]

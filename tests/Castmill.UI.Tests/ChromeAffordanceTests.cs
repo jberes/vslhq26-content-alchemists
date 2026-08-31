@@ -157,7 +157,8 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
         Assert.Contains("Added ", row.TextContent, StringComparison.Ordinal);
         Assert.Contains("Updated ", row.TextContent, StringComparison.Ordinal);
         Assert.Contains("Webinar", row.TextContent, StringComparison.Ordinal);
-        Assert.Equal("🗑", row.QuerySelector(".cm-rail__delete span")!.TextContent.Trim());
+        Assert.NotNull(row.QuerySelector(".cm-rail__delete svg.cm-icon"));
+        Assert.DoesNotContain("🗑", row.TextContent, StringComparison.Ordinal);
     }
 
     private static string Css()

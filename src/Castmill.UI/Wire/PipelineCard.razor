@@ -1,0 +1,70 @@
+@namespace Castmill.UI.Scheduling
+@using System.Globalization
+
+<article class="cm-pipeline__card cm-pipeline__card--@StatusName(Item.Status)"
+         draggable="@CanDrag"
+         @ondragstart="() => DragStarted.InvokeAsync(Item)" @ondragend="() => DragEnded.InvokeAsync()">
+    <span class="cm-pipeline__copy">
+        <span class="cm-run-show__channel">@Item.Channel</span>
+        <span class="cm-pipeline__title cm-wire-clamp-2">@Item.Title</span>
+        <span class="cm-pipeline__facts">
+            <IgbChip Outlined="true">@DateChip</IgbChip>
+        </span>
+        @if (Item.Status == WireDeliveryStatus.Sent)
+        {
+            <span class="cm-pipeline__receipt" aria-label="Delivery receipt">
+                @if (Item.SentAtUtc is { } sentAt)
+                {
+                    <time datetime="@sentAt.ToString("O", CultureInfo.InvariantCulture)">@Local(sentAt).ToString("d MMM HH:mm", CultureInfo.CurrentCulture)</time>
+                }
+                @if (!string.IsNullOrWhiteSpace(Item.BrokerRef))
+                {
+                    <span>@Item.BrokerRef</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(Item.Permalink))
+                {
+                    <a href="@Item.Permalink" target="_blank" rel="noopener noreferrer">Live post</a>
+                }
+            </span>
+        }
+        else if (Item.Status is WireDeliveryStatus.Error or WireDeliveryStatus.Blocked)
+        {
+            <span class="cm-pipeline__reason">@(Item.BlockedReason ?? Item.LastError ?? "Publishing needs attention.")</span>
+        }
+    </span>
+    <span class="cm-pipeline__actions" aria-label="Pipeline item actions">
+        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Edit.InvokeAsync(Item)">Edit</IgbButton>
+        @if (Item.Status == WireDeliveryStatus.Error)
+        {
+            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Retry.InvokeAsync(Item)">Retry</IgbButton>
+        }
+        else if (Item.Status == WireDeliveryStatus.Blocked)
+        {
+            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Export.InvokeAsync(Item)">Export clip</IgbButton>
+        }
+        else if (Item.Status != WireDeliveryStatus.Sent)
+        {
+            <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Move.InvokeAsync(Item)">Move</IgbButton>
+        }
+    </span>
+</article>
+
+@code {
+    [Parameter, EditorRequired] public WireScheduleItem Item { get; set; } = default!;
+    [Parameter] public EventCallback<WireScheduleItem> Edit { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Move { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Export { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Retry { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> DragStarted { get; set; }
+    [Parameter] public EventCallback DragEnded { get; set; }
+
+    private string DateChip => WireTime.Local(Item)
+        .ToString("ddd HH:mm", CultureInfo.InvariantCulture)
+        .ToUpperInvariant();
+
+    private DateTimeOffset Local(DateTimeOffset value) =>
+        TimeZoneInfo.ConvertTime(value, TimeZoneInfo.FindSystemTimeZoneById(Item.TimeZone));
+
+    private static string StatusName(WireDeliveryStatus status) => status.ToString().ToLowerInvariant();
+    private bool CanDrag => Item.Status is not WireDeliveryStatus.Sent;
+}

@@ -87,6 +87,7 @@
                     <ul class="cm-cards cm-review-desk__list" data-cm-scroll>
                         @foreach (var item in ReviewItems)
                         {
+                            var scheduled = ScheduledEntryFor(item.ArtifactId);
                             <li>
                                 @* A row, not a giant click target: the actions are explicit
                                    buttons because "what happens if I click this card" was
@@ -98,9 +99,19 @@
                                         <span class="cm-card__title">@item.Title</span>
                                         <span class="cm-meta">Updated @ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
                                     </span>
-                                    <span class="@ArtifactDisplay.StatusModifier(item.Status)">
-                                        @ArtifactDisplay.StatusLabel(item.Status)
-                                    </span>
+                                    @if (scheduled is not null)
+                                    {
+                                        <span class="cm-front__scheduled">
+                                            Scheduled: @scheduled.ScheduledAt.ToLocalTime().ToString(
+                                                "MMM d, yyyy · h:mm tt", System.Globalization.CultureInfo.CurrentCulture)
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="@ArtifactDisplay.StatusModifier(item.Status)">
+                                            @ArtifactDisplay.StatusLabel(item.Status)
+                                        </span>
+                                    }
                                     <span class="cm-front__item-actions">
                                         <button type="button" class="cm-button cm-button--quiet"
                                             @onclick="() => OpenFocus(item)">@ReviewActionLabel(item.Status)</button>
@@ -243,6 +254,7 @@
     private readonly List<DashboardArtifact> _aging = [];
     private readonly List<string> _slotModels = [];
     private readonly List<ScheduleEntryResponse> _wire = [];
+    private readonly Dictionary<Guid, ScheduleEntryResponse> _scheduleByArtifact = [];
     private bool _wireLoaded;
 
     private List<DashboardArtifact> ReviewItems =>
@@ -410,11 +422,20 @@
         try
         {
             var now = DateTimeOffset.Now;
+            var entries = (await Schedule.ListAsync(
+                    new DateTimeOffset(now.Date, now.Offset), now.AddYears(1)))
+                .Where(entry => !string.Equals(entry.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entry => entry.ScheduledAt)
+                .ToList();
             _wire.Clear();
-            _wire.AddRange((await Schedule.ListAsync(now, now.AddDays(7)))
-                .Where(e => !string.Equals(e.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(e => e.ScheduledAt)
+            _wire.AddRange(entries
+                .Where(entry => entry.ScheduledAt < now.AddDays(7))
                 .Take(6));
+            _scheduleByArtifact.Clear();
+            foreach (var entry in entries.Where(entry => entry.ArtifactId is not null))
+            {
+                _scheduleByArtifact.TryAdd(entry.ArtifactId!.Value, entry);
+            }
         }
         catch (Exception ex) when (ex is ApiException or HttpRequestException)
         {
@@ -424,6 +445,9 @@
         _wireLoaded = true;
         StateHasChanged();
     }
+
+    private ScheduleEntryResponse? ScheduledEntryFor(Guid artifactId) =>
+        _scheduleByArtifact.GetValueOrDefault(artifactId);
 
     private static string Excerpt(string text) =>
         text.Length <= 60 ? text : string.Concat(text.AsSpan(0, 59), "…");

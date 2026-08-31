@@ -42,6 +42,16 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         // The FULL-size url, never the gallery thumbnail: the point is judging the real image.
         Assert.Equal(Take().Url, image.GetAttribute("src"));
         Assert.NotNull(view.Find(".cm-lightbox__stage"));
+        Assert.NotNull(view.Find(".cm-lightbox__stage .cm-lightbox__toolbar"));
+        Assert.NotNull(view.Find(".cm-lightbox__toolbar > .cm-lightbox__toolbar-actions"));
+        Assert.NotNull(view.Find(".cm-lightbox__toolbar > .cm-lightbox__lock"));
+        Assert.NotNull(view.Find("button.cm-lightbox__close[aria-label='Close image']"));
+        Assert.Empty(view.FindAll(".cm-lightbox__toolbar .cm-button--compact"));
+        Assert.Contains("Use this image", view.Find(".cm-lightbox__toolbar").TextContent,
+            StringComparison.Ordinal);
+        Assert.NotNull(view.Find("button[aria-label='Lock image']"));
+        Assert.DoesNotContain("preferred", view.Find(".cm-lightbox__toolbar").TextContent,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -99,19 +109,20 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Mark_as_keeper_preserves_placement_as_a_separate_action()
+    public async Task Locking_a_take_is_separate_from_using_it()
     {
         var view = await OpenAsync();
-        Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}",
-            Take() with { State = "Kept" });
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants/{TakeId}/lock",
+            Take() with { IsLocked = true, CanUnlock = true, LockedAt = DateTimeOffset.UtcNow });
 
-        await view.FindAll("button").Single(button =>
-            button.TextContent.Contains("Mark as keeper", StringComparison.Ordinal)).ClickAsync();
+        await view.Find("button[aria-label='Lock image']").ClickAsync();
 
-        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Patch
-            && body.Path.EndsWith($"variants/{TakeId}", StringComparison.Ordinal)
-            && body.Body.Contains("Kept", StringComparison.Ordinal));
+        Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Put
+            && body.Path.EndsWith($"variants/{TakeId}/lock", StringComparison.Ordinal));
         Assert.DoesNotContain(Http.Bodies, body => body.Path.EndsWith("/place", StringComparison.Ordinal));
+        Assert.NotNull(view.Find("button[aria-label='Unlock image']"));
+        Assert.True(view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Delete forever", StringComparison.Ordinal)).HasAttribute("disabled"));
     }
 
     [Fact]

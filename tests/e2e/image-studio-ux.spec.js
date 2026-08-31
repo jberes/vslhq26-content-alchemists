@@ -139,6 +139,11 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(submitReport.ok()).toBeTruthy();
 
         await page.goto('/sign-in');
+        const demoCredentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+        expect(demoCredentials.ok()).toBeTruthy();
+        const demo = await demoCredentials.json();
+        await expect(page.getByLabel('Email')).toHaveValue(demo.email);
+        await expect(page.getByLabel('Password')).toHaveValue(demo.password);
         await page.getByLabel('Email').fill(email);
         await page.getByLabel('Password').fill(password);
         await page.getByRole('button', { name: 'Sign in' }).click();
@@ -155,7 +160,8 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(campaignRow).toContainText('Updated');
         await campaignRow.hover();
         await expect(campaignRow.locator('.cm-rail__delete')).toBeVisible();
-        await expect(campaignRow.locator('.cm-rail__delete')).toContainText('🗑');
+        await expect(campaignRow.locator('.cm-rail__delete .cm-icon')).toBeVisible();
+        await expect(campaignRow.locator('.cm-rail__delete')).not.toContainText('🗑');
 
         await page.goto(`/campaigns/${campaignId}/floor`);
         await expect(page.locator('.cm-campaign-header__meta')).toContainText('Webinar');
@@ -164,7 +170,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const renameResponse = page.waitForResponse(response =>
             response.url().endsWith(`/api/v1/campaigns/${campaignId}`)
             && response.request().method() === 'PUT');
-        await page.getByRole('button', { name: 'Rename', exact: true }).click();
+        await page.getByRole('button', { name: 'Rename campaign', exact: true }).click();
         await page.getByLabel('Campaign name').fill(renamedCampaignName);
         await page.getByRole('button', { name: 'Save', exact: true }).click();
         expect((await renameResponse).ok()).toBeTruthy();
@@ -293,6 +299,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         // the metered image pixels are represented by a deterministic fixture.
         const takeId = crypto.randomUUID();
         let takeState = 'Candidate';
+        let takeLocked = false;
         const takeFixture = () => ({
             id: takeId,
             slotId,
@@ -305,6 +312,9 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
             width: 1280,
             height: 720,
             createdAt: new Date().toISOString(),
+            isLocked: takeLocked,
+            canUnlock: takeLocked,
+            lockedAt: takeLocked ? new Date().toISOString() : null,
         });
         await page.route(url =>
             url.pathname.endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/variants`)
@@ -321,6 +331,15 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
                     status: 200,
                     contentType: 'application/json',
                     body: JSON.stringify(takeFixture()),
+                });
+            });
+        await page.route(`**/api/v1/campaigns/${campaignId}/image-slots/${slotId}/variants/${takeId}/lock`,
+            async route => {
+                takeLocked = route.request().method() === 'PUT';
+                await route.fulfill({
+                    status: takeLocked ? 200 : 204,
+                    contentType: 'application/json',
+                    body: takeLocked ? JSON.stringify(takeFixture()) : '',
                 });
             });
         await page.goto(`/campaigns/${campaignId}/images`);
@@ -350,14 +369,10 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-gallery__tile')).toHaveCount(1);
         await expect(page.getByRole('button', { name: 'Show discarded takes' })).toHaveCount(0);
         await page.locator('.cm-gallery__tile').click();
-        const keeperRefresh = page.waitForResponse(response =>
-            response.url().endsWith(`/api/v1/campaigns/${campaignId}/preview`)
-            && response.request().method() === 'GET');
-        await page.getByRole('button', { name: 'Mark as keeper' }).click();
-        await keeperRefresh;
-        await page.getByRole('button', { name: 'Close', exact: true }).click();
-        await expect(page.locator('.cm-gallery__tile')).toHaveClass(/cm-gallery__tile--keeper/);
-        await expect(page.locator('.cm-gallery__keeper')).toHaveText('✓ Keeper');
+        await page.getByRole('button', { name: 'Lock image' }).click();
+        await page.getByRole('button', { name: 'Close image' }).click();
+        await expect(page.locator('.cm-gallery__tile')).toHaveClass(/cm-gallery__tile--locked/);
+        await expect(page.locator('.cm-gallery__lock')).toContainText('Locked');
         const loadedPreviewRequests = previewRequests;
 
         const manual = page.getByRole('button', { name: /Manual Use this prompt verbatim/ });
@@ -409,7 +424,8 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-focus__category').nth(2)).toContainText('Social');
         await expect(page.getByText('Campaign-wide', { exact: true })).toHaveCount(0);
         await expect(page.locator('.cm-focus__category button')).toHaveCount(0);
-        await expect(page.locator('.cm-tree__delete').first()).toContainText('🗑');
+        await expect(page.locator('.cm-tree__delete .cm-icon').first()).toBeVisible();
+        await expect(page.locator('.cm-tree__delete').first()).not.toContainText('🗑');
 
         await page.locator('.cm-focus__list-item', { hasText: 'Launch post' }).click();
         await expect(page.locator('.cm-focus__head h1')).toHaveText('Launch post');

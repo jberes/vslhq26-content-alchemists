@@ -126,11 +126,29 @@ public sealed class ContentClusterTests
         var piece = Assert.Single(social.Children, child => child.Id == linkedIn.Id.ToString("D"));
         Assert.Equal("open", piece.Action);
         Assert.Equal(linkedIn.Id.ToString("D"), piece.Value);
+        Assert.Equal("Draft", piece.Badge);
+        Assert.Equal("draft", piece.Tone);
 
         var owned = Assert.Single(tree.Children, child => child.Id == "category-owned");
         Assert.Equal("1 piece", owned.Title);
         Assert.Equal("Ready", owned.Badge); // the only piece is approved
         Assert.Equal("success", owned.Tone);
+
+        var reviewed = Artifact("show-notes", "Approved notes", ArtifactStatus.Queued);
+        var reviewedTree = ClusterMap.BuildTree(Build([blog, reviewed]));
+        var reviewedNode = reviewedTree.Children
+            .SelectMany(child => child.Children)
+            .Single(child => child.Id == reviewed.Id.ToString("D"));
+        Assert.Equal("Reviewed", reviewedNode.Badge);
+        Assert.Equal("success", reviewedNode.Tone);
+
+        var inReview = Artifact("newsletter", "Pending review", ArtifactStatus.InReview);
+        var reviewTree = ClusterMap.BuildTree(Build([blog, inReview]));
+        var reviewNode = reviewTree.Children
+            .SelectMany(child => child.Children)
+            .Single(child => child.Id == inReview.Id.ToString("D"));
+        Assert.Equal("In review", reviewNode.Badge);
+        Assert.Equal("review", reviewNode.Tone);
 
         // Long-form leads, then video, then social, then owned audience — reading order.
         Assert.Equal(

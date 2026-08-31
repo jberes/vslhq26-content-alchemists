@@ -112,7 +112,7 @@
                         @if (brand.IsOwner)
                         {
                             <button type="button" class="cm-tree__delete" aria-label="Delete @brand.Name"
-                                @onclick="() => DeleteAsync(brand)">✕</button>
+                                @onclick="() => DeleteAsync(brand)"><AppIcon Name="trash" /></button>
                         }
                     </div>
                 </li>

@@ -8,6 +8,7 @@ test.describe('webpage Start a Run', () => {
     test('reviews metadata and requires approval before a page intent', async ({ page, request }) => {
         let campaignId = null;
         let campaignName = null;
+        let accessToken = null;
         const now = new Date().toISOString();
 
         await page.route('**/api/v1/campaigns/*/sources/import/webpage', async route => {
@@ -25,7 +26,7 @@ test.describe('webpage Start a Run', () => {
         });
 
         try {
-            await signIn(page, request);
+            accessToken = await signIn(page, request);
             await page.goto('/campaigns/new');
             await page.getByRole('listitem').filter({ hasText: 'Import webpage' }).click();
             campaignName = `Web evidence E2E ${Date.now()}`;
@@ -64,7 +65,7 @@ test.describe('webpage Start a Run', () => {
             }));
             expect(layout.scrollWidth).toBe(layout.viewport);
 
-            await deleteCampaign(page, campaignName);
+            await deleteCampaign(request, accessToken, campaignId);
             campaignId = null;
             campaignName = null;
             await page.unroute('**/api/v1/campaigns/*/sources/import/webpage');
@@ -91,12 +92,12 @@ test.describe('webpage Start a Run', () => {
             await expect(page.getByRole('alert')).toContainText('renders its content with JavaScript');
             await expect(page.getByRole('alert')).toContainText('paste its content instead');
             await expect(page.getByRole('button', { name: 'Back' })).toBeVisible();
-            await deleteCampaign(page, campaignName);
+            await deleteCampaign(request, accessToken, campaignId);
             campaignId = null;
             campaignName = null;
         } finally {
-            if (campaignId && campaignName) {
-                await deleteCampaign(page, campaignName).catch(() => {});
+            if (campaignId && accessToken) {
+                await deleteCampaign(request, accessToken, campaignId).catch(() => {});
             }
         }
     });
@@ -118,12 +119,19 @@ async function signIn(page, request) {
     expect(login.status()).toBe(200);
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+
+    const apiLogin = await request.post('http://localhost:5005/api/v1/auth/login', {
+        data: { email, password },
+    });
+    expect(apiLogin.ok()).toBeTruthy();
+    return (await apiLogin.json()).accessToken;
 }
 
-async function deleteCampaign(page, campaignName) {
-    await page.getByRole('button', { name: `Delete ${campaignName}` }).click();
-    await page.getByRole('button', { name: 'Delete campaign', exact: true }).click();
-    await expect(page.getByRole('button', { name: `Delete ${campaignName}` })).toHaveCount(0);
+async function deleteCampaign(request, accessToken, campaignId) {
+    const response = await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(response.ok()).toBeTruthy();
 }
 
 function campaignIdFrom(url) {

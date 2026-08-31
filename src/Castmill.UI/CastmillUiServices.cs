@@ -31,10 +31,14 @@ public static class CastmillUiServices
         services.AddIgniteUIBlazor(
             typeof(IgbCardModule),
             typeof(IgbButtonModule),
+            typeof(IgbButtonGroupModule),
+            typeof(IgbToggleButtonModule),
             typeof(IgbChipModule),
             typeof(IgbBadgeModule),
             typeof(IgbInputModule),
-            typeof(IgbDialogModule));
+            typeof(IgbDialogModule),
+            typeof(IgbDatePickerModule),
+            typeof(IgbDateTimeInputModule));
 
         // ---- Design system -----------------------------------------------------
         services.AddScoped<IUiStateStore, BrowserUiStateStore>();

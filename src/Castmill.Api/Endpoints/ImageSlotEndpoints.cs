@@ -36,6 +36,10 @@ public static class ImageSlotEndpoints
         group.MapDelete("/{slotId:guid}", ClearAsync).RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}/variants/{variantId:guid}", DeleteVariantAsync)
             .RequireRateLimiting("writes");
+        group.MapPut("/{slotId:guid}/variants/{variantId:guid}/lock", LockVariantAsync)
+            .RequireRateLimiting("writes");
+        group.MapDelete("/{slotId:guid}/variants/{variantId:guid}/lock", UnlockVariantAsync)
+            .RequireRateLimiting("writes");
 
         // Persisted takes: the gallery lists them, keep/discard flips state, steer
         // makes a new take from an old one. Blobs are never deleted (immutable cache).
@@ -774,7 +778,7 @@ public static class ImageSlotEndpoints
         {
             return Results.NotFound();
         }
-        var variant = await db.ImageVariants.SingleOrDefaultAsync(
+        var variant = await db.ImageVariants.AsNoTracking().SingleOrDefaultAsync(
             v => v.Id == variantId && v.SlotId == slotId && v.CampaignId == campaignId, ct);
         if (variant is null)
         {
@@ -787,8 +791,20 @@ public static class ImageSlotEndpoints
                     + "Remove it from the slot first, then delete it.");
         }
 
-        db.ImageVariants.Remove(variant);
-        await db.SaveChangesAsync(ct);
+        var deleted = await db.ImageVariants
+            .Where(item => item.Id == variantId
+                && item.SlotId == slotId
+                && item.CampaignId == campaignId
+                && item.LockedByUserId == null)
+            .ExecuteDeleteAsync(ct);
+        if (deleted == 0)
+        {
+            return await db.ImageVariants.AnyAsync(
+                item => item.Id == variantId && item.SlotId == slotId && item.CampaignId == campaignId, ct)
+                ? Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "This take is locked. Unlock it before deleting it.")
+                : Results.NotFound();
+        }
 
         // Blobs after the row: repeating a delete for a missing blob is harmless,
         // resurrecting a row because a blob call hiccupped is not.
@@ -803,8 +819,93 @@ public static class ImageSlotEndpoints
         return Results.NoContent();
     }
 
+    private static async Task<IResult> LockVariantAsync(
+        Guid campaignId,
+        Guid slotId,
+        Guid variantId,
+        ClaimsPrincipal principal,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (await LoadSlotAsync(campaignId, slotId, db, ct) is null)
+        {
+            return Results.NotFound();
+        }
+
+        var userId = AuthEndpoints.GetUserId(principal);
+        var lockedAt = clock.GetUtcNow();
+        var updated = await db.ImageVariants
+            .Where(item => item.Id == variantId
+                && item.SlotId == slotId
+                && item.CampaignId == campaignId
+                && (item.LockedByUserId == null || item.LockedByUserId == userId))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LockedByUserId, userId)
+                .SetProperty(item => item.LockedAt, lockedAt), ct);
+        if (updated == 0)
+        {
+            return await db.ImageVariants.AnyAsync(
+                item => item.Id == variantId && item.SlotId == slotId && item.CampaignId == campaignId, ct)
+                ? Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "This take is already locked by another collaborator.")
+                : Results.NotFound();
+        }
+
+        var variant = await db.ImageVariants.AsNoTracking().SingleAsync(
+            item => item.Id == variantId && item.SlotId == slotId && item.CampaignId == campaignId, ct);
+        return Results.Ok(ToResponse(variant, userId, userId));
+    }
+
+    private static async Task<IResult> UnlockVariantAsync(
+        Guid campaignId,
+        Guid slotId,
+        Guid variantId,
+        ClaimsPrincipal principal,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        if (await LoadSlotAsync(campaignId, slotId, db, ct) is null)
+        {
+            return Results.NotFound();
+        }
+
+        var userId = AuthEndpoints.GetUserId(principal);
+        var ownerId = await db.Campaigns
+            .Where(campaign => campaign.Id == campaignId)
+            .Select(campaign => campaign.OwnerId)
+            .SingleAsync(ct);
+        var updated = await db.ImageVariants
+            .Where(item => item.Id == variantId
+                && item.SlotId == slotId
+                && item.CampaignId == campaignId
+                && item.LockedByUserId != null
+                && (item.LockedByUserId == userId || ownerId == userId))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LockedByUserId, (Guid?)null)
+                .SetProperty(item => item.LockedAt, (DateTimeOffset?)null), ct);
+        if (updated == 1)
+        {
+            return Results.NoContent();
+        }
+
+        var variant = await db.ImageVariants.AsNoTracking().SingleOrDefaultAsync(
+            item => item.Id == variantId && item.SlotId == slotId && item.CampaignId == campaignId, ct);
+        if (variant is null)
+        {
+            return Results.NotFound();
+        }
+        if (variant.LockedByUserId is not null)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                detail: "Only the person who locked this take or the campaign owner can unlock it.");
+        }
+
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> ListVariantsAsync(
-        Guid campaignId, Guid slotId, CastmillDbContext db, CancellationToken ct,
+        Guid campaignId, Guid slotId, ClaimsPrincipal principal, CastmillDbContext db, CancellationToken ct,
         bool includeDiscarded = false)
     {
         if (await LoadSlotAsync(campaignId, slotId, db, ct) is null)
@@ -816,7 +917,12 @@ public static class ImageSlotEndpoints
             .Where(v => v.SlotId == slotId && (includeDiscarded || v.State != "Discarded"))
             .OrderByDescending(v => v.CreatedAt)
             .ToListAsync(ct);
-        return Results.Ok(variants.Select(ToResponse).ToList());
+        var ownerId = await db.Campaigns
+            .Where(campaign => campaign.Id == campaignId)
+            .Select(campaign => campaign.OwnerId)
+            .SingleAsync(ct);
+        var userId = AuthEndpoints.GetUserId(principal);
+        return Results.Ok(variants.Select(variant => ToResponse(variant, userId, ownerId)).ToList());
     }
 
     private static async Task<IResult> SetVariantStateAsync(
@@ -1219,9 +1325,14 @@ public static class ImageSlotEndpoints
                 : string.Empty);
     }
 
-    internal static ImageVariantResponse ToResponse(ImageVariant v) =>
+    internal static ImageVariantResponse ToResponse(
+        ImageVariant v, Guid? userId = null, Guid? campaignOwnerId = null) =>
         new(v.Id, v.SlotId, v.Url, v.ThumbUrl, v.Model, v.State,
-            v.SteeringNote, v.SourceVariantId, v.Width, v.Height, v.CreatedAt);
+            v.SteeringNote, v.SourceVariantId, v.Width, v.Height, v.CreatedAt,
+            v.LockedByUserId is not null,
+            v.LockedByUserId is not null
+                && (v.LockedByUserId == userId || campaignOwnerId == userId),
+            v.LockedAt);
 
     /// <summary>
     /// Places a chosen variant: the slot flips Filled, the headline (if any) is

@@ -278,6 +278,9 @@ public sealed class ScheduleEntry : ITenantScoped
     /// <summary>Draft | Queued | Sent | Error.</summary>
     public required string Status { get; set; }
     public string? Error { get; set; }
+    public DateTimeOffset? SentAtUtc { get; set; }
+    public string? Permalink { get; set; }
+    public string? MetricsJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -342,6 +345,10 @@ public sealed class ImageVariant : ITenantScoped
 
     /// <summary>Candidate | Kept | Discarded. Blobs are never deleted (immutable cache).</summary>
     public required string State { get; set; }
+
+    /// <summary>The user protecting this take from hard deletion; null when unlocked.</summary>
+    public Guid? LockedByUserId { get; set; }
+    public DateTimeOffset? LockedAt { get; set; }
 
     public int Width { get; set; }
     public int Height { get; set; }

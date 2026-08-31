@@ -58,7 +58,29 @@
     --cm-status-review: var(--cmf-status-review);
     --cm-status-queued: var(--cmf-status-queued);
     --cm-status-published: var(--cmf-status-published);
+   --cm-on-status-queued: var(--cmf-on-status-queued);
     --cm-status-bar-width: 3px;
+
+    /* The Wire keeps the approved Industry sheet regardless of the surrounding family.
+       Its error hue must remain distinct from Warm Editorial's ember accent. */
+    --cm-wire-bg: #f2f2f3;
+    --cm-wire-surface: #e9e9ea;
+    --cm-wire-ink: #1d1f20;
+    --cm-wire-divider: rgb(29 31 32 / 16%);
+    --cm-wire-hairline: rgb(29 31 32 / 10%);
+    --cm-wire-accent: #5980a6;
+    --cm-wire-accent-soft: #94bce3;
+    --cm-wire-queued: #416180;
+    --cm-wire-sent: #1d2d3d;
+    --cm-wire-draft: #b7b7ba;
+    --cm-wire-error: #c15f3c;
+   --cm-wire-dark-bg: #191b1c;
+   --cm-wire-dark-card: #222425;
+   --cm-wire-dark-ink: #e7e7ea;
+   --cm-wire-dark-title: #f2f2f3;
+   --cm-wire-dark-divider: rgb(231 231 234 / 18%);
+   --cm-wire-dark-accent: #94bce3;
+   --cm-wire-dark-error: #e0a08a;
 
     /* ---- Shape --------------------------------------------------------------- */
     --cm-radius-sm: var(--cmf-radius-sm);

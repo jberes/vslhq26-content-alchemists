@@ -86,7 +86,7 @@
                 pillar.Title,
                 "Pillar blog",
                 cluster.PrimaryKeyword ?? "Campaign foundation",
-                pillar.Status,
+                TreeStatusLabel(pillar.Status),
                 "open",
                 pillar.ArtifactId.ToString("D"),
                 Tone(pillar.Status),
@@ -163,7 +163,7 @@
         node.KindLabel,
         node.Title,
         "Supporting content",
-        node.Status,
+        TreeStatusLabel(node.Status),
         "open",
         node.ArtifactId.ToString("D"),
         Tone(node.Status),
@@ -180,9 +180,16 @@
         "gap",
         []);
 
-    private static string Tone(string status) => status is "Approved" or "Published"
-        ? "success"
-        : "default";
+    private static string TreeStatusLabel(string status) => status == "Approved"
+        ? status
+        : ArtifactDisplay.StatusLabel(status);
+
+    private static string Tone(string status) => status switch
+    {
+        "Approved" or ArtifactStatus.Queued or ArtifactStatus.Published => "success",
+        ArtifactStatus.InReview => "review",
+        _ => "draft",
+    };
 
     private static int NodeCount(ContentCluster cluster) =>
         1 + cluster.Supporting.Count + cluster.Gaps.Count;

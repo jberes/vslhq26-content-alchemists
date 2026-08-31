@@ -1,0 +1,220 @@
+@namespace Castmill.UI.Scheduling
+@using System.Globalization
+
+<section class="cm-pipeline" aria-label="Wire pipeline">
+    <div class="cm-pipeline__scope">
+        <span>@ScopeLine</span>
+        <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Pipeline scope">
+            <IgbToggleButton Value="campaign" Selected="CampaignOnly" Disabled="@(CampaignId is null)"
+                             @onclick="ToggleCampaignOnly">This campaign only</IgbToggleButton>
+        </IgbButtonGroup>
+        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => ConnectBroker.InvokeAsync()">Connect broker</IgbButton>
+    </div>
+
+    <div class="cm-pipeline__columns">
+        <section class="cm-pipeline__column cm-pipeline__column--ready">
+            <header class="cm-pipeline__column-head">
+                <h2>Ready</h2>
+                <span>@ReadyItems.Count</span>
+            </header>
+            <ul class="cm-pipeline__body @DropClass(WirePipelineColumn.Ready)" data-drop-target="ready"
+                @ondragenter="() => _dropTarget = WirePipelineColumn.Ready" @ondragleave="ClearDropTarget"
+                @ondragover:preventDefault @ondrop:preventDefault @ondrop="DropReadyAsync">
+                @foreach (var item in ReadyItems)
+                {
+                    <QueueCard Item="item"
+                               CssClass="cm-pipeline__card"
+                               ShowNoDate="true"
+                               Edit="EditQueue"
+                               Slot="OpenQueueSlot"
+                               DragStarted="BeginQueueDrag"
+                               DragEnded="EndDrag" />
+                }
+            </ul>
+        </section>
+
+        <section class="cm-pipeline__column cm-pipeline__column--queued">
+            <header class="cm-pipeline__column-head">
+                <h2>@(Data.BrokerConfigured ? "Queued" : "Staged")</h2>
+                <span>@QueuedItems.Count</span>
+            </header>
+            <div class="cm-pipeline__body @DropClass(WirePipelineColumn.Queued)" data-drop-target="queued"
+                 @ondragenter="() => _dropTarget = WirePipelineColumn.Queued" @ondragleave="ClearDropTarget"
+                 @ondragover:preventDefault @ondrop:preventDefault @ondrop="DropQueuedAsync">
+                @foreach (var item in QueuedItems)
+                {
+                    <PipelineCard Item="item"
+                                  Edit="Edit"
+                                  Move="OpenMove"
+                                  Export="Export"
+                                  Retry="Retry"
+                                  DragStarted="BeginScheduleDrag"
+                                  DragEnded="EndDrag" />
+                }
+            </div>
+        </section>
+
+        <section class="cm-pipeline__column cm-pipeline__column--sent">
+            <header class="cm-pipeline__column-head">
+                <h2>Sent</h2>
+                <span>@SentItems.Count</span>
+            </header>
+            <div class="cm-pipeline__body cm-pipeline__body--sent">
+                @foreach (var item in SentItems)
+                {
+                    <PipelineCard Item="item"
+                                  Edit="Edit"
+                                  Move="OpenMove"
+                                  Export="Export"
+                                  Retry="Retry"
+                                  DragStarted="BeginScheduleDrag"
+                                  DragEnded="EndDrag" />
+                }
+            </div>
+        </section>
+
+        <section class="cm-pipeline__column cm-pipeline__column--attention">
+            <header class="cm-pipeline__column-head">
+                <h2>Needs attention</h2>
+                <span>@AttentionItems.Count</span>
+            </header>
+            <div class="cm-pipeline__body @DropClass(WirePipelineColumn.Attention)" data-drop-target="attention"
+                 @ondragenter="() => _dropTarget = WirePipelineColumn.Attention" @ondragleave="ClearDropTarget"
+                 @ondragover:preventDefault @ondrop:preventDefault @ondrop="ClearDropTarget">
+                @foreach (var item in AttentionItems)
+                {
+                    <PipelineCard Item="item"
+                                  Edit="Edit"
+                                  Move="OpenMove"
+                                  Export="Export"
+                                  Retry="Retry"
+                                  DragStarted="BeginScheduleDrag"
+                                  DragEnded="EndDrag" />
+                }
+            </div>
+        </section>
+    </div>
+
+    <SlotDialog @ref="_slotDialog" TimeZone="@Data.TimeZone" Confirmed="Slot" />
+</section>
+
+@code {
+    private SlotDialog? _slotDialog;
+    private WireQueueItem? _draggedQueue;
+    private WireScheduleItem? _draggedSchedule;
+    private WirePipelineColumn? _dropTarget;
+
+    [Parameter, EditorRequired] public WireBoardData Data { get; set; } = default!;
+    [Parameter] public bool CampaignOnly { get; set; }
+    [Parameter] public Guid? CampaignId { get; set; }
+    [Parameter] public EventCallback<bool> CampaignOnlyChanged { get; set; }
+    [Parameter] public EventCallback<WireQueueItem> EditQueue { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Edit { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Export { get; set; }
+    [Parameter] public EventCallback<WireSlotRequest> Slot { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Retry { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Unschedule { get; set; }
+    [Parameter] public EventCallback ConnectBroker { get; set; }
+
+    private IReadOnlyList<WireQueueItem> ReadyItems => Data.Queue
+        .Where(item => !CampaignOnly || item.CampaignId == CampaignId)
+        .ToList();
+
+    private IReadOnlyList<WireScheduleItem> ScheduledItems => Data.Items
+        .Where(item => !CampaignOnly || item.CampaignId == CampaignId)
+        .ToList();
+
+    private IReadOnlyList<WireScheduleItem> QueuedItems => ScheduledItems
+        .Where(item => item.Status is WireDeliveryStatus.Draft or WireDeliveryStatus.Queued or WireDeliveryStatus.Staged)
+        .OrderBy(item => item.ScheduledAtUtc)
+        .ToList();
+
+    private IReadOnlyList<WireScheduleItem> SentItems => ScheduledItems
+        .Where(item => item.Status == WireDeliveryStatus.Sent)
+        .OrderByDescending(item => item.SentAtUtc)
+        .ToList();
+
+    private IReadOnlyList<WireScheduleItem> AttentionItems => ScheduledItems
+        .Where(item => item.Status is WireDeliveryStatus.Error or WireDeliveryStatus.Blocked)
+        .OrderBy(item => item.ScheduledAtUtc)
+        .ToList();
+
+    private string ScopeLine
+    {
+        get
+        {
+            var items = ReadyItems.Count + ScheduledItems.Count;
+            var campaigns = ReadyItems.Select(item => item.CampaignId)
+                .Concat(ScheduledItems.Select(item => item.CampaignId))
+                .Distinct()
+                .Count();
+            return $"{items} items in flight · Across all {campaigns} campaigns in this range";
+        }
+    }
+
+    private void OpenQueueSlot(WireQueueItem item) => _slotDialog?.Open(item, DefaultSlotDate, 9 * 60);
+
+    private void OpenMove(WireScheduleItem item) => _slotDialog?.Open(item);
+
+    private async Task ToggleCampaignOnly()
+    {
+        if (CampaignId is not null)
+        {
+            await CampaignOnlyChanged.InvokeAsync(!CampaignOnly);
+        }
+    }
+
+    private void BeginQueueDrag(WireQueueItem item)
+    {
+        _draggedQueue = item;
+        _draggedSchedule = null;
+    }
+
+    private void BeginScheduleDrag(WireScheduleItem item)
+    {
+        _draggedSchedule = item;
+        _draggedQueue = null;
+    }
+
+    private void EndDrag()
+    {
+        _draggedQueue = null;
+        _draggedSchedule = null;
+        _dropTarget = null;
+    }
+
+    private async Task DropReadyAsync()
+    {
+        _dropTarget = null;
+        if (_draggedSchedule is { Status: not WireDeliveryStatus.Sent } item)
+        {
+            EndDrag();
+            await Unschedule.InvokeAsync(item);
+        }
+    }
+
+    private async Task DropQueuedAsync()
+    {
+        _dropTarget = null;
+        if (_draggedQueue is { } queueItem)
+        {
+            EndDrag();
+            _slotDialog?.Open(queueItem, DefaultSlotDate, 9 * 60);
+            return;
+        }
+
+        if (_draggedSchedule is { Status: WireDeliveryStatus.Error } failed)
+        {
+            EndDrag();
+            await Retry.InvokeAsync(failed);
+        }
+    }
+
+    private void ClearDropTarget() => _dropTarget = null;
+
+    private string DropClass(WirePipelineColumn column) =>
+        _dropTarget == column ? "cm-pipeline__body--drop" : string.Empty;
+
+    private DateOnly DefaultSlotDate => Data.Days.FirstOrDefault(day => day.IsToday && day.HasPostingWindow)?.Date
+        ?? Data.Days.First(day => day.HasPostingWindow).Date;
+}

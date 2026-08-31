@@ -1,0 +1,377 @@
+@namespace Castmill.UI.Scheduling
+@using System.Globalization
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<section class="@(ShowHeader ? "cm-run-show" : "cm-run-show__projection")" aria-labelledby="cm-run-show-title">
+    @if (ShowHeader)
+    {
+        <header class="cm-run-show__header">
+            <div>
+                <span class="cm-run-show__kicker">The Wire</span>
+                <h1 id="cm-run-show-title">@(Data.RangeDays == 14 ? "Fortnight" : "Week") of @Data.RangeStart.ToString("d MMM", CultureInfo.CurrentCulture)</h1>
+                <div class="cm-run-show__states" aria-label="Schedule summary">
+                    <IgbChip class="cm-run-show__chip" Outlined="true">@Count(WireDeliveryStatus.Queued, WireDeliveryStatus.Staged) queued</IgbChip>
+                    <IgbChip>@Count(WireDeliveryStatus.Sent) sent</IgbChip>
+                    <IgbChip class="cm-run-show__chip cm-run-show__chip--accent">@Data.Queue.Count ready to schedule</IgbChip>
+                    <span class="cm-run-show__zone">@Data.TimeZone</span>
+                </div>
+            </div>
+            <div class="cm-run-show__controls" aria-label="Run of Show controls">
+                <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Wire view">
+                    <IgbToggleButton Value="run" Selected="true">Run of show</IgbToggleButton>
+                    <IgbToggleButton Value="pipeline" Disabled="true">Pipeline</IgbToggleButton>
+                    <IgbToggleButton Value="agenda" Disabled="true">Agenda</IgbToggleButton>
+                </IgbButtonGroup>
+                <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Schedule range">
+                    <IgbToggleButton Value="week" Selected="@(Data.RangeDays == 7)" @onclick="() => RangeDaysChanged.InvokeAsync(7)">Week</IgbToggleButton>
+                    <IgbToggleButton Value="fortnight" Selected="@(Data.RangeDays == 14)" @onclick="() => RangeDaysChanged.InvokeAsync(14)">Fortnight</IgbToggleButton>
+                </IgbButtonGroup>
+                <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRange.InvokeAsync(-1)">← Prev</IgbButton>
+                <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => NavigateRange.InvokeAsync(1)">Next →</IgbButton>
+            </div>
+        </header>
+    }
+
+    @if (!Data.BrokerConfigured)
+    {
+        <div class="cm-run-show__broker blueprint" role="status">
+            <span class="cm-run-show__broker-label">No broker</span>
+            <span>Nothing leaves Castmill until a publishing broker is connected — everything below stages locally.</span>
+            <IgbButton @onclick="() => ConnectBroker.InvokeAsync()">Connect broker</IgbButton>
+        </div>
+    }
+
+    <div class="cm-run-show__frame">
+        <QueueRail Items="Data.Queue"
+                   Edit="Edit"
+                   Slot="OpenSlot"
+                   DragStarted="BeginQueueDrag"
+                   DragEnded="EndDrag" />
+
+        <div class="cm-run-show__timeline">
+            <div class="cm-run-show__ruler" aria-label="Posting time ruler">
+                @foreach (var time in RulerTimes)
+                {
+                    <span>@time</span>
+                }
+            </div>
+
+            <div class="cm-run-show__days">
+                @foreach (var day in VisibleDays)
+                {
+                    <div class="@DayClass(day)">
+                        <div class="cm-run-show__day-gutter">
+                            <strong>@DayLabel(day)</strong>
+                            @if (day.HasPostingWindow && day.Items.Count > 0)
+                            {
+                                <span class="@DayStateClass(day)">@DayState(day)</span>
+                            }
+                        </div>
+                        @if (!day.HasPostingWindow)
+                        {
+                            <div class="cm-run-show__lane cm-run-show__lane--collapsed">
+                                collapsed — no posting window
+                            </div>
+                        }
+                        else
+                        {
+                            <div id="@LaneId(day)" class="@LaneClass(day)" style="@LaneStyle(day)"
+                                 @ondragenter="() => EnterDrop(day)" @ondragleave="LeaveDrop"
+                                 @ondragover:preventDefault @ondrop:preventDefault
+                                 @ondrop="args => DropAsync(day, args)">
+                                @if (day.Items.Count == 0)
+                                {
+                                    <span class="cm-run-show__empty-copy">nothing scheduled — drop here</span>
+                                }
+                                @foreach (var item in day.Items)
+                                {
+                                    <article class="cm-run-show__item cm-run-show__item--@StatusName(item.Status)"
+                                        style="@PositionStyle(day, item)" draggable="@CanDrag(item.Status)"
+                                             @ondragstart="() => BeginScheduleDrag(item)" @ondragend="EndDrag">
+                                        <span class="cm-run-show__item-copy">
+                                            <span class="cm-run-show__item-meta">
+                                                <span>@WireTime.Local(item).ToString("HH:mm", CultureInfo.InvariantCulture)</span>
+                                                <span class="cm-run-show__channel">@item.Channel</span>
+                                                <IgbChip class="cm-run-show__status-chip" Outlined="true">@StatusLabel(item.Status)</IgbChip>
+                                            </span>
+                                            <span class="cm-run-show__item-title cm-wire-clamp-1">@item.Title</span>
+                                            @if (item.Status == WireDeliveryStatus.Sent)
+                                            {
+                                                <span class="cm-run-show__receipt" aria-label="Delivery receipt">
+                                                    @if (item.SentAtUtc is { } sentAt)
+                                                    {
+                                                        <time datetime="@sentAt.ToString("O", CultureInfo.InvariantCulture)">@WireTime.Local(item with { ScheduledAtUtc = sentAt }).ToString("d MMM HH:mm", CultureInfo.CurrentCulture)</time>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(item.BrokerRef))
+                                                    {
+                                                        <span>@item.BrokerRef</span>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(item.Permalink))
+                                                    {
+                                                        <a href="@item.Permalink" target="_blank" rel="noopener noreferrer">Live post</a>
+                                                    }
+                                                </span>
+                                            }
+                                            else if (item.Status == WireDeliveryStatus.Blocked)
+                                            {
+                                                <span class="cm-run-show__blocked">@item.BlockedReason</span>
+                                            }
+                                            else if (item.Status == WireDeliveryStatus.Error)
+                                            {
+                                                <span class="cm-run-show__blocked">@item.LastError</span>
+                                            }
+                                        </span>
+                                        @if (item.Status != WireDeliveryStatus.Sent)
+                                        {
+                                            <span class="cm-run-show__item-actions" aria-label="Scheduled item actions">
+                                                <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => OpenMove(item)">Move</IgbButton>
+                                                @if (item.Status == WireDeliveryStatus.Error)
+                                                {
+                                                    <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Retry.InvokeAsync(item)">Retry</IgbButton>
+                                                }
+                                            </span>
+                                        }
+                                    </article>
+                                }
+                                @if (day.Items.Count > 0)
+                                {
+                                    <span class="cm-run-show__lane-spacer" aria-hidden="true"></span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <SlotDialog @ref="_slotDialog" TimeZone="@Data.TimeZone" Confirmed="Slot" />
+</section>
+
+@code {
+    private const string ModulePath = "./_content/Castmill.UI/js/castmill-wire.js?v=2";
+    private static readonly string[] RulerTimes = ["06:00", "09:00", "12:00", "15:00", "18:00", "21:00"];
+    private IJSObjectReference? _module;
+    private SlotDialog? _slotDialog;
+    private WireQueueItem? _draggedQueue;
+    private WireScheduleItem? _draggedSchedule;
+    private DateOnly? _dropDate;
+
+    [Parameter, EditorRequired] public WireBoardData Data { get; set; } = default!;
+    [Parameter] public bool ShowHeader { get; set; } = true;
+    [Parameter] public EventCallback<WireQueueItem> Edit { get; set; }
+    [Parameter] public EventCallback<WireSlotRequest> Slot { get; set; }
+    [Parameter] public EventCallback<WireScheduleItem> Retry { get; set; }
+    [Parameter] public EventCallback<int> RangeDaysChanged { get; set; }
+    [Parameter] public EventCallback<int> NavigateRange { get; set; }
+    [Parameter] public EventCallback ConnectBroker { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    private IReadOnlyList<WireDay> VisibleDays
+    {
+        get
+        {
+            var visible = new List<WireDay>();
+            for (var index = 0; index < Data.Days.Count; index++)
+            {
+                var day = Data.Days[index];
+                if (day.HasPostingWindow)
+                {
+                    visible.Add(day);
+                    continue;
+                }
+
+                var end = day.Date;
+                while (index + 1 < Data.Days.Count && !Data.Days[index + 1].HasPostingWindow)
+                {
+                    end = Data.Days[++index].Date;
+                }
+                visible.Add(day with { EndDate = end, Items = [] });
+            }
+            return visible;
+        }
+    }
+
+    private int Count(params WireDeliveryStatus[] states) =>
+        Data.Items.Count(item => states.Contains(item.Status));
+
+    private static string DayClass(WireDay day) => string.Join(' ', new[]
+    {
+        "cm-run-show__day",
+        day.IsToday ? "cm-run-show__day--today" : null,
+        !day.HasPostingWindow ? "cm-run-show__day--weekend" : null,
+        day.HasPostingWindow && day.Items.Count == 0 ? "cm-run-show__day--empty" : null,
+    }.Where(value => value is not null));
+
+    private string LaneClass(WireDay day) => string.Join(' ', new[]
+    {
+        "cm-run-show__lane",
+        day.Items.Count == 0 ? "cm-run-show__lane--empty" : null,
+        _dropDate == day.Date ? "cm-run-show__lane--drop" : null,
+    }.Where(value => value is not null));
+
+    private static string DayLabel(WireDay day) => !day.HasPostingWindow
+        ? day.EndDate == day.Date
+            ? day.Date.ToString("ddd d MMM", CultureInfo.CurrentCulture).ToUpperInvariant()
+            : $"{day.Date:ddd}–{day.EndDate:ddd}".ToUpperInvariant()
+        : day.Date.ToString("ddd d MMM", CultureInfo.CurrentCulture).ToUpperInvariant();
+
+    private static string DayState(WireDay day)
+    {
+        var errors = day.Items.Count(item => item.Status is WireDeliveryStatus.Error or WireDeliveryStatus.Blocked);
+        var sent = day.Items.Count(item => item.Status == WireDeliveryStatus.Sent);
+        var queued = day.Items.Count - errors - sent;
+        if (errors > 0)
+        {
+            return $"{errors} error";
+        }
+        if (day.IsToday)
+        {
+            return $"today · {queued} queued";
+        }
+        if (sent > 0)
+        {
+            return $"{sent} sent";
+        }
+        return $"{queued} queued";
+    }
+
+    private static string DayStateClass(WireDay day) =>
+        day.Items.Any(item => item.Status is WireDeliveryStatus.Error or WireDeliveryStatus.Blocked)
+            ? "cm-run-show__day-state cm-run-show__day-state--error"
+            : day.IsToday
+                ? "cm-run-show__day-state cm-run-show__day-state--today"
+                : "cm-run-show__day-state";
+
+    private string PositionStyle(WireDay day, WireScheduleItem item)
+    {
+        var minutes = WireTime.Minutes(WireTime.Local(item));
+        var start = (Data.WindowStart.Hour * 60) + Data.WindowStart.Minute;
+        var end = (Data.WindowEnd.Hour * 60) + Data.WindowEnd.Minute;
+        var percent = Math.Clamp((minutes - start) * 100d / (end - start), 0d, 100d);
+        var level = WireTime.StackLevels(day.Items).GetValueOrDefault(item.Id);
+        return $"--cm-wire-left: {percent.ToString("0.###", CultureInfo.InvariantCulture)}%; --cm-wire-level: {level};";
+    }
+
+    private static string LaneStyle(WireDay day)
+    {
+        var levels = WireTime.StackLevels(day.Items);
+        var rows = levels.Count == 0 ? 0 : levels.Values.Max() + 1;
+        return $"--cm-wire-rows: {rows};";
+    }
+
+    private static string LaneId(WireDay day) => $"cm-wire-lane-{day.Date:yyyy-MM-dd}";
+    private static string StatusName(WireDeliveryStatus status) => status.ToString().ToLowerInvariant();
+    private static bool CanDrag(WireDeliveryStatus status) => status is not WireDeliveryStatus.Sent;
+
+    private string StatusLabel(WireDeliveryStatus status) => status switch
+    {
+        WireDeliveryStatus.Draft or WireDeliveryStatus.Queued when !Data.BrokerConfigured => "STAGED",
+        WireDeliveryStatus.Staged => "STAGED",
+        WireDeliveryStatus.Blocked => "NO URL",
+        _ => status.ToString().ToUpperInvariant(),
+    };
+
+    private void BeginQueueDrag(WireQueueItem item)
+    {
+        _draggedQueue = item;
+        _draggedSchedule = null;
+    }
+
+    private void BeginScheduleDrag(WireScheduleItem item)
+    {
+        _draggedSchedule = item;
+        _draggedQueue = null;
+    }
+
+    private void EndDrag()
+    {
+        _draggedQueue = null;
+        _draggedSchedule = null;
+        _dropDate = null;
+    }
+
+    private void EnterDrop(WireDay day) => _dropDate = day.Date;
+    private void LeaveDrop() => _dropDate = null;
+
+    private async Task DropAsync(WireDay day, DragEventArgs args)
+    {
+        _dropDate = null;
+        if (_draggedQueue is null && _draggedSchedule is null)
+        {
+            return;
+        }
+
+        double? ratio = null;
+        if (_module is not null)
+        {
+            try
+            {
+                ratio = await _module.InvokeAsync<double>("relativeX", LaneId(day), args.ClientX);
+            }
+            catch (JSException)
+            {
+            }
+        }
+
+        if (ratio is null)
+        {
+            _slotDialog?.Open(new WireSlotRequest(_draggedQueue, _draggedSchedule, day.Date, 9 * 60));
+            return;
+        }
+
+        var minutes = WireTime.Snap(ratio.Value, Data.WindowStart, Data.WindowEnd);
+        var request = new WireSlotRequest(_draggedQueue, _draggedSchedule, day.Date, minutes);
+        if (WireTime.ToUtc(day.Date, minutes, TimeZoneInfo.FindSystemTimeZoneById(Data.TimeZone)) is null)
+        {
+            _slotDialog?.Open(request);
+            return;
+        }
+        if (_draggedSchedule is { } moving && WireTime.IsSameSlot(moving, day.Date, minutes))
+        {
+            EndDrag();
+            return;
+        }
+
+        EndDrag();
+        await Slot.InvokeAsync(request);
+    }
+
+    private void OpenSlot(WireQueueItem item) =>
+        _slotDialog?.Open(item, DefaultSlotDate, 9 * 60);
+
+    private void OpenMove(WireScheduleItem item) => _slotDialog?.Open(item);
+
+    private DateOnly DefaultSlotDate => Data.Days.FirstOrDefault(day => day.IsToday && day.HasPostingWindow)?.Date
+        ?? Data.Days.First(day => day.HasPostingWindow).Date;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

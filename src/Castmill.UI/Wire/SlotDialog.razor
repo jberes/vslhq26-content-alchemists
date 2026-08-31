@@ -1,0 +1,90 @@
+@namespace Castmill.UI.Scheduling
+
+<IgbDialog class="cm-run-show__slot-dialog" Open="@_open" CloseOnOutsideClick="false" aria-label="Choose schedule slot">
+    <span slot="title">@(_request?.ScheduleItem is null ? "Schedule item" : "Move item")</span>
+    <div class="cm-run-show__slot-fields">
+        <label class="cm-field">
+            <span class="cm-field__label">Date</span>
+            <IgbDatePicker @bind-Value="_date" />
+        </label>
+        <label class="cm-field">
+            <span class="cm-field__label">Time</span>
+            <IgbDateTimeInput InputFormat="HH:mm" @bind-Value="_time" />
+        </label>
+        @if (_ambiguous)
+        {
+            <span class="cm-form__error" role="alert">Choose an unambiguous local time.</span>
+        }
+    </div>
+    <div slot="footer" class="cm-run-show__slot-actions">
+        <IgbButton Variant="ButtonVariant.Outlined" @onclick="Close">Cancel</IgbButton>
+        <IgbButton @onclick="ConfirmAsync">@(_request?.ScheduleItem is null ? "Schedule" : "Move")</IgbButton>
+    </div>
+</IgbDialog>
+
+@code {
+    private WireSlotRequest? _request;
+    private DateTime? _date;
+    private DateTime? _time;
+    private bool _open;
+    private bool _ambiguous;
+
+    [Parameter, EditorRequired] public string TimeZone { get; set; } = TimeZoneInfo.Utc.Id;
+    [Parameter] public EventCallback<WireSlotRequest> Confirmed { get; set; }
+
+    public void Open(WireQueueItem item, DateOnly date, int minutes) =>
+        Open(new WireSlotRequest(item, null, date, minutes));
+
+    public void Open(WireScheduleItem item)
+    {
+        var local = WireTime.Local(item);
+        Open(new WireSlotRequest(
+            null,
+            item,
+            DateOnly.FromDateTime(local.DateTime),
+            WireTime.Minutes(local)));
+    }
+
+    public void Open(WireSlotRequest request)
+    {
+        _request = request;
+        _date = request.Date.ToDateTime(TimeOnly.MinValue);
+        _time = DateTime.Today.AddMinutes(request.Minutes);
+        _ambiguous = false;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_request is null)
+        {
+            return;
+        }
+
+        var time = _time ?? DateTime.Today.AddMinutes(_request.Minutes);
+        var request = _request with
+        {
+            Date = DateOnly.FromDateTime(_date ?? _request.Date.ToDateTime(TimeOnly.MinValue)),
+            Minutes = (time.Hour * 60) + time.Minute,
+        };
+        _ambiguous = WireTime.ToUtc(
+            request.Date,
+            request.Minutes,
+            TimeZoneInfo.FindSystemTimeZoneById(TimeZone)) is null;
+        if (_ambiguous)
+        {
+            return;
+        }
+
+        Close();
+        await Confirmed.InvokeAsync(request);
+    }
+
+    private void Close()
+    {
+        _open = false;
+        _request = null;
+        _ambiguous = false;
+    }
+}

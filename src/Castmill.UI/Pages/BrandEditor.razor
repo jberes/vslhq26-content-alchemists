@@ -147,7 +147,7 @@
                         <input class="cm-input cm-mono cm-brand__color-hex" maxlength="7"
                                aria-label="Hex for @color.Role" @bind="color.Hex" />
                         <button type="button" class="cm-tree__delete" aria-label="Remove colour"
-                                @onclick="() => _colors.Remove(color)">✕</button>
+                            @onclick="() => _colors.Remove(color)"><AppIcon Name="trash" /></button>
                     </div>
                 }
                 <button type="button" class="cm-button cm-button--quiet" @onclick="AddColor"
@@ -209,7 +209,7 @@
                                     }
                                     <button type="button" class="cm-tree__delete cm-asset-card__delete"
                                             aria-label="Remove @(asset.Label ?? asset.FileName) from the kit"
-                                            @onclick="() => UnlinkAssetAsync(asset)">✕</button>
+                                            @onclick="() => UnlinkAssetAsync(asset)"><AppIcon Name="trash" /></button>
                                     <label class="cm-asset-card__type">
                                         <span>Type</span>
                                         <select value="@asset.Kind"
@@ -343,7 +343,9 @@
                                 <button type="button" class="cm-tree__delete"
                                         aria-label="Remove @collaborator.Email"
                                         disabled="@(_removingCollaborator == collaborator.Id)"
-                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">✕</button>
+                                        @onclick="() => RemoveCollaboratorAsync(collaborator)">
+                                    <AppIcon Name="trash" />
+                                </button>
                             </li>
                         }
                     </ul>

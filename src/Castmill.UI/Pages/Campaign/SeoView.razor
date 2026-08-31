@@ -480,9 +480,8 @@
         Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifactId}");
 
     /// <summary>
-    /// Drafts a missing cluster kind against the campaign's saved targets. The angle carries
-    /// the primary keyword so a supporting piece is written to reinforce the pillar, not to
-    /// wander off on its own topic — which is the whole point of a cluster.
+    /// Adds a placeholder immediately and moves into Focus. Focus owns the long generation
+    /// request so the editor can show real progress instead of leaving this page frozen.
     /// </summary>
     private async Task DraftKindAsync(string kind)
     {
@@ -499,13 +498,25 @@
                 ? $"Support the pillar content targeting \"{kw}\". Reinforce and link back to that topic rather than introducing a new one."
                 : "Support the campaign's primary blog; reinforce its topic rather than starting a new one.";
 
-            await Generation.GenerateOneAsync(CampaignId, kind, transcriptId, angle);
+            var title = $"New {ArtifactDisplay.KindLabel(kind).ToLowerInvariant()}";
+            var contentJson = JsonSerializer.Serialize(new
+            {
+                markdown = string.Empty,
+                placeholder = true,
+                seedAngle = angle,
+            });
+            var parentId = kind == "blog"
+                ? null
+                : Campaign.Artifacts.FirstOrDefault(item => item.Kind == "blog" && !item.IsPlaceholder)?.Id;
+            var placeholder = await Campaigns.CreateArtifactAsync(
+                CampaignId, kind, title, contentJson, parentId);
             await Campaign.RefreshAsync(CampaignId);
-            Notifier.ShowSuccess($"{ArtifactDisplay.KindLabel(kind)} drafted into the cluster.");
+            Navigation.NavigateTo(
+                $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={placeholder.Id}&generate=true");
         }
         catch (Exception ex) when (ex is ApiException or HttpRequestException)
         {
-            Notifier.ShowError($"Couldn't draft that piece — {(ex as ApiException)?.Message ?? "the API was unreachable."}");
+            Notifier.ShowError($"Couldn't add that piece — {(ex as ApiException)?.Message ?? "the API was unreachable."}");
         }
         finally
         {

@@ -314,6 +314,7 @@ public sealed class CastmillDbContext(
             e.Property(s => s.MediaUrl).HasMaxLength(2000);
             e.Property(s => s.Status).HasMaxLength(20);
             e.Property(s => s.Error).HasMaxLength(2000);
+            e.Property(s => s.Permalink).HasMaxLength(2000);
             e.HasIndex(s => new { s.TenantId, s.ScheduledAt });
             e.HasQueryFilter(s => s.TenantId == _tenantProvider.TenantId
                 || Campaigns.Any(campaign => campaign.Id == s.CampaignId));
@@ -338,6 +339,7 @@ public sealed class CastmillDbContext(
             e.Property(v => v.Prompt).HasMaxLength(8000);
             e.Property(v => v.SteeringNote).HasMaxLength(1000);
             e.Property(v => v.State).HasMaxLength(20);
+            e.HasIndex(v => v.LockedByUserId);
             e.HasIndex(v => new { v.TenantId, v.SlotId, v.CreatedAt });
             e.HasQueryFilter(v => v.TenantId == _tenantProvider.TenantId
                 || Campaigns.Any(campaign => campaign.Id == v.CampaignId));

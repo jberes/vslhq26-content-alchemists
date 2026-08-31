@@ -1,0 +1,28 @@
+@namespace Castmill.UI.Scheduling
+
+<li class="cm-run-show__queue-card cm-wire-queue-card @CssClass blueprint" draggable="true"
+    @ondragstart="() => DragStarted.InvokeAsync(Item)" @ondragend="() => DragEnded.InvokeAsync()">
+    <span class="cm-run-show__queue-copy">
+        <span class="cm-run-show__channel">@Item.Channel</span>
+        <span class="cm-run-show__queue-title cm-wire-clamp-2">@Item.Title</span>
+        @if (ShowNoDate)
+        {
+            <IgbChip class="cm-wire-queue-card__date" Outlined="true">NO DATE</IgbChip>
+        }
+        <span class="cm-run-show__meta">@Item.Meta</span>
+    </span>
+    <span class="cm-run-show__queue-actions" aria-label="Queue item actions">
+        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Edit.InvokeAsync(Item)">Edit</IgbButton>
+        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => Slot.InvokeAsync(Item)">Slot</IgbButton>
+    </span>
+</li>
+
+@code {
+    [Parameter, EditorRequired] public WireQueueItem Item { get; set; } = default!;
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public bool ShowNoDate { get; set; }
+    [Parameter] public EventCallback<WireQueueItem> Edit { get; set; }
+    [Parameter] public EventCallback<WireQueueItem> Slot { get; set; }
+    [Parameter] public EventCallback<WireQueueItem> DragStarted { get; set; }
+    [Parameter] public EventCallback DragEnded { get; set; }
+}

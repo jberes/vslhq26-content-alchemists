@@ -379,7 +379,7 @@
                            maxlength="100" @bind="link.Label" />
                     <input class="cm-input" placeholder="https://…" maxlength="2000" @bind="link.Url" />
                     <button type="button" class="cm-tree__delete" aria-label="Remove link"
-                            @onclick="() => _links.Remove(link)">✕</button>
+                            @onclick="() => _links.Remove(link)"><AppIcon Name="trash" /></button>
                 </div>
             }
             <button type="button" class="cm-button cm-button--quiet" @onclick="() => _links.Add(new LinkRow())"

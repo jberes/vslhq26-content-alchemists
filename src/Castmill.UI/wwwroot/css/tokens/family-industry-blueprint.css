@@ -50,9 +50,10 @@
     /* De-monochromed (was an all-blue ramp): each state gets its own hue, and the bar
        position still carries the meaning when hue can't (ADR-F12). */
     --cmf-status-draft: #b7b7ba;
-    --cmf-status-review: #3f7fc0;
-    --cmf-status-queued: #a8760a;
-    --cmf-status-published: #2f6b41;
+   --cmf-status-review: #a8760a;
+   --cmf-status-queued: #147a3f;
+    --cmf-status-published: #147a3f;
+      --cmf-on-status-queued: #ffffff;
 
     --cmf-radius-sm: 0;
     --cmf-radius-md: 0;
@@ -108,9 +109,10 @@
     --cmf-danger: #f08a8a;
 
     --cmf-status-draft: #7a7a7d;
-    --cmf-status-review: #6ea8dd;
-    --cmf-status-queued: #e0b354;
-    --cmf-status-published: #7fc492;
+   --cmf-status-review: #e0b354;
+   --cmf-status-queued: #68dc8d;
+    --cmf-status-published: #68dc8d;
+      --cmf-on-status-queued: #102316;
 
     --cmf-radius-sm: 0;
     --cmf-radius-md: 0;

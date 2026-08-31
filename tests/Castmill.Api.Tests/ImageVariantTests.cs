@@ -22,6 +22,8 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class ImageVariantTests(CastmillApiFactory factory)
 {
+    private WebApplicationFactory<Program>? _activeApp;
+
     [Fact]
     public async Task Generate_persists_variants_with_thumbs_and_a_pollable_image_run()
     {
@@ -214,6 +216,83 @@ public sealed class ImageVariantTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task Locked_take_cannot_be_unlocked_or_deleted_by_another_collaborator()
+    {
+        var (owner, campaignId, slotId) = await SetUpSlotAsync();
+        var batch = (await (await owner.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
+            new { variants = 1 })).Content.ReadFromJsonAsync<VariantBatchResponse>())!;
+        var take = Assert.Single(batch.Variants);
+
+        var lockedResponse = await owner.PutAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{take.Id}/lock",
+            new { });
+        lockedResponse.EnsureSuccessStatusCode();
+        var locked = (await lockedResponse.Content.ReadFromJsonAsync<ImageVariantResponse>())!;
+        Assert.True(locked.IsLocked);
+        Assert.True(locked.CanUnlock);
+
+        var collaboratorEmail = $"image-collaborator-{Guid.NewGuid():N}@example.com";
+        (await owner.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/collaborators",
+            new CampaignCollaboratorRequest(collaboratorEmail))).EnsureSuccessStatusCode();
+        var collaborator = await RegisterAsync(collaboratorEmail, "Image Collaborator");
+        var baseUrl = $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{take.Id}";
+
+        var collaboratorView = (await collaborator.GetFromJsonAsync<List<ImageVariantResponse>>(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants"))!;
+        Assert.True(Assert.Single(collaboratorView).IsLocked);
+        Assert.False(Assert.Single(collaboratorView).CanUnlock);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await collaborator.DeleteAsync($"{baseUrl}/lock")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await collaborator.DeleteAsync(baseUrl)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.DeleteAsync($"{baseUrl}/lock")).StatusCode);
+        var delete = await collaborator.DeleteAsync(baseUrl);
+        Assert.True(delete.StatusCode == HttpStatusCode.NoContent,
+            $"Expected unlocked collaborator delete to return 204, got {(int)delete.StatusCode}: "
+            + await delete.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Concurrent_lock_and_delete_mutations_have_one_database_winner()
+    {
+        var (owner, campaignId, slotId) = await SetUpSlotAsync();
+        var batch = (await (await owner.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
+            new { variants = 1 })).Content.ReadFromJsonAsync<VariantBatchResponse>())!;
+        var take = Assert.Single(batch.Variants);
+        var collaboratorEmail = $"image-race-{Guid.NewGuid():N}@example.com";
+        (await owner.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/collaborators",
+            new CampaignCollaboratorRequest(collaboratorEmail))).EnsureSuccessStatusCode();
+        var collaborator = await RegisterAsync(collaboratorEmail, "Image Race Collaborator");
+        var takeUrl = $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{take.Id}";
+        var lockUrl = $"{takeUrl}/lock";
+
+        var lockResponses = await Task.WhenAll(
+            owner.PutAsJsonAsync(lockUrl, new { }),
+            collaborator.PutAsJsonAsync(lockUrl, new { }));
+        Assert.Single(lockResponses, response => response.StatusCode == HttpStatusCode.OK);
+        Assert.Single(lockResponses, response => response.StatusCode == HttpStatusCode.Conflict);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync(lockUrl)).StatusCode);
+
+        var collaboratorLock = collaborator.PutAsJsonAsync(lockUrl, new { });
+        var ownerDelete = owner.DeleteAsync(takeUrl);
+        var mutationResponses = await Task.WhenAll(collaboratorLock, ownerDelete);
+
+        var lockStatus = mutationResponses[0].StatusCode;
+        var deleteStatus = mutationResponses[1].StatusCode;
+        Assert.True(
+            lockStatus == HttpStatusCode.OK && deleteStatus == HttpStatusCode.Conflict
+            || lockStatus == HttpStatusCode.NotFound && deleteStatus == HttpStatusCode.NoContent,
+            $"Expected lock or delete to win atomically, got lock {(int)lockStatus} and delete {(int)deleteStatus}.");
+    }
+
+    [Fact]
     public async Task Steer_creates_a_lineage_linked_take_with_the_adjusted_prompt()
     {
         var renderer = new CapturingRenderer();
@@ -300,6 +379,7 @@ public sealed class ImageVariantTests(CastmillApiFactory factory)
             s.Replace(ServiceDescriptor.Scoped<IImageProviderRegistry>(_ => new ReadyImageProviderRegistry()));
             s.Replace(ServiceDescriptor.Singleton<IPublicContentStore>(new MemoryPublicStore()));
         }));
+        _activeApp = app;
 
         var client = app.CreateClient();
         var register = await client.PostAsJsonAsync("/api/v1/auth/register",
@@ -323,6 +403,18 @@ public sealed class ImageVariantTests(CastmillApiFactory factory)
     }
 
     private static HttpClient Client(HttpClient client) => client;
+
+    private async Task<HttpClient> RegisterAsync(string email, string displayName)
+    {
+        var client = (_activeApp ?? factory).CreateClient();
+        var response = await client.PostAsJsonAsync("/api/v1/auth/register",
+            new RegisterRequest(email, "correct-horse-battery-staple", displayName));
+        response.EnsureSuccessStatusCode();
+        var tokens = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens!.AccessToken);
+        return client;
+    }
 
     private static async Task<ImageVariantResponse> Patch(HttpClient client, string url, object body)
     {

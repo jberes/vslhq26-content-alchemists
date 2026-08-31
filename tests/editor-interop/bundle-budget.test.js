@@ -17,6 +17,8 @@ const apexTreeBundle = fileURLToPath(
     new URL('../../src/Castmill.UI/wwwroot/js/castmill-apextree.js', import.meta.url));
 const apexTreeInterop = fileURLToPath(
     new URL('../../src/editor-interop/src/apextree.js', import.meta.url));
+const overlayInterop = fileURLToPath(
+    new URL('../../src/Castmill.UI/wwwroot/js/castmill-overlay.js', import.meta.url));
 const viewsCss = fileURLToPath(
     new URL('../../src/Castmill.UI/wwwroot/css/views.css', import.meta.url));
 
@@ -62,24 +64,52 @@ describe('ApexTree bundle', () => {
 
     it('uses explicit text-safe semantic colors for status badges', () => {
         const interopSource = readFileSync(apexTreeInterop, 'utf8');
+        expect(interopSource).toContain('cm-cluster-node--editable-draft');
+        expect(interopSource).toContain('cm-cluster-node__badge-hover');
+        expect(interopSource).toContain('Edit</span>');
         const css = readFileSync(viewsCss, 'utf8');
 
         expect(interopSource).toContain('color: badgeColor');
         expect(interopSource).toContain('palette.accentStrong');
-        expect(interopSource).toContain('palette.success');
+        expect(interopSource).toContain('palette.statusReview');
+        expect(interopSource).toContain('palette.statusApproved');
+        expect(interopSource).toContain('nodeWidth: 248');
+        expect(interopSource).toContain('nodeHeight: 128');
         expect(interopSource).toContain('color:${palette.onAccent}');
         expect(interopSource).toContain('color:${palette.muted}');
         expect(interopSource).toContain('escapeHtml(content.badge.text)');
         expect(css).not.toContain('--apex-tree-badge-color');
     });
 
-    it('leaves the SVG viewport entirely under ApexTree control', () => {
+    it('uses native zoom and keeps the root aligned to the viewport top', () => {
         const interopSource = readFileSync(apexTreeInterop, 'utf8');
 
         expect(interopSource).not.toContain('graph.fitScreen()');
-        expect(interopSource).not.toContain('graph.updateViewBox');
-        expect(interopSource).not.toContain('graph.zoom(');
+        expect(interopSource).toContain('graph.zoom(1.25)');
+        expect(interopSource).toContain('rootY - 12');
+        expect(interopSource).toContain('graph.updateViewBox');
         expect(interopSource).not.toContain("svg.setAttribute('width'");
         expect(interopSource).not.toContain("svg.setAttribute('height'");
+    });
+
+    it('does not trap page scrolling around the tree canvas', () => {
+        const interopSource = readFileSync(apexTreeInterop, 'utf8');
+        const css = readFileSync(viewsCss, 'utf8');
+
+        expect(interopSource).toContain("event.code === 'Space'");
+        expect(interopSource).toContain("event.target instanceof SVGElement");
+        expect(interopSource).toContain("removeEventListener('keydown'");
+        expect(css).toMatch(/\.cm-cluster__tree\s*\{[^}]*overflow:\s*hidden;/s);
+    });
+});
+
+describe('Mill Floor provenance overlay', () => {
+    it('reveals an offscreen citation without moving focus', () => {
+        const source = readFileSync(overlayInterop, 'utf8');
+
+        expect(source).toContain('scrollCitationIntoView');
+        expect(source).toContain("closest('[data-cm-scroll]')");
+        expect(source).toContain('scroller.scrollTo');
+        expect(source).not.toContain('.focus(');
     });
 });

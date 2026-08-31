@@ -38,6 +38,8 @@
     private double _height;
     private bool _observing;
     private string _lastHighlightKey = "";
+    private Guid? _lastScrolledArtifactId;
+    private long _redrawVersion;
 
     /// <summary>The canvas root element; also the SVG's coordinate system.</summary>
     [Parameter, EditorRequired] public ElementReference Container { get; set; }
@@ -47,6 +49,9 @@
 
     /// <summary>Segment ids the active artifact cites.</summary>
     [Parameter] public IReadOnlyList<string> Citations { get; set; } = [];
+
+    /// <summary>When hover changes cards, reveal the first cited row without moving focus.</summary>
+    [Parameter] public bool AutoScroll { get; set; }
 
     /// <summary>Called with the segment ids to highlight, so the transcript rows can react.</summary>
     [Parameter] public EventCallback<IReadOnlyList<string>> OnHighlight { get; set; }
@@ -75,32 +80,52 @@
             _self = DotNetObjectReference.Create(this);
             _observer = await _module.InvokeAsync<IJSObjectReference>("observe", Container, _self);
         }
+
+        if (firstRender)
+        {
+            await RedrawAsync(++_redrawVersion);
+            StateHasChanged();
+        }
     }
 
-    protected override async Task OnParametersSetAsync() => await RedrawAsync();
+    protected override async Task OnParametersSetAsync() => await RedrawAsync(++_redrawVersion);
 
     /// <summary>Geometry moved — scroll, resize, zoom re-layout. Called from JS, ≤ once per frame.</summary>
     [JSInvokable]
     public async Task NotifyGeometryChangedAsync()
     {
-        await RedrawAsync();
+        await RedrawAsync(++_redrawVersion);
         StateHasChanged();
     }
 
-    private async Task RedrawAsync()
+    private async Task RedrawAsync(long version)
     {
         _threads.Clear();
 
-        if (_module is null || ActiveArtifactId is null || Citations.Count == 0
+        var artifactId = ActiveArtifactId;
+        var citations = Citations.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        if (_module is null || artifactId is null || citations.Length == 0
             || Container.Equals(default(ElementReference)))
         {
+            if (artifactId is null)
+            {
+                _lastScrolledArtifactId = null;
+            }
             await EmitHighlightAsync([]);
             return;
         }
 
-        var cardSelector = $"[data-card=\"{ActiveArtifactId}\"]";
+        if (AutoScroll && _lastScrolledArtifactId != artifactId)
+        {
+            _lastScrolledArtifactId = artifactId;
+            await _module.InvokeVoidAsync(
+                "scrollCitationIntoView", Container, citations[0]);
+        }
+
+        var cardSelector = $"[data-card=\"{artifactId}\"]";
         var selectors = new List<string> { cardSelector };
-        selectors.AddRange(Citations.Select(id => $"[data-seg=\"{id}\"]"));
+        selectors.AddRange(citations.Select(id => $"[data-seg=\"{id}\"]"));
 
         Measured measured;
         try
@@ -108,6 +133,11 @@
             measured = await _module.InvokeAsync<Measured>("measure", Container, selectors);
         }
         catch (JSException)
+        {
+            return;
+        }
+
+        if (version != _redrawVersion || ActiveArtifactId != artifactId)
         {
             return;
         }
@@ -123,7 +153,7 @@
 
         var visible = new List<string>();
 
-        foreach (var segmentId in Citations)
+        foreach (var segmentId in citations)
         {
             if (!measured.Rects.TryGetValue($"[data-seg=\"{segmentId}\"]", out var row) || !row.Visible)
             {
@@ -147,7 +177,7 @@
                 y1));
         }
 
-        await EmitHighlightAsync(Citations);
+        await EmitHighlightAsync(citations);
     }
 
     /// <summary>
@@ -174,7 +204,7 @@
         // layout — geometry must be re-measured, not assumed (ADR-F09's acceptance).
         // This is JS interop: it throws if the canvas is gone, and unguarded that fault
         // reaches the renderer rather than any ErrorBoundary.
-        await RedrawAsync();
+        await RedrawAsync(++_redrawVersion);
     }, Notifier, StateHasChanged, "Redrawing the overlay"));
 
     private static string Fmt(double value) =>

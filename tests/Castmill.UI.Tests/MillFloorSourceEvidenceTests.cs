@@ -64,8 +64,8 @@ public sealed class MillFloorSourceEvidenceTests : CastmillUiTestContext
         await view.InvokeAsync(() => Task.CompletedTask);
         view.Render();
 
-        view.Find($"[data-card='{artifact.Id}']")
-            .TriggerEvent("onmouseover", new MouseEventArgs());
+        view.Find($"[data-card='{artifact.Id}']").ParentElement!
+            .TriggerEvent("onmouseenter", new MouseEventArgs());
         view.WaitForAssertion(() =>
             Assert.Equal(2, view.FindAll(".cm-source-tab").Count));
         Assert.Equal("true", view.FindAll(".cm-source-tab")[1].GetAttribute("aria-selected"));
@@ -215,8 +215,8 @@ public sealed class MillFloorSourceEvidenceTests : CastmillUiTestContext
             Assert.False(Services.GetRequiredService<CampaignState>().IsLoading));
         await view.InvokeAsync(() => Task.CompletedTask);
         view.Render();
-        view.Find($"[data-card='{artifact.Id}']")
-            .TriggerEvent("onmouseover", new MouseEventArgs());
+        view.Find($"[data-card='{artifact.Id}']").ParentElement!
+            .TriggerEvent("onmouseenter", new MouseEventArgs());
         view.WaitForAssertion(() =>
             Assert.Contains("Historical evidence the artifact consumed.", view.Markup, StringComparison.Ordinal));
         Assert.DoesNotContain("Newly approved evidence.", view.Markup, StringComparison.Ordinal);

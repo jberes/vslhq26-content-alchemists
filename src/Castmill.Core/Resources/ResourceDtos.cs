@@ -203,7 +203,8 @@ public sealed record GenerateVariantsRequest(
 /// <summary>A persisted take for a slot. State: Candidate | Kept | Discarded.</summary>
 public sealed record ImageVariantResponse(
     Guid Id, Guid SlotId, string Url, string ThumbUrl, string Model, string State,
-    string? SteeringNote, Guid? SourceVariantId, int Width, int Height, DateTimeOffset CreatedAt);
+    string? SteeringNote, Guid? SourceVariantId, int Width, int Height, DateTimeOffset CreatedAt,
+    bool IsLocked = false, bool CanUnlock = false, DateTimeOffset? LockedAt = null);
 
 public sealed record VariantStateRequest(
     [property: Required, MaxLength(20)] string State);
@@ -279,10 +280,19 @@ public sealed record ScheduleEntryCreateRequest(
 public sealed record ScheduleEntryMoveRequest(
     [property: Required] DateTimeOffset ScheduledAt);
 
+public sealed record ScheduleMetricsResponse(
+    long? Reach = null,
+    long? Engagement = null,
+    decimal? OpenRate = null,
+    decimal? CompletionRate = null);
+
 public sealed record ScheduleEntryResponse(
     Guid Id, Guid CampaignId, Guid? ArtifactId, string ChannelId, string? BrokerPostId,
     string Text, string? MediaUrl, DateTimeOffset ScheduledAt, string Status, string? Error,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? SentAtUtc = null,
+    [property: MaxLength(2000)] string? Permalink = null,
+    ScheduleMetricsResponse? Metrics = null);
 
 public sealed record PublishReadinessResponse(
     bool BrokerConfigured,

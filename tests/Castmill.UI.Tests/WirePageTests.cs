@@ -1,383 +1,474 @@
+using System.Text.Json;
 using Bunit;
 using Bunit.TestDoubles;
-using Castmill.Core;
 using Castmill.Core.Resources;
+using Castmill.UI.Design;
 using Castmill.UI.Http;
 using Castmill.UI.Pages;
+using Castmill.UI.Scheduling;
+using IgniteUI.Blazor.Controls;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
-/// <summary>
-/// The rail's Wire item used to point at a route no page served, which dead-ended the
-/// user with no way back to the workspace. These tests pin that /wire is a real routed
-/// page inside the shell, renders the week from the schedule mirror, and states what it
-/// cannot do yet instead of offering a dead control (G3).
-/// </summary>
 public sealed class WirePageTests : CastmillUiTestContext
 {
-    private static readonly Guid CampaignId = Guid.Parse("81111111-1111-1111-1111-111111111111");
-    private static readonly Guid ArtifactId = Guid.Parse("81111111-1111-1111-1111-222222222222");
+    private readonly Guid _campaignId = Guid.Parse("a1000000-0000-0000-0000-000000000001");
+    private readonly Guid _artifactId = Guid.Parse("a2000000-0000-0000-0000-000000000001");
 
-    public WirePageTests()
-    {
-        SignInTestUser();
-        Http.OnGet("api/v1/campaigns", new List<CampaignResponse>
-        {
-            new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
-                DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow),
-        });
-
-        Http.OnGet("api/v1/campaigns/dashboard", new DashboardResponse(
-            [], [], [], 0, 0, [], null,
-            ReadyToSchedule:
-            [
-                new DashboardArtifact(CampaignId, "Webinar campaign", ArtifactId,
-                    "social-x", "Launch thread", ArtifactStatus.Queued, DateTimeOffset.UtcNow),
-            ]));
-
-        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse>());
-        Http.OnGet("api/v1/publish/readiness", new PublishReadinessResponse(
-            false, false, false,
-            "No publishing broker has been selected or configured. Posts can be staged in Castmill only."));
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{ArtifactId}", new ArtifactResponse(
-            ArtifactId, CampaignId, "social-x", "Launch thread",
-            """{"content":{"text":"Launch day","hashtags":["Castmill"]},"validation":{}}""",
-            ArtifactStatus.Queued, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview());
-    }
+    public WirePageTests() => SignInTestUser();
 
     [Fact]
-    public async Task The_wire_route_resolves_to_a_real_page_inside_the_shell()
+    public async Task The_wire_loads_one_live_data_set_inside_the_workspace_shell()
     {
+        StubWire();
         var navigation = Services.GetRequiredService<BunitNavigationManager>();
         navigation.NavigateTo("/wire");
 
         var app = Render<App>();
-        await app.WaitForStateAsync(
-            () => app.Markup.Contains("Ready to schedule", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(5));
+        await app.WaitForAssertionAsync(() =>
+            Assert.NotNull(app.Find(".cm-run-show")));
 
-        // Not the not-found dead end...
-        Assert.DoesNotContain("Nothing on this plate", app.Markup, StringComparison.Ordinal);
-        // ...and the workspace rail is present, so there is always a way back.
         Assert.Contains("Front page", app.Markup, StringComparison.Ordinal);
-        Assert.Contains("Campaigns", app.Markup, StringComparison.Ordinal);
+        Assert.Contains("Ready story", app.Markup, StringComparison.Ordinal);
+        Assert.Contains(Http.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.RequestUri?.AbsolutePath == "/api/v1/campaigns/dashboard");
+        Assert.Contains(Http.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.RequestUri?.AbsolutePath == "/api/v1/schedule"
+            && request.RequestUri.Query.Contains("from=", StringComparison.Ordinal)
+            && request.RequestUri.Query.Contains("to=", StringComparison.Ordinal));
+        Assert.Contains(Http.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.RequestUri?.AbsolutePath == "/api/v1/publish/readiness");
     }
 
     [Fact]
-    public async Task The_week_renders_seven_days_and_the_ready_queue()
+    public void Queue_actions_are_fixed_and_slot_opens_the_ignite_dialog()
     {
+        var page = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, Board()));
+        var queueCard = page.Find(".cm-run-show__queue-card");
+
+        Assert.Equal(2, queueCard.Children.Length);
+        Assert.Equal(new[] { "Edit", "Slot" }, queueCard.QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
+
+        queueCard.QuerySelectorAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+
+        Assert.NotNull(page.Find("igc-dialog[open]"));
+        Assert.NotNull(page.FindComponent<IgbDatePicker>());
+        Assert.NotNull(page.FindComponent<IgbDateTimeInput>());
+
+        var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
+        Assert.Contains(".cm-run-show__queue-actions,", css, StringComparison.Ordinal);
+        Assert.Contains("inline-size: 52px", css, StringComparison.Ordinal);
+        Assert.Contains(":focus-within", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Keyboard_slot_stages_locally_and_uses_the_schedule_client()
+    {
+        var scheduledAt = DateTimeOffset.UtcNow.AddDays(2);
+        StubWire();
+        Http.OnPost("api/v1/schedule", ScheduleResponse(
+            Guid.Parse("a3000000-0000-0000-0000-000000000001"), scheduledAt, "Draft"));
         var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll(".cm-wire__day").Count == 7, TimeSpan.FromSeconds(5));
+        await page.WaitForAssertionAsync(() => Assert.Single(page.FindAll(".cm-run-show__queue-card")));
 
-        Assert.Contains("Launch thread", page.Markup, StringComparison.Ordinal);
-        Assert.Contains("Local mirror", page.Markup, StringComparison.Ordinal);
-        Assert.Contains("Exported clips", page.Markup, StringComparison.Ordinal);
+        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+        var date = DateTime.Today.AddDays(2);
+        await page.InvokeAsync(() =>
+            page.FindComponent<IgbDatePicker>().Instance.ValueChanged.InvokeAsync(date));
+        await page.InvokeAsync(() =>
+            page.FindComponent<IgbDateTimeInput>().Instance.ValueChanged.InvokeAsync(date.AddHours(9)));
+        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Schedule").Click();
+
+        await page.WaitForAssertionAsync(() =>
+            Assert.Contains(Http.Bodies, body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule"));
+        var request = Http.Bodies.Single(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule");
+        using var json = JsonDocument.Parse(request.Body);
+        Assert.False(json.RootElement.GetProperty("pushToBroker").GetBoolean());
+        Assert.Contains("staged locally", Services.GetRequiredService<Notifier>().Current.Single().Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task A_scheduled_entry_lands_in_its_day_column()
+    public async Task Past_keyboard_slot_is_rejected_before_the_schedule_client()
     {
-        var when = DateTimeOffset.Now.Date.AddHours(9);
-        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse>
+        StubWire();
+        var page = Render<Wire>();
+        await page.WaitForAssertionAsync(() => Assert.Single(page.FindAll(".cm-run-show__queue-card")));
+
+        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Slot").Click();
+        var past = DateTime.Today.AddDays(-1).AddHours(9);
+        await page.InvokeAsync(() =>
+            page.FindComponent<IgbDatePicker>().Instance.ValueChanged.InvokeAsync(past.Date));
+        await page.InvokeAsync(() =>
+            page.FindComponent<IgbDateTimeInput>().Instance.ValueChanged.InvokeAsync(past));
+        page.FindAll("igc-button").Single(button => button.TextContent.Trim() == "Schedule").Click();
+
+        await page.WaitForAssertionAsync(() => Assert.Contains(
+            Services.GetRequiredService<Notifier>().Current,
+            message => message.Message == "Choose a future time."));
+        Assert.DoesNotContain(Http.Bodies,
+            body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule");
+    }
+
+    [Fact]
+    public void Empty_days_collapse_titles_clamp_and_timeline_can_shrink()
+    {
+        var page = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, Board()));
+
+        Assert.Contains("nothing scheduled — drop here", page.Find(".cm-run-show__day--empty").TextContent, StringComparison.Ordinal);
+        Assert.Contains("SAT–SUN", page.Find(".cm-run-show__day--weekend").TextContent, StringComparison.Ordinal);
+        Assert.All(page.FindAll(".cm-run-show__queue-title"), title =>
+            Assert.Contains("cm-wire-clamp-2", title.ClassList));
+
+        var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
+        Assert.Contains("display: -webkit-box", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
+        Assert.Contains("-webkit-line-clamp: 2", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
+        Assert.Contains("min-inline-size: 0", Rule(css, ".cm-run-show__timeline"), StringComparison.Ordinal);
+        Assert.Contains("block-size: 30px", Rule(css, ".cm-run-show__day--empty"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Time_mapping_snaps_to_fifteen_minutes_and_overlap_stacks()
+    {
+        Assert.Equal(6 * 60, WireTime.Snap(0, new TimeOnly(6, 0), new TimeOnly(22, 0)));
+        Assert.Equal(14 * 60, WireTime.Snap(0.5, new TimeOnly(6, 0), new TimeOnly(22, 0)));
+        Assert.Equal(22 * 60, WireTime.Snap(1, new TimeOnly(6, 0), new TimeOnly(22, 0)));
+
+        var items = new[]
         {
-            new(Guid.NewGuid(), CampaignId, ArtifactId, "linkedin", null,
-                "Shipping the new dashboard today.", null, when, "Queued", null, DateTimeOffset.UtcNow),
-        });
+            Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000001"), 9, 0),
+            Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000002"), 10, 0),
+            Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000003"), 10, 30),
+        };
+        var levels = WireTime.StackLevels(items);
 
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.Markup.Contains("Shipping the new dashboard today.", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(5));
-
-        var today = page.FindAll(".cm-wire__day")
-            .First(d => d.TextContent.Contains("Shipping the new dashboard", StringComparison.Ordinal));
-        Assert.Contains("linkedin", today.TextContent, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Composer_warns_with_the_exact_overage_and_blocks_scheduling()
-    {
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(5));
-
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer__text").Count == 1, TimeSpan.FromSeconds(5));
-
-        page.Find(".cm-composer__text").Input(new string('x', 281));
-
-        Assert.Contains("1 over limit. Remove exactly 1 character", page.Markup, StringComparison.Ordinal);
-        var stage = page.FindAll("button").Single(button => button.TextContent.Contains("Add to Queue", StringComparison.Ordinal));
-        Assert.True(stage.HasAttribute("disabled"));
-    }
-
-    [Fact]
-    public async Task Composer_counts_unicode_characters_instead_of_utf16_code_units()
-    {
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)
-                && !button.HasAttribute("disabled")),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer__text").Count == 1, TimeSpan.FromSeconds(5));
-
-        page.Find(".cm-composer__text").Input(string.Concat(Enumerable.Repeat("😀", 280)));
-
-        Assert.Contains("280 / 280", page.Markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("over limit", page.Markup, StringComparison.Ordinal);
-        var stage = page.FindAll("button").Single(button => button.TextContent.Contains("Add to Queue", StringComparison.Ordinal));
-        Assert.False(stage.HasAttribute("disabled"));
-    }
-
-    [Fact]
-    public async Task Composer_excludes_images_owned_by_a_sibling_artifact()
-    {
-        var siblingId = Guid.NewGuid();
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", PreviewWithSlots(
-            Slot("https://cdn.example/owned.webp", ArtifactId),
-            Slot("https://cdn.example/sibling.webp", siblingId)));
-
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)
-                && !button.HasAttribute("disabled")),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer select option").Count > 1, TimeSpan.FromSeconds(5));
-
-        Assert.Contains("https://cdn.example/owned.webp", page.Markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("https://cdn.example/sibling.webp", page.Markup, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Composer_stages_an_existing_published_image_then_writes_a_local_schedule_row()
-    {
-        var scheduled = new ScheduleEntryResponse(
-            Guid.NewGuid(), CampaignId, ArtifactId, "x", null, "Launch day\n\n#Castmill",
-            "https://cdn.example/social.webp", DateTimeOffset.UtcNow.AddHours(1),
-            "Draft", "No broker configured; entry saved locally.", DateTimeOffset.UtcNow);
-        Http.OnPost("api/v1/schedule", scheduled);
-
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer").Count == 1, TimeSpan.FromSeconds(5));
-
-        page.Find(".cm-composer select").Change("https://cdn.example/social.webp");
-        page.FindAll("button").Single(button => button.TextContent.Contains("Add to Queue", StringComparison.Ordinal)).Click();
-        page.FindAll("button").Single(button => button.TextContent.Contains("Save local schedule", StringComparison.Ordinal)).Click();
-
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Any(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule"),
-            TimeSpan.FromSeconds(5));
-        var body = Http.Bodies.Single(request => request.Method == HttpMethod.Post && request.Path == "api/v1/schedule").Body;
-        Assert.Contains("\"artifactId\":\"81111111-1111-1111-1111-222222222222\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"mediaUrl\":\"https://cdn.example/social.webp\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"pushToBroker\":false", body, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Broker_reconciliation_starts_only_after_the_local_mirror_renders()
-    {
-        var when = DateTimeOffset.Now.Date.AddHours(9);
-        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse>
+        Assert.Equal(0, levels[items[0].Id]);
+        Assert.Equal(1, levels[items[1].Id]);
+        Assert.Equal(0, levels[items[2].Id]);
+        Assert.True(WireTime.IsSameSlot(items[0] with
         {
-            new(Guid.NewGuid(), CampaignId, ArtifactId, "ch-1", "broker-1",
-                "Visible before broker reconciliation.", null, when, "Queued", null, DateTimeOffset.UtcNow),
-        });
-        Http.OnGet("api/v1/publish/readiness", new PublishReadinessResponse(
-            true, true, true, "The publishing broker is ready.", CanSchedule: true));
-        var channels = Http.Gate(HttpMethod.Get, "api/v1/publish/channels");
-        Http.OnPost("api/v1/schedule/reconcile", new ScheduleReconcileResponse(1, 0, []));
+            ScheduledAtUtc = items[0].ScheduledAtUtc.AddSeconds(20),
+        }, new DateOnly(2026, 8, 31), 9 * 60));
 
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.Markup.Contains("Visible before broker reconciliation.", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(5));
-        await page.WaitForStateAsync(
-            () => Http.Requests.Any(request => request.Method == HttpMethod.Get
-                && request.RequestUri?.AbsolutePath.EndsWith("/api/v1/publish/channels", StringComparison.Ordinal) == true),
-            TimeSpan.FromSeconds(5));
+        var board = Board(items, rangeDays: 14);
+        var page = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, board));
+        Assert.Equal(12, page.FindAll(".cm-run-show__day").Count);
+        Assert.Contains("--cm-wire-rows: 2", page.Find("#cm-wire-lane-2026-08-31").GetAttribute("style"), StringComparison.Ordinal);
+    }
 
-        Assert.Contains("Visible before broker reconciliation.", page.Markup, StringComparison.Ordinal);
-        Assert.True(page.FindAll("button").Single(button =>
-            button.TextContent.Contains("Compose", StringComparison.Ordinal)).HasAttribute("disabled"));
-        channels.SetResult(StubHttpHandler.Json(new List<PublishChannel>
+    [Fact]
+    public void Mapper_uses_delivery_contract_and_no_wire_view_renders_metrics()
+    {
+        var dashboard = Dashboard();
+        var sentAt = new DateTimeOffset(2026, 8, 31, 9, 3, 12, TimeSpan.Zero);
+        var sent = ScheduleResponse(
+            Guid.Parse("a3000000-0000-0000-0000-000000000001"),
+            new DateTimeOffset(2026, 8, 31, 9, 0, 0, TimeSpan.Zero),
+            "Sent",
+            brokerRef: "broker-42",
+            sentAtUtc: sentAt,
+            permalink: "https://social.example/posts/42",
+            metrics: new ScheduleMetricsResponse(
+                Reach: 984321,
+                Engagement: 87654,
+                OpenRate: 0.375m,
+                CompletionRate: 0.625m));
+        var staged = ScheduleResponse(
+            Guid.Parse("a3000000-0000-0000-0000-000000000002"),
+            new DateTimeOffset(2026, 9, 1, 9, 0, 0, TimeSpan.Zero),
+            "Draft");
+        var data = WireBoardMapper.Create(
+            new DateOnly(2026, 8, 31), 7, dashboard, [sent, staged],
+            Readiness(false), [], new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero), TimeZoneInfo.Utc);
+
+        Assert.Equal(WireDeliveryStatus.Staged, data.Items.Single(item => item.Id == staged.Id).Status);
+        var sentItem = data.Items.Single(item => item.Id == sent.Id);
+        Assert.Equal(sentAt, sentItem.SentAtUtc);
+        Assert.Equal("https://social.example/posts/42", sentItem.Permalink);
+        Assert.Equal(984321, sentItem.Metrics!.Reach);
+        Assert.Equal(0.625m, sentItem.Metrics.CompletionRate);
+
+        var runOfShow = Render<RunOfShowView>(parameters => parameters.Add(component => component.Data, data));
+        var pipeline = Render<PipelineView>(parameters => parameters.Add(component => component.Data, data));
+        var agenda = Render<AgendaView>(parameters => parameters.Add(component => component.Data, data));
+        Assert.Contains("STAGED", runOfShow.Markup, StringComparison.Ordinal);
+        Assert.Contains("No broker", runOfShow.Markup, StringComparison.Ordinal);
+        Assert.Contains("Delivery receipt", runOfShow.Markup, StringComparison.Ordinal);
+        Assert.Contains("Live post", runOfShow.Markup, StringComparison.Ordinal);
+        foreach (var markup in new[] { runOfShow.Markup, pipeline.Markup, agenda.Markup })
         {
-            new("ch-1", "Main X", "x"),
-        }));
-        await page.WaitForStateAsync(
-            () => page.Markup.Contains("Mirror reconciled with the broker", StringComparison.Ordinal),
-            TimeSpan.FromSeconds(5));
-        Assert.False(page.FindAll("button").Single(button =>
-            button.TextContent.Contains("Compose", StringComparison.Ordinal)).HasAttribute("disabled"));
+            Assert.DoesNotContain("reach", markup, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("engagement", markup, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("984321", markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("87654", markup, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
-    public async Task Broker_error_row_keeps_the_composer_open_for_correction()
+    public void Agenda_projects_chronological_rows_with_fixed_actions_and_shared_queue()
     {
-        Http.OnPost("api/v1/schedule", new ScheduleEntryResponse(
-            Guid.NewGuid(), CampaignId, ArtifactId, "x", null, "Launch day\n\n#Castmill", null,
-            DateTimeOffset.UtcNow.AddHours(1), "Error", "Broker rejected the post.", DateTimeOffset.UtcNow));
-
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)
-                && !button.HasAttribute("disabled")),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer").Count == 1, TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Add to Queue", StringComparison.Ordinal)).Click();
-        page.FindAll("button").Single(button => button.TextContent.Contains("Save local schedule", StringComparison.Ordinal)).Click();
-
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Any(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule"),
-            TimeSpan.FromSeconds(5));
-        Assert.Single(page.FindAll(".cm-composer"));
-    }
-
-    [Fact]
-    public async Task Mixed_channel_retry_submits_only_the_channel_that_failed()
-    {
-        Http.OnGet("api/v1/publish/readiness", new PublishReadinessResponse(
-            true, true, true, "The publishing broker is ready.", CanSchedule: true));
-        Http.OnGet("api/v1/publish/channels", new List<PublishChannel>
+        var queued = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000010"), 10, 15);
+        var blocked = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000011"), 8, 30) with
         {
-            new("ch-x", "Main X", "x"),
-            new("ch-linkedin", "Company LinkedIn", "linkedin"),
-        });
-        Http.OnPost("api/v1/schedule/reconcile", new ScheduleReconcileResponse(0, 0, []));
-        Http.OnPostSequence("api/v1/schedule",
-            Scheduled("ch-x", "Queued"),
-            Scheduled("ch-linkedin", "Error", "Broker rejected LinkedIn."),
-            Scheduled("ch-linkedin", "Queued"));
+            Status = WireDeliveryStatus.Blocked,
+            BlockedReason = "A durable published URL is required.",
+        };
+        var page = Render<AgendaView>(parameters => parameters
+            .Add(component => component.Data, Board([queued, blocked])));
 
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)
-                && !button.HasAttribute("disabled")),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Compose", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-composer__variant").Count == 2, TimeSpan.FromSeconds(5));
+        var rows = page.FindAll(".cm-agenda__row");
+        Assert.Equal(new[] { "08:30", "10:15" }, rows.Select(row => row.QuerySelector(".cm-agenda__time")!.TextContent.Trim()));
+        Assert.All(rows, row => Assert.Contains("cm-wire-clamp-1", row.QuerySelector(".cm-agenda__title")!.ClassList));
+        Assert.Equal(new[] { "Edit", "Export" }, rows[0].QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
+        Assert.Equal(new[] { "Edit", "Move" }, rows[1].QuerySelectorAll("igc-button").Select(button => button.TextContent.Trim()));
+        Assert.Contains("Nothing scheduled — drop an item here", page.Markup, StringComparison.Ordinal);
+        Assert.Single(page.FindAll(".cm-wire-queue-card"));
+        Assert.Empty(page.FindAll(".cm-run-show__ruler"));
 
-        page.FindAll(".cm-composer__variant input[type=checkbox]")[1].Change(true);
-        page.FindAll("button").Single(button => button.TextContent.Contains("Add to Queue", StringComparison.Ordinal)).Click();
-        page.FindAll("button").Single(button => button.TextContent == "Schedule").Click();
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Count(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule") == 2,
-            TimeSpan.FromSeconds(5));
-
-        Assert.Contains("Main X · scheduled", page.Markup, StringComparison.Ordinal);
-        page.FindAll("button").Single(button => button.TextContent == "Schedule").Click();
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Count(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule") == 3,
-            TimeSpan.FromSeconds(5));
-
-        var requests = Http.Bodies
-            .Where(body => body.Method == HttpMethod.Post && body.Path == "api/v1/schedule")
-            .Select(body => body.Body)
-            .ToList();
-        Assert.Single(requests, body => body.Contains("\"channelId\":\"ch-x\"", StringComparison.Ordinal));
-        Assert.Equal(2, requests.Count(body => body.Contains("\"channelId\":\"ch-linkedin\"", StringComparison.Ordinal)));
+        var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
+        Assert.Contains("inline-size: 108px", Rule(css, ".cm-agenda__actions"), StringComparison.Ordinal);
+        Assert.Contains("min-inline-size: 0", Rule(css, ".cm-agenda__title"), StringComparison.Ordinal);
+        Assert.Contains(".cm-agenda__row:focus-within .cm-agenda__actions", css, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Error_entry_retry_calls_the_guarded_retry_endpoint()
+    public void Agenda_narrow_mode_uses_the_unscheduled_bar_instead_of_the_right_dock()
     {
-        var id = Guid.NewGuid();
-        var when = DateTimeOffset.Now.Date.AddHours(9);
-        var error = new ScheduleEntryResponse(
-            id, CampaignId, ArtifactId, "ch-1", null, "Retry me", null, when,
-            "Error", "Broker rejected the post.", DateTimeOffset.UtcNow);
-        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse> { error });
-        Http.OnGet("api/v1/publish/readiness", new PublishReadinessResponse(
-            true, true, true, "The publishing broker is ready.", CanSchedule: true));
-        Http.OnGet("api/v1/publish/channels", new List<PublishChannel>
+        var page = Render<AgendaView>(parameters => parameters
+            .Add(component => component.Data, Board())
+            .Add(component => component.Narrow, true));
+
+        Assert.Contains("cm-agenda--narrow", page.Find(".cm-agenda").ClassList);
+        Assert.Contains("cm-wire-queue--compact", page.Find(".cm-wire-queue").ClassList);
+        var bar = page.Find(".cm-wire-queue__bar");
+        Assert.Contains("1 unscheduled", bar.TextContent, StringComparison.Ordinal);
+        Assert.Contains("+", bar.TextContent, StringComparison.Ordinal);
+        Assert.Equal("false", bar.GetAttribute("aria-expanded"));
+        Assert.Equal("cm-wire-queue-content", bar.GetAttribute("aria-controls"));
+        Assert.True(page.Find(".cm-wire-queue__content").HasAttribute("hidden"));
+
+        bar.Click();
+        Assert.Equal("true", page.Find(".cm-wire-queue__bar").GetAttribute("aria-expanded"));
+        Assert.False(page.Find(".cm-wire-queue__content").HasAttribute("hidden"));
+    }
+
+    [Fact]
+    public void Pipeline_projects_four_status_columns_with_only_sent_delivery_facts()
+    {
+        var queued = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000020"), 10, 15);
+        var sentAt = new DateTimeOffset(2026, 8, 31, 12, 5, 0, TimeSpan.Zero);
+        var sent = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000021"), 12, 0) with
         {
-            new("ch-1", "Main X", "x"),
-        });
-        Http.OnPost("api/v1/schedule/reconcile", new ScheduleReconcileResponse(0, 0, []));
-        Http.OnPost($"api/v1/schedule/{id}/retry", error with { Status = "Queued", Error = null, BrokerPostId = "post-1" });
+            Status = WireDeliveryStatus.Sent,
+            SentAtUtc = sentAt,
+            BrokerRef = "broker-42",
+            Permalink = "https://broker.example/posts/42",
+        };
+        var blocked = Scheduled(Guid.Parse("a3000000-0000-0000-0000-000000000022"), 14, 0) with
+        {
+            Status = WireDeliveryStatus.Blocked,
+            BlockedReason = "A durable published URL is required.",
+        };
+        var page = Render<PipelineView>(parameters => parameters
+            .Add(component => component.Data, Board([queued, sent, blocked])));
 
-        var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Retry", StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Retry", StringComparison.Ordinal)).Click();
+        Assert.Equal(
+            new[] { "Ready", "Staged", "Sent", "Needs attention" },
+            page.FindAll(".cm-pipeline__column-head h2").Select(heading => heading.TextContent.Trim()));
+        Assert.Single(page.FindAll(".cm-pipeline__column--ready .cm-wire-queue-card"));
+        Assert.Contains("NO DATE", page.Find(".cm-pipeline__column--ready").TextContent, StringComparison.Ordinal);
+        Assert.Contains("MON 10:15", page.Find(".cm-pipeline__column--queued").TextContent, StringComparison.Ordinal);
+        Assert.Contains("A durable published URL is required.", page.Find(".cm-pipeline__column--attention").TextContent, StringComparison.Ordinal);
+        Assert.Contains("Export clip", page.Find(".cm-pipeline__column--attention").TextContent, StringComparison.Ordinal);
+        Assert.Contains("broker-42", page.Find(".cm-pipeline__column--sent").TextContent, StringComparison.Ordinal);
+        Assert.Contains("Live post", page.Find(".cm-pipeline__column--sent").TextContent, StringComparison.Ordinal);
+        Assert.Null(page.Find(".cm-pipeline__column--sent .cm-pipeline__body").GetAttribute("data-drop-target"));
+        Assert.Equal(3, page.FindAll("[data-drop-target]").Count);
+        Assert.All(page.FindAll(".cm-pipeline__title"), title => Assert.Contains("cm-wire-clamp-2", title.ClassList));
+        Assert.DoesNotContain("reach", page.Markup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("engagement", page.Markup, StringComparison.OrdinalIgnoreCase);
 
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Any(body => body.Method == HttpMethod.Post
-                && body.Path == $"api/v1/schedule/{id}/retry"),
-            TimeSpan.FromSeconds(5));
+        var css = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
+        Assert.Contains("min-block-size: 120px", Rule(css, ".cm-pipeline__body"), StringComparison.Ordinal);
+        Assert.Contains("inline-size: 72px", Rule(css, ".cm-pipeline__actions"), StringComparison.Ordinal);
+        Assert.Contains(".cm-pipeline__card:focus-within .cm-pipeline__actions", css, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Draft_entry_can_be_moved_and_cancelled_from_the_wire()
+    public async Task View_switch_uses_one_loaded_data_set_without_refetching()
     {
-        var id = Guid.NewGuid();
-        var when = DateTimeOffset.Now.Date.AddHours(9);
-        var draft = new ScheduleEntryResponse(
-            id, CampaignId, ArtifactId, "x", null, "Move me", null, when,
-            "Draft", null, DateTimeOffset.UtcNow);
-        Http.OnGet("api/v1/schedule", new List<ScheduleEntryResponse> { draft });
-        Http.OnPatch($"api/v1/schedule/{id}", draft with { ScheduledAt = when.AddHours(2) });
-        Http.OnStatus(HttpMethod.Delete, $"api/v1/schedule/{id}", System.Net.HttpStatusCode.NoContent);
-
+        StubWire();
         var page = Render<Wire>();
-        await page.WaitForStateAsync(
-            () => page.FindAll("button").Any(button => button.TextContent.Contains("Move", StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(5));
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-run-show__timeline")));
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Fortnight").Click();
+        await page.WaitForAssertionAsync(() => Assert.Contains("Fortnight of", page.Markup, StringComparison.Ordinal));
+        var requestsAfterRangeChange = Http.Requests.Count;
 
-        page.FindAll("button").Single(button => button.TextContent.Contains("Move", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(() => page.FindAll(".cm-wire__move").Count == 1, TimeSpan.FromSeconds(5));
-        page.Find(".cm-wire__move input").Change(
-            when.AddHours(2).ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Save move", StringComparison.Ordinal)).Click();
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline").Click();
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-pipeline")));
+        Assert.Empty(page.FindAll("[aria-label='Schedule range']"));
 
-        await page.WaitForStateAsync(
-            () => Http.Bodies.Any(body => body.Method == HttpMethod.Patch
-                && body.Path == $"api/v1/schedule/{id}"),
-            TimeSpan.FromSeconds(5));
-        page.FindAll("button").Single(button => button.TextContent.Contains("Cancel", StringComparison.Ordinal)).Click();
-        await page.WaitForStateAsync(
-            () => Http.Requests.Any(request => request.Method == HttpMethod.Delete
-                && request.RequestUri?.AbsolutePath.EndsWith($"/api/v1/schedule/{id}", StringComparison.Ordinal) == true),
-            TimeSpan.FromSeconds(5));
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Agenda").Click();
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-agenda")));
+        Assert.NotNull(page.Find("[aria-label='Schedule range']"));
+        Assert.Contains("Fortnight of", page.Markup, StringComparison.Ordinal);
+        Assert.Equal(requestsAfterRangeChange, Http.Requests.Count);
     }
 
-    private static CampaignPreview Preview() => new(
-        new CampaignResponse(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
-        [],
+    [Fact]
+    public async Task Narrow_content_forces_agenda_and_disables_run_of_show()
+    {
+        StubWire();
+        var page = Render<Wire>();
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-run-show__timeline")));
+
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline").Click();
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-pipeline")));
+
+        await page.InvokeAsync(() => page.Instance.WireWidthChanged(1099));
+
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-agenda--narrow")));
+        var run = page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Run of show");
+        var pipeline = page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline");
+        Assert.True(run.HasAttribute("disabled"));
+        Assert.True(pipeline.HasAttribute("disabled"));
+        run.Click();
+        Assert.NotNull(page.Find(".cm-agenda"));
+
+        var script = ReadWorkspaceFile("src/Castmill.UI/wwwroot/js/castmill-wire.js");
+        Assert.Contains("new ResizeObserver", script, StringComparison.Ordinal);
+        Assert.Contains("observer.disconnect()", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Pipeline_ready_drop_opens_the_shared_slot_dialog()
+    {
+        var page = Render<PipelineView>(parameters => parameters
+            .Add(component => component.Data, Board()));
+
+        await page.Find(".cm-pipeline__column--ready .cm-wire-queue-card")
+            .TriggerEventAsync("ondragstart", new DragEventArgs());
+        await page.Find(".cm-pipeline__column--queued .cm-pipeline__body")
+            .TriggerEventAsync("ondrop", new DragEventArgs());
+
+        Assert.NotNull(page.Find("igc-dialog[open]"));
+        Assert.NotNull(page.FindComponent<IgbDatePicker>());
+        Assert.NotNull(page.FindComponent<IgbDateTimeInput>());
+    }
+
+    private void StubWire(bool brokerReady = false)
+    {
+        Http.OnGet("api/v1/campaigns/dashboard", Dashboard());
+        Http.OnGet("api/v1/schedule", Array.Empty<ScheduleEntryResponse>());
+        Http.OnGet("api/v1/publish/readiness", Readiness(brokerReady));
+        if (brokerReady)
+        {
+            Http.OnGet("api/v1/publish/channels", new[] { new PublishChannel("linkedin", "LinkedIn", "LinkedIn") });
+        }
+    }
+
+    private DashboardResponse Dashboard() => new(
+        ReviewQueue: [],
+        AgingDrafts: [],
+        Campaigns: [new CampaignCounts(_campaignId, 1, 0, 0, 0)],
+        EmptySlots: 0,
+        CampaignsWithEmptySlots: 0,
+        EmptySlotModels: [],
+        FirstEmptySlotCampaign: null,
+        ReadyToSchedule:
         [
-            new ImageSlotResponse(
-                Guid.NewGuid(), CampaignId, "social-card", 1200, 1200,
-                null, null, null, null, false, "Filled", "https://cdn.example/social.webp", null,
-                DateTimeOffset.UtcNow, ArtifactId: ArtifactId),
-        ],
-        1,
-        1);
+            new DashboardArtifact(
+                _campaignId, "Launch campaign", _artifactId, "linkedin", "Ready story", "Queued",
+                new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero)),
+        ]);
 
-    private static CampaignPreview PreviewWithSlots(params ImageSlotResponse[] slots) => new(
-        new CampaignResponse(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
-        [], slots, slots.Length, slots.Length);
+    private static PublishReadinessResponse Readiness(bool ready) => new(
+        BrokerConfigured: ready,
+        CredentialStored: ready,
+        Ready: ready,
+        Detail: ready ? "Ready." : "No broker configured.",
+        CanStageLocally: true,
+        CanSchedule: ready);
 
-    private static ImageSlotResponse Slot(string url, Guid artifactId) => new(
-        Guid.NewGuid(), CampaignId, "social-card", 1200, 1200,
-        null, null, null, null, false, "Filled", url, null,
-        DateTimeOffset.UtcNow, ArtifactId: artifactId);
+    private ScheduleEntryResponse ScheduleResponse(
+        Guid id,
+        DateTimeOffset scheduledAt,
+        string status,
+        string? brokerRef = null,
+        DateTimeOffset? sentAtUtc = null,
+        string? permalink = null,
+        ScheduleMetricsResponse? metrics = null) => new(
+        id,
+        _campaignId,
+        _artifactId,
+        "linkedin",
+        brokerRef,
+        "Ready story",
+        null,
+        scheduledAt,
+        status,
+        null,
+        scheduledAt.AddMinutes(1),
+        sentAtUtc,
+        permalink,
+        metrics);
 
-    private static ScheduleEntryResponse Scheduled(string channelId, string status, string? error = null) => new(
-        Guid.NewGuid(), CampaignId, ArtifactId, channelId,
-        status == "Queued" ? $"post-{channelId}" : null,
-        "Launch day\n\n#Castmill", null, DateTimeOffset.UtcNow.AddHours(1),
-        status, error, DateTimeOffset.UtcNow);
+    private WireBoardData Board(IReadOnlyList<WireScheduleItem>? items = null, int rangeDays = 7)
+    {
+        items ??= [];
+        var start = new DateOnly(2026, 8, 31);
+        var days = Enumerable.Range(0, rangeDays)
+            .Select(offset => start.AddDays(offset))
+            .Select(date => new WireDay(
+                date,
+                date == start,
+                date.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday,
+                date == start ? items : []))
+            .ToList();
+        return new WireBoardData(
+            start,
+            rangeDays,
+            TimeZoneInfo.Utc.Id,
+            new TimeOnly(6, 0),
+            new TimeOnly(22, 0),
+            BrokerConfigured: false,
+            [new WireQueueItem(_artifactId, _campaignId, "linkedin", "LinkedIn", "Ready story", "validators passed")],
+            days);
+    }
+
+    private WireScheduleItem Scheduled(Guid id, int hour, int minute) => new(
+        id,
+        Guid.NewGuid(),
+        _campaignId,
+        "linkedin",
+        "LinkedIn",
+        $"Story at {hour}:{minute:00}",
+        new DateTimeOffset(2026, 8, 31, hour, minute, 0, TimeSpan.Zero),
+        TimeZoneInfo.Utc.Id,
+        WireDeliveryStatus.Queued);
+
+    private static string ReadWorkspaceFile(string relativePath)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Castmill.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine(directory.FullName, relativePath));
+    }
+
+    private static string Rule(string css, string selector)
+    {
+        var start = css.IndexOf(selector + " {", StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing CSS rule {selector}");
+        var end = css.IndexOf('}', start);
+        Assert.True(end > start, $"Unclosed CSS rule {selector}");
+        return css[start..end];
+    }
 }

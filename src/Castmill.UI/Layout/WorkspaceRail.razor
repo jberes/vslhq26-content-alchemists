@@ -118,7 +118,7 @@
                         <button type="button" class="cm-rail__delete"
                                 title="Delete campaign" aria-label="Delete @campaign.Name"
                                 @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
-                            <span aria-hidden="true">🗑</span>
+                            <AppIcon Name="trash" />
                         </button>
                     </li>
                 }
