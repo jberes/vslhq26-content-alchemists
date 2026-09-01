@@ -120,13 +120,16 @@ public static class AiEndpoints
     private static IResult ProjectRun(GenerationRun run)
     {
         using var items = JsonDocument.Parse(run.ItemsJson);
+        var completed = items.RootElement.EnumerateArray().Count(item =>
+            !item.TryGetProperty("outcome", out var outcome)
+            || !string.Equals(outcome.GetString(), "Generating", StringComparison.OrdinalIgnoreCase));
         return Results.Ok(new
         {
             run.Id,
             run.CampaignId,
             run.Status,
             run.TotalKinds,
-            completed = items.RootElement.GetArrayLength(),
+            completed,
             items = items.RootElement.Clone(),
             run.StartedAt,
             run.UpdatedAt,

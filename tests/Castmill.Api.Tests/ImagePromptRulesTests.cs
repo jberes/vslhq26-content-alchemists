@@ -32,6 +32,13 @@ public sealed class ImagePromptRulesTests
             Assert.Contains(ImagePromptRules.Composition, prompt, StringComparison.Ordinal);
             Assert.Contains($"{ImagePromptRules.SafeMarginPercent}% of any edge", prompt, StringComparison.Ordinal);
         });
+
+        Assert.Contains("1280×720", provider.Prompts[1], StringComparison.Ordinal);
+        Assert.Contains("generated 1536×1024 frame", provider.Prompts[1], StringComparison.Ordinal);
+        Assert.Contains("Do not render any new text", provider.Prompts[1], StringComparison.Ordinal);
+        Assert.Contains("x=308 through x=1228", provider.Prompts[1], StringComparison.Ordinal);
+        Assert.Contains("y=205 through y=819", provider.Prompts[1], StringComparison.Ordinal);
+        Assert.Contains("1280×720", provider.Prompts[2], StringComparison.Ordinal);
     }
 
     [Fact]

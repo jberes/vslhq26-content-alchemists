@@ -3767,6 +3767,46 @@ button.cm-intent {
     outline-offset: 1px;
 }
 
+.cm-studio__card--generating {
+    border-style: solid;
+    border-color: var(--cm-accent-strong);
+}
+
+.cm-studio__card-generating {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    z-index: 2;
+    display: inline-flex;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-3);
+    transform: translate(-50%, -50%);
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-surface) 88%, transparent);
+}
+
+.cm-studio__card-generating .cm-ai-dot {
+    animation-name: cm-studio-dot-bounce;
+}
+
+.cm-studio__card-generating .cm-ai-dot:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.cm-studio__card-generating .cm-ai-dot:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes cm-studio-dot-bounce {
+    0%, 60%, 100% { opacity: 0.45; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-0.35rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cm-studio__card-generating .cm-ai-dot {
+        animation: none;
+    }
+}
+
 .cm-studio__card img {
     position: absolute;
     inset: 0;
@@ -7284,7 +7324,6 @@ body.cm-wire-dragging [data-wire-drag] {
     block-size: 32.25rem;
     min-block-size: 0;
     overflow: hidden;
-    overscroll-behavior: contain;
     border: 1px solid var(--cm-rule);
     background: var(--cm-surface-sunken);
     border-radius: var(--cm-radius-lg);

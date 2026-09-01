@@ -112,6 +112,63 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Batch_generation_animates_the_active_slot_and_reveals_each_take_as_it_lands()
+    {
+        var runId = Guid.Parse("71111111-1111-1111-1111-777777777777");
+        var started = DateTimeOffset.UtcNow;
+        var rendering = new RunProgress(
+            runId, CampaignId, "Running", 1, 0,
+            [new RunItem("youtube-thumbnail", false, null, null, null, 0,
+                SlotId, 1, "Generating")],
+            started, started.AddSeconds(1));
+        var gate = Http.Gate(HttpMethod.Post,
+            $"api/v1/campaigns/{CampaignId}/image-slots/generate-pending");
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll("button").Any(button =>
+            button.TextContent.Contains("Generate all pending", StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(5));
+        Http.OnGet($"api/v1/ai/campaigns/{CampaignId}/runs/latest", rendering);
+        await view.FindAll("button").Single(button =>
+            button.TextContent.Contains("Generate all pending", StringComparison.Ordinal)).ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var tile = view.Find(".cm-studio__card--generating");
+            Assert.Equal(3, tile.QuerySelectorAll(".cm-ai-dot").Length);
+            Assert.Contains("Rendering", tile.TextContent, StringComparison.Ordinal);
+        }, TimeSpan.FromSeconds(5));
+
+        var takeThumb = "https://public.example/thumbs/landed.webp";
+        var landedSlot = new ImageSlotResponse(
+            SlotId, CampaignId, "youtube-thumbnail", 1280, 720,
+            "a bold thumbnail", "gpt-image-2", null, null, true,
+            "Empty", null, null, DateTimeOffset.UtcNow,
+            ActiveTakeCount: 1, LatestTakeThumbUrl: takeThumb);
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
+            new CampaignPreview(Campaign(), [], [landedSlot], 0, 6));
+        Http.OnGet($"api/v1/ai/campaigns/{CampaignId}/runs/latest",
+            rendering with
+            {
+                Completed = 1,
+                Items = [new RunItem("youtube-thumbnail", true, null, null, null, 2100,
+                    SlotId, 1, "Succeeded")],
+                UpdatedAt = started.AddSeconds(3),
+            });
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var tile = view.Find(".cm-studio__card:not(.cm-studio__card--add)");
+            Assert.Equal(takeThumb, tile.QuerySelector("img")?.GetAttribute("src"));
+            Assert.Empty(tile.QuerySelectorAll(".cm-ai-dot"));
+        }, TimeSpan.FromSeconds(5));
+
+        gate.SetResult(StubHttpHandler.Json(new ImageBatchResponse(
+            runId, 1, 1, 0, 0, 1, 0,
+            [new ImageBatchSlotResult(SlotId, "youtube-thumbnail", "Succeeded", 1, 1, 0)])));
+    }
+
+    [Fact]
     public async Task Reload_reattaches_to_the_running_image_batch_and_reenables_controls_on_completion()
     {
         var runId = Guid.Parse("71111111-1111-1111-1111-666666666666");

@@ -1024,6 +1024,7 @@
     private int _batchTakeTarget = 1;
     private Guid? _batchAttachCampaign;
     private Guid? _handledBatchRun;
+    private int _revealedBatchSuccesses;
     private Guid? _addingFor;
     private Guid? _deletingSlot;
     private bool _seeding;
@@ -1698,6 +1699,14 @@
     private void OnStudioRunChanged() => InvokeAsync(() =>
         StoreEvents.GuardedAsync(async () =>
     {
+        var batchSuccesses = StudioRun.BatchProgress?.Items.Count(item =>
+            item.Success && string.Equals(item.Outcome, "Succeeded", StringComparison.OrdinalIgnoreCase)) ?? 0;
+        if (StudioRun.CampaignId == CampaignId && batchSuccesses > _revealedBatchSuccesses)
+        {
+            _revealedBatchSuccesses = batchSuccesses;
+            await Campaign.RefreshAsync(CampaignId);
+        }
+
         if (StudioRun.CampaignId == CampaignId && !StudioRun.IsBatchRunning
             && (StudioRun.BatchResult?.RunId ?? StudioRun.BatchProgress?.Id) is { } batchRunId
             && _handledBatchRun != batchRunId)
@@ -2031,7 +2040,7 @@
     private RenderFragment SheetCard(ImageSlotResponse slot) => __builder =>
     {
         var active = slot.Id == _selectedId;
-        var rendering = StudioRun.IsActiveFor(slot.Id);
+        var rendering = StudioRun.IsActiveFor(slot.Id) || IsBatchRendering(slot.Id);
         var filled = slot.State == "Filled" && slot.PublishedUrl is not null;
         // A slot with generated-but-unplaced takes previews its best take: work exists,
         // it just hasn't been placed — an empty dashed hole would misreport that.
@@ -2039,7 +2048,7 @@
         var hasImagery = filled || takeThumb is not null;
         <div class="cm-studio__tile" style="aspect-ratio: @slot.TargetWidth / @slot.TargetHeight; flex-basis: @(TileBasis(slot))px;">
         <button type="button"
-                class="cm-studio__card @(hasImagery ? "cm-studio__card--filled" : null) @(active ? "cm-studio__card--active" : null)"
+            class="cm-studio__card @(hasImagery ? "cm-studio__card--filled" : null) @(rendering ? "cm-studio__card--generating" : null) @(active ? "cm-studio__card--active" : null)"
                 aria-pressed="@(active ? "true" : "false")"
                 @onclick="() => OpenSlotAsync(slot)">
             @if (filled)
@@ -2050,6 +2059,14 @@
             else if (takeThumb is not null)
             {
                 <img src="@takeThumb" alt="" loading="lazy" decoding="async" />
+            }
+            @if (rendering)
+            {
+                <span class="cm-studio__card-generating" aria-hidden="true">
+                    <span class="cm-ai-dot"></span>
+                    <span class="cm-ai-dot"></span>
+                    <span class="cm-ai-dot"></span>
+                </span>
             }
             <span class="cm-studio__card-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
             <span class="cm-studio__card-foot">
@@ -2089,6 +2106,10 @@
         }
         </div>
     };
+
+    private bool IsBatchRendering(Guid slotId) => StudioRun.IsBatchRunning
+        && StudioRun.BatchProgress?.Items.Any(item => item.SlotId == slotId
+            && string.Equals(item.Outcome, "Generating", StringComparison.OrdinalIgnoreCase)) == true;
 
     /// <summary>Tile width scaled from the slot's real published width, clamped to stay
     /// usable — a 1600-wide header reads visibly wider than a 1280-wide thumbnail. The floor
@@ -2474,6 +2495,7 @@
         }
         await SavePromptAsync();
         _handledBatchRun = null;
+        _revealedBatchSuccesses = 0;
         StudioRun.StartBatch(CampaignId, _batchTakeTarget);
     }
 

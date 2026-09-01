@@ -100,6 +100,7 @@ describe('ApexTree bundle', () => {
         expect(interopSource).toContain("event.target instanceof SVGElement");
         expect(interopSource).toContain("removeEventListener('keydown'");
         expect(css).toMatch(/\.cm-cluster__tree\s*\{[^}]*overflow:\s*hidden;/s);
+        expect(css).not.toMatch(/\.cm-cluster__tree\s*\{[^}]*overscroll-behavior:\s*contain;/s);
     });
 });
 

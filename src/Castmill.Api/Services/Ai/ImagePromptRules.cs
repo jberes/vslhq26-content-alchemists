@@ -14,8 +14,8 @@ namespace Castmill.Api.Services.Ai;
 /// </summary>
 public static class ImagePromptRules
 {
-    /// <summary>Worst-case centre-crop loss per edge is ~11%; 15% leaves real headroom.</summary>
-    public const int SafeMarginPercent = 15;
+  /// <summary>Base inset before target-specific crop compensation is applied.</summary>
+  public const int SafeMarginPercent = 20;
 
     private const int SafeCentrePercent = 100 - (2 * SafeMarginPercent);
 
@@ -29,6 +29,10 @@ public static class ImagePromptRules
         - Never let a letter, word, or subject touch, overlap, or run past any edge.
         - Every word rendered must be complete and fully legible: no clipped glyphs, no
           truncated headlines, no text running out of frame, no text split across an edge.
+        - Do not render any new text, letters, numbers, captions, headlines, labels, badges
+          or logos. Castmill composites exact authored text after generation. If an
+          authoritative reference image already contains text, keep the entire referenced
+          panel inside the safe area without recreating, enlarging or repositioning its text.
         - Compose for the centre: background, gradients and atmosphere may reach the edges,
           but meaning must not.
         """;
@@ -36,4 +40,47 @@ public static class ImagePromptRules
     /// <summary>Appends the house rules to a prompt. Blank prompts are returned unchanged.</summary>
     public static string Apply(string prompt) =>
         string.IsNullOrWhiteSpace(prompt) ? prompt : $"{prompt.TrimEnd()}\n\n{Composition}";
+
+    /// <summary>Adds crop-safe bounds calculated for the exact published slot.</summary>
+    public static string Apply(
+        string prompt,
+        int targetWidth,
+        int targetHeight,
+        int generatedWidth,
+        int generatedHeight)
+    {
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return prompt;
+        }
+
+        var targetAspect = (double)targetWidth / targetHeight;
+        var generatedAspect = (double)generatedWidth / generatedHeight;
+        var horizontalCrop = targetAspect < generatedAspect
+            ? (1 - (targetAspect / generatedAspect)) / 2
+            : 0;
+        var verticalCrop = targetAspect > generatedAspect
+            ? (1 - (generatedAspect / targetAspect)) / 2
+            : 0;
+        var baseMargin = SafeMarginPercent / 100d;
+        var horizontalMargin = Math.Max(baseMargin, horizontalCrop + (0.12 * (1 - (2 * horizontalCrop))));
+        var verticalMargin = Math.Max(baseMargin, verticalCrop + (0.12 * (1 - (2 * verticalCrop))));
+        var left = (int)Math.Ceiling(generatedWidth * horizontalMargin);
+        var right = (int)Math.Floor(generatedWidth * (1 - horizontalMargin));
+        var top = (int)Math.Ceiling(generatedHeight * verticalMargin);
+        var bottom = (int)Math.Floor(generatedHeight * (1 - verticalMargin));
+
+        return $$"""
+            {{Apply(prompt)}}
+
+            EXACT OUTPUT SAFETY (mandatory, final instruction):
+            - The published slot is {{targetWidth}}×{{targetHeight}} pixels. It is produced
+              from a generated {{generatedWidth}}×{{generatedHeight}} frame by centre-cropping.
+            - Keep every essential visual entirely inside x={{left}} through x={{right}} and
+              y={{top}} through y={{bottom}} of the generated frame. The complete outer area
+              is disposable crop and must contain background only.
+            - Do not render any new text. Reserve clean negative space for Castmill's
+              deterministic, crop-safe text compositor.
+            """;
+    }
 }

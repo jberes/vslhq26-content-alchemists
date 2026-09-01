@@ -225,8 +225,10 @@ public static partial class Generators
             JSON schema: { "title": string, "images": [ { "slot": string, "prompt": string, "aspectRatio": string } ], "citations": string[] }
             "slot" is one of: "blog-hero", "youtube-thumbnail", "blog-inline-1", "blog-inline-2".
             Every rendered image is centre-cropped afterwards, so compose each prompt for the
-            centre of the frame: ask for generous clear margins on all four edges, and never
-            place headline text, logos or key subjects near an edge where they would be cut.
+            centre of the frame: demand generous clear margins on all four edges and keep every
+            key subject inside the central safe area. Prompts must request NO rendered words,
+            letters, numbers, captions, headlines, labels, badges or logos. Reserve clean
+            negative space for exact text to be composited after generation.
             """,
             (json, t) => ValidateCommon(json, t, requireArray: "images", minItems: 3)));
 

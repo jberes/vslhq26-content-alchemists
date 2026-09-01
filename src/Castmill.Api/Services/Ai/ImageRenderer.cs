@@ -42,8 +42,11 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
+        var aspect = AspectFor(width, height);
+        var frame = FrameDimensions(aspect);
         var raw = await provider.GenerateAsync(
-            userId, ImagePromptRules.Apply(prompt), AspectFor(width, height), modelAlias, ct);
+            userId, ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height),
+            aspect, modelAlias, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 
@@ -52,8 +55,11 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         IReadOnlyList<ImageReference> references, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
+        var aspect = AspectFor(width, height);
+        var frame = FrameDimensions(aspect);
         var raw = await provider.GenerateAsync(
-            userId, ImagePromptRules.Apply(prompt), AspectFor(width, height), modelAlias, references, ct);
+            userId, ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height),
+            aspect, modelAlias, references, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 
@@ -72,6 +78,14 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         "9:16" or "2:3" or "portrait" => new GeneratedImageSize(1024, 1536),
         _ => new GeneratedImageSize(1024, 1024),
     };
+
+    private static (int Width, int Height) FrameDimensions(string aspectRatio) =>
+        aspectRatio.Trim() switch
+        {
+            "16:9" or "3:2" or "landscape" => (1536, 1024),
+            "9:16" or "2:3" or "portrait" => (1024, 1536),
+            _ => (1024, 1024),
+        };
 
     /// <summary>WebP re-encode (publish format, ADR/G list): smaller than PNG at publish quality.</summary>
     internal static byte[] EncodeWebp(byte[] sourceImage)

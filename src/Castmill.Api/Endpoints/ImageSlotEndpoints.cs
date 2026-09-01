@@ -639,6 +639,9 @@ public static class ImageSlotEndpoints
 
             for (var variantIndex = 1; variantIndex <= work.Variants; variantIndex++)
             {
+                var activeEvent = BatchGeneratingEvent(slot, variantIndex);
+                events.Add(activeEvent);
+                await SaveBatchProgressAsync(db, run, events, clock, CancellationToken.None);
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
@@ -680,6 +683,7 @@ public static class ImageSlotEndpoints
                     events.Add(BatchEvent(slot, variantIndex, success: false,
                         failure.Item1, failure.Item2, stopwatch.ElapsedMilliseconds));
                 }
+                    events.Remove(activeEvent);
                 await SaveBatchProgressAsync(db, run, events, clock, CancellationToken.None);
             }
 
@@ -743,6 +747,18 @@ public static class ImageSlotEndpoints
             error,
             durationMs,
         };
+
+    private static object BatchGeneratingEvent(ImageSlot slot, int variantIndex) => new
+    {
+        kind = slot.Kind,
+        slotId = slot.Id,
+        variantIndex,
+        success = false,
+        outcome = "Generating",
+        errorCode = (string?)null,
+        error = (string?)null,
+        durationMs = 0L,
+    };
 
     private static async Task SaveBatchProgressAsync(
         CastmillDbContext db, GenerationRun run, List<object> events,
