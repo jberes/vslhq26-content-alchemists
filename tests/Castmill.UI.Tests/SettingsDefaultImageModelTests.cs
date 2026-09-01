@@ -33,7 +33,7 @@ public sealed class SettingsDefaultImageModelTests : CastmillUiTestContext
     {
         var view = Render<Castmill.UI.Pages.Settings>();
         await view.WaitForStateAsync(
-            () => view.FindAll("button[role='tab']").Count == 5, TimeSpan.FromSeconds(5));
+            () => view.FindAll("button[role='tab']").Count == 6, TimeSpan.FromSeconds(5));
         await view.FindAll("button[role='tab']")
             .Single(tab => tab.TextContent.Trim() == "Models")
             .ClickAsync();

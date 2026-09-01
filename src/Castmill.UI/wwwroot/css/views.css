@@ -7370,3 +7370,29 @@ body.cm-wire-dragging [data-wire-drag] {
         block-size: 27rem;
     }
 }
+
+/* ---- Settings › Appearance ------------------------------------------------------ */
+
+.cm-settings__appearance {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-6);
+}
+
+.cm-settings__appearance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: var(--cm-space-6);
+}
+
+.cm-settings__appearance-group {
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.cm-settings__appearance-group legend {
+    padding: 0;
+    margin-block-end: var(--cm-space-2);
+}

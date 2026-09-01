@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Castmill Desktop (Windows x64) installer.
+
+  Per-machine MSI into Program Files. The payload is the SELF-CONTAINED publish output
+  (.NET runtime + Windows App SDK bundled), so a target machine needs no prerequisite
+  installs; WebView2 ships with Windows 11 and current Windows 10.
+
+  Build:  see installer/windows/README.md — the publish folder is passed in as PublishDir.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="Castmill"
+           Manufacturer="Infragistics"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7B1C1E2E-6E3B-4D3E-9C1A-4E2B5A7C9D31"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- Every build is a major upgrade: the payload is a whole self-contained app tree,
+         so patching individual files is not the model. Older versions are removed first. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Castmill is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="CastmillIcon" SourceFile="$(var.PublishDir)\Castmill.Desktop.exe" />
+    <Property Id="ARPPRODUCTICON" Value="CastmillIcon" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!-- 64-bit app: Program Files, not Program Files (x86). -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Castmill" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppShortcutFolder" Name="Castmill" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Castmill" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <!-- Harvests the entire publish tree, preserving subdirectories. -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <DirectoryRef Id="AppShortcutFolder">
+      <Component Id="StartMenuShortcut" Guid="1D9F4A76-5C2E-49B8-9A63-8F0C5D2B7E44">
+        <Shortcut Id="CastmillStartMenu"
+                  Name="Castmill"
+                  Description="Castmill content workspace"
+                  Target="[INSTALLFOLDER]Castmill.Desktop.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppShortcutFolder" Directory="AppShortcutFolder" On="uninstall" />
+        <!-- A per-machine component needs a per-user key path for the shortcut. -->
+        <RegistryValue Root="HKCU" Key="Software\Infragistics\Castmill"
+                       Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+  </Package>
+</Wix>

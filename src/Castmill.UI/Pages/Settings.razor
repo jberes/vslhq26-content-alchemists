@@ -23,6 +23,7 @@
 @inject ImagesClient Images
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject ThemeService Theme
 
 <PageTitle>Settings · Castmill</PageTitle>
 
@@ -140,6 +141,78 @@
     }
 
     @* ---- Credentials: first, because it is the panel people arrive to change. ---- *@
+    @* Theme switching used to exist only on the dev-only style guide, which meant a shipped
+       build had no way to reach it at all. These are the same ThemeService calls; the choice
+       is per-device UI state (ADR-F06) and applies instantly with no reload. *@
+    @if (_tab == "appearance")
+    {
+        <article class="cm-settings__appearance">
+            <div>
+                <span class="cm-kicker">Appearance</span>
+                <h2>Theme</h2>
+                <p class="cm-meta">
+                    Applies immediately and is remembered on this device.
+                </p>
+            </div>
+
+            <div class="cm-settings__appearance-grid">
+                <fieldset class="cm-settings__appearance-group">
+                    <legend class="cm-kicker">Family</legend>
+                    <div class="cm-tabs" role="radiogroup" aria-label="Theme family">
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Family == ThemeFamily.WarmEditorial ? "true" : "false")"
+                                aria-selected="@(Theme.Family == ThemeFamily.WarmEditorial ? "true" : "false")"
+                                @onclick="() => Theme.SetFamilyAsync(ThemeFamily.WarmEditorial)">
+                            Warm editorial
+                        </button>
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Family == ThemeFamily.IndustryBlueprint ? "true" : "false")"
+                                aria-selected="@(Theme.Family == ThemeFamily.IndustryBlueprint ? "true" : "false")"
+                                @onclick="() => Theme.SetFamilyAsync(ThemeFamily.IndustryBlueprint)">
+                            Industry blueprint
+                        </button>
+                    </div>
+                </fieldset>
+
+                <fieldset class="cm-settings__appearance-group">
+                    <legend class="cm-kicker">Mode</legend>
+                    <div class="cm-tabs" role="radiogroup" aria-label="Theme mode">
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Mode == ThemeMode.Light ? "true" : "false")"
+                                aria-selected="@(Theme.Mode == ThemeMode.Light ? "true" : "false")"
+                                @onclick="() => Theme.SetModeAsync(ThemeMode.Light)">
+                            Light
+                        </button>
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Mode == ThemeMode.Dark ? "true" : "false")"
+                                aria-selected="@(Theme.Mode == ThemeMode.Dark ? "true" : "false")"
+                                @onclick="() => Theme.SetModeAsync(ThemeMode.Dark)">
+                            Dark
+                        </button>
+                    </div>
+                </fieldset>
+
+                <fieldset class="cm-settings__appearance-group">
+                    <legend class="cm-kicker">Density</legend>
+                    <div class="cm-tabs" role="radiogroup" aria-label="Interface density">
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Density == ThemeDensity.Comfortable ? "true" : "false")"
+                                aria-selected="@(Theme.Density == ThemeDensity.Comfortable ? "true" : "false")"
+                                @onclick="() => Theme.SetDensityAsync(ThemeDensity.Comfortable)">
+                            Comfortable
+                        </button>
+                        <button type="button" role="radio" class="cm-tabs__tab"
+                                aria-checked="@(Theme.Density == ThemeDensity.Compact ? "true" : "false")"
+                                aria-selected="@(Theme.Density == ThemeDensity.Compact ? "true" : "false")"
+                                @onclick="() => Theme.SetDensityAsync(ThemeDensity.Compact)">
+                            Compact
+                        </button>
+                    </div>
+                </fieldset>
+            </div>
+        </article>
+    }
+
     @if (_tab == "credentials")
     {
         @if (_secrets is null && _loadError is null)
@@ -358,7 +431,7 @@
     /// <summary>Credentials first: it is the panel people navigate here to change.</summary>
     private static readonly (string Id, string Label)[] Tabs =
         [("credentials", "Credentials"), ("security", "Security"), ("links", "Links"),
-         ("readiness", "Readiness"), ("models", "Models")];
+         ("readiness", "Readiness"), ("models", "Models"), ("appearance", "Appearance")];
 
     private string _tab = "credentials";
 

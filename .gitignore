@@ -66,3 +66,6 @@ src/Castmill.UI/wwwroot/js/castmill-apextree.js.map
 src/Castmill.UI/wwwroot/js/*.LEGAL.txt
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+
+# Installer build output (an 88 MB MSI does not belong in git)
+installer/windows/out/

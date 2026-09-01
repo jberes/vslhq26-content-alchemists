@@ -708,3 +708,19 @@ input[type="file"]:disabled::file-selector-button {
     border-color: var(--cm-rule);
     cursor: not-allowed;
 }
+
+/* Header light/dark toggle: icon-only, so it costs no horizontal room in the top bar. */
+.cm-topbar__theme {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 32px;
+    block-size: 32px;
+    padding: 0;
+    flex: none;
+}
+
+.cm-topbar__theme svg {
+    inline-size: 17px;
+    block-size: 17px;
+}

@@ -8,6 +8,7 @@
 @implements IDisposable
 @inherits LayoutComponentBase
 @inject ThemeService Theme
+@inject Castmill.UI.Platform.IShellInfo Shell
 @inject AuthState Auth
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -40,7 +41,32 @@ else
                 </button>
                 <span class="cm-kicker">@PhaseLabel</span>
                 <div class="cm-topbar__spacer"></div>
-                <a class="cm-meta" href="dev/style-guide">Style guide</a>
+                @* Light/dark is the switch people reach for constantly, so it lives in the
+                   header; family and density are in Settings > Appearance. The style-guide
+                   link is dev-only — in a shipped build that page refuses to render, so
+                   linking to it just leads somewhere broken. *@
+                <button type="button" class="cm-topbar__theme cm-button cm-button--quiet"
+                        title="@(Theme.Mode == ThemeMode.Dark ? "Switch to light theme" : "Switch to dark theme")"
+                        aria-label="@(Theme.Mode == ThemeMode.Dark ? "Switch to light theme" : "Switch to dark theme")"
+                        @onclick="Theme.ToggleModeAsync">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        @if (Theme.Mode == ThemeMode.Dark)
+                        {
+                            <circle cx="12" cy="12" r="4" />
+                            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                        }
+                        else
+                        {
+                            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                        }
+                    </svg>
+                </button>
+                <a class="cm-meta" href="settings">Settings</a>
+                @if (Shell.IsDevelopment)
+                {
+                    <a class="cm-meta" href="dev/style-guide">Style guide</a>
+                }
                 @if (Auth.AvatarDataUrl is { } avatarUrl)
                 {
                     <img class="cm-user-avatar" src="@avatarUrl" alt="" />
