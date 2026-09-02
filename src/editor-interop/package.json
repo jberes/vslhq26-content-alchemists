@@ -18,7 +18,7 @@
     "esbuild": "0.28.1"
   },
   "dependencies": {
-    "@tiptap/core": "3.29.2",
+    "@tiptap/core": "3.30.4",
     "@tiptap/extension-bubble-menu": "3.29.2",
     "@tiptap/extension-image": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
