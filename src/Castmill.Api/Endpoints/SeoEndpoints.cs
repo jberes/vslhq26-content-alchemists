@@ -41,6 +41,7 @@ public static class SeoEndpoints
         // edits. /keyword-plan stays as the post-hoc report that creates an artifact.
         group.MapPost("/research", ResearchAsync).Validate<SeoResearchRequest>().RequireRateLimiting("ai");
         group.MapPost("/deep-analysis", DeepAnalysisAsync).Validate<SeoDeepAnalysisRequest>().RequireRateLimiting("ai");
+        group.MapPost("/distribution", DistributionAsync).Validate<SeoDistributionRequest>().RequireRateLimiting("searches");
 
         group.MapGet("/reports/{artifactId:guid}", GetReportAsync);
         group.MapPost("/reports/{artifactId:guid}/share", ShareAsync).RequireRateLimiting("writes");
@@ -54,6 +55,28 @@ public static class SeoEndpoints
     /// live SERP snapshot as the campaign's SEO report before any titles or copy are made.
     /// The report remains a draft until the user saves their chosen campaign targets.
     /// </summary>
+    /// <summary>
+    /// Post-publish check (ADR-059): crawl the live page, judge it against the AEO rules, and
+    /// list who links to it and where copies appear. Live data, not persisted.
+    /// </summary>
+    private static async Task<IResult> DistributionAsync(
+        SeoDistributionRequest request,
+        ISeoDistributionService distribution,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var exists = await db.Campaigns.AnyAsync(c => c.Id == request.CampaignId, ct);
+        if (!exists)
+        {
+            return Results.NotFound();
+        }
+        if (!Uri.TryCreate(request.Url.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["url"] = ["Enter the full http(s) address of the published page."] });
+        }
+        return Results.Ok(await distribution.BuildAsync(uri.ToString(), request.MentionQuery, ct));
+    }
+
     private static async Task<IResult> DeepAnalysisAsync(
         SeoDeepAnalysisRequest request,
         System.Security.Claims.ClaimsPrincipal principal,

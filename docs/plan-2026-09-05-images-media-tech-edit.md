@@ -128,5 +128,6 @@ Both actions already read Steering (finding above). Add an optional **Technical 
   - SEO research agent decorates `SeoResearch`; metrics only from DataForSEO tool results.
 - Prompts: `Generators.AeoGuidance` on every reader-facing kind (answer-first, question headings, FAQ, keyword placement, YouTube description rules, syndication canonical).
 - Config: `Ai:Agents:{TechEditVerifier,ImageCritic,SeoResearch}` (structure in the committed template).
-- Backlog: DataForSEO `ai_keyword_data` / `llm_mentions` in the AEO scorecard; Content Analysis for syndication tracking; OnPage check after publish; critic for compare-mode takes.
+- **Follow-up (same night) — BUILT, ADR-059 / ADR-F58:** DataForSEO `ai_keyword_data` + `llm_mentions` in the deep report; `POST /seo/distribution` Published page check (OnPage instant crawl judged in code, referring domains, Content Analysis title mentions) with a panel on the SEO desk; `chat-audit` (gpt-5.6-sol) probed with an image — vision confirmed; tiptap 3.31.3 (npm audit clean).
+- Backlog: critic for compare-mode takes; scheduled re-checks of the Published page check with diffs.
 

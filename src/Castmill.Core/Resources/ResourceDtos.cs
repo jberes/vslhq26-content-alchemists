@@ -537,7 +537,68 @@ public sealed record SeoDeepInsights(
     IReadOnlyList<SeoCompetitorSnapshot>? Competitors,
     IReadOnlyList<SeoContentAngle> ContentAngles,
     IReadOnlyList<SeoSectionStatus> Sections,
-    DateTimeOffset AnglesGeneratedAt);
+    DateTimeOffset AnglesGeneratedAt,
+    /// <summary>How often AI assistants are asked each target phrase (DataForSEO AI Keyword Data). Null on older reports.</summary>
+    IReadOnlyList<SeoAiKeywordVolume>? AiKeywordVolumes = null,
+    /// <summary>Where the site is already named inside LLM answers (DataForSEO LLM Mentions). Null on older reports.</summary>
+    SeoLlmMentionsSummary? LlmMentions = null);
+
+/// <summary>Monthly prompts to AI assistants that contain the phrase — the AEO twin of search volume.</summary>
+public sealed record SeoAiKeywordVolume(string Term, long AiSearchVolume, long? PreviousMonth = null);
+
+public sealed record SeoLlmMention(
+    string Platform, string Model, string Question, long? AiSearchVolume, string? LastSeen, string? Excerpt);
+
+public sealed record SeoLlmMentionsSummary(
+    string Domain,
+    long TotalMentions,
+    IReadOnlyDictionary<string, int> SampleByPlatform,
+    IReadOnlyList<SeoLlmMention> Samples);
+
+// ---- Distribution check (ADR-059): is the published page built the way the report asked, and
+// ---- who is already linking to or copying it?
+
+public sealed record SeoDistributionRequest(
+    [property: Required] Guid CampaignId,
+    [property: Required, MaxLength(2000), Url] string Url,
+    /// <summary>Phrase to search mentions for; defaults to the page title.</summary>
+    [property: MaxLength(200)] string? MentionQuery = null);
+
+public sealed record SeoPageSnapshot(
+    string Url,
+    int StatusCode,
+    string? Title,
+    string? Description,
+    string? Canonical,
+    IReadOnlyList<string> H1,
+    IReadOnlyList<string> H2,
+    IReadOnlyList<string> H3,
+    int WordCount,
+    bool HasStructuredData,
+    bool IsHttps,
+    double? OnPageScore);
+
+public sealed record SeoPageCheck(string Label, bool Passed, string Detail);
+
+public sealed record SeoReferringDomain(string Domain, long Rank, long Backlinks, string? FirstSeen, long SpamScore);
+
+public sealed record SeoReferringDomainsResult(long TotalCount, IReadOnlyList<SeoReferringDomain> Items);
+
+public sealed record SeoMention(string Url, string Domain, string? Title, string? Snippet, string? FetchedAt, long? DomainRank);
+
+public sealed record SeoMentionsResult(long TotalCount, IReadOnlyList<SeoMention> Items);
+
+public sealed record SeoDistributionReport(
+    string Url,
+    DateTimeOffset GeneratedAt,
+    SeoPageSnapshot? Page,
+    IReadOnlyList<SeoPageCheck> Checks,
+    long? ReferringDomainCount,
+    IReadOnlyList<SeoReferringDomain> ReferringDomains,
+    string? MentionQuery,
+    long? MentionCount,
+    IReadOnlyList<SeoMention> Mentions,
+    IReadOnlyList<SeoSectionStatus> Sections);
 
 public sealed record SeoAnalysisReportResponse(
     Guid ReportArtifactId,

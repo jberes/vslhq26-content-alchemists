@@ -183,6 +183,62 @@
         </div>
     </section>
 
+    @if (Insights is { AiKeywordVolumes: { Count: > 0 } aiVolumes })
+    {
+        <section class="cm-deep-report__section">
+            <h3>AI assistant demand</h3>
+            <p class="cm-meta">How often ChatGPT, Gemini and the other assistants are asked each target phrase per month — the answer-engine twin of search volume. A phrase with AI demand and no citation is the AEO gap to close first.</p>
+            <div class="cm-scroll-x">
+                <table class="cm-seo__table">
+                    <thead><tr><th>Keyword</th><th>AI prompts / month</th><th>Previous month</th></tr></thead>
+                    <tbody>
+                        @foreach (var row in aiVolumes.OrderByDescending(v => v.AiSearchVolume).Take(24))
+                        {
+                            <tr>
+                                <td><strong>@row.Term</strong></td>
+                                <td class="cm-mono">@row.AiSearchVolume.ToString("N0", CultureInfo.CurrentCulture)</td>
+                                <td class="cm-mono">@(row.PreviousMonth?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    @if (Insights is { LlmMentions: { } mentions })
+    {
+        <section class="cm-deep-report__section">
+            <h3>Where LLMs already name @mentions.Domain</h3>
+            <p class="cm-meta">
+                @mentions.TotalMentions.ToString("N0", CultureInfo.CurrentCulture) answers across the tracked assistants mention the site.
+                @if (mentions.SampleByPlatform.Count > 0)
+                {
+                    <text>Sample by platform: @string.Join(", ", mentions.SampleByPlatform.OrderByDescending(p => p.Value).Select(p => $"{p.Key} {p.Value}")).</text>
+                }
+            </p>
+            @if (mentions.Samples.Count > 0)
+            {
+                <div class="cm-scroll-x">
+                    <table class="cm-seo__table">
+                        <thead><tr><th>Question asked</th><th>Assistant</th><th>AI prompts / month</th><th>Last seen</th></tr></thead>
+                        <tbody>
+                            @foreach (var sample in mentions.Samples.Take(20))
+                            {
+                                <tr>
+                                    <td><strong>@sample.Question</strong>@if (sample.Excerpt is not null) { <br /><span class="cm-meta">@sample.Excerpt</span> }</td>
+                                    <td>@sample.Platform · @sample.Model</td>
+                                    <td class="cm-mono">@(sample.AiSearchVolume?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</td>
+                                    <td class="cm-mono">@(sample.LastSeen?[..Math.Min(10, sample.LastSeen.Length)] ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+
     @if (Insights is { KeywordGaps.Count: > 0 } gapInsights)
     {
         <section class="cm-deep-report__section">

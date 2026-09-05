@@ -58,6 +58,8 @@ public sealed class SeoReportService(
         SeoAuthoritySnapshot? authority = null;
         IReadOnlyList<SeoCompetitorSnapshot>? competitors = null;
         SeoAeoScorecard aeo;
+        IReadOnlyList<SeoAiKeywordVolume> aiVolumes = [];
+        SeoLlmMentionsSummary? llmMentions = null;
 
         if (!provider.IsConfigured)
         {
@@ -75,14 +77,23 @@ public sealed class SeoReportService(
                 research.ProviderLookups is { Count: > 0 } lookups
                     ? $"Completed: {string.Join(", ", lookups)}."
                     : "No DataForSEO keyword dataset completed for this run."));
+            // AEO demand (ADR-059): how often the assistants themselves are asked each phrase.
+            var aiVolumeTask = SoftAsync(
+                "AI search demand",
+                () => provider.GetAiSearchVolumeAsync([.. research.Keywords.Select(k => k.Term).Take(24)], ct),
+                Array.Empty<SeoAiKeywordVolume>());
             if (domain.Length == 0)
             {
                 sections.Add(new SeoSectionStatus("Domain intelligence", false,
                     "Add the site URL to measure rankings, authority, competitors, and AI citations."));
                 aeo = new SeoAeoScorecard(null, 0, 0, []);
+                aiVolumes = await aiVolumeTask;
             }
             else
             {
+                var llmMentionsTask = SoftAsync(
+                    "LLM mentions", () => provider.GetLlmMentionsAsync(domain, 20, ct),
+                    default(SeoLlmMentionsSummary));
                 var rankedTask = SoftAsync(
                     "ranked keywords", () => provider.GetRankedKeywordsAsync(domain, 50, ct),
                     Array.Empty<SeoRankedKeyword>());
@@ -100,10 +111,13 @@ public sealed class SeoReportService(
                 var aeoTask = BuildAeoAsync(domain, audienceAndBrief, serp.Keyword, ct);
 
                 await Task.WhenAll(
-                    rankedTask, authorityTask, footprintTask, competitorCandidatesTask, aeoTask);
+                    rankedTask, authorityTask, footprintTask, competitorCandidatesTask, aeoTask,
+                    aiVolumeTask, llmMentionsTask);
                 ranked = rankedTask.Result;
                 authority = authorityTask.Result;
                 aeo = aeoTask.Result;
+                aiVolumes = aiVolumeTask.Result;
+                llmMentions = llmMentionsTask.Result;
                 competitors = await BuildCompetitorsAsync(
                     domain, serp, competitorCandidatesTask.Result,
                     authority, footprintTask.Result, ct);
@@ -126,7 +140,15 @@ public sealed class SeoReportService(
                     aeo.EnginesSucceeded > 0
                         ? $"{aeo.EnginesCitingDomain} of {aeo.EnginesSucceeded} available engines cited {domain}."
                         : "No answer engine returned a usable response."));
+                sections.Add(new SeoSectionStatus("LLM mentions", llmMentions is not null,
+                    llmMentions is null
+                        ? "The LLM mentions dataset was unavailable."
+                        : $"{llmMentions.TotalMentions:N0} LLM answers already name {domain}."));
             }
+            sections.Add(new SeoSectionStatus("AI search demand", aiVolumes.Count > 0,
+                aiVolumes.Count > 0
+                    ? $"AI assistant prompt volume returned for {aiVolumes.Count(v => v.AiSearchVolume > 0)} of {aiVolumes.Count} keywords."
+                    : "No AI assistant prompt volume was returned."));
         }
 
         var rankedTerms = ranked.Select(r => r.Term).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -145,7 +167,8 @@ public sealed class SeoReportService(
                 : "No content angles could be generated."));
 
         return new SeoDeepInsights(
-            aeo, gaps, ranked, authority, competitors, angles, sections, generatedAt);
+            aeo, gaps, ranked, authority, competitors, angles, sections, generatedAt,
+            aiVolumes.Count > 0 ? aiVolumes : null, llmMentions);
     }
 
     public Task<IReadOnlyList<SeoContentAngle>> RegenerateAnglesAsync(

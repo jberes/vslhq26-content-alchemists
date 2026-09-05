@@ -84,6 +84,26 @@ public interface ISeoProvider
         string provider, string question, string? siteDomain, CancellationToken ct) =>
         Task.FromResult(new SeoAeoEngineResult(
             provider, provider, false, false, null, [], "Answer-engine analysis is unavailable."));
+
+    /// <summary>How often AI assistants are prompted with each phrase (ai_optimization/ai_keyword_data).</summary>
+    Task<IReadOnlyList<SeoAiKeywordVolume>> GetAiSearchVolumeAsync(IReadOnlyList<string> keywords, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SeoAiKeywordVolume>>([]);
+
+    /// <summary>LLM answers that already name the domain (ai_optimization/llm_mentions). Null when unavailable.</summary>
+    Task<SeoLlmMentionsSummary?> GetLlmMentionsAsync(string domain, int limit, CancellationToken ct) =>
+        Task.FromResult<SeoLlmMentionsSummary?>(null);
+
+    /// <summary>A live single-page crawl of a published URL (on_page/instant_pages). Null when unavailable.</summary>
+    Task<SeoPageSnapshot?> GetPageSnapshotAsync(string url, CancellationToken ct) =>
+        Task.FromResult<SeoPageSnapshot?>(null);
+
+    /// <summary>Domains linking to a page or site (backlinks/referring_domains).</summary>
+    Task<SeoReferringDomainsResult> GetReferringDomainsAsync(string target, int limit, CancellationToken ct) =>
+        Task.FromResult(new SeoReferringDomainsResult(0, []));
+
+    /// <summary>Pages across the web that mention a phrase (content_analysis/search) — syndicated copies included.</summary>
+    Task<SeoMentionsResult> SearchMentionsAsync(string keyword, int limit, CancellationToken ct) =>
+        Task.FromResult(new SeoMentionsResult(0, []));
 }
 
 /// <summary>
@@ -624,6 +644,183 @@ public sealed class DataForSeoProvider(
         return (int)Math.Clamp(avgVolume / 100.0 * (1.0 - avgDifficulty / 100.0), 0, 100);
     }
 
+    // ---- AI Optimization, OnPage, Backlinks, Content Analysis (ADR-059) ----------
+
+    public async Task<IReadOnlyList<SeoAiKeywordVolume>> GetAiSearchVolumeAsync(IReadOnlyList<string> keywords, CancellationToken ct)
+    {
+        if (keywords.Count == 0)
+        {
+            return [];
+        }
+        using var doc = await PostAsync("v3/ai_optimization/ai_keyword_data/keywords_search_volume/live", new[]
+        {
+            new
+            {
+                keywords = keywords.Take(200).ToArray(),
+                location_code = _options.LocationCode,
+                language_code = _options.LanguageCode,
+            },
+        }, ct);
+
+        var rows = new List<SeoAiKeywordVolume>();
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var term = Str(item, "keyword");
+            if (term.Length == 0)
+            {
+                continue;
+            }
+            long? previous = null;
+            if (item.TryGetProperty("ai_monthly_searches", out var months) && months.ValueKind == JsonValueKind.Array)
+            {
+                var second = months.EnumerateArray().Skip(1).FirstOrDefault();
+                previous = second.ValueKind == JsonValueKind.Object ? NullableLong(second, "ai_search_volume") : null;
+            }
+            rows.Add(new SeoAiKeywordVolume(term, Num(item, "ai_search_volume"), previous));
+        }
+        return rows;
+    }
+
+    public async Task<SeoLlmMentionsSummary?> GetLlmMentionsAsync(string domain, int limit, CancellationToken ct)
+    {
+        var target = NormalizeDomain(domain);
+        if (target.Length == 0)
+        {
+            return null;
+        }
+        using var doc = await PostAsync("v3/ai_optimization/llm_mentions/search/live", new[]
+        {
+            new
+            {
+                target = new[] { new { domain = target } },
+                limit = Math.Clamp(limit, 1, 100),
+            },
+        }, ct);
+
+        foreach (var result in TaskResultItems(doc, itemsNestedInResult: false))
+        {
+            var samples = new List<SeoLlmMention>();
+            var byPlatform = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (result.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var platform = Str(item, "platform");
+                    byPlatform[platform] = byPlatform.GetValueOrDefault(platform) + 1;
+                    samples.Add(new SeoLlmMention(
+                        platform,
+                        Str(item, "model_name"),
+                        Str(item, "question"),
+                        NullableLong(item, "ai_search_volume"),
+                        NullableText(item, "last_response_at"),
+                        Excerpt(NullableText(item, "answer"))));
+                }
+            }
+            return new SeoLlmMentionsSummary(target, Num(result, "total_count"), byPlatform, samples);
+        }
+        return null;
+    }
+
+    public async Task<SeoPageSnapshot?> GetPageSnapshotAsync(string url, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/on_page/instant_pages", new[]
+        {
+            new { url, enable_javascript = false, load_resources = false },
+        }, ct);
+
+        foreach (var item in TaskResultItems(doc, itemsNestedInResult: true))
+        {
+            var meta = Object(item, "meta");
+            var htags = Object(meta, "htags");
+            var checks = Object(item, "checks");
+            var content = Object(meta, "content");
+            return new SeoPageSnapshot(
+                NullableText(item, "url") ?? url,
+                (int)Num(item, "status_code"),
+                NullableText(meta, "title"),
+                NullableText(meta, "description"),
+                NullableText(meta, "canonical"),
+                Strings(htags, "h1"),
+                Strings(htags, "h2"),
+                Strings(htags, "h3"),
+                (int)Num(content, "plain_text_word_count"),
+                Bool(checks, "has_micromarkup"),
+                Bool(checks, "is_https"),
+                NullableDouble(item, "onpage_score"));
+        }
+        return null;
+    }
+
+    public async Task<SeoReferringDomainsResult> GetReferringDomainsAsync(string target, int limit, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/backlinks/referring_domains/live", new[]
+        {
+            new { target, limit = Math.Clamp(limit, 1, 100), order_by = RankDescending },
+        }, ct);
+
+        foreach (var result in TaskResultItems(doc, itemsNestedInResult: false))
+        {
+            var rows = new List<SeoReferringDomain>();
+            if (result.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    rows.Add(new SeoReferringDomain(
+                        Str(item, "domain"), Num(item, "rank"), Num(item, "backlinks"),
+                        NullableText(item, "first_seen"), Num(item, "backlinks_spam_score")));
+                }
+            }
+            return new SeoReferringDomainsResult(Num(result, "total_count"), rows);
+        }
+        return new SeoReferringDomainsResult(0, []);
+    }
+
+    public async Task<SeoMentionsResult> SearchMentionsAsync(string keyword, int limit, CancellationToken ct)
+    {
+        using var doc = await PostAsync("v3/content_analysis/search/live", new[]
+        {
+            new { keyword, limit = Math.Clamp(limit, 1, 100) },
+        }, ct);
+
+        foreach (var result in TaskResultItems(doc, itemsNestedInResult: false))
+        {
+            var rows = new List<SeoMention>();
+            if (result.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var info = Object(item, "content_info");
+                    rows.Add(new SeoMention(
+                        Str(item, "url"), Str(item, "domain"),
+                        FirstString(info, "title", "main_title"), NullableText(info, "snippet"),
+                        NullableText(item, "fetch_time"), NullableLong(item, "domain_rank")));
+                }
+            }
+            return new SeoMentionsResult(Num(result, "total_count"), rows);
+        }
+        return new SeoMentionsResult(0, []);
+    }
+
+    private static readonly string[] RankDescending = ["rank,desc"];
+
+    private static IReadOnlyList<string> Strings(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array
+            ? [.. v.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!.Trim()).Where(x => x.Length > 0)]
+            : [];
+
+    /// <summary>An LLM answer minus its image markdown, trimmed to a readable sample.</summary>
+    internal static string? Excerpt(string? answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            return null;
+        }
+        var lines = answer.Split('\n').Where(l => !l.TrimStart().StartsWith("![", StringComparison.Ordinal));
+        var text = string.Join(" ", lines).Trim();
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        return text.Length <= 240 ? text : text[..240] + "…";
+    }
+
     // ---- Transport & envelope --------------------------------------------------
 
     private async Task<JsonDocument> PostAsync(string path, object body, CancellationToken ct)
@@ -829,17 +1026,20 @@ public sealed class DataForSeoProvider(
         return null;
     }
 
+    // Every accessor tolerates a missing object (ValueKind Undefined/Null): DataForSEO returns
+    // "meta": null for a page its crawler could not read, and a broken page is a finding, not
+    // an exception.
     private static string Str(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : "";
 
     private static bool Bool(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False && v.GetBoolean();
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False && v.GetBoolean();
 
     private static long Num(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
 
     private static double Dbl(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0;
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0;
 
     private static long? NullableLong(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object
@@ -854,7 +1054,7 @@ public sealed class DataForSeoProvider(
             : null;
 
     private static string? NullableText(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
 }

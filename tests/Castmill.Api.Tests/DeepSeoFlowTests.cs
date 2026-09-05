@@ -68,6 +68,11 @@ public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
         Assert.Equal(3, report.Insights.Aeo.EnginesSucceeded);
         Assert.Single(report.Insights.RankedKeywords);
         Assert.NotNull(report.Insights.SiteAuthority);
+        // ADR-059: AI assistant demand and LLM mentions ride on the same report.
+        Assert.Equal(93, Assert.Single(report.Insights.AiKeywordVolumes!).AiSearchVolume);
+        Assert.Equal(1281, report.Insights.LlmMentions!.TotalMentions);
+        Assert.Contains(report.Insights.Sections, s => s.Section == "AI search demand" && s.Available);
+        Assert.Contains(report.Insights.Sections, s => s.Section == "LLM mentions" && s.Available);
         Assert.Equal(3, report.Insights.Competitors!.Count);
         Assert.Equal(0.62, report.Insights.Competitors.Single(c => c.Domain == "one.example").TopicVisibility);
         Assert.NotEmpty(report.Insights.ContentAngles);
@@ -504,6 +509,12 @@ public sealed class DeepSeoFlowTests(CastmillApiFactory factory)
                 [new SeoCompetitorCandidate("one.example", 2.4, 8, 0.62, 440),
                  new SeoCompetitorCandidate("two.example", 4.2, 6, 0.41, 260),
                  new SeoCompetitorCandidate("example.com", 8, 2, 0.12, 40)]);
+        public Task<IReadOnlyList<SeoAiKeywordVolume>> GetAiSearchVolumeAsync(IReadOnlyList<string> keywords, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SeoAiKeywordVolume>>([.. keywords.Select(k => new SeoAiKeywordVolume(k, 93, 96))]);
+        public Task<SeoLlmMentionsSummary?> GetLlmMentionsAsync(string domain, int limit, CancellationToken ct) =>
+            Task.FromResult<SeoLlmMentionsSummary?>(new SeoLlmMentionsSummary(domain, 1281,
+                new Dictionary<string, int> { ["google"] = 1 },
+                [new SeoLlmMention("google", "google_ai_overview", "best react grid", 90500, "2026-07-30", "An answer.")]));
         public Task<SeoAeoEngineResult> QueryAnswerEngineAsync(
             string provider, string question, string? siteDomain, CancellationToken ct) =>
             Task.FromResult(provider == "perplexity"

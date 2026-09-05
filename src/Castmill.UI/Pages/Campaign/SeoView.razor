@@ -295,6 +295,8 @@
                                          OnRegenerate="RegenerateImpactAsync" />
                 }
 
+                <SeoDistributionPanel CampaignId="CampaignId" DefaultUrl="@(HasValidSiteUrl ? _focus.Trim() : null)" />
+
                 @* The Content Scout (E4). This generalises the per-keyword "Draft as artifact"
                    button above: it spans every kind rather than only blogs, and — the point —
                    it checks what we have already published and already drafted first. *@

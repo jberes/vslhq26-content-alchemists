@@ -341,4 +341,118 @@ public sealed class DataForSeoTests
         Assert.True(DataForSeoProvider.Opportunity(easyPopular) > DataForSeoProvider.Opportunity(hardPopular));
         Assert.True(DataForSeoProvider.Opportunity(hardPopular) > DataForSeoProvider.Opportunity(easyNiche));
     }
+
+    // ---- ADR-059: AI Optimization, OnPage, Backlinks, Content Analysis ----------
+
+    [Fact]
+    public async Task Ai_search_volume_parses_the_current_and_previous_month()
+    {
+        var handler = new StubHandler(_ => """
+            {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"items":[
+              {"keyword":"deployment automation","ai_search_volume":93,"ai_monthly_searches":[{"year":2026,"month":8,"ai_search_volume":93},{"year":2026,"month":7,"ai_search_volume":96}]},
+              {"keyword":"blazor grid","ai_search_volume":0,"ai_monthly_searches":[]}]}]}]}
+            """);
+        var rows = await CreateProvider(handler).GetAiSearchVolumeAsync(["deployment automation", "blazor grid"], CancellationToken.None);
+
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(93, rows[0].AiSearchVolume);
+        Assert.Equal(96, rows[0].PreviousMonth);
+        Assert.Null(rows[1].PreviousMonth);
+        Assert.EndsWith("v3/ai_optimization/ai_keyword_data/keywords_search_volume/live", handler.LastRequest!.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Llm_mentions_send_the_domain_target_shape_and_summarise_by_platform()
+    {
+        string? body = null;
+        var handler = new StubHandler(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return """
+                {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"total_count":1281,"items_count":2,"items":[
+                  {"platform":"google","model_name":"google_ai_overview","question":"model view presenter","answer":"![img](https://x/y)\nMVP is a pattern **derived** from MVC.","ai_search_volume":90500,"last_response_at":"2026-07-30 04:09:09 +00:00"},
+                  {"platform":"chat_gpt","model_name":"gpt-4o","question":"best blazor grid","answer":"Ignite UI…","ai_search_volume":null,"last_response_at":"2026-08-01 00:00:00 +00:00"}]}]}]}
+                """;
+        });
+        var summary = await CreateProvider(handler).GetLlmMentionsAsync("https://www.infragistics.com/", 20, CancellationToken.None);
+
+        Assert.NotNull(summary);
+        Assert.Equal("infragistics.com", summary!.Domain);
+        Assert.Equal(1281, summary.TotalMentions);
+        Assert.Equal(1, summary.SampleByPlatform["google"]);
+        Assert.Equal(1, summary.SampleByPlatform["chat_gpt"]);
+        Assert.Equal("MVP is a pattern **derived** from MVC.", summary.Samples[0].Excerpt);
+        Assert.Equal(90500, summary.Samples[0].AiSearchVolume);
+        Assert.Null(summary.Samples[1].AiSearchVolume);
+        // The API rejects a string target and a "target" key inside the item: it wants {"domain": …}.
+        Assert.Contains("\"target\":[{\"domain\":\"infragistics.com\"}]", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Instant_page_crawl_reads_headings_canonical_word_count_and_schema()
+    {
+        var handler = new StubHandler(_ => """
+            {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"items":[
+              {"url":"https://www.example.com/post","status_code":200,"onpage_score":98.17,
+               "meta":{"title":"Blazor grids explained","description":"A guide.","canonical":"https://www.example.com/post",
+                       "htags":{"h1":["Blazor grids explained"],"h2":["What is a Blazor grid?","Setup"],"h3":["Why virtualise?"]},
+                       "content":{"plain_text_word_count":1420}},
+               "checks":{"has_micromarkup":true,"is_https":true}}]}]}]}
+            """);
+        var page = await CreateProvider(handler).GetPageSnapshotAsync("https://www.example.com/post", CancellationToken.None);
+
+        Assert.NotNull(page);
+        Assert.Equal(200, page!.StatusCode);
+        Assert.Equal("Blazor grids explained", page.Title);
+        Assert.Equal(["Blazor grids explained"], page.H1);
+        Assert.Equal(2, page.H2.Count);
+        Assert.Equal(["Why virtualise?"], page.H3);
+        Assert.Equal(1420, page.WordCount);
+        Assert.True(page.HasStructuredData);
+        Assert.True(page.IsHttps);
+        Assert.Equal(98.17, page.OnPageScore);
+        Assert.EndsWith("v3/on_page/instant_pages", handler.LastRequest!.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_broken_page_with_null_meta_parses_to_its_status_code()
+    {
+        var handler = new StubHandler(_ => """
+            {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"items":[
+              {"resource_type":"broken","status_code":503,"url":"https://www.example.com/post","meta":null,"onpage_score":null,"checks":null}]}]}]}
+            """);
+        var page = await CreateProvider(handler).GetPageSnapshotAsync("https://www.example.com/post", CancellationToken.None);
+
+        Assert.NotNull(page);
+        Assert.Equal(503, page!.StatusCode);
+        Assert.Null(page.Title);
+        Assert.Empty(page.H1);
+        Assert.Equal(0, page.WordCount);
+    }
+
+    [Fact]
+    public async Task Referring_domains_and_mentions_carry_their_totals()
+    {
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath.Contains("backlinks", StringComparison.Ordinal)
+            ? """
+              {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"total_count":3,"items":[
+                {"domain":"medium.com","rank":812,"backlinks":2,"first_seen":"2026-09-01 10:00:00 +00:00","backlinks_spam_score":0}]}]}]}
+              """
+            : """
+              {"status_code":20000,"tasks":[{"status_code":20000,"result":[{"total_count":7,"items":[
+                {"url":"https://medium.com/@x/blazor-grids-explained","domain":"medium.com","domain_rank":812,"fetch_time":"2026-09-02 08:00:00 +00:00",
+                 "content_info":{"title":"Blazor grids explained","snippet":"Originally published at example.com…"}}]}]}]}
+              """);
+        var provider = CreateProvider(handler);
+
+        var links = await provider.GetReferringDomainsAsync("https://www.example.com/post", 25, CancellationToken.None);
+        var mentions = await provider.SearchMentionsAsync("Blazor grids explained", 25, CancellationToken.None);
+
+        Assert.Equal(3, links.TotalCount);
+        Assert.Equal("medium.com", Assert.Single(links.Items).Domain);
+        Assert.Equal(7, mentions.TotalCount);
+        var mention = Assert.Single(mentions.Items);
+        Assert.Equal("Blazor grids explained", mention.Title);
+        Assert.Equal(812, mention.DomainRank);
+    }
 }

@@ -88,4 +88,44 @@ public sealed class DeepSeoReportTests : CastmillUiTestContext
         Assert.True(drafted);
         Assert.True(regenerated);
     }
+
+    [Fact]
+    public void Ai_demand_and_llm_mentions_render_when_the_report_carries_them()
+    {
+        var report = new SeoAnalysisReportResponse(
+            Guid.NewGuid(), DateTimeOffset.UtcNow,
+            new SeoResearchResponse([new SeoTarget("react data grid", 8100, 42, 157.7, "provider")], [], true, []),
+            new SeoSerpSnapshot("react data grid", null, null, []),
+            [],
+            SiteUrl: "https://example.com",
+            Insights: new SeoDeepInsights(
+                new SeoAeoScorecard(null, 0, 0, []), [], [], null, null, [], [], DateTimeOffset.UtcNow,
+                [new SeoAiKeywordVolume("react data grid", 93, 96)],
+                new SeoLlmMentionsSummary("example.com", 1281, new Dictionary<string, int> { ["google"] = 1 },
+                    [new SeoLlmMention("google", "google_ai_overview", "best react grid", 90500, "2026-07-30 04:09:09 +00:00", "An answer.")])));
+
+        var view = Render<DeepSeoReport>(parameters => parameters.Add(p => p.Report, report));
+
+        Assert.Contains("AI assistant demand", view.Markup, StringComparison.Ordinal);
+        Assert.Contains("Where LLMs already name example.com", view.Markup, StringComparison.Ordinal);
+        Assert.Contains("1,281", view.Markup, StringComparison.Ordinal);
+        Assert.Contains("best react grid", view.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Older_reports_without_the_new_datasets_render_without_the_sections()
+    {
+        var report = new SeoAnalysisReportResponse(
+            Guid.NewGuid(), DateTimeOffset.UtcNow,
+            new SeoResearchResponse([new SeoTarget("react data grid", 8100, 42, 157.7, "provider")], [], true, []),
+            new SeoSerpSnapshot("react data grid", null, null, []),
+            [],
+            SiteUrl: "https://example.com",
+            Insights: new SeoDeepInsights(new SeoAeoScorecard(null, 0, 0, []), [], [], null, null, [], [], DateTimeOffset.UtcNow));
+
+        var view = Render<DeepSeoReport>(parameters => parameters.Add(p => p.Report, report));
+
+        Assert.DoesNotContain("AI assistant demand", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Where LLMs already name", view.Markup, StringComparison.Ordinal);
+    }
 }

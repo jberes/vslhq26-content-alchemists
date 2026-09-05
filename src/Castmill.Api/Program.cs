@@ -138,6 +138,7 @@ builder.Services.AddScoped<IWorkspaceLinks, WorkspaceLinks>();
 builder.Services.AddScoped<Castmill.Api.Services.Seo.SeoResearch>();
 builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoResearch, Castmill.Api.Services.Seo.SeoResearchAgent>();
 builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoReportService, Castmill.Api.Services.Seo.SeoReportService>();
+builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoDistributionService, Castmill.Api.Services.Seo.SeoDistributionService>();
 builder.Services.AddHostedService<InterruptedRunSweeper>();
 // Its own client: a short timeout and no resilience retries, because re-fetching a slow
 // third-party site would only make the user wait longer for the same answer.

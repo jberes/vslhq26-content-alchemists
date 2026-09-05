@@ -1,0 +1,158 @@
+@* Post-publish check (ADR-059 / ADR-F58): the report told the writers how to build the page;
+   this crawls the page that shipped and says whether they did, then shows who links to it
+   and where copies of it are appearing (Medium, LinkedIn, dev.to …). Live data each run. *@
+@using System.Globalization
+@using Castmill.Core.Resources
+@using Castmill.UI.Http
+@inject SeoClient Seo
+
+<section class="cm-deep-report__section cm-seo__distribution" aria-label="Published page check">
+    <div class="cm-deep-report__section-head">
+        <div>
+            <h3>Published page check</h3>
+            <p class="cm-meta">
+                Paste the live URL once the piece is up. Castmill crawls it against the answer-engine
+                rules the writers were given, counts the domains linking to it, and finds pages that
+                reuse its title — the syndicated copies that must point back here.
+            </p>
+        </div>
+    </div>
+    <div class="cm-form__actions">
+        <input class="cm-input cm-seo__focus" aria-label="Published page URL" placeholder="https://www.example.com/blog/the-post"
+               @bind="_url" @bind:event="oninput" disabled="@_running" />
+        <input class="cm-input" aria-label="Mention phrase" placeholder="Mention phrase (defaults to the page title)"
+               @bind="_query" @bind:event="oninput" disabled="@_running" />
+        <button type="button" class="cm-button" disabled="@(_running || !HasValidUrl)" @onclick="RunAsync">
+            @(_running ? "Checking the page…" : "Check page")
+        </button>
+    </div>
+    @if (_error is not null)
+    {
+        <p class="cm-meta" role="alert">@_error</p>
+    }
+    @if (_report is { } report)
+    {
+        <div class="cm-seo__distribution-result">
+            <ul class="cm-seo__checks" aria-label="Page checks">
+                @foreach (var check in report.Checks)
+                {
+                    <li class="@(check.Passed ? "cm-seo__check cm-seo__check--ok" : "cm-seo__check")">
+                        <strong>@check.Label</strong> · @check.Detail
+                    </li>
+                }
+            </ul>
+            @if (report.Page is { } crawled)
+            {
+                <p class="cm-meta">
+                    @(crawled.Title ?? "(no title)") · canonical @(crawled.Canonical ?? "none") · @crawled.WordCount.ToString("N0", CultureInfo.CurrentCulture) words
+                    · @crawled.H2.Count H2 · schema @(crawled.HasStructuredData ? "yes" : "no")
+                </p>
+            }
+
+            <h4>Referring domains — @(report.ReferringDomainCount?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</h4>
+            @if (report.ReferringDomains.Count == 0)
+            {
+                <p class="cm-meta">No domain links to this page yet. Syndicated copies with a first-paragraph link back are the fastest way to change that.</p>
+            }
+            else
+            {
+                <div class="cm-scroll-x">
+                    <table class="cm-seo__table">
+                        <thead><tr><th>Domain</th><th>Rank</th><th>Backlinks</th><th>First seen</th><th>Spam</th></tr></thead>
+                        <tbody>
+                            @foreach (var domain in report.ReferringDomains)
+                            {
+                                <tr>
+                                    <td><strong>@domain.Domain</strong></td>
+                                    <td class="cm-mono">@domain.Rank</td>
+                                    <td class="cm-mono">@domain.Backlinks.ToString("N0", CultureInfo.CurrentCulture)</td>
+                                    <td class="cm-mono">@(domain.FirstSeen?[..Math.Min(10, domain.FirstSeen.Length)] ?? "—")</td>
+                                    <td class="cm-mono">@domain.SpamScore</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <h4>Mentions of “@(report.MentionQuery ?? "—")” — @(report.MentionCount?.ToString("N0", CultureInfo.CurrentCulture) ?? "—")</h4>
+            @if (report.Mentions.Count == 0)
+            {
+                <p class="cm-meta">No page mentions that phrase yet. Copies on Medium, LinkedIn or dev.to will appear here once indexed.</p>
+            }
+            else
+            {
+                <div class="cm-scroll-x">
+                    <table class="cm-seo__table">
+                        <thead><tr><th>Page</th><th>Domain</th><th>Domain rank</th><th>Seen</th></tr></thead>
+                        <tbody>
+                            @foreach (var mention in report.Mentions)
+                            {
+                                <tr>
+                                    <td><a href="@mention.Url" target="_blank" rel="noopener">@(mention.Title ?? mention.Url)</a></td>
+                                    <td>@mention.Domain</td>
+                                    <td class="cm-mono">@(mention.DomainRank?.ToString(CultureInfo.CurrentCulture) ?? "—")</td>
+                                    <td class="cm-mono">@(mention.FetchedAt?[..Math.Min(10, mention.FetchedAt.Length)] ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            <ul class="cm-seo__checks" aria-label="Data coverage">
+                @foreach (var section in report.Sections)
+                {
+                    <li class="@(section.Available ? "cm-seo__check cm-seo__check--ok" : "cm-seo__check")">@section.Section · @section.Detail</li>
+                }
+            </ul>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid CampaignId { get; set; }
+    /// <summary>Pre-fills the URL field; the producer edits it to the exact published page.</summary>
+    [Parameter] public string? DefaultUrl { get; set; }
+
+    private string _url = string.Empty;
+    private string _query = string.Empty;
+    private bool _running;
+    private string? _error;
+    private SeoDistributionReport? _report;
+    private bool _seeded;
+
+    private bool HasValidUrl => Uri.TryCreate(_url.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+    protected override void OnParametersSet()
+    {
+        if (!_seeded && !string.IsNullOrWhiteSpace(DefaultUrl))
+        {
+            _url = DefaultUrl;
+            _seeded = true;
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        if (!HasValidUrl)
+        {
+            return;
+        }
+        _running = true;
+        _error = null;
+        try
+        {
+            _report = await Seo.DistributionCheckAsync(CampaignId, _url.Trim(),
+                string.IsNullOrWhiteSpace(_query) ? null : _query.Trim());
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+}

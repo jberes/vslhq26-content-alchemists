@@ -49,6 +49,13 @@ public sealed class SeoClient(ApiClient api)
             new SeoDeepAnalysisRequest(campaignId, transcriptArtifactId, siteUrl),
             anonymous: false, ct);
 
+    /// <summary>Post-publish check (ADR-059): live crawl + referring domains + mentions for a published URL.</summary>
+    public Task<SeoDistributionReport> DistributionCheckAsync(
+        Guid campaignId, string url, string? mentionQuery = null, CancellationToken ct = default) =>
+        api.PostAsync<SeoDistributionRequest, SeoDistributionReport>(
+            "api/v1/seo/distribution", new SeoDistributionRequest(campaignId, url, mentionQuery),
+            anonymous: false, ct);
+
     public Task<SeoTargetsResponse> GetTargetsAsync(Guid campaignId, CancellationToken ct = default) =>
         api.GetAsync<SeoTargetsResponse>($"api/v1/campaigns/{campaignId}/seo-targets", ct);
 

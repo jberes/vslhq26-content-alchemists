@@ -162,7 +162,7 @@ the agents:
 DataForSEO exposes eleven API families. Castmill uses the ones that inform *what to write and
 whether it worked*; the rest are either off-mission or wait on a real site to audit.
 
-**In use today**
+**In use (ADR-059 added the last five rows on 2026-09-05)**
 
 | Family / endpoint | Where | Purpose |
 |---|---|---|
@@ -171,24 +171,41 @@ whether it worked*; the rest are either off-mission or wait on a real site to au
 | Labs `ranked_keywords`, `domain_rank_overview`, `serp_competitors` | deep report | the site's own footprint, authority vs competitors, who wins the keyword set |
 | Backlinks `summary` | deep report | authority gap |
 | AI Optimization `llm_responses` | AEO scorecard | asks ChatGPT/Gemini/Claude/Perplexity the target questions and records whether the brand is cited |
+| **AI Optimization `ai_keyword_data/keywords_search_volume`** | deep report → *AI assistant demand* | how often the assistants themselves are prompted with each target phrase, with last month for trend — the AEO twin of search volume |
+| **AI Optimization `llm_mentions/search`** | deep report → *Where LLMs already name the site* | every tracked LLM answer that names the domain: the question asked, the assistant, prompt volume, last seen. Request shape is `target: [{ domain }]`; about $0.10 per call, so it runs once per deep analysis and only when a site URL is given |
+| **OnPage `instant_pages`** | SEO desk → *Published page check* | a live single-page crawl of the URL that shipped: title, description, canonical, H1/H2/H3, word count, schema presence, HTTPS, status |
+| **Backlinks `referring_domains`** | Published page check | which domains link to that exact page — the syndication loop closing |
+| **Content Analysis `search`** | Published page check | pages across the web that reuse the piece's title (or a phrase you type) — where the Medium / LinkedIn / dev.to copies are appearing |
 
-**Worth adding next (in priority order)**
+**The Published page check** (`POST /api/v1/seo/distribution`, `SeoDistributionService`) is
+the post-publish half of the desk. It judges the crawled page against the same AEO rules the
+writers were given — the judgement is code (`Evaluate`), not a model:
 
-1. **AI Optimization — `ai_keyword_data` and `llm_mentions`.** Search volume as seen by AI
-   assistants and where the brand is already mentioned in LLM answers. Directly measures the AEO
-   goal; would slot into the scorecard beside `llm_responses`.
-2. **Content Analysis.** Mentions of the brand/product across the web with sentiment — the
-   natural way to *track syndicated copies and backlinks to the video or core page* (Medium,
-   LinkedIn, dev.to) once they are live.
-3. **OnPage.** Crawl the published blog URL and confirm the AEO structure actually shipped:
-   headings, schema (`FAQPage`, `HowTo`, `Article`), canonical, word count. Belongs in the
-   publish step, after Git publish.
-4. **Backlinks `referring_domains` / `anchors`.** Which syndication targets are passing
-   authority to the original — closes the loop on the syndication guidance.
-5. **Keyword Data (Google Ads)** for paid-intent volume when a campaign has a landing page.
+| Check | Passes when |
+|---|---|
+| Page reachable | HTTP 2xx. A 403/503 is named as the site refusing the crawler (bot protection) and the remaining checks are skipped rather than failed |
+| Served over HTTPS | the crawler saw https |
+| Canonical points here | a canonical exists and resolves to this URL (scheme, `www.` and trailing slash ignored). A copy whose canonical points elsewhere is told so |
+| Exactly one H1 | one H1 |
+| Question headings | at least one H2/H3 ends with `?` |
+| Section structure | three or more H2s |
+| Enough depth | 800+ words (the blog generator's floor) |
+| Structured data | schema markup detected (Article + FAQPage is the ask) |
+| Title length | 1–60 characters |
+| Meta description | 1–160 characters |
 
-Not planned: Business Data (reviews/local), Merchant (shopping), App Data — off-mission for
-developer-tool content.
+Verified live on 2026-09-05 against the Ignite UI for Blazor product page: 58 referring
+domains, 3 title mentions, and four honest fails (no question headings, no schema, title 65,
+description 173). The Infragistics community blog returned 503 to DataForSEO's crawler — the
+check says so instead of inventing a verdict.
+
+**Still open**
+
+- Keyword Data (Google Ads) for paid-intent volume when a campaign has a landing page.
+- Scheduled re-checks: the Published page check is on demand; a weekly run that diffs
+  referring domains and mentions would show syndication paying off over time.
+- Not planned: Business Data (reviews/local), Merchant (shopping), App Data — off-mission for
+  developer-tool content.
 
 **What ranks a YouTube video vs a blog, and how the data maps.** YouTube ranks on intent match
 and retention, then metadata; the research agent's PAA and SERP reads say what the *intent* is,
@@ -204,9 +221,10 @@ benefit from the same target list, which is why targets live on the campaign, no
 - **Tech Edit + verifier:** Anthropic `claude-opus-5` when the Tech Edit key is stored — the
   highest-accuracy option for reading pages and deciding whether a sentence supports a claim.
   Without the key both fall back to the Foundry `chat-tech-edit` alias.
-- **Art director:** `chat-audit` must be a **vision-capable** deployment (GPT-4o-class or
-  better on Foundry). A text-only deployment produces `art director unavailable` on every take
-  and the loop costs nothing extra.
+- **Art director:** `chat-audit` must be a **vision-capable** deployment. The configured
+  `gpt-5.6-sol` deployment was probed with an image on 2026-09-05 and answered correctly, so the
+  critic works as deployed. A text-only deployment produces `art director unavailable` on every
+  take and the loop costs nothing extra.
 - **SEO research:** `chat` — planning, not prose; a mid-tier model is enough because every
   number comes from the tools.
 
