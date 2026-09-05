@@ -20,6 +20,18 @@ public interface IImageRenderer
         Guid userId, string prompt, int width, int height, string? modelAlias,
         IReadOnlyList<ImageReference> references, CancellationToken ct) =>
         RenderExactAsync(userId, prompt, width, height, modelAlias, ct);
+
+    /// <summary>Region edit of an existing take (ADR-055): the provider repaints the masked area,
+    /// the result is fitted back to the take's own size and WebP-encoded. No house rules are
+    /// appended: the frame IS the take, nothing is cropped.</summary>
+    Task<byte[]> RenderEditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, int width, int height, string? modelAlias, CancellationToken ct) =>
+        throw new NotSupportedException("Region edits need the real renderer.");
+
+    /// <summary>The frame the resolved provider paints for this slot (ADR-055) — for the
+    /// prompt preview's crop figures and the studio's per-model crop badge.</summary>
+    Task<(int Width, int Height)> FrameForAsync(Guid userId, int width, int height, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(ImageRenderer.FrameFor(width, height));
 }
 
 public sealed class ImageRenderer(IImageProviderRegistry providers, IImageComposer composer) : IImageRenderer
@@ -38,15 +50,18 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         return EncodeWebp(raw);
     }
 
+    // The provider is asked for the slot's EXACT size (ADR-055): MAI paints it, Gemini picks
+    // its nearest native ratio, gpt-image maps to one of three fixed frames. The safe-margin
+    // rules are then written against the frame that provider will really return, so the
+    // numbers in the prompt match the crop that follows.
     public async Task<byte[]> RenderExactAsync(
         Guid userId, string prompt, int width, int height, string? modelAlias, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
-        var aspect = AspectFor(width, height);
-        var frame = FrameDimensions(aspect);
+        var frame = await provider.FrameForAsync(userId, width, height, modelAlias, ct);
         var raw = await provider.GenerateAsync(
             userId, ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height),
-            aspect, modelAlias, ct);
+            ImageAspect.Describe(width, height), modelAlias, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 
@@ -55,11 +70,21 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         IReadOnlyList<ImageReference> references, CancellationToken ct)
     {
         var provider = providers.Resolve(modelAlias);
-        var aspect = AspectFor(width, height);
-        var frame = FrameDimensions(aspect);
+        var frame = await provider.FrameForAsync(userId, width, height, modelAlias, ct);
         var raw = await provider.GenerateAsync(
             userId, ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height),
-            aspect, modelAlias, references, ct);
+            ImageAspect.Describe(width, height), modelAlias, references, ct);
+        return composer.ToSlotWebp(raw, width, height);
+    }
+
+    public Task<(int Width, int Height)> FrameForAsync(
+        Guid userId, int width, int height, string? modelAlias, CancellationToken ct) =>
+        providers.Resolve(modelAlias).FrameForAsync(userId, width, height, modelAlias, ct);
+
+    public async Task<byte[]> RenderEditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, int width, int height, string? modelAlias, CancellationToken ct)
+    {
+        var raw = await providers.Resolve(modelAlias).EditAsync(userId, instruction, image, maskPng, modelAlias, ct);
         return composer.ToSlotWebp(raw, width, height);
     }
 
@@ -78,6 +103,10 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
         "9:16" or "2:3" or "portrait" => new GeneratedImageSize(1024, 1536),
         _ => new GeneratedImageSize(1024, 1024),
     };
+
+    /// <summary>The frame a provider paints for a slot of this size, before the centre-crop.</summary>
+    public static (int Width, int Height) FrameFor(int width, int height) =>
+        FrameDimensions(AspectFor(width, height));
 
     private static (int Width, int Height) FrameDimensions(string aspectRatio) =>
         aspectRatio.Trim() switch

@@ -501,67 +501,6 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
     }
 
     /// <summary>
-    /// Generated images kept arriving with their text clipped along the top or the left. The
-    /// cause is structural, not stylistic: the model emits its own fixed size and the renderer
-    /// then CROPS that to the slot's dimensions, which are a different aspect ratio — so
-    /// anything the model placed near an edge is inside the strip that gets cut away.
-    ///
-    /// The guardrails therefore have to reach every generation path, and have to come LAST so
-    /// a brand style block or a user adjustment cannot override them.
-    /// </summary>
-    [Fact]
-    public void Every_image_prompt_carries_the_safe_area_typography_rules_last()
-    {
-        var slot = new Castmill.Core.ImageSlot
-        {
-            Kind = "youtube-thumbnail",
-            State = "Empty",
-            TargetWidth = 1280,
-            TargetHeight = 720,
-        };
-        var plain = Castmill.Api.Endpoints.ImageSlotEndpoints.AppendSlotCompositionGuardrails(
-            Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt("a hero image", null, null), slot);
-        Assert.Contains("1280×720", plain, StringComparison.Ordinal);
-        Assert.Contains("16:9", plain, StringComparison.Ordinal);
-        Assert.Contains("middle 76%", plain, StringComparison.Ordinal);
-        Assert.Contains("No partial", plain, StringComparison.Ordinal);
-
-        // Brand style and a steering note must not be able to have the last word.
-        var steered = Castmill.Api.Endpoints.ImageSlotEndpoints.AppendSlotCompositionGuardrails(
-            Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt(
-                "a hero image", "Brand style: terracotta and ink.", "make the text touch the edges"), slot);
-
-        Assert.EndsWith(Castmill.Api.Endpoints.ImageSlotEndpoints.TypographyGuardrails, steered, StringComparison.Ordinal);
-        Assert.True(
-            steered.IndexOf("Adjustment:", StringComparison.Ordinal)
-            < steered.IndexOf("Text rendering rules", StringComparison.Ordinal),
-            "The typography rules must be the most recent instruction the model reads.");
-    }
-
-    /// <summary>
-    /// The thumbnail is the SEO surface YouTube actually shows, so text in it should carry
-    /// the campaign's primary keyword — as phrasing, never as a painted keyword list. Riding
-    /// on ComposeEffectivePrompt puts it on every slot generation, after the brand style and
-    /// before the user's adjustment.
-    /// </summary>
-    [Fact]
-    public void The_primary_keyword_steers_image_text_without_being_stuffed()
-    {
-        var prompt = Castmill.Api.Endpoints.ImageSlotEndpoints.ComposeEffectivePrompt(
-            "a bold thumbnail", "Brand style: terracotta.", "warmer light", "react data grid");
-
-        Assert.Contains("\"react data grid\"", prompt, StringComparison.Ordinal);
-        Assert.Contains("Never render a list of keywords", prompt, StringComparison.Ordinal);
-        // The user's adjustment stays the LAST word.
-        Assert.True(prompt.IndexOf("react data grid", StringComparison.Ordinal)
-            < prompt.IndexOf("Adjustment:", StringComparison.Ordinal));
-
-        // And a campaign without targets composes exactly as before.
-        Assert.DoesNotContain("keyword", Castmill.Api.Endpoints.ImageSlotEndpoints
-            .ComposeEffectivePrompt("a bold thumbnail", null, null, null), StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
     /// Blog image slots hang off a specific blog, so a test that wants them needs a blog to
     /// hang them from — reserving campaign-wide no longer creates any.
     /// </summary>

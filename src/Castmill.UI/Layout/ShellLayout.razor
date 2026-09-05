@@ -9,6 +9,7 @@
 @inherits LayoutComponentBase
 @inject ThemeService Theme
 @inject Castmill.UI.Platform.IShellInfo Shell
+@inject HttpClient Api
 @inject AuthState Auth
 @inject INotifier Notifier
 @inject NavigationManager Navigation
@@ -66,6 +67,12 @@ else
                 @if (Shell.IsDevelopment)
                 {
                     <a class="cm-meta" href="dev/style-guide">Style guide</a>
+                    @* Which API this client is talking to. The desktop shell defaults to
+                       production unless built with -p:CastmillApiBaseAddress, so a Debug
+                       build can silently exercise the live database — say so in the chrome. *@
+                    <span class="cm-chip cm-mono cm-shell__api" title="API base address: @Api.BaseAddress">
+                        API · @(Api.BaseAddress?.IsLoopback == true ? "local" : "REMOTE") · @Api.BaseAddress?.Authority
+                    </span>
                 }
                 @if (Auth.AvatarDataUrl is { } avatarUrl)
                 {

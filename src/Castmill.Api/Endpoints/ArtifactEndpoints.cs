@@ -6,6 +6,8 @@ using Castmill.Core;
 using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
 
+using Castmill.Api.Services.Ai;
+
 namespace Castmill.Api.Endpoints;
 
 public static class ArtifactEndpoints
@@ -22,6 +24,7 @@ public static class ArtifactEndpoints
         group.MapGet("/{id:guid}", GetAsync);
         group.MapPost("/", CreateAsync).Validate<ArtifactCreateRequest>().RequireRateLimiting("writes");
         group.MapPut("/{id:guid}", UpdateAsync).Validate<ArtifactUpdateRequest>().RequireRateLimiting("writes");
+        group.MapPut("/{id:guid}/technical-brief", SetTechnicalBriefAsync).Validate<TechnicalBrief>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}", DeleteAsync).RequireRateLimiting("writes");
         group.MapPatch("/{id:guid}/status", SetStatusAsync)
             .Validate<ArtifactStatusRequest>().RequireRateLimiting("writes");
@@ -201,7 +204,8 @@ public static class ArtifactEndpoints
         return Results.Ok(new ArtifactResponse(
             artifact.Id, artifact.CampaignId, artifact.Kind, artifact.Title,
             artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
-            artifact.UpdatedAt, artifact.ParentArtifactId));
+            artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
     }
 
     private static async Task<IResult> CreateAsync(
@@ -250,7 +254,8 @@ public static class ArtifactEndpoints
             $"/api/v1/campaigns/{campaignId}/artifacts/{artifact.Id}",
             new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
                 artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
-                artifact.UpdatedAt, artifact.ParentArtifactId));
+                artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -299,7 +304,36 @@ public static class ArtifactEndpoints
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
             artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
-            artifact.UpdatedAt, artifact.ParentArtifactId));
+            artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
+    }
+
+    /// <summary>
+    /// Stores the technical brief (ADR-056). Metadata, not content: no revision snapshot, no
+    /// version bump, no If-Match — a brief edit must never make an open editor's save stale.
+    /// An empty brief clears it.
+    /// </summary>
+    private static async Task<IResult> SetTechnicalBriefAsync(
+        Guid campaignId,
+        Guid id,
+        TechnicalBrief request,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var artifact = await db.Artifacts
+            .SingleOrDefaultAsync(a => a.Id == id && a.CampaignId == campaignId, ct);
+        if (artifact is null)
+        {
+            return Results.NotFound();
+        }
+        artifact.TechnicalBriefJson = TechnicalBriefs.Serialize(request);
+        artifact.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
+            artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
+            artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
     }
 
     private static async Task<IResult> DeleteAsync(
@@ -416,7 +450,8 @@ public static class ArtifactEndpoints
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
             artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
-            artifact.UpdatedAt, artifact.ParentArtifactId));
+            artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
     }
 
     /// <summary>
@@ -472,6 +507,7 @@ public static class ArtifactEndpoints
         response.Headers.ETag = ToEtag(artifact.Version);
         return Results.Ok(new ArtifactResponse(artifact.Id, campaignId, artifact.Kind, artifact.Title,
             artifact.ContentJson, artifact.Status, artifact.Version, artifact.CreatedAt,
-            artifact.UpdatedAt, artifact.ParentArtifactId));
+            artifact.UpdatedAt, artifact.ParentArtifactId,
+            TechnicalBriefs.Parse(artifact.TechnicalBriefJson)));
     }
 }

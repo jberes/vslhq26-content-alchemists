@@ -38,6 +38,19 @@
                     <h1 id="cm-wire-title">The Wire</h1>
                     <p class="cm-run-show__sub">What leaves the mill, and when — every campaign on one timeline. Times in @_data.TimeZone.</p>
                 </div>
+                @* Campaign scope (ADR-F54): every campaign by default, or one campaign's plan.
+                   Both projections read the same filtered data set. *@
+                <label class="cm-run-show__scope">
+                    <span class="cm-kicker">Campaign</span>
+                    <select class="cm-input cm-run-show__scope-select" aria-label="Campaign scope"
+                            value="@(_scopeCampaignId?.ToString() ?? AllCampaigns)" @onchange="OnScopeChanged">
+                        <option value="@AllCampaigns">All campaigns (@CampaignOptions.Count)</option>
+                        @foreach (var option in CampaignOptions)
+                        {
+                            <option value="@option.Id">@option.Name</option>
+                        }
+                    </select>
+                </label>
                 <IgbButtonGroup class="cm-run-show__controls" Selection="ButtonGroupSelection.Single" aria-label="Wire view">
                     <IgbToggleButton Value="run" Selected="@(_view == WireViewMode.RunOfShow)"
                                      @onclick="() => _view = WireViewMode.RunOfShow">Run of show</IgbToggleButton>
@@ -64,10 +77,8 @@
 
             @if (_view == WireViewMode.Pipeline)
             {
-                <PipelineView Data="_data"
-                              CampaignOnly="_campaignOnly"
-                              CampaignId="Workspace.Active?.Id"
-                              CampaignOnlyChanged="SetCampaignOnly"
+                <PipelineView Data="ScopedData"
+                              ScopeLabel="@ScopeLabel"
                               EditQueue="EditQueueAsync"
                               Edit="EditScheduleAsync"
                               Export="EditScheduleAsync"
@@ -78,7 +89,7 @@
             }
             else
             {
-                <RunOfShowView Data="_data"
+                <RunOfShowView Data="ScopedData"
                                Edit="EditQueueAsync"
                                Slot="ApplySlotAsync"
                                Retry="RetryAsync"
@@ -107,7 +118,8 @@
     private WireBoardData? _data;
     private DateOnly _rangeStart;
     private bool _loading = true;
-    private bool _campaignOnly;
+    private const string AllCampaigns = "all";
+    private Guid? _scopeCampaignId;
     private string? _loadError;
     private WireViewMode _view = WireViewMode.RunOfShow;
 
@@ -302,7 +314,67 @@
     private int Count(params WireDeliveryStatus[] states) =>
         _data?.Items.Count(item => states.Contains(item.Status)) ?? 0;
 
-    private void SetCampaignOnly(bool campaignOnly) => _campaignOnly = campaignOnly;
+    private sealed record CampaignOption(Guid Id, string Name);
+
+    /// <summary>Every campaign with something on The Wire in this range, named from the
+    /// workspace list (falls back to the dashboard's artifact rows for campaigns the rail
+    /// has not loaded).</summary>
+    private IReadOnlyList<CampaignOption> CampaignOptions
+    {
+        get
+        {
+            if (_data is null)
+            {
+                return [];
+            }
+            var names = new Dictionary<Guid, string>();
+            foreach (var campaign in Workspace.Campaigns)
+            {
+                names[campaign.Id] = campaign.Name;
+            }
+            foreach (var artifact in (_dashboard?.ReadyToSchedule ?? [])
+                .Concat(_dashboard?.ReviewQueue ?? [])
+                .Concat(_dashboard?.AgingDrafts ?? []))
+            {
+                names.TryAdd(artifact.CampaignId, artifact.CampaignName);
+            }
+            return _data.Queue.Select(item => item.CampaignId)
+                .Concat(_data.Items.Select(item => item.CampaignId))
+                .Distinct()
+                .Select(id => new CampaignOption(id, names.GetValueOrDefault(id) ?? $"Campaign {id.ToString()[..8]}"))
+                .OrderBy(option => option.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+    }
+
+    /// <summary>The loaded board narrowed to the selected campaign; the whole board otherwise.</summary>
+    private WireBoardData? ScopedData
+    {
+        get
+        {
+            if (_data is null || _scopeCampaignId is not { } scope)
+            {
+                return _data;
+            }
+            return _data with
+            {
+                Queue = _data.Queue.Where(item => item.CampaignId == scope).ToList(),
+                Days = _data.Days
+                    .Select(day => day with { Items = day.Items.Where(item => item.CampaignId == scope).ToList() })
+                    .ToList(),
+            };
+        }
+    }
+
+    private string ScopeLabel => _scopeCampaignId is { } scope
+        ? CampaignOptions.FirstOrDefault(option => option.Id == scope)?.Name ?? "this campaign"
+        : "all campaigns";
+
+    private void OnScopeChanged(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString();
+        _scopeCampaignId = Guid.TryParse(value, out var id) ? id : null;
+    }
 
     private static DateOnly StartOfWeek(DateOnly date)
     {

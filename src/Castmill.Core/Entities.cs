@@ -154,6 +154,13 @@ public sealed class Artifact : ITenantScoped
     /// </summary>
     public string? CitationsJson { get; set; }
 
+    /// <summary>
+    /// Optional technical brief (ADR-056): product/version, APIs, constraints, must-mention and
+    /// must-not-claim lists. Fed to generation, regenerate and the Tech Edit, and used as the
+    /// knowledge-base query seed. Null for the ordinary, non-technical piece.
+    /// </summary>
+    public string? TechnicalBriefJson { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -254,6 +261,12 @@ public sealed class ImageSlot : ITenantScoped
     /// </summary>
     public string? BaseImagePath { get; set; }
     public string? BaseImageUrl { get; set; }
+    /// <summary>
+    /// The overlay editor's spec (ADR-055): text boxes with positions as ratios of the slot,
+    /// fonts, colours and bands. Rendered deterministically by ImageComposer on place and on
+    /// every edit, so the published image matches the editor's preview.
+    /// </summary>
+    public string? OverlaySpecJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
@@ -437,6 +450,66 @@ public sealed class BrandTemplate : ITenantScoped
     /// <summary>The template auto-applied for this kind; at most one per (brand, kind).</summary>
     public bool IsDefault { get; set; }
 
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A brand's own retrieval endpoint (ADR-056): a RAG gateway that answers a question with
+/// synthesised prose and citations, consulted by the Tech Edit and by technical generation.
+/// Per brand rather than per workspace because the Infragistics knowledge is not the same
+/// knowledge as another brand's. The bearer token is stored encrypted with the secret cipher.
+/// </summary>
+public sealed class BrandKnowledgeSource : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public required string Name { get; set; }
+    public required string BaseUrl { get; set; }
+    public string QueryPath { get; set; } = "/query";
+    public string QueryField { get; set; } = "query";
+    /// <summary>Encrypted bearer token; null when the gateway is open or uses the workspace token.</summary>
+    public string? TokenCiphertext { get; set; }
+    public bool Enabled { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A skill file on a brand (ADR-056): SKILL.md-style instructions the Tech Edit and technical
+/// generation read as authoritative product knowledge. Stored as text, capped, versioned by
+/// UpdatedAt. <see cref="AppliesTo"/> is an optional comma list of generator kinds.
+/// </summary>
+public sealed class BrandSkill : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public required string Name { get; set; }
+    public required string FileName { get; set; }
+    public required string Content { get; set; }
+    public string? AppliesTo { get; set; }
+    public bool Enabled { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A remote MCP server a brand exposes to the Tech Edit (ADR-056), attached through the
+/// Anthropic MCP connector. The authorization header value is stored encrypted.
+/// </summary>
+public sealed class BrandMcpServer : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public required string Name { get; set; }
+    public required string Url { get; set; }
+    public string? AuthorizationCiphertext { get; set; }
+    /// <summary>JSON array of tool names the model may call; null = every tool the server offers.</summary>
+    public string? AllowedToolsJson { get; set; }
+    public bool Enabled { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

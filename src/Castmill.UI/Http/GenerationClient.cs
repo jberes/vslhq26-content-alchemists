@@ -76,10 +76,11 @@ public sealed class GenerationClient(ApiClient api)
 
     public Task<IngestResult> IngestTranscriptAsync(
         Guid campaignId, string text, string source = "pasted",
-        IReadOnlyList<TranscriptSegment>? segments = null, CancellationToken ct = default) =>
+        IReadOnlyList<TranscriptSegment>? segments = null,
+        string? localPath = null, string? contentHash = null, CancellationToken ct = default) =>
         api.PostAsync<object, IngestResult>(
             $"api/v1/ai/campaigns/{campaignId}/transcripts",
-            new { text, source, segments },
+            new { text, source, segments, localPath, contentHash },
             anonymous: false,
             ct);
 
@@ -104,10 +105,10 @@ public sealed class GenerationClient(ApiClient api)
     public Task<RunItem> GenerateOneAsync(
         Guid campaignId, string kind, Guid? transcriptArtifactId, string? brief,
         Guid? parentArtifactId = null, Guid? replaceArtifactId = null,
-        CancellationToken ct = default) =>
+        Castmill.Core.Resources.TechnicalBrief? technicalBrief = null, CancellationToken ct = default) =>
         api.PostAsync<object, RunItem>(
             $"api/v1/ai/campaigns/{campaignId}/generate/{Uri.EscapeDataString(kind)}",
-            new { transcriptArtifactId, brief, parentArtifactId, replaceArtifactId },
+            new { transcriptArtifactId, brief, parentArtifactId, replaceArtifactId, technicalBrief },
             anonymous: false,
             ct);
 
@@ -125,10 +126,10 @@ public sealed class GenerationClient(ApiClient api)
     /// </summary>
     public Task<TechEditResult> TechEditAsync(
         Guid campaignId, Guid artifactId, string? steering, bool useKnowledgeBase,
-        CancellationToken ct = default) =>
+        Castmill.Core.Resources.TechnicalBrief? technicalBrief = null, CancellationToken ct = default) =>
         api.PostAsync<object, TechEditResult>(
             $"api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/tech-edit",
-            new { steering, useKnowledgeBase },
+            new { steering, useKnowledgeBase, technicalBrief },
             anonymous: false,
             ct);
 

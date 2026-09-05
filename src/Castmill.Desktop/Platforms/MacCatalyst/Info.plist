@@ -34,6 +34,13 @@
     </array>
     <key>XSAppIconAssets</key>
     <string>Assets.xcassets/appicon.appiconset</string>
+    <!-- The Mill Floor player streams picked recordings from a loopback HTTP server (ADR-057);
+         ATS must allow plain http to 127.0.0.1. Nothing else is exempted. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Castmill records voice notes only when you press Record, then transcribes the recording into campaign evidence.</string>
 </dict>

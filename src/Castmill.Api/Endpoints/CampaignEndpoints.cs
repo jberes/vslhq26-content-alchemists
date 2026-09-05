@@ -421,7 +421,10 @@ public static class CampaignEndpoints
             ? (await brandAccess.FindAsync(
                 brandId, AuthEndpoints.GetUserId(principal), tenant.TenantId!.Value,
                 tracking: false, ct))?.Brand is { } accessibleBrand
-                ? new BrandSummaryResponse(accessibleBrand.Id, accessibleBrand.Name)
+                ? new BrandSummaryResponse(accessibleBrand.Id, accessibleBrand.Name,
+                    await db.BrandKnowledgeSources.IgnoreQueryFilters().AnyAsync(k => k.BrandId == accessibleBrand.Id && k.Enabled, ct)
+                    || await db.BrandSkills.IgnoreQueryFilters().AnyAsync(k => k.BrandId == accessibleBrand.Id && k.Enabled, ct)
+                    || await db.BrandMcpServers.IgnoreQueryFilters().AnyAsync(k => k.BrandId == accessibleBrand.Id && k.Enabled, ct))
                 : null
             : null;
 

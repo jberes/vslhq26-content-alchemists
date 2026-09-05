@@ -2099,9 +2099,15 @@
             var campaign = await EnsureCampaignAsync();
 
             await NarrateAsync($"combining {_pickedFiles.Count} sources · {combined.Count} timed segments…", 98);
+            // Media link (ADR-057): a single recording is linked by path + fingerprint so the
+            // Mill Floor can play it and re-find it if it moves. Several files combine into one
+            // transcript, so there is no single path to link.
+            var single = _pickedFiles.Count == 1 ? _pickedFiles[0] : null;
+            var fingerprint = single is null ? null : await Media.FingerprintAsync(single.Path);
             var ingest = await Generation.IngestTranscriptAsync(
                 campaign.Id, string.Join(' ', combined.Select(segment => segment.Text)),
-                string.Join(" + ", _pickedFiles.Select(file => file.FileName)), combined);
+                string.Join(" + ", _pickedFiles.Select(file => file.FileName)), combined,
+                localPath: single?.Path, contentHash: fingerprint);
             _transcriptArtifactId = ingest.TranscriptArtifactId;
             await LoadTranscriptEvidenceAsync(campaign.Id, ingest.TranscriptArtifactId);
 

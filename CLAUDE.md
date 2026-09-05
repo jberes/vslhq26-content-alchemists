@@ -19,6 +19,11 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
   applied inside `ImageRenderer` — the single choke point every render passes through — so
   no call site or user prompt can bypass the safe-margin rule. New render paths go through
   `ImageRenderer`; if one ever cannot, it applies `ImagePromptRules.Apply` itself.
+- **`ImagePromptComposer` is the only place an image prompt is assembled** (ADR-055): brief per
+  kind, digest, direction, brand look, reference note, adjustment last. It says nothing about
+  margins or text — that is `ImagePromptRules`' job, and the renderer writes those numbers
+  against the frame the resolved provider really paints (`IImageProvider.FrameForAsync`).
+  Never append a second rules block from an endpoint.
 - Any prompt authored by a generator (`Generators.cs`) must ask for clear edge margins and
   centre-weighted composition. Prompts that place headlines, logos or key subjects near an
   edge are wrong regardless of how good the image looks before cropping.

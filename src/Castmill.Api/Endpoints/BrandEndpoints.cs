@@ -58,6 +58,24 @@ public static partial class BrandEndpoints
         group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}/kind", ChangeAssetKindAsync)
             .Validate<BrandAssetKindRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
 
+        // Brand knowledge (ADR-056): RAG endpoints, skills, MCP servers.
+        group.MapGet("/{id:guid}/knowledge", GetKnowledgeAsync);
+        group.MapPost("/{id:guid}/knowledge/sources", UpsertKnowledgeSourceAsync)
+            .Validate<BrandKnowledgeSourceRequest>().RequireRateLimiting("writes");
+        group.MapPut("/{id:guid}/knowledge/sources/{itemId:guid}", UpsertKnowledgeSourceAsync)
+            .Validate<BrandKnowledgeSourceRequest>().RequireRateLimiting("writes");
+        group.MapDelete("/{id:guid}/knowledge/sources/{itemId:guid}", DeleteKnowledgeSourceAsync).RequireRateLimiting("writes");
+        group.MapPost("/{id:guid}/knowledge/skills", UpsertSkillAsync)
+            .Validate<BrandSkillRequest>().RequireRateLimiting("writes");
+        group.MapPut("/{id:guid}/knowledge/skills/{itemId:guid}", UpsertSkillAsync)
+            .Validate<BrandSkillRequest>().RequireRateLimiting("writes");
+        group.MapDelete("/{id:guid}/knowledge/skills/{itemId:guid}", DeleteSkillAsync).RequireRateLimiting("writes");
+        group.MapPost("/{id:guid}/knowledge/mcp-servers", UpsertMcpServerAsync)
+            .Validate<BrandMcpServerRequest>().RequireRateLimiting("writes");
+        group.MapPut("/{id:guid}/knowledge/mcp-servers/{itemId:guid}", UpsertMcpServerAsync)
+            .Validate<BrandMcpServerRequest>().RequireRateLimiting("writes");
+        group.MapDelete("/{id:guid}/knowledge/mcp-servers/{itemId:guid}", DeleteMcpServerAsync).RequireRateLimiting("writes");
+
         group.MapGet("/{id:guid}/templates", ListTemplatesAsync);
         group.MapPost("/{id:guid}/templates", CreateTemplateAsync)
             .Validate<BrandTemplateRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
@@ -630,6 +648,228 @@ public static partial class BrandEndpoints
             .ToListAsync(ct);
         return Results.Ok(templates.Select(ToResponse).ToList());
     }
+
+    // ---- Brand knowledge (ADR-056) ------------------------------------------------
+
+    private static async Task<IResult> GetKnowledgeAsync(
+        Guid id, ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var tenantId = grant.Brand.TenantId;
+        var sources = await db.BrandKnowledgeSources.IgnoreQueryFilters()
+            .Where(k => k.BrandId == id && k.TenantId == tenantId).OrderBy(k => k.CreatedAt).ToListAsync(ct);
+        var skills = await db.BrandSkills.IgnoreQueryFilters()
+            .Where(k => k.BrandId == id && k.TenantId == tenantId).OrderBy(k => k.Name).ToListAsync(ct);
+        var servers = await db.BrandMcpServers.IgnoreQueryFilters()
+            .Where(k => k.BrandId == id && k.TenantId == tenantId).OrderBy(k => k.Name).ToListAsync(ct);
+        return Results.Ok(new BrandKnowledgeResponse(
+            sources.Select(ToResponse).ToList(),
+            skills.Select(ToResponse).ToList(),
+            servers.Select(ToResponse).ToList()));
+    }
+
+    private static async Task<IResult> UpsertKnowledgeSourceAsync(
+        Guid id, Guid? itemId, BrandKnowledgeSourceRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        Castmill.Api.Services.Secrets.ISecretCipher cipher,
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var now = clock.GetUtcNow();
+        BrandKnowledgeSource? row = null;
+        if (itemId is { } existingId)
+        {
+            row = await db.BrandKnowledgeSources.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(k => k.Id == existingId && k.BrandId == id && k.TenantId == grant.Brand.TenantId, ct);
+            if (row is null)
+            {
+                return Results.NotFound();
+            }
+        }
+        row ??= new BrandKnowledgeSource
+        {
+            Id = Guid.NewGuid(), TenantId = grant.Brand.TenantId, BrandId = id,
+            Name = request.Name, BaseUrl = request.BaseUrl, CreatedAt = now,
+        };
+        row.Name = request.Name.Trim();
+        row.BaseUrl = request.BaseUrl.Trim();
+        row.QueryPath = string.IsNullOrWhiteSpace(request.QueryPath) ? "/query" : request.QueryPath.Trim();
+        row.QueryField = string.IsNullOrWhiteSpace(request.QueryField) ? "query" : request.QueryField.Trim();
+        row.Enabled = request.Enabled;
+        if (request.Token is not null)
+        {
+            // Null leaves the stored token; empty clears it. Encrypted with the workspace cipher,
+            // never stored or returned in clear.
+            row.TokenCiphertext = request.Token.Length == 0 ? null : cipher.Encrypt(request.Token);
+        }
+        row.UpdatedAt = now;
+        if (itemId is null)
+        {
+            db.BrandKnowledgeSources.Add(row);
+        }
+        await db.SaveChangesAsync(ct);
+        return itemId is null
+            ? Results.Created($"/api/v1/brands/{id}/knowledge/sources/{row.Id}", ToResponse(row))
+            : Results.Ok(ToResponse(row));
+    }
+
+    private static async Task<IResult> DeleteKnowledgeSourceAsync(
+        Guid id, Guid itemId, ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var removed = await db.BrandKnowledgeSources.IgnoreQueryFilters()
+            .Where(k => k.Id == itemId && k.BrandId == id && k.TenantId == grant.Brand.TenantId)
+            .ExecuteDeleteAsync(ct);
+        return removed == 0 ? Results.NotFound() : Results.NoContent();
+    }
+
+    private static async Task<IResult> UpsertSkillAsync(
+        Guid id, Guid? itemId, BrandSkillRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var now = clock.GetUtcNow();
+        BrandSkill? row = null;
+        if (itemId is { } existingId)
+        {
+            row = await db.BrandSkills.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(k => k.Id == existingId && k.BrandId == id && k.TenantId == grant.Brand.TenantId, ct);
+            if (row is null)
+            {
+                return Results.NotFound();
+            }
+        }
+        row ??= new BrandSkill
+        {
+            Id = Guid.NewGuid(), TenantId = grant.Brand.TenantId, BrandId = id,
+            Name = request.Name, FileName = request.FileName, Content = request.Content, CreatedAt = now,
+        };
+        row.Name = request.Name.Trim();
+        row.FileName = request.FileName.Trim();
+        row.Content = request.Content;
+        row.AppliesTo = string.IsNullOrWhiteSpace(request.AppliesTo) ? null : request.AppliesTo.Trim();
+        row.Enabled = request.Enabled;
+        row.UpdatedAt = now;
+        if (itemId is null)
+        {
+            db.BrandSkills.Add(row);
+        }
+        await db.SaveChangesAsync(ct);
+        return itemId is null
+            ? Results.Created($"/api/v1/brands/{id}/knowledge/skills/{row.Id}", ToResponse(row))
+            : Results.Ok(ToResponse(row));
+    }
+
+    private static async Task<IResult> DeleteSkillAsync(
+        Guid id, Guid itemId, ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var removed = await db.BrandSkills.IgnoreQueryFilters()
+            .Where(k => k.Id == itemId && k.BrandId == id && k.TenantId == grant.Brand.TenantId)
+            .ExecuteDeleteAsync(ct);
+        return removed == 0 ? Results.NotFound() : Results.NoContent();
+    }
+
+    private static async Task<IResult> UpsertMcpServerAsync(
+        Guid id, Guid? itemId, BrandMcpServerRequest request,
+        ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        Castmill.Api.Services.Secrets.ISecretCipher cipher,
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps)
+        {
+            return Results.Problem("MCP servers must be reached over https.", statusCode: 400);
+        }
+        var now = clock.GetUtcNow();
+        BrandMcpServer? row = null;
+        if (itemId is { } existingId)
+        {
+            row = await db.BrandMcpServers.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(k => k.Id == existingId && k.BrandId == id && k.TenantId == grant.Brand.TenantId, ct);
+            if (row is null)
+            {
+                return Results.NotFound();
+            }
+        }
+        row ??= new BrandMcpServer
+        {
+            Id = Guid.NewGuid(), TenantId = grant.Brand.TenantId, BrandId = id,
+            Name = request.Name, Url = request.Url, CreatedAt = now,
+        };
+        row.Name = request.Name.Trim();
+        row.Url = request.Url.Trim();
+        row.AllowedToolsJson = request.AllowedTools is { Count: > 0 }
+            ? System.Text.Json.JsonSerializer.Serialize(request.AllowedTools.Select(t => t.Trim()).Where(t => t.Length > 0))
+            : null;
+        row.Enabled = request.Enabled;
+        if (request.Authorization is not null)
+        {
+            row.AuthorizationCiphertext = request.Authorization.Length == 0 ? null : cipher.Encrypt(request.Authorization);
+        }
+        row.UpdatedAt = now;
+        if (itemId is null)
+        {
+            db.BrandMcpServers.Add(row);
+        }
+        await db.SaveChangesAsync(ct);
+        return itemId is null
+            ? Results.Created($"/api/v1/brands/{id}/knowledge/mcp-servers/{row.Id}", ToResponse(row))
+            : Results.Ok(ToResponse(row));
+    }
+
+    private static async Task<IResult> DeleteMcpServerAsync(
+        Guid id, Guid itemId, ClaimsPrincipal principal, ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, CancellationToken ct)
+    {
+        var grant = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        if (grant is null)
+        {
+            return Results.NotFound();
+        }
+        var removed = await db.BrandMcpServers.IgnoreQueryFilters()
+            .Where(k => k.Id == itemId && k.BrandId == id && k.TenantId == grant.Brand.TenantId)
+            .ExecuteDeleteAsync(ct);
+        return removed == 0 ? Results.NotFound() : Results.NoContent();
+    }
+
+    private static BrandKnowledgeSourceResponse ToResponse(BrandKnowledgeSource k) =>
+        new(k.Id, k.BrandId, k.Name, k.BaseUrl, k.QueryPath, k.QueryField, k.TokenCiphertext is not null, k.Enabled, k.UpdatedAt);
+
+    private static BrandSkillResponse ToResponse(BrandSkill k) =>
+        new(k.Id, k.BrandId, k.Name, k.FileName, k.Content, k.AppliesTo, k.Enabled, k.UpdatedAt);
+
+    private static BrandMcpServerResponse ToResponse(BrandMcpServer k) =>
+        new(k.Id, k.BrandId, k.Name, k.Url, k.AuthorizationCiphertext is not null,
+            Castmill.Api.Services.Ai.BrandContextService.ParseTools(k.AllowedToolsJson), k.Enabled, k.UpdatedAt);
 
     private static async Task<IResult> CreateTemplateAsync(
         Guid id,

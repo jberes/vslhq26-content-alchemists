@@ -12,16 +12,31 @@ namespace Castmill.Api.Services.Ai;
 
 /// <summary>Everything brand- and campaign-context-shaped a generation run needs, resolved
 /// once per run. Blocks are pre-rendered prompt text; empty context has every member null.</summary>
+/// <summary>A brand skill file as the Tech Edit reads it (ADR-056).</summary>
+public sealed record BrandSkillText(string Name, string? AppliesTo, string Content)
+{
+    public bool AppliesToKind(string kind) =>
+        string.IsNullOrWhiteSpace(AppliesTo)
+        || AppliesTo.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Any(k => k.Equals(kind, StringComparison.OrdinalIgnoreCase));
+}
+
 public sealed record BrandContext(
     string? StyleBlock,
     string? ImageStyleBlock,
     IReadOnlyDictionary<string, string> TemplateSteeringByKind,
     string? CampaignContextBlock,
     /// <summary>The campaign's SEO/AEO targets as prompt text — see BuildSeoTargetBlock.</summary>
-    string? SeoTargetBlock = null)
+    string? SeoTargetBlock = null,
+    /// <summary>The brand's own RAG gateway (ADR-056); null falls back to the workspace one.</summary>
+    Castmill.Api.Services.Knowledge.KnowledgeEndpoint? Knowledge = null,
+    IReadOnlyList<BrandSkillText>? Skills = null,
+    IReadOnlyList<McpServerDefinition>? McpServers = null)
 {
     public static readonly BrandContext Empty = new(null, null,
         new Dictionary<string, string>(StringComparer.Ordinal), null);
+
+    public bool HasKnowledge => Knowledge is not null || Skills is { Count: > 0 } || McpServers is { Count: > 0 };
 }
 
 public interface IBrandContextService
@@ -37,7 +52,8 @@ public interface IBrandContextService
 /// </summary>
 public sealed class BrandContextService(
     CastmillDbContext db,
-    IBrandAccessService brandAccess) : IBrandContextService
+    IBrandAccessService brandAccess,
+    Castmill.Api.Services.Secrets.ISecretCipher cipher) : IBrandContextService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -92,12 +108,56 @@ public sealed class BrandContextService(
             .Select(a => new { a.Kind, a.Label })
             .ToListAsync(ct);
 
+        // Brand knowledge (ADR-056): the first enabled RAG endpoint, every enabled skill, every
+        // enabled MCP server — tokens decrypted here, once, for this request only.
+        var knowledgeRow = await db.BrandKnowledgeSources.IgnoreQueryFilters()
+            .Where(k => k.BrandId == brandId && k.TenantId == grant.Brand.TenantId && k.Enabled)
+            .OrderBy(k => k.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        var skills = await db.BrandSkills.IgnoreQueryFilters()
+            .Where(k => k.BrandId == brandId && k.TenantId == grant.Brand.TenantId && k.Enabled)
+            .OrderBy(k => k.Name)
+            .Select(k => new BrandSkillText(k.Name, k.AppliesTo, k.Content))
+            .ToListAsync(ct);
+        var mcpRows = await db.BrandMcpServers.IgnoreQueryFilters()
+            .Where(k => k.BrandId == brandId && k.TenantId == grant.Brand.TenantId && k.Enabled)
+            .OrderBy(k => k.Name)
+            .ToListAsync(ct);
+
         return new BrandContext(
             BuildStyleBlock(grant.Brand.Name, card),
             BuildImageStyleBlock(card, imageAssets.Select(a => (a.Kind, a.Label!))),
             templates,
             contextBlock,
-            seoBlock);
+            seoBlock,
+            knowledgeRow is null
+                ? null
+                : new Castmill.Api.Services.Knowledge.KnowledgeEndpoint(
+                    knowledgeRow.BaseUrl, knowledgeRow.QueryPath, knowledgeRow.QueryField,
+                    Decrypt(knowledgeRow.TokenCiphertext), knowledgeRow.Name),
+            skills,
+            mcpRows.Select(m => new McpServerDefinition(
+                m.Name, m.Url, Decrypt(m.AuthorizationCiphertext), ParseTools(m.AllowedToolsJson))).ToList());
+    }
+
+    private string? Decrypt(string? ciphertext) =>
+        string.IsNullOrWhiteSpace(ciphertext) ? null : cipher.Decrypt(ciphertext);
+
+    internal static IReadOnlyList<string>? ParseTools(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+        try
+        {
+            var tools = JsonSerializer.Deserialize<List<string>>(json, Json);
+            return tools is { Count: > 0 } ? tools : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

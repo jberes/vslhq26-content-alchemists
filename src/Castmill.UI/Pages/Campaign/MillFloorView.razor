@@ -21,6 +21,11 @@
 @inject INotifier Notifier
 @inject IClipboardService Clipboard
 @inject NavigationManager Navigation
+@inject Castmill.UI.Platform.IMediaPipeline Media
+@inject Castmill.UI.Http.MediaUploadClient MediaUploads
+@inject Castmill.UI.Http.BrandsClient AssetSas
+@using Castmill.UI.Http
+@inject IJSRuntime JS
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Mill Floor</PageTitle>
 
@@ -63,16 +68,62 @@
             @if (SelectedSource?.Id == Campaign.TranscriptSourceAssetId
                 && Campaign.Transcript is { Segments.Count: > 0 } transcript)
             {
-                <div class="cm-source__player cm-duotone" aria-hidden="true">
-                    <span class="cm-source__play">&#9654;</span>
-                </div>
+                @* The source recording (ADR-057): played from the local file on the desktop, from
+                   the cloud copy anywhere, and otherwise an honest state with the actions that
+                   would make it playable. Never a decorative player. *@
+                @if (_mediaUrl is { } mediaUrl)
+                {
+                    @if (IsVideo(SelectedSource))
+                    {
+                        <video class="cm-source__media" controls preload="metadata" src="@mediaUrl"
+                               @ref="_mediaElement" @key="mediaUrl" aria-label="Source recording"></video>
+                    }
+                    else
+                    {
+                        <audio class="cm-source__media cm-source__media--audio" controls preload="metadata" src="@mediaUrl"
+                               @ref="_mediaElement" @key="mediaUrl" aria-label="Source recording"></audio>
+                    }
+                }
+                else
+                {
+                    <div class="cm-source__player cm-duotone cm-source__player--empty">
+                        <span class="cm-meta">
+                            @(_mediaStatus ?? (SelectedSource?.LocalPath is { Length: > 0 }
+                                ? (Media.CanPlayLocalFiles ? "Recording not found at its last location." : "Recording lives on the machine that transcribed it.")
+                                : "No recording is linked to this transcript."))
+                        </span>
+                    </div>
+                }
                 <div class="cm-source__scrub cm-mono cm-meta">
-                    <span>0:00</span>
-                    <span class="cm-source__scrub-bar"></span>
+                    <span>@Clock(_mediaTime)</span>
+                    <span class="cm-source__scrub-bar"><span class="cm-source__scrub-fill" style="inline-size:@(ScrubPercent(transcript))%"></span></span>
                     <span>@Clock(transcript.Segments[^1].EndSeconds)</span>
                 </div>
+                <div class="cm-source__media-actions">
+                    @if (Media.CanPlayLocalFiles)
+                    {
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@_mediaBusy" @onclick="LocateRecordingAsync">
+                            @(SelectedSource?.LocalPath is { Length: > 0 } ? "Locate file…" : "Link recording…")
+                        </button>
+                        @if (SelectedSource is { LocalPath: { Length: > 0 }, MediaAssetId: null })
+                        {
+                            <button type="button" class="cm-button cm-button--quiet" disabled="@_mediaBusy" @onclick="UploadRecordingAsync"
+                                    title="Copy the recording to private Azure storage so every machine (and the clip worker) can play it">
+                                @(_mediaBusy ? _mediaStatus ?? "Uploading…" : "Upload to Azure")
+                            </button>
+                        }
+                    }
+                    @if (SelectedSource?.MediaAssetId is not null)
+                    {
+                        <span class="cm-chip cm-mono" title="A private cloud copy exists">CLOUD COPY</span>
+                    }
+                    @if (SelectedSource?.LocalPath is { Length: > 0 } localPath)
+                    {
+                        <span class="cm-meta cm-mono cm-source__path" title="@localPath">@System.IO.Path.GetFileName(localPath)</span>
+                    }
+                </div>
 
-                <SourceTranscript Transcript="transcript" Highlighted="_highlighted" />
+                <SourceTranscript Transcript="transcript" Highlighted="_highlighted" SegmentClicked="SeekToSegmentAsync" />
 
                 @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
                 {
@@ -729,6 +780,228 @@
     {
         _selectedSourceId = sourceId;
         _geometryEpoch++;
+        _ = ResolveMediaAsync();
+    }
+
+    // ---- Source recording (ADR-057) ----------------------------------------------------
+
+    private const string MediaModulePath = "./_content/Castmill.UI/js/castmill-media.js?v=1";
+    private ElementReference _mediaElement;
+    private IJSObjectReference? _mediaModule;
+    private IJSObjectReference? _mediaHandle;
+    private DotNetObjectReference<MillFloorView>? _mediaSelf;
+    private string? _mediaUrl;
+    private string? _attachedMediaUrl;
+    private string? _mediaStatus;
+    private bool _mediaBusy;
+    private double _mediaTime;
+    private Guid? _mediaResolvedFor;
+
+    private static bool IsVideo(SourceAssetResponse? source)
+    {
+        var type = source?.ContentTypeHint ?? source?.ContentType ?? string.Empty;
+        if (type.StartsWith("video/", StringComparison.OrdinalIgnoreCase)) return true;
+        if (type.StartsWith("audio/", StringComparison.OrdinalIgnoreCase)) return false;
+        var ext = System.IO.Path.GetExtension(source?.LocalPath ?? string.Empty).ToLowerInvariant();
+        return ext is ".mp4" or ".mov" or ".m4v" or ".webm";
+    }
+
+    private double ScrubPercent(Castmill.Core.Ai.TranscriptContent transcript)
+    {
+        var end = transcript.Segments.Count == 0 ? 0 : transcript.Segments[^1].EndSeconds;
+        return end <= 0 ? 0 : Math.Clamp(_mediaTime / end * 100, 0, 100);
+    }
+
+    /// <summary>Local file first (desktop), cloud copy second (a short-lived read SAS), else nothing.</summary>
+    private async Task ResolveMediaAsync()
+    {
+        var source = SelectedSource;
+        if (source is null)
+        {
+            _mediaUrl = null;
+            return;
+        }
+        if (_mediaResolvedFor == source.Id && _mediaUrl is not null)
+        {
+            return;
+        }
+        _mediaResolvedFor = source.Id;
+        _mediaUrl = null;
+        _mediaTime = 0;
+        if (source.LocalPath is { Length: > 0 } path && Media.CanPlayLocalFiles)
+        {
+            _mediaUrl = await Media.OpenLocalMediaAsync(path);
+        }
+        if (_mediaUrl is null && source.MediaAssetId is { } assetId)
+        {
+            try
+            {
+                _mediaUrl = (await AssetSas.MintReadSasAsync(assetId)).ReadUrl;
+            }
+            catch (ApiException ex)
+            {
+                _mediaStatus = $"Cloud copy unavailable — {ex.Message}";
+            }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LocateRecordingAsync()
+    {
+        if (SelectedSource is not { } source)
+        {
+            return;
+        }
+        var picked = await Media.PickMediaAsync();
+        if (picked is null)
+        {
+            return;
+        }
+        _mediaBusy = true;
+        try
+        {
+            var fingerprint = await Media.FingerprintAsync(picked.Path);
+            if (source.ContentHash is { Length: > 0 } known && fingerprint is not null
+                && !string.Equals(known, fingerprint, StringComparison.Ordinal))
+            {
+                var proceed = await Confirm.ConfirmAsync(new ConfirmRequest(
+                    "Different recording?",
+                    $"{picked.FileName} does not match the fingerprint of the file this transcript came from. Link it anyway?",
+                    "Link anyway"));
+                if (!proceed)
+                {
+                    return;
+                }
+            }
+            await Evidence.SetMediaLinkAsync(CampaignId, source.Id, localPath: picked.Path, contentHash: fingerprint);
+            await Campaign.RefreshAsync(CampaignId);
+            _mediaResolvedFor = null;
+            _mediaStatus = null;
+            await ResolveMediaAsync();
+            Notifier.ShowSuccess($"Linked {picked.FileName}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _mediaBusy = false;
+        }
+    }
+
+    /// <summary>Copies the local recording to private storage through the existing resumable upload path; no transcription — the transcript already exists.</summary>
+    private async Task UploadRecordingAsync()
+    {
+        if (SelectedSource is not { LocalPath: { Length: > 0 } path } source)
+        {
+            return;
+        }
+        await using var stream = await Media.OpenReadAsync(path);
+        if (stream is null)
+        {
+            Notifier.ShowError("The recording is not at its last known location. Locate it first.");
+            return;
+        }
+        _mediaBusy = true;
+        try
+        {
+            var fileName = System.IO.Path.GetFileName(path);
+            var contentType = IsVideo(source) ? "video/mp4" : "audio/mpeg";
+            if (source.ContentTypeHint is { Length: > 0 } hint && hint.Contains('/'))
+            {
+                contentType = hint;
+            }
+            var upload = await MediaUploads.CreateAsync(CampaignId, fileName, contentType, stream.Length);
+            var buffer = new byte[upload.BlockSize];
+            while (upload.UploadedBytes < upload.TotalBytes)
+            {
+                var wanted = (int)Math.Min(upload.BlockSize, upload.TotalBytes - upload.UploadedBytes);
+                var read = 0;
+                while (read < wanted)
+                {
+                    var n = await stream.ReadAsync(buffer.AsMemory(read, wanted - read));
+                    if (n <= 0) break;
+                    read += n;
+                }
+                upload = await MediaUploads.PutBlockAsync(CampaignId, upload.Id, upload.NextBlockIndex, buffer[..read]);
+                _mediaStatus = $"Uploading… {Math.Round(upload.Percent)}%";
+                StateHasChanged();
+            }
+            upload = await MediaUploads.CommitAsync(CampaignId, upload.Id);
+            await Evidence.SetMediaLinkAsync(CampaignId, source.Id, mediaAssetId: upload.AssetId);
+            await Campaign.RefreshAsync(CampaignId);
+            _mediaStatus = null;
+            Notifier.ShowSuccess("Recording copied to private storage. It now plays on every machine.");
+        }
+        catch (ApiException ex)
+        {
+            _mediaStatus = null;
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _mediaBusy = false;
+        }
+    }
+
+    private async Task SeekToSegmentAsync(Castmill.Core.Ai.TranscriptSegment segment)
+    {
+        if (_mediaHandle is not null)
+        {
+            await _mediaHandle.InvokeVoidAsync("seek", segment.StartSeconds);
+        }
+    }
+
+    [JSInvokable]
+    public void OnTime(double seconds)
+    {
+        _mediaTime = seconds;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDuration(double seconds)
+    {
+    }
+
+    private async Task EnsureMediaAttachedAsync()
+    {
+        if (_mediaUrl is null)
+        {
+            await DetachMediaAsync();
+            return;
+        }
+        if (_mediaHandle is not null && _attachedMediaUrl == _mediaUrl)
+        {
+            return;
+        }
+        await DetachMediaAsync();
+        try
+        {
+            _mediaModule ??= await JS.InvokeAsync<IJSObjectReference>("import", MediaModulePath);
+            _mediaSelf ??= DotNetObjectReference.Create(this);
+            _mediaHandle = await _mediaModule.InvokeAsync<IJSObjectReference>("attach", _mediaElement, _mediaSelf);
+            _attachedMediaUrl = _mediaUrl;
+        }
+        catch (JSException)
+        {
+            // Headless hosts (bUnit) have no module loader; the element still renders.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private async Task DetachMediaAsync()
+    {
+        if (_mediaHandle is not null)
+        {
+            try { await _mediaHandle.InvokeVoidAsync("dispose"); } catch (JSException) { }
+            try { await _mediaHandle.DisposeAsync(); } catch (JSException) { }
+            _mediaHandle = null;
+            _attachedMediaUrl = null;
+        }
     }
 
     private void EnsureSelectedSource()
@@ -1114,5 +1387,17 @@
         StopTicking();
         Campaign.Changed -= OnCampaignChanged;
         PressRun.Changed -= OnPressRunChanged;
+        _ = DetachMediaAsync();
+        _mediaSelf?.Dispose();
+    }
+
+    /// <summary>The player island follows the media element: attached once a URL resolves, re-attached when it changes.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ResolveMediaAsync();
+        }
+        await EnsureMediaAttachedAsync();
     }
 }

@@ -119,6 +119,38 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
 
     // ---- helpers ---------------------------------------------------------------
 
+    /// <summary>
+    /// The kit upload's Choose File is gated on the description (it becomes prompt text).
+    /// With no explanation the gate read as a broken button. The hint states the rule while
+    /// the gate is closed, and the picker unlocks the moment a description is typed.
+    /// </summary>
+    [Fact]
+    public async Task Choose_file_says_why_it_is_locked_and_unlocks_once_a_description_is_typed()
+    {
+        var takeId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants",
+            new List<ImageVariantResponse>
+            {
+                new(takeId, SlotId, "https://public.example/full.webp", "https://public.example/thumb.webp",
+                    "gpt-image-2", "Candidate", null, null, 1280, 720, DateTimeOffset.UtcNow),
+            });
+
+        var view = await OpenDrawerAsync();
+        await view.WaitForStateAsync(() => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
+        await view.Find(".cm-gallery__tile").ClickAsync();
+        await view.WaitForStateAsync(() => view.FindAll(".cm-lightbox").Count == 1, TimeSpan.FromSeconds(5));
+
+        var file = view.Find(".cm-lightbox input[type=file]");
+        Assert.True(file.HasAttribute("disabled"));
+        Assert.Contains("Type a description first", view.Find("#cm-kit-upload-hint").TextContent, StringComparison.Ordinal);
+
+        view.Find(".cm-lightbox input[aria-label='Description used as prompt text']").Input("the Berlin studio wall");
+
+        file = view.Find(".cm-lightbox input[type=file]");
+        Assert.False(file.HasAttribute("disabled"));
+        Assert.Contains("Ready", view.Find("#cm-kit-upload-hint").TextContent, StringComparison.Ordinal);
+    }
+
     private async Task<IRenderedComponent<ImageStudioView>> OpenDrawerAsync()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));

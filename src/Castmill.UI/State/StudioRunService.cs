@@ -64,6 +64,21 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
         Start(campaignId, slotId, variants,
             ct => images.GenerateAsync(campaignId, slotId, variants, modelAlias, ct));
 
+    /// <summary>
+    /// Compare mode: one take per listed model, same prompt, one run. The gallery labels
+    /// each take with its model so the producer picks by eye.
+    /// </summary>
+    public void StartCompare(Guid campaignId, Guid slotId, IReadOnlyList<string> modelAliases) =>
+        Start(campaignId, slotId, modelAliases.Count,
+            ct => images.CompareAsync(campaignId, slotId, modelAliases, 1, ct));
+
+    /// <summary>Region edit (ADR-055): repaint a masked part of a take into a new take with lineage.</summary>
+    public void StartEdit(
+        Guid campaignId, Guid slotId, Guid sourceVariantId, string maskPngBase64, string instruction,
+        string? modelAlias = null) =>
+        Start(campaignId, slotId, 1,
+            ct => images.EditRegionAsync(campaignId, slotId, sourceVariantId, maskPngBase64, instruction, 1, modelAlias, ct));
+
     /// <summary>Starts a steered run from an existing take.</summary>
     public void StartSteer(
         Guid campaignId, Guid slotId, Guid sourceVariantId, string note, int variants = 1,

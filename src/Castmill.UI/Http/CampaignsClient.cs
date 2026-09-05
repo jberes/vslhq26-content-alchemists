@@ -107,6 +107,12 @@ public sealed class CampaignsClient(ApiClient api)
         Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
         api.GetWithETagAsync<ArtifactResponse>($"api/v1/campaigns/{campaignId}/artifacts/{artifactId}", ct);
 
+    /// <summary>Stores the technical brief (ADR-056). Metadata: no If-Match, no version bump.</summary>
+    public Task<ArtifactResponse> SetTechnicalBriefAsync(
+        Guid campaignId, Guid artifactId, TechnicalBrief brief, CancellationToken ct = default) =>
+        api.PutAsync<TechnicalBrief, ArtifactResponse>(
+            $"api/v1/campaigns/{campaignId}/artifacts/{artifactId}/technical-brief", brief, etag: null, ct);
+
     /// <summary>Deletes one artifact and its revisions. Server returns 204; no undo.</summary>
     public Task DeleteArtifactAsync(Guid campaignId, Guid artifactId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/campaigns/{campaignId}/artifacts/{artifactId}", ct);

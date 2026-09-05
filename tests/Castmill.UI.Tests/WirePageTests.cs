@@ -129,7 +129,13 @@ public sealed class WirePageTests : CastmillUiTestContext
         Assert.Contains("display: -webkit-box", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
         Assert.Contains("-webkit-line-clamp: 2", Rule(css, ".cm-wire-clamp-2"), StringComparison.Ordinal);
         Assert.Contains("min-inline-size: 0", Rule(css, ".cm-run-show__timeline"), StringComparison.Ordinal);
-        Assert.Contains("block-size: 36px", Rule(css, ".cm-run-show__day--empty"), StringComparison.Ordinal);
+        // Empty days are full lanes with air between them, not 36px list rows (backlog 2026-09-05).
+        Assert.Contains("block-size: var(--cm-wire-day-min)", Rule(css, ".cm-run-show__day--empty"), StringComparison.Ordinal);
+        Assert.Contains("gap: var(--cm-wire-day-gap)", Rule(css, ".cm-run-show__days"), StringComparison.Ordinal);
+        Assert.Contains("block-size: var(--cm-wire-day-min)", Rule(css, ".cm-run-show__day--weekend"), StringComparison.Ordinal);
+        var semantic = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/tokens/semantic.css");
+        var minMatch = System.Text.RegularExpressions.Regex.Match(semantic, @"--cm-wire-day-min:\s*(\d+)px");
+        Assert.True(minMatch.Success && int.Parse(minMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) >= 64, "day lanes must be at least 64px");
     }
 
     [Fact]
@@ -305,6 +311,88 @@ public sealed class WirePageTests : CastmillUiTestContext
         Assert.NotNull(page.Find("igc-dialog[open]"));
         Assert.NotNull(page.FindComponent<IgbDatePicker>());
         Assert.NotNull(page.FindComponent<IgbDateTimeInput>());
+    }
+
+    /// <summary>
+    /// The Wire is workspace-scoped, but a producer planning one launch wants that
+    /// campaign's plan alone. One selector in the header narrows BOTH projections; the old
+    /// Pipeline-only "This campaign only" toggle bound to whatever campaign the rail last
+    /// opened, which was not a choice.
+    /// </summary>
+    [Fact]
+    public async Task The_campaign_selector_narrows_both_projections_to_one_campaign()
+    {
+        var otherCampaign = Guid.NewGuid();
+        var otherArtifact = Guid.NewGuid();
+        Http.OnGet("api/v1/campaigns/dashboard", new DashboardResponse(
+            ReviewQueue: [],
+            AgingDrafts: [],
+            Campaigns: [new CampaignCounts(_campaignId, 1, 0, 0, 0), new CampaignCounts(otherCampaign, 1, 0, 0, 0)],
+            EmptySlots: 0,
+            CampaignsWithEmptySlots: 0,
+            EmptySlotModels: [],
+            FirstEmptySlotCampaign: null,
+            ReadyToSchedule:
+            [
+                new DashboardArtifact(_campaignId, "Launch campaign", _artifactId, "linkedin", "Ready story", "Queued",
+                    new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero)),
+                new DashboardArtifact(otherCampaign, "Webinar campaign", otherArtifact, "linkedin", "Webinar recap", "Queued",
+                    new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero)),
+            ]));
+        Http.OnGet("api/v1/schedule", Array.Empty<ScheduleEntryResponse>());
+        Http.OnGet("api/v1/publish/readiness", Readiness(false));
+
+        var page = Render<Wire>();
+        await page.WaitForAssertionAsync(() => Assert.Equal(2, page.FindAll(".cm-run-show__queue-card").Count));
+
+        var select = page.Find("select.cm-run-show__scope-select");
+        Assert.Contains("All campaigns (2)", select.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Webinar campaign", select.TextContent, StringComparison.Ordinal);
+
+        select.Change(otherCampaign.ToString());
+        await page.WaitForAssertionAsync(() => Assert.Single(page.FindAll(".cm-run-show__queue-card")));
+        Assert.Contains("Webinar recap", page.Find(".cm-run-show__queue-card").TextContent, StringComparison.Ordinal);
+
+        page.FindAll("igc-toggle-button").Single(button => button.TextContent.Trim() == "Pipeline").Click();
+        await page.WaitForAssertionAsync(() => Assert.NotNull(page.Find(".cm-pipeline")));
+        Assert.Single(page.FindAll(".cm-pipeline__column--ready .cm-wire-queue-card"));
+        Assert.Contains("Webinar campaign", page.Find(".cm-pipeline__scope").TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain(page.FindAll("igc-toggle-button"), button => button.TextContent.Contains("This campaign only", StringComparison.Ordinal));
+
+        select.Change("all");
+        await page.WaitForAssertionAsync(() => Assert.Equal(2, page.FindAll(".cm-pipeline__column--ready .cm-wire-queue-card").Count));
+    }
+
+    /// <summary>
+    /// The Wire ignored the theme toggle: its sheet was literal light colours, and the dark
+    /// values sat unreferenced in the token file. Dark mode now swaps the same --cm-wire-*
+    /// names, so feature CSS never branches on the mode.
+    /// </summary>
+    [Fact]
+    public void The_wire_sheet_is_mode_aware_and_its_type_is_tokenised()
+    {
+        var semantic = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/tokens/semantic.css");
+        var darkBlock = Rule(semantic, ":root[data-cm-mode=\"dark\"]");
+        foreach (var token in new[] { "--cm-wire-bg", "--cm-wire-surface", "--cm-wire-ink", "--cm-wire-divider", "--cm-wire-accent", "--cm-wire-error" })
+        {
+            Assert.Contains(token + ":", darkBlock, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("--cm-wire-dark-", semantic, StringComparison.Ordinal);
+
+        // Every Wire type step is at least 11px (0.6875rem): the 9.5–10px labels were sub-legible.
+        foreach (var token in new[] { "--cm-wire-text-xs", "--cm-wire-text-sm", "--cm-wire-text-md", "--cm-wire-text-body", "--cm-wire-text-title", "--cm-wire-text-day" })
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(semantic, System.Text.RegularExpressions.Regex.Escape(token) + @":\s*([\d.]+)rem");
+            Assert.True(match.Success, token + " is not defined in rem");
+            Assert.True(double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) >= 0.6875, token + " is smaller than 11px");
+        }
+
+        // No pixel font-size literals survive in The Wire's feature CSS.
+        var views = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/views.css");
+        var start = views.IndexOf("/* ---- The Wire (workspace scope)", StringComparison.Ordinal);
+        var end = views.IndexOf(".cm-wire {", start, StringComparison.Ordinal);
+        Assert.True(start > 0 && end > start);
+        Assert.DoesNotMatch(@"font-size:\s*[\d.]+px", views[start..end]);
     }
 
     private void StubWire(bool brokerReady = false)

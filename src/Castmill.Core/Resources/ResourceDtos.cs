@@ -123,7 +123,8 @@ public sealed record ArtifactPreviewResponse(
 public sealed record ArtifactResponse(
     Guid Id, Guid CampaignId, string Kind, string Title, string ContentJson, string Status,
     long Version, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
-    Guid? ParentArtifactId = null);
+    Guid? ParentArtifactId = null,
+    TechnicalBrief? TechnicalBrief = null);
 
 /// <summary>
 /// Status transitions are their own action, not part of a content save: "mark reviewed" and
@@ -168,7 +169,65 @@ public sealed record ImageSlotResponse(
     /// <summary>The take explicitly marked Kept, even when it has not been placed yet.</summary>
     string? KeeperThumbUrl = null,
     /// <summary>Keeper id used by authenticated full-resolution download actions.</summary>
-    Guid? KeeperVariantId = null);
+    Guid? KeeperVariantId = null,
+    /// <summary>The overlay editor's spec (ADR-055); null when the slot has no overlay boxes.</summary>
+    OverlaySpec? Overlay = null);
+
+// ---- Overlay editor (ADR-055) -----------------------------------------------
+
+/// <summary>Solid band behind a text box: colour, opacity, padding and corner radius as ratios of the text size.</summary>
+public sealed record OverlayBand(
+    [property: Required, MaxLength(9)] string Color,
+    [property: Range(0, 1)] double Opacity = 1,
+    [property: Range(0, 2)] double Padding = 0.4,
+    [property: Range(0, 1)] double Radius = 0.12);
+
+/// <summary>
+/// One text box on the image. Geometry is in RATIOS of the slot (0–1) so the same spec renders
+/// on the editor's preview and the server's full-size composite; FontSize is a ratio of the
+/// slot height. Weight is 400 | 600 | 700. Align is left | center | right.
+/// </summary>
+public sealed record OverlayBox(
+    [property: Required, MaxLength(40)] string Id,
+    [property: Required, MaxLength(160)] string Text,
+    [property: Range(0, 1)] double X,
+    [property: Range(0, 1)] double Y,
+    [property: Range(0.02, 1)] double W,
+    [property: Range(0.02, 1)] double H,
+    [property: Range(0.01, 0.6)] double FontSize = 0.09,
+    [property: Range(100, 900)] int Weight = 600,
+    [property: MaxLength(9)] string Color = "#F2F2F3",
+    [property: MaxLength(10)] string Align = "left",
+    OverlayBand? Band = null,
+    /// <summary>Optional logo asset from the brand kit drawn into this box instead of text.</summary>
+    Guid? LogoAssetId = null);
+
+public sealed record OverlaySpec(
+    [property: Required, MaxLength(12)] IReadOnlyList<OverlayBox> Boxes);
+
+/// <summary>Region edit (ADR-055): a mask over the take plus an instruction — "replace the background", "add this face".</summary>
+public sealed record ImageRegionEditRequest(
+    /// <summary>PNG, base64: white = edit, black/transparent = keep. Same size as the take, or any size (it is fitted).</summary>
+    [property: Required, MaxLength(6_000_000)] string MaskPng,
+    [property: Required, MinLength(3), MaxLength(1000)] string Instruction,
+    [property: Range(1, 3)] int Variants = 1,
+    [property: MaxLength(100)] string? ModelAlias = null);
+
+/// <summary>Technical brief (ADR-056): the facts a technical piece must get right.</summary>
+public sealed record TechnicalBrief(
+    [property: MaxLength(200)] string? Product = null,
+    [property: MaxLength(100)] string? Version = null,
+    [property: MaxLength(2000)] string? Apis = null,
+    [property: MaxLength(2000)] string? Constraints = null,
+    [property: MaxLength(2000)] string? MustMention = null,
+    [property: MaxLength(2000)] string? MustNotClaim = null,
+    bool ConsultKnowledgeBase = true)
+{
+    public bool IsEmpty =>
+        string.IsNullOrWhiteSpace(Product) && string.IsNullOrWhiteSpace(Version)
+        && string.IsNullOrWhiteSpace(Apis) && string.IsNullOrWhiteSpace(Constraints)
+        && string.IsNullOrWhiteSpace(MustMention) && string.IsNullOrWhiteSpace(MustNotClaim);
+}
 
 public sealed record ImageSlotPatchRequest(
     [property: MaxLength(4000)] string? Prompt,
@@ -198,13 +257,38 @@ public sealed record GenerateVariantsRequest(
     /// slot's saved default. Comparing two models on the same prompt is the normal way to
     /// work; making that comparison require a persisted settings change was not.
     /// </summary>
-    [property: MaxLength(100)] string? ModelAlias = null);
+    [property: MaxLength(100)] string? ModelAlias = null,
+    /// <summary>
+    /// Compare mode (ADR-054): render <see cref="Variants"/> take(s) on EACH of these
+    /// models in one run, so the gallery holds the same prompt from every provider side by
+    /// side. Overrides <see cref="ModelAlias"/> when present. Each take records its model.
+    /// </summary>
+    [property: MaxLength(6)] string[]? ModelAliases = null);
+
+/// <summary>
+/// The exact text a generate call would send for this slot right now (ADR-054). Auto mode
+/// hid the prompt entirely, which made a bad render impossible to diagnose from the studio.
+/// </summary>
+public sealed record ImagePromptPreviewResponse(
+    string Prompt,
+    string PromptMode,
+    int TargetWidth,
+    int TargetHeight,
+    /// <summary>The frame the provider actually paints before Castmill centre-crops it.</summary>
+    int FrameWidth,
+    int FrameHeight,
+    /// <summary>Percent of each cropped edge lost to the crop (0 when the frame already matches).</summary>
+    double CropPercentHorizontal,
+    double CropPercentVertical,
+    bool ReferencesAttach);
 
 /// <summary>A persisted take for a slot. State: Candidate | Kept | Discarded.</summary>
 public sealed record ImageVariantResponse(
     Guid Id, Guid SlotId, string Url, string ThumbUrl, string Model, string State,
     string? SteeringNote, Guid? SourceVariantId, int Width, int Height, DateTimeOffset CreatedAt,
-    bool IsLocked = false, bool CanUnlock = false, DateTimeOffset? LockedAt = null);
+    bool IsLocked = false, bool CanUnlock = false, DateTimeOffset? LockedAt = null,
+    /// <summary>The EXACT prompt this take was rendered from — post brand, steering and house rules.</summary>
+    string? Prompt = null);
 
 public sealed record VariantStateRequest(
     [property: Required, MaxLength(20)] string State);

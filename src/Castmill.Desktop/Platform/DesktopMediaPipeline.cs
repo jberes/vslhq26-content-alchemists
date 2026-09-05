@@ -19,11 +19,37 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
     private readonly WhisperModelManager _models = new(
         Path.Combine(FileSystem.AppDataDirectory, "whisper"));
 
+    private readonly LocalMediaServer _server = new();
+
     public bool CanProcessLocally => true;
 
     public string? UnavailableReason => null;
 
     public PickedMedia? LastPicked { get; private set; }
+
+    public bool CanPlayLocalFiles => true;
+
+    /// <summary>
+    /// The WebView cannot load file:// media, so the desktop serves picked recordings from a
+    /// loopback HTTP server with Range support (ADR-057). Only files registered here are
+    /// reachable, each under an opaque token; nothing else on disk is exposed.
+    /// </summary>
+    public Task<string?> OpenLocalMediaAsync(string path) =>
+        Task.FromResult(File.Exists(path) ? _server.Register(path) : null);
+
+    public async Task<string?> FingerprintAsync(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+        return await Task.Run(() => MediaFingerprint.Compute(path));
+    }
+
+    public Task<Stream?> OpenReadAsync(string path) =>
+        Task.FromResult<Stream?>(File.Exists(path)
+            ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true)
+            : null);
 
     public async Task<PickedMedia?> PickMediaAsync()
     {

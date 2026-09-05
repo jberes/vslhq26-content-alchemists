@@ -26,7 +26,18 @@ public sealed record SourceAssetResponse(
     Guid CurrentEvidenceRevisionId,
     ApprovedEvidenceRevision? ApprovedEvidence,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>Media link (ADR-057): where the recording is on the transcribing machine, its fingerprint, and the optional cloud copy.</summary>
+    string? LocalPath = null,
+    string? ContentHash = null,
+    Guid? MediaAssetId = null,
+    string? ContentTypeHint = null);
+
+/// <summary>Sets or clears the media link on a source (ADR-057). Null fields are left as they are; empty strings clear.</summary>
+public sealed record SourceMediaLinkRequest(
+    [property: MaxLength(2000)] string? LocalPath = null,
+    [property: MaxLength(80)] string? ContentHash = null,
+    Guid? MediaAssetId = null);
 
 public sealed record EvidenceBlockResponse(
     Guid SourceAssetId,

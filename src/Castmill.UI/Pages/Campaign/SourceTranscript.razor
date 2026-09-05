@@ -11,8 +11,8 @@
 <ol class="cm-source__segments" data-cm-scroll>
     @foreach (var segment in Transcript.Segments)
     {
-        <li class="cm-seg @(Highlighted.Contains(segment.Id) ? "cm-seg--cited" : "")"
-            data-seg="@segment.Id">
+        <li class="cm-seg @(Highlighted.Contains(segment.Id) ? "cm-seg--cited" : "") @(SegmentClicked.HasDelegate ? "cm-seg--seekable" : "")"
+            data-seg="@segment.Id" @onclick="() => SegmentClicked.InvokeAsync(segment)">
             <span class="cm-seg__label cm-mono">
                 @Clock(segment.StartSeconds)@(segment.Speaker is null ? "" : $" · {segment.Speaker}")
                 @(segment.SourceLabel is null ? "" : $" · {segment.SourceLabel}")
@@ -31,6 +31,9 @@
     /// <summary>Segment ids to mark as cited. The parent mutates one set in place, so the
     /// comparison is by content, not reference.</summary>
     [Parameter, EditorRequired] public IReadOnlySet<string> Highlighted { get; set; } = default!;
+
+    /// <summary>Optional: the Mill Floor player seeks to the clicked segment (ADR-057).</summary>
+    [Parameter] public EventCallback<TranscriptSegment> SegmentClicked { get; set; }
 
     protected override bool ShouldRender() =>
         !ReferenceEquals(_renderedTranscript, Transcript)

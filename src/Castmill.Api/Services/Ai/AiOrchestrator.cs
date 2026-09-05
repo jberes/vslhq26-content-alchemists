@@ -38,7 +38,8 @@ public interface IAiOrchestrator
     /// </summary>
     Task<TechEditResult> RunTechEditAsync(
         Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
-        string? steering, bool useKnowledgeBase, CancellationToken ct);
+        string? steering, bool useKnowledgeBase, CancellationToken ct,
+        Castmill.Core.Resources.TechnicalBrief? technicalBrief = null);
     Task<YoutubeTitleRegenerationResponse> RegenerateYoutubeTitleAsync(
         Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
         string slot, string? steering, CancellationToken ct);
@@ -49,6 +50,7 @@ public sealed class AiOrchestrator(
     IImagePlanService imagePlan,
     IBrandContextService brands,
     IKnowledgeBaseClient knowledge,
+    IAnthropicMcpClient mcp,
     IWorkspaceLinks workspaceLinks,
     IContentDependencyService dependencies,
     CastmillDbContext db,
@@ -585,13 +587,17 @@ public sealed class AiOrchestrator(
     /// </summary>
     public async Task<TechEditResult> RunTechEditAsync(
         Guid userId, Campaign campaign, Artifact artifact, TranscriptContent transcript,
-        string? steering, bool useKnowledgeBase, CancellationToken ct)
+        string? steering, bool useKnowledgeBase, CancellationToken ct,
+        Castmill.Core.Resources.TechnicalBrief? technicalBrief = null)
     {
-        steering = WithContentType(campaign, steering);
+        // The technical brief rides on the steering string (ADR-056) so BuildPrompt places it
+        // with the campaign brief, ahead of the evidence.
+        steering = TechnicalBriefs.Merge(WithContentType(campaign, steering), technicalBrief);
         var evidence = await dependencies.LoadGenerationEvidenceAsync(campaign.Id, transcript, ct);
         var stopwatch = Stopwatch.StartNew();
         var provider = "foundry";
         var knowledgeUsed = false;
+        var attached = new List<string>();
         try
         {
             var kind = Generators.Normalize(artifact.Kind);
@@ -604,15 +610,50 @@ public sealed class AiOrchestrator(
             var brand = await brands.ResolveAsync(campaign, ct);
             provider = await chatProviders.ResolveNameAsync(userId, FoundryClientFactory.TechEditAlias, ct);
 
+            // Knowledge base: the brand's own endpoint first, the workspace gateway otherwise.
+            // A technical brief that asks for it counts as opting in.
+            var consult = useKnowledgeBase || technicalBrief is { ConsultKnowledgeBase: true, IsEmpty: false };
             var knowledgeBlock = string.Empty;
-            if (useKnowledgeBase)
+            if (consult)
             {
-                var answer = await knowledge.AskAsync(userId, BuildKnowledgeQuery(artifact, payload.Value, campaign), ct);
+                var query = BuildKnowledgeQuery(artifact, payload.Value, campaign, TechnicalBriefs.QuerySeed(technicalBrief));
+                var answer = await knowledge.AskAsync(userId, query, brand.Knowledge, ct);
                 if (answer is not null)
                 {
                     knowledgeUsed = true;
                     knowledgeBlock = $"\n{answer.ToPromptBlock()}\n";
+                    attached.Add(brand.Knowledge is { } endpoint ? $"knowledge: {endpoint.Name}" : "knowledge: workspace");
                 }
+            }
+
+            // Brand skills that apply to this kind are authoritative product instructions.
+            var skillsBlock = string.Empty;
+            var skills = (brand.Skills ?? []).Where(skill => skill.AppliesToKind(kind)).ToList();
+            if (skills.Count > 0)
+            {
+                var text = new System.Text.StringBuilder();
+                text.AppendLine("BRAND SKILLS (authoritative product knowledge — follow exactly, cite where they back a claim):");
+                foreach (var skill in skills)
+                {
+                    text.Append("--- skill: ").AppendLine(skill.Name);
+                    text.AppendLine(skill.Content.Trim());
+                    attached.Add($"skill: {skill.Name}");
+                }
+                text.AppendLine("END BRAND SKILLS");
+                skillsBlock = $"\n{text}\n";
+            }
+
+            // MCP servers reach the model only on the Anthropic path (the connector is theirs).
+            var mcpServers = brand.McpServers ?? [];
+            var useMcp = mcpServers.Count > 0 && !provider.Equals("foundry", StringComparison.OrdinalIgnoreCase);
+            var mcpBlock = useMcp
+                ? "\nTOOLS: MCP servers are attached (" + string.Join(", ", mcpServers.Select(m => m.Name))
+                  + "). Use them to verify every technical claim you keep or add; prefer a tool result "
+                  + "over your own recollection, and record the tool-derived URL as the claim's source.\n"
+                : string.Empty;
+            if (useMcp)
+            {
+                attached.AddRange(mcpServers.Select(m => $"mcp: {m.Name}"));
             }
 
             var instructions = $$"""
@@ -620,24 +661,33 @@ public sealed class AiOrchestrator(
                 validated; your job is to make it more accurate, more specific and more useful
                 to a technical reader — not to rewrite it for the sake of rewriting.
 
-                Correct anything the knowledge base contradicts, replace vague claims with
-                concrete ones it supports, and link to a source URL where one genuinely backs a
-                statement. Leave the structure, length and voice alone unless they are the
-                problem. If a passage is already right, return it unchanged.
+                Correct anything the knowledge base, brand skills or tool results contradict,
+                replace vague claims with concrete ones they support, and link to a source URL
+                where one genuinely backs a statement. Leave the structure, length and voice
+                alone unless they are the problem. If a passage is already right, return it
+                unchanged. Never invent a version number, API name, option or benchmark: when
+                nothing verifies a statement, keep it hedged and list it as an unverified claim.
 
                 Return the SAME JSON schema you are given, edited, wrapped like this:
                 { "artifact": { ...the same shape as the current content... },
-                  "changes": [ { "what": string, "why": string, "sourceUrl": string } ] }
+                  "changes": [ { "what": string, "why": string, "sourceUrl": string } ],
+                  "claims": [ { "statement": string, "sourceUrl": string|null } ] }
+
+                "claims" lists every technical statement the edited artifact asserts (product
+                behaviour, API names, versions, numbers, compatibility); sourceUrl is the
+                knowledge-base, skill or tool source that backs it, or null when nothing does.
 
                 Every field present in the current content must still be present, including
                 "citations", which must keep citing exact approved evidence ids.
-                {{knowledgeBlock}}
+                {{knowledgeBlock}}{{skillsBlock}}{{mcpBlock}}
                 Current content:
                 {{payload.Value.GetRawText()}}
                 """;
 
-            var response = await CallModelAsync(userId, FoundryClientFactory.TechEditAlias,
-                $"{kind}-tech-edit", BuildPrompt(instructions, steering, evidence, brand, kind), ct);
+            var prompt = BuildPrompt(instructions, steering, evidence, brand, kind);
+            var response = useMcp
+                ? await CallMcpAsync(userId, $"{kind}-tech-edit", prompt, mcpServers, ct)
+                : await CallModelAsync(userId, FoundryClientFactory.TechEditAlias, $"{kind}-tech-edit", prompt, ct);
 
             var parsed = CitationMarkers.Strip(ParseModelJson(response));
             if (!parsed.TryGetProperty("artifact", out var edited) || edited.ValueKind != JsonValueKind.Object)
@@ -661,8 +711,12 @@ public sealed class AiOrchestrator(
             }
 
             var changes = ReadChanges(parsed);
+            var claims = ReadClaims(parsed);
             var warnings = new List<string>(validation.Warnings);
             warnings.AddRange(changes.Select(c => $"Tech edit: {c}"));
+            // Verification policy (ADR-056): an unverified technical claim is flagged, never
+            // silently kept and never rewritten into something more confident.
+            warnings.AddRange(claims.Where(c => !c.Verified).Select(c => $"Unverified claim: {c.Statement}"));
 
             var now = clock.GetUtcNow();
             var strategy = db.Database.CreateExecutionStrategy();
@@ -693,15 +747,56 @@ public sealed class AiOrchestrator(
             });
 
             return new TechEditResult(true, null, artifact.Id, artifact.Version, provider, knowledgeUsed,
-                changes, warnings, stopwatch.ElapsedMilliseconds);
+                changes, warnings, stopwatch.ElapsedMilliseconds, claims, attached);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Tech edit failed for artifact {ArtifactId}", artifact.Id);
             return TechEditFail(artifact,
-                ex is AiNotConfiguredException ? ex.Message : $"Tech edit failed: {ex.GetType().Name}",
+                ex is AiNotConfiguredException or InvalidOperationException ? ex.Message : $"Tech edit failed: {ex.GetType().Name}",
                 stopwatch, provider, knowledgeUsed);
         }
+    }
+
+    /// <summary>The MCP-enabled completion, logged like every other model call.</summary>
+    private async Task<string> CallMcpAsync(
+        Guid userId, string kind, string prompt, IReadOnlyList<McpServerDefinition> servers, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var success = false;
+        var responseText = string.Empty;
+        try
+        {
+            responseText = await mcp.CompleteAsync(userId, prompt, servers, ct);
+            success = true;
+            return responseText;
+        }
+        finally
+        {
+            promptLog.Record(new PromptLogEntry(
+                clock.GetUtcNow(), userId, kind, "anthropic+mcp",
+                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds));
+        }
+    }
+
+    internal static IReadOnlyList<ClaimCheck> ReadClaims(JsonElement parsed)
+    {
+        if (!parsed.TryGetProperty("claims", out var claims) || claims.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        return [.. claims.EnumerateArray()
+            .Where(c => c.ValueKind == JsonValueKind.Object
+                && c.TryGetProperty("statement", out var st) && st.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(st.GetString()))
+            .Select(c =>
+            {
+                var statement = c.GetProperty("statement").GetString()!.Trim();
+                var source = c.TryGetProperty("sourceUrl", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+                var verified = Uri.TryCreate(source, UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+                return new ClaimCheck(statement, verified ? source : null, verified);
+            })];
     }
 
     /// <summary>Runs the kind's own pass-1 validator; blog has its own pipeline and validator.</summary>
@@ -745,9 +840,13 @@ public sealed class AiOrchestrator(
     /// plus meta description plus headings — rather than its full body, which would bury the
     /// topic in prose the gateway has to re-summarise.
     /// </summary>
-    private static string BuildKnowledgeQuery(Artifact artifact, JsonElement payload, Campaign campaign)
+    private static string BuildKnowledgeQuery(Artifact artifact, JsonElement payload, Campaign campaign, string? seed = null)
     {
         var parts = new List<string> { artifact.Title };
+        if (!string.IsNullOrWhiteSpace(seed))
+        {
+            parts.Insert(0, seed);
+        }
         if (payload.TryGetProperty("metaDescription", out var meta) && meta.ValueKind == JsonValueKind.String)
         {
             parts.Add(meta.GetString()!);

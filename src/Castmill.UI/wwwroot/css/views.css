@@ -1350,7 +1350,8 @@ button.cm-intent {
     grid-column: 1 / -1;
 }
 
-.cm-plan__slot-download {
+.cm-plan__slot-download,
+.cm-plan__slot-edit {
     position: absolute;
     inset-inline-end: var(--cm-space-2);
     inset-block-end: var(--cm-space-2);
@@ -1364,9 +1365,25 @@ button.cm-intent {
     transition: opacity var(--cm-motion);
 }
 
-.cm-plan__slot-preview:hover .cm-plan__slot-download,
-.cm-plan__slot-preview:focus-within .cm-plan__slot-download {
+.cm-plan__slot-preview:hover .cm-plan__slot-action,
+.cm-plan__slot-preview:focus-within .cm-plan__slot-action {
     opacity: 1;
+}
+
+/* Edit + Download share the corner; the group is positioned, the buttons flow inside it. */
+.cm-plan__slot-actions {
+    position: absolute;
+    inset-inline-end: var(--cm-space-2);
+    inset-block-end: var(--cm-space-2);
+    display: flex;
+    gap: var(--cm-space-2);
+}
+
+.cm-plan__slot-actions .cm-plan__slot-action {
+    position: static;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-1);
 }
 
 .cm-badge {
@@ -2219,6 +2236,159 @@ button.cm-intent {
     flex: 1 1 auto;
     block-size: 3px;
     background: var(--cm-surface-sunken);
+}
+
+/* Real media element (ADR-057): fills the card width, keeps its own aspect. */
+.cm-source__media {
+    display: block;
+    inline-size: 100%;
+    max-block-size: 40vh;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-inverse);
+}
+
+.cm-source__media--audio {
+    max-block-size: 3rem;
+}
+
+.cm-source__player--empty {
+    padding: var(--cm-space-4);
+    text-align: center;
+}
+
+.cm-source__scrub-fill {
+    display: block;
+    block-size: 100%;
+    background: var(--cm-accent);
+    transition: inline-size 200ms linear;
+}
+
+.cm-source__media-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-source__path {
+    max-inline-size: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cm-seg--seekable {
+    cursor: pointer;
+}
+
+.cm-seg--seekable:hover {
+    background: var(--cm-accent-wash);
+    color: var(--cm-on-surface);
+}
+
+/* Technical brief (ADR-056) */
+.cm-techbrief {
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-techbrief > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    cursor: pointer;
+}
+
+.cm-techbrief__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-3);
+    padding: var(--cm-space-3);
+}
+
+.cm-techbrief__wide {
+    grid-column: 1 / -1;
+}
+
+.cm-techbrief .cm-form__actions {
+    padding: 0 var(--cm-space-3) var(--cm-space-3);
+}
+
+.cm-claims__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+}
+
+.cm-claims__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--cm-space-1) var(--cm-space-2);
+    padding: var(--cm-space-2);
+    border-inline-start: 3px solid var(--cm-status-published);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-claims__item--open {
+    border-inline-start-color: var(--cm-warning);
+}
+
+.cm-claims__item .cm-meta {
+    grid-column: 2;
+}
+
+.cm-claims__mark {
+    font-family: var(--cm-font-mono);
+    font-weight: 600;
+}
+
+/* Brand knowledge (ADR-056) */
+.cm-knowledge__block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    padding-block: var(--cm-space-4);
+    border-block-start: 1px solid var(--cm-rule);
+}
+
+.cm-knowledge__block h3 {
+    margin: 0;
+    font-size: var(--cm-text-h4);
+}
+
+.cm-knowledge__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+}
+
+.cm-knowledge__row-actions {
+    display: flex;
+    gap: var(--cm-space-2);
+}
+
+.cm-knowledge__form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--cm-space-2);
+}
+
+.cm-knowledge__form .cm-form__actions,
+.cm-knowledge__form .cm-knowledge__skill-body,
+.cm-knowledge__form .cm-knowledge__file {
+    grid-column: 1 / -1;
 }
 
 .cm-source__segments {
@@ -3108,6 +3278,11 @@ button.cm-intent {
     color: var(--cm-on-surface);
 }
 
+.cm-seo__frame {
+    inline-size: 100%;
+    min-inline-size: 0;
+}
+
 .cm-seo {
     display: grid;
     grid-template-columns: minmax(16rem, 1fr) minmax(0, 2.4fr) minmax(14rem, 1fr);
@@ -3543,7 +3718,9 @@ button.cm-intent {
 }
 
 .cm-studio--open {
-    grid-template-columns: minmax(0, 1fr) minmax(26rem, 34rem);
+    /* The drawer is the editor: it gets real width on a wide screen instead of a fixed
+       34rem column beside an empty gutter. */
+    grid-template-columns: minmax(0, 1.4fr) minmax(28rem, 1fr);
 }
 
 .cm-studio__sheet {
@@ -3991,6 +4168,44 @@ button.cm-intent {
 
 .cm-studio__drawer-head h2 {
     margin: 0;
+}
+
+/* The prompt Castmill will send / did send (ADR-054): collapsed by default, full text on
+   demand, monospace so the composition rules read as the block the model receives. */
+.cm-studio__preview {
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-studio__preview > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    cursor: pointer;
+}
+
+.cm-studio__preview-text {
+    margin: 0;
+    padding: var(--cm-space-3);
+    max-block-size: 24rem;
+    overflow: auto;
+    border-block-start: 1px solid var(--cm-rule);
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-meta);
+    line-height: var(--cm-leading-body);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.cm-studio__preview > .cm-button {
+    margin: var(--cm-space-2) var(--cm-space-3) var(--cm-space-3);
+}
+
+.cm-studio__compare {
+    flex-wrap: wrap;
 }
 
 .cm-studio__drawer-close {
@@ -4826,6 +5041,185 @@ button.cm-intent {
     padding: var(--cm-space-8);
 }
 
+/* ---- Editor surface (ADR-055) --------------------------------------------------- */
+/* The image plus positioned overlay boxes and a mask rectangle. Geometry is in ratios of
+   the image; container-query height units size the type so it scales with the picture. */
+.cm-imgeditor {
+    position: relative;
+    display: inline-block;
+    max-inline-size: 100%;
+    max-block-size: 100%;
+    container-type: size;
+    line-height: 0;
+}
+
+.cm-imgeditor > img {
+    display: block;
+    max-inline-size: 100%;
+    max-block-size: 100%;
+}
+
+.cm-imgeditor[data-editor-mode="mask"] {
+    cursor: crosshair;
+}
+
+.cm-imgeditor__box {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: flex-start;
+    overflow: hidden;
+    padding: 0;
+    font-family: var(--cm-font-display);
+    line-height: 1.1;
+    text-shadow: 0 0.06em 0.25em rgb(0 0 0 / 55%);
+    pointer-events: none;
+    user-select: none;
+}
+
+.cm-imgeditor__box--live {
+    outline: 1px dashed color-mix(in srgb, var(--cm-accent) 70%, transparent);
+    outline-offset: 2px;
+    cursor: move;
+    pointer-events: auto;
+}
+
+.cm-imgeditor__box--selected {
+    outline: 2px solid var(--cm-accent);
+}
+
+.cm-imgeditor__text {
+    display: inline-block;
+    max-inline-size: 100%;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--cm-imgeditor-band, transparent);
+    padding: var(--cm-imgeditor-band-pad, 0);
+    border-radius: 0.12em;
+}
+
+.cm-imgeditor__box[style*="--cm-imgeditor-band"] .cm-imgeditor__text {
+    padding: 0.24em 0.4em;
+    text-shadow: none;
+}
+
+.cm-imgeditor__handle {
+    position: absolute;
+    inset-inline-end: -6px;
+    inset-block-end: -6px;
+    inline-size: 12px;
+    block-size: 12px;
+    border: 2px solid var(--cm-accent);
+    border-radius: 2px;
+    background: var(--cm-surface);
+    cursor: nwse-resize;
+    pointer-events: auto;
+}
+
+.cm-imgeditor__mask {
+    position: absolute;
+    box-sizing: border-box;
+    border: 2px dashed var(--cm-accent);
+    background: color-mix(in srgb, var(--cm-accent) 22%, transparent);
+    pointer-events: none;
+}
+
+.cm-imgeditor--secondary {
+    position: relative;
+}
+
+.cm-imgeditor__label {
+    position: absolute;
+    inset-inline-start: var(--cm-space-2);
+    inset-block-start: var(--cm-space-2);
+    padding: 0 var(--cm-space-2);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-inverse);
+    color: var(--cm-on-inverse);
+    font-size: var(--cm-text-meta);
+    line-height: 1.6;
+}
+
+.cm-imgeditor__swap {
+    position: absolute;
+    inset-inline-end: var(--cm-space-2);
+    inset-block-end: var(--cm-space-2);
+}
+
+.cm-lightbox__canvas--compare {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--cm-space-4);
+    align-items: center;
+}
+
+.cm-lightbox__canvas--compare .cm-imgeditor {
+    max-inline-size: 100%;
+}
+
+.cm-imgeditor-panel__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--cm-space-3);
+}
+
+.cm-imgeditor-panel__row .cm-field {
+    flex: 1 1 8rem;
+}
+
+.cm-imgeditor-panel__color {
+    inline-size: 3rem;
+    block-size: 2rem;
+    padding: 0;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: transparent;
+}
+
+.cm-imgeditor-panel__toggle {
+    align-self: center;
+}
+
+.cm-button--on {
+    background: var(--cm-accent-wash);
+    border-color: var(--cm-accent);
+    color: var(--cm-on-surface);
+}
+
+/* Take history: the chain a take was steered/edited from, as a strip of thumbs. */
+.cm-lineage__strip {
+    display: flex;
+    gap: var(--cm-space-2);
+    overflow-x: auto;
+    padding-block: var(--cm-space-1);
+}
+
+.cm-lineage__node {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    inline-size: 5.5rem;
+    padding: var(--cm-space-1);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    cursor: pointer;
+    text-align: start;
+}
+
+.cm-lineage__node img {
+    inline-size: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 2px;
+}
+
+.cm-lineage__node--current {
+    border-color: var(--cm-accent);
+}
+
 .cm-lightbox__close {
     position: absolute;
     z-index: 2;
@@ -5077,14 +5471,14 @@ button.cm-intent {
     padding: 9px 12px;
     background: var(--cm-wire-surface);
     color: color-mix(in srgb, var(--cm-wire-ink) 72%, transparent);
-    font-size: 12.5px;
+    font-size: var(--cm-wire-text-body);
 }
 
 .cm-run-show__broker-label {
     flex: none;
     color: var(--cm-wire-accent);
     font-family: var(--cm-font-mono);
-    font-size: 10px;
+    font-size: var(--cm-wire-text-xs);
     font-weight: 600;
     letter-spacing: 0;
     line-height: 1;
@@ -5120,7 +5514,7 @@ button.cm-intent {
     margin-block-end: var(--cm-space-2);
     color: color-mix(in srgb, var(--cm-wire-ink) 50%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 10px;
+    font-size: var(--cm-wire-text-xs);
     font-weight: 600;
     letter-spacing: 0.12em;
     line-height: 1;
@@ -5231,7 +5625,7 @@ button.cm-intent {
 .cm-run-show__channel {
     color: color-mix(in srgb, var(--cm-wire-ink) 50%, transparent);
     font-family: var(--cm-font-display);
-    font-size: 10px;
+    font-size: var(--cm-wire-text-xs);
     font-weight: 600;
     letter-spacing: 0.1em;
     line-height: 1;
@@ -5241,7 +5635,7 @@ button.cm-intent {
 .cm-run-show__queue-title {
     margin-block-start: 3px;
     font-family: var(--cm-font-display);
-    font-size: 15px;
+    font-size: var(--cm-wire-text-title);
     font-weight: 600;
     line-height: 1.18;
 }
@@ -5250,7 +5644,7 @@ button.cm-intent {
     margin-block-start: 5px;
     color: color-mix(in srgb, var(--cm-wire-ink) 45%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 11px;
+    font-size: var(--cm-wire-text-sm);
     line-height: 1;
 }
 
@@ -5258,7 +5652,7 @@ button.cm-intent {
     margin-block-start: var(--cm-space-3);
     padding: 9px 11px;
     color: color-mix(in srgb, var(--cm-wire-ink) 62%, transparent);
-    font-size: 11.5px;
+    font-size: var(--cm-wire-text-md);
     line-height: 1.5;
 }
 
@@ -5282,7 +5676,7 @@ button.cm-intent {
     background: var(--cm-wire-bg);
     color: color-mix(in srgb, var(--cm-wire-ink) 42%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 10.5px;
+    font-size: var(--cm-wire-text-sm);
 }
 
 .cm-run-show__ruler span {
@@ -5295,14 +5689,28 @@ button.cm-intent {
 }
 
 .cm-run-show__days {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-wire-day-gap);
+    padding-block: var(--cm-wire-day-gap);
     border-block: 1px solid var(--cm-wire-divider);
 }
 
+/* Every day is a real lane, not a list row (backlog 2026-09-05: "not so jammed up"). Empty
+   days keep the same height as a day with one item so the week reads as a calendar, and
+   the rows are separated by a gap rather than a hairline pressed against the next numeral. */
 .cm-run-show__day {
     display: flex;
     align-items: stretch;
     gap: 20px;
-    padding-block: 14px;
+    min-block-size: var(--cm-wire-day-min);
+    padding-block: var(--cm-space-3);
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-wire-surface) 55%, transparent);
+    border: 1px solid var(--cm-wire-hairline);
+}
+
+.cm-run-show__day:last-child {
     border-block-end: 1px solid var(--cm-wire-hairline);
 }
 
@@ -5317,28 +5725,34 @@ button.cm-intent {
 .cm-run-show__day--empty {
     align-items: center;
     box-sizing: border-box;
-    block-size: 36px;
-    padding-block: 7px;
+    block-size: var(--cm-wire-day-min);
+    padding-block: var(--cm-space-3);
 }
 
+/* The weekend collapse is lighter, not shorter: same lane height, quieter ink. */
 .cm-run-show__day--weekend {
     align-items: center;
     box-sizing: border-box;
-    block-size: 36px;
-    padding-block: 7px;
-    opacity: 0.5;
+    block-size: var(--cm-wire-day-min);
+    padding-block: var(--cm-space-3);
+    background: transparent;
+    border-style: dashed;
+    opacity: 0.7;
 }
 
 .cm-run-show__day-gutter {
     display: flex;
     flex: none;
     flex-direction: column;
+    justify-content: center;
+    gap: var(--cm-space-1);
     inline-size: 108px;
+    padding-inline-start: var(--cm-space-2);
 }
 
 .cm-run-show__day-gutter strong {
     font-family: var(--cm-font-display);
-    font-size: 16px;
+    font-size: var(--cm-wire-text-day);
     font-weight: 600;
     line-height: 1;
 }
@@ -5347,7 +5761,7 @@ button.cm-intent {
     margin-block-start: 2px;
     color: color-mix(in srgb, var(--cm-wire-ink) 42%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 10.5px;
+    font-size: var(--cm-wire-text-sm);
 }
 
 .cm-run-show__day-state--today {
@@ -5402,27 +5816,30 @@ body.cm-wire-dragging [data-wire-drag] {
 
 .cm-run-show__lane--empty,
 .cm-run-show__lane--collapsed {
-    padding: 5px 0 5px 10px;
-    color: color-mix(in srgb, var(--cm-wire-ink) 38%, transparent);
-    font-size: 11.5px;
+    display: flex;
+    align-items: center;
+    align-self: stretch;
+    padding: 0 0 0 12px;
+    color: color-mix(in srgb, var(--cm-wire-ink) 42%, transparent);
+    font-size: var(--cm-wire-text-md);
 }
 
 .cm-run-show__empty-copy {
     display: block;
     padding: 5px 0 5px 2px;
     color: color-mix(in srgb, var(--cm-wire-ink) 38%, transparent);
-    font-size: 11.5px;
+    font-size: var(--cm-wire-text-md);
 }
 
 .cm-run-show__lane-spacer {
     display: block;
-    block-size: calc(56px + (var(--cm-wire-rows, 1) - 1) * 68px);
+    block-size: calc(var(--cm-wire-row-base) + (var(--cm-wire-rows, 1) - 1) * var(--cm-wire-row-step));
 }
 
 .cm-run-show__item {
     --cm-wire-left: 0%;
     position: absolute;
-    inset-block-start: calc(var(--cm-wire-level, 0) * 68px);
+    inset-block-start: calc(var(--cm-wire-level, 0) * var(--cm-wire-row-step));
     inset-inline-start: clamp(0px, var(--cm-wire-left), calc(100% - min(15.625rem, 100%)));
     display: flex;
     align-items: flex-start;
@@ -5463,7 +5880,7 @@ body.cm-wire-dragging [data-wire-drag] {
     min-inline-size: 0;
     color: var(--cm-wire-queued);
     font-family: var(--cm-font-mono);
-    font-size: 10.5px;
+    font-size: var(--cm-wire-text-sm);
 }
 
 .cm-run-show__item-meta .cm-run-show__channel {
@@ -5487,7 +5904,7 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-run-show__item-title {
     inline-size: 100%;
     margin-block-start: 3px;
-    font-size: 12.5px;
+    font-size: var(--cm-wire-text-body);
 }
 
 .cm-run-show__receipt,
@@ -5499,7 +5916,7 @@ body.cm-wire-dragging [data-wire-drag] {
     overflow: hidden;
     color: color-mix(in srgb, var(--cm-wire-ink) 58%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 9.5px;
+    font-size: var(--cm-wire-text-xs);
     line-height: 1.2;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -5578,11 +5995,23 @@ body.cm-wire-dragging [data-wire-drag] {
     gap: var(--cm-space-3);
     margin-block-end: var(--cm-space-4);
     color: color-mix(in srgb, var(--cm-wire-ink) 72%, transparent);
-    font-size: 12.5px;
+    font-size: var(--cm-wire-text-body);
 }
 
-.cm-pipeline__scope igb-button-group {
+.cm-pipeline__scope .cm-pipeline__broker {
     margin-inline-start: auto;
+}
+
+/* Campaign scope selector in the Wire header (ADR-F54). */
+.cm-run-show__scope {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    min-inline-size: 14rem;
+}
+
+.cm-run-show__scope-select {
+    font-size: var(--cm-wire-text-body);
 }
 
 .cm-pipeline__columns {
@@ -5620,7 +6049,7 @@ body.cm-wire-dragging [data-wire-drag] {
     margin: 0;
     color: var(--cm-wire-ink);
     font-family: var(--cm-font-display);
-    font-size: 11px;
+    font-size: var(--cm-wire-text-sm);
     font-weight: 600;
     text-transform: uppercase;
 }
@@ -5629,7 +6058,7 @@ body.cm-wire-dragging [data-wire-drag] {
     margin-inline-start: auto;
     color: color-mix(in srgb, var(--cm-wire-ink) 45%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 10px;
+    font-size: var(--cm-wire-text-xs);
 }
 
 .cm-pipeline__body {
@@ -5685,7 +6114,7 @@ body.cm-wire-dragging [data-wire-drag] {
     margin-block-start: 3px;
     color: var(--cm-wire-ink);
     font-family: var(--cm-font-display);
-    font-size: 15px;
+    font-size: var(--cm-wire-text-title);
     font-weight: 600;
     line-height: 1.18;
 }
@@ -5704,7 +6133,7 @@ body.cm-wire-dragging [data-wire-drag] {
     margin-block-start: var(--cm-space-2);
     color: color-mix(in srgb, var(--cm-wire-ink) 68%, transparent);
     font-family: var(--cm-font-mono);
-    font-size: 10px;
+    font-size: var(--cm-wire-text-xs);
 }
 
 .cm-pipeline__receipt a {
@@ -5714,7 +6143,7 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-pipeline__copy > .cm-pipeline__reason {
     color: var(--cm-wire-error);
     font-family: var(--cm-font-body);
-    font-size: 11.5px;
+    font-size: var(--cm-wire-text-md);
 }
 
 .cm-pipeline__actions {

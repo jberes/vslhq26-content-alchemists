@@ -22,7 +22,9 @@
 
     --cm-rail-width: 346px;      /* was 432 (2× the handoff's 216); ~20% narrower per owner, 2026-08-05 */
     --cm-rail-width-icons: 56px;
-    --cm-content-max: 1600px;    /* dashboards cap and centre */
+    /* Dashboards fill the frame (ADR-F55). The old 1600px cap centred the content and left
+       wide empty gutters on every desktop wider than a laptop — the owner's screens are. */
+    --cm-content-max: 100%;
     --cm-measure: 72ch;          /* manuscript column */
 }
 

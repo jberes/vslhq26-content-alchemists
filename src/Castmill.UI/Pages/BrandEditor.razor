@@ -296,6 +296,131 @@
                           @onblur="SaveTemplateAsync"></textarea>
             </section>
         }
+        @if (_brandTab == "knowledge")
+        {
+            @* Brand knowledge (ADR-056): what makes a technical piece accurate. A RAG endpoint the
+               Tech Edit consults, skill files it reads as authoritative, MCP servers it may call. *@
+            <section class="cm-brand__section cm-knowledge">
+                <h2 class="cm-front__block-title">Knowledge</h2>
+                <p class="cm-meta">
+                    Ground the Tech Edit and technical generation on this brand's own sources. Nothing
+                    here talks to a model directly; every pass reads it through the server.
+                </p>
+                @if (_knowledge is null)
+                {
+                    <p class="cm-loading-line" role="status"><span class="cm-ai-dot" aria-hidden="true"></span> Loading knowledge…</p>
+                }
+                else
+                {
+                    <div class="cm-knowledge__block">
+                        <h3>Knowledge base (RAG)</h3>
+                        <p class="cm-meta">A gateway that answers a question with prose and citations — e.g. a support/docs RAG. Posts <code>{ "&lt;field&gt;": question }</code> and reads <code>output</code>, <code>citations[]</code>.</p>
+                        @foreach (var source in _knowledge.Sources)
+                        {
+                            <div class="cm-knowledge__row">
+                                <div>
+                                    <strong>@source.Name</strong> <span class="cm-meta cm-mono">@source.BaseUrl</span>
+                                    <span class="cm-meta"> · @(source.HasToken ? "token stored" : "no token") · @(source.Enabled ? "enabled" : "disabled")</span>
+                                </div>
+                                <div class="cm-knowledge__row-actions">
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact" @onclick="() => EditSource(source)">Edit</button>
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact cm-button--danger" @onclick="() => DeleteSourceAsync(source)">Remove</button>
+                                </div>
+                            </div>
+                        }
+                        <div class="cm-knowledge__form">
+                            <input class="cm-input" placeholder="Name (e.g. Infragistics support RAG)" aria-label="Knowledge source name" @bind="_srcName" />
+                            <input class="cm-input" placeholder="https://rag.example.com" aria-label="Base URL" @bind="_srcUrl" />
+                            <input class="cm-input" placeholder="/query" aria-label="Query path" @bind="_srcPath" />
+                            <input class="cm-input" placeholder="query" aria-label="Query field" @bind="_srcField" />
+                            <input class="cm-input" type="password" placeholder="Bearer token (leave blank to keep)" aria-label="Bearer token" @bind="_srcToken" autocomplete="off" />
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button" disabled="@(_knowledgeBusy || string.IsNullOrWhiteSpace(_srcName) || string.IsNullOrWhiteSpace(_srcUrl))" @onclick="SaveSourceAsync">
+                                    @(_srcId is null ? "Add knowledge base" : "Save knowledge base")
+                                </button>
+                                @if (_srcId is not null)
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet" @onclick="ResetSourceForm">Cancel</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cm-knowledge__block">
+                        <h3>Skills</h3>
+                        <p class="cm-meta">SKILL.md-style instruction files: exact product facts, API names, the way features are described. Read as authoritative by the Tech Edit. Optional "applies to" limits a skill to content types (e.g. <code>blog, youtube</code>).</p>
+                        @foreach (var skill in _knowledge.Skills)
+                        {
+                            <div class="cm-knowledge__row">
+                                <div>
+                                    <strong>@skill.Name</strong> <span class="cm-meta cm-mono">@skill.FileName · @skill.Content.Length.ToString("N0") chars</span>
+                                    @if (!string.IsNullOrWhiteSpace(skill.AppliesTo))
+                                    {
+                                        <span class="cm-meta"> · @skill.AppliesTo</span>
+                                    }
+                                </div>
+                                <div class="cm-knowledge__row-actions">
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact" @onclick="() => EditSkill(skill)">Edit</button>
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact cm-button--danger" @onclick="() => DeleteSkillAsync(skill)">Remove</button>
+                                </div>
+                            </div>
+                        }
+                        <div class="cm-knowledge__form">
+                            <input class="cm-input" placeholder="Skill name" aria-label="Skill name" @bind="_skillName" />
+                            <input class="cm-input" placeholder="Applies to (optional, comma list of content types)" aria-label="Applies to" @bind="_skillAppliesTo" />
+                            <InputFile class="cm-knowledge__file" OnChange="ReadSkillFileAsync" accept=".md,.txt,.markdown" aria-label="Skill file" />
+                            <textarea class="cm-input cm-textarea cm-knowledge__skill-body" rows="8" maxlength="65536" placeholder="…or paste the skill's markdown here" aria-label="Skill content" @bind="_skillContent" @bind:event="oninput"></textarea>
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button" disabled="@(_knowledgeBusy || string.IsNullOrWhiteSpace(_skillName) || string.IsNullOrWhiteSpace(_skillContent))" @onclick="SaveSkillAsync">
+                                    @(_skillId is null ? "Add skill" : "Save skill")
+                                </button>
+                                @if (_skillId is not null)
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet" @onclick="ResetSkillForm">Cancel</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cm-knowledge__block">
+                        <h3>MCP servers</h3>
+                        <p class="cm-meta">Remote MCP servers the Tech Edit may call to verify claims (docs search, API reference, release notes). Attached through the Anthropic MCP connector, so they take effect when the Tech Edit runs on the Anthropic provider. HTTPS only.</p>
+                        @foreach (var server in _knowledge.McpServers)
+                        {
+                            <div class="cm-knowledge__row">
+                                <div>
+                                    <strong>@server.Name</strong> <span class="cm-meta cm-mono">@server.Url</span>
+                                    <span class="cm-meta"> · @(server.HasAuthorization ? "auth stored" : "no auth")@(server.AllowedTools is { Count: > 0 } ? $" · {server.AllowedTools.Count} tools" : " · all tools")</span>
+                                </div>
+                                <div class="cm-knowledge__row-actions">
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact" @onclick="() => EditServer(server)">Edit</button>
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact cm-button--danger" @onclick="() => DeleteServerAsync(server)">Remove</button>
+                                </div>
+                            </div>
+                        }
+                        <div class="cm-knowledge__form">
+                            <input class="cm-input" placeholder="Name (letters, digits, - _)" aria-label="MCP server name" @bind="_mcpName" />
+                            <input class="cm-input" placeholder="https://mcp.example.com/sse" aria-label="MCP server URL" @bind="_mcpUrl" />
+                            <input class="cm-input" type="password" placeholder="Authorization header value (optional; blank keeps)" aria-label="Authorization" @bind="_mcpAuth" autocomplete="off" />
+                            <input class="cm-input" placeholder="Allowed tools, comma list (optional)" aria-label="Allowed tools" @bind="_mcpTools" />
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button" disabled="@(_knowledgeBusy || string.IsNullOrWhiteSpace(_mcpName) || string.IsNullOrWhiteSpace(_mcpUrl))" @onclick="SaveServerAsync">
+                                    @(_mcpId is null ? "Add MCP server" : "Save MCP server")
+                                </button>
+                                @if (_mcpId is not null)
+                                {
+                                    <button type="button" class="cm-button cm-button--quiet" @onclick="ResetServerForm">Cancel</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    @if (_knowledgeStatus is { } knowledgeStatus)
+                    {
+                        <p class="cm-meta" role="status">@knowledgeStatus</p>
+                    }
+                }
+            </section>
+        }
         @if (_brandTab == "sharing" && _isOwner)
         {
             <section class="cm-brand__section cm-brand__sharing">
@@ -370,7 +495,7 @@
 
     private static readonly (string Id, string Label)[] BrandTabs =
         [("identity", "Identity & voice"), ("style", "Colours & type"),
-         ("assets", "Asset kit"), ("templates", "Templates"), ("sharing", "Sharing")];
+         ("assets", "Asset kit"), ("templates", "Templates"), ("knowledge", "Knowledge"), ("sharing", "Sharing")];
 
     private IEnumerable<(string Id, string Label)> VisibleBrandTabs =>
         _isOwner ? BrandTabs : BrandTabs.Where(tab => tab.Id != "sharing");
@@ -386,6 +511,10 @@
         if (tab == "templates" && _tplTemplateId is null)
         {
             await SelectTemplateKindAsync(_tplKind);
+        }
+        if (tab == "knowledge" && _knowledge is null)
+        {
+            await LoadKnowledgeAsync();
         }
         if (tab == "sharing" && _isOwner)
         {
@@ -629,6 +758,177 @@
 
     private bool _loaded;
     private bool _isOwner;
+
+    // ---- Knowledge tab (ADR-056) ----------------------------------------------------
+    private BrandKnowledgeResponse? _knowledge;
+    private bool _knowledgeBusy;
+    private string? _knowledgeStatus;
+    private Guid? _srcId; private string _srcName = ""; private string _srcUrl = ""; private string _srcPath = "/query"; private string _srcField = "query"; private string _srcToken = "";
+    private Guid? _skillId; private string _skillName = ""; private string _skillFile = "SKILL.md"; private string _skillAppliesTo = ""; private string _skillContent = "";
+    private Guid? _mcpId; private string _mcpName = ""; private string _mcpUrl = ""; private string _mcpAuth = ""; private string _mcpTools = "";
+
+    private async Task LoadKnowledgeAsync()
+    {
+        try
+        {
+            _knowledge = await Brands.GetKnowledgeAsync(BrandId);
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Knowledge could not be loaded — {ex.Message}";
+            _knowledge = new BrandKnowledgeResponse([], [], []);
+        }
+    }
+
+    private void EditSource(BrandKnowledgeSourceResponse source)
+    {
+        _srcId = source.Id; _srcName = source.Name; _srcUrl = source.BaseUrl; _srcPath = source.QueryPath; _srcField = source.QueryField; _srcToken = "";
+    }
+
+    private void ResetSourceForm()
+    {
+        _srcId = null; _srcName = ""; _srcUrl = ""; _srcPath = "/query"; _srcField = "query"; _srcToken = "";
+    }
+
+    private async Task SaveSourceAsync()
+    {
+        _knowledgeBusy = true;
+        try
+        {
+            await Brands.SaveKnowledgeSourceAsync(BrandId, _srcId, new BrandKnowledgeSourceRequest(
+                _srcName.Trim(), _srcUrl.Trim(), _srcPath.Trim(), _srcField.Trim(),
+                Token: _srcId is null ? (_srcToken.Length == 0 ? null : _srcToken) : (_srcToken.Length == 0 ? null : _srcToken)));
+            _knowledgeStatus = "Knowledge base saved.";
+            ResetSourceForm();
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _knowledgeBusy = false;
+        }
+    }
+
+    private async Task DeleteSourceAsync(BrandKnowledgeSourceResponse source)
+    {
+        try
+        {
+            await Brands.DeleteKnowledgeSourceAsync(BrandId, source.Id);
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not removed — {ex.Message}";
+        }
+    }
+
+    private void EditSkill(BrandSkillResponse skill)
+    {
+        _skillId = skill.Id; _skillName = skill.Name; _skillFile = skill.FileName; _skillAppliesTo = skill.AppliesTo ?? ""; _skillContent = skill.Content;
+    }
+
+    private void ResetSkillForm()
+    {
+        _skillId = null; _skillName = ""; _skillFile = "SKILL.md"; _skillAppliesTo = ""; _skillContent = "";
+    }
+
+    private async Task ReadSkillFileAsync(InputFileChangeEventArgs e)
+    {
+        if (e.File is null)
+        {
+            return;
+        }
+        using var reader = new StreamReader(e.File.OpenReadStream(65536));
+        _skillContent = await reader.ReadToEndAsync();
+        _skillFile = e.File.Name;
+        if (string.IsNullOrWhiteSpace(_skillName))
+        {
+            _skillName = System.IO.Path.GetFileNameWithoutExtension(e.File.Name);
+        }
+    }
+
+    private async Task SaveSkillAsync()
+    {
+        _knowledgeBusy = true;
+        try
+        {
+            await Brands.SaveSkillAsync(BrandId, _skillId, new BrandSkillRequest(
+                _skillName.Trim(), string.IsNullOrWhiteSpace(_skillFile) ? "SKILL.md" : _skillFile.Trim(), _skillContent,
+                string.IsNullOrWhiteSpace(_skillAppliesTo) ? null : _skillAppliesTo.Trim()));
+            _knowledgeStatus = "Skill saved.";
+            ResetSkillForm();
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _knowledgeBusy = false;
+        }
+    }
+
+    private async Task DeleteSkillAsync(BrandSkillResponse skill)
+    {
+        try
+        {
+            await Brands.DeleteSkillAsync(BrandId, skill.Id);
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not removed — {ex.Message}";
+        }
+    }
+
+    private void EditServer(BrandMcpServerResponse server)
+    {
+        _mcpId = server.Id; _mcpName = server.Name; _mcpUrl = server.Url; _mcpAuth = ""; _mcpTools = server.AllowedTools is { Count: > 0 } ? string.Join(", ", server.AllowedTools) : "";
+    }
+
+    private void ResetServerForm()
+    {
+        _mcpId = null; _mcpName = ""; _mcpUrl = ""; _mcpAuth = ""; _mcpTools = "";
+    }
+
+    private async Task SaveServerAsync()
+    {
+        _knowledgeBusy = true;
+        try
+        {
+            var tools = _mcpTools.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            await Brands.SaveMcpServerAsync(BrandId, _mcpId, new BrandMcpServerRequest(
+                _mcpName.Trim(), _mcpUrl.Trim(), _mcpAuth.Length == 0 ? null : _mcpAuth, tools.Length == 0 ? null : tools));
+            _knowledgeStatus = "MCP server saved.";
+            ResetServerForm();
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _knowledgeBusy = false;
+        }
+    }
+
+    private async Task DeleteServerAsync(BrandMcpServerResponse server)
+    {
+        try
+        {
+            await Brands.DeleteMcpServerAsync(BrandId, server.Id);
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not removed — {ex.Message}";
+        }
+    }
     private bool _saving;
     private bool _uploading;
     private Guid? _retypingAsset;

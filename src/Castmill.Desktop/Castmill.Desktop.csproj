@@ -19,8 +19,11 @@
         <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
         <ApplicationVersion>1</ApplicationVersion>
 
-        <!-- Desktop builds are thin clients of the deployed API. Override with
-             -p:CastmillApiBaseAddress=https://.../ for another environment. -->
+        <!-- Desktop builds are thin clients of the deployed API. Release targets production;
+             Debug targets the local API (https profile, :7105) so a dev bundle can never
+             exercise the live database by accident (backlog 2026-09-05). Override either
+             with -p:CastmillApiBaseAddress=https://.../ . -->
+        <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == '' And '$(Configuration)' == 'Debug'">https://localhost:7105/</CastmillApiBaseAddress>
         <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == ''">https://azappdzrs2vrhk6ote.azurewebsites.net/</CastmillApiBaseAddress>
 
         <!-- Unpackaged on Windows until Phase F9 does MSIX packaging (E10.4). -->

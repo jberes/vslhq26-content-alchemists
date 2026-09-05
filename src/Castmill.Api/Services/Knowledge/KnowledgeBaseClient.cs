@@ -76,9 +76,20 @@ public sealed record KnowledgeAnswer(
     }
 }
 
+/// <summary>A brand's own RAG gateway (ADR-056), token already decrypted for this request.</summary>
+public sealed record KnowledgeEndpoint(string BaseUrl, string QueryPath, string QueryField, string? Token, string Name);
+
 public interface IKnowledgeBaseClient
 {
     bool IsConfigured { get; }
+
+    /// <summary>
+    /// Asks a specific brand endpoint first, falling back to the workspace gateway when none is
+    /// given. Default routes to <see cref="AskAsync(Guid, string, CancellationToken)"/> so
+    /// fakes keep compiling.
+    /// </summary>
+    Task<KnowledgeAnswer?> AskAsync(Guid userId, string question, KnowledgeEndpoint? endpoint, CancellationToken ct) =>
+        AskAsync(userId, question, ct);
 
     /// <summary>
     /// Asks the gateway a question. Returns null when the gateway is unconfigured, has no
@@ -102,6 +113,22 @@ public sealed class KnowledgeBaseClient(
 
     public bool IsConfigured => _options.IsConfigured;
 
+    public async Task<KnowledgeAnswer?> AskAsync(Guid userId, string question, KnowledgeEndpoint? endpoint, CancellationToken ct)
+    {
+        if (endpoint is null)
+        {
+            return await AskAsync(userId, question, ct);
+        }
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            return null;
+        }
+        // A brand endpoint without its own token borrows the workspace token, so one gateway
+        // configured both ways keeps working.
+        var token = endpoint.Token ?? await secrets.GetAsync(userId, SecretKind.KnowledgeBaseToken, ct);
+        return await QueryAsync(endpoint.BaseUrl, endpoint.QueryPath, endpoint.QueryField, token, question, ct);
+    }
+
     public async Task<KnowledgeAnswer?> AskAsync(Guid userId, string question, CancellationToken ct)
     {
         if (!_options.IsConfigured || string.IsNullOrWhiteSpace(question))
@@ -114,16 +141,24 @@ public sealed class KnowledgeBaseClient(
         {
             return null;
         }
+        return await QueryAsync(_options.BaseUrl, _options.QueryPath, _options.QueryField, token, question, ct);
+    }
 
+    private async Task<KnowledgeAnswer?> QueryAsync(
+        string baseUrl, string queryPath, string queryField, string? token, string question, CancellationToken ct)
+    {
         var client = httpClients.CreateClient(HttpClientName);
-        client.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/') + "/");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
 
-        var body = new Dictionary<string, object?> { [_options.QueryField] = question };
+        var body = new Dictionary<string, object?> { [queryField] = question };
 
         try
         {
-            var response = await client.PostAsJsonAsync(_options.QueryPath.TrimStart('/'), body, Json, ct);
+            var response = await client.PostAsJsonAsync(queryPath.TrimStart('/'), body, Json, ct);
             if (!response.IsSuccessStatusCode)
             {
                 // Never echo the body: a gateway error can quote the request, and the request

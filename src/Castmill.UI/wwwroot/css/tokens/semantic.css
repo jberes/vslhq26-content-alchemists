@@ -62,7 +62,9 @@
     --cm-status-bar-width: 3px;
 
     /* The Wire keeps the approved Industry sheet regardless of the surrounding family.
-       Its error hue must remain distinct from Warm Editorial's ember accent. */
+       Its error hue must remain distinct from Warm Editorial's ember accent. The sheet is
+       mode-aware (ADR-F54): these are the light values; the dark block below swaps them
+       under [data-cm-mode="dark"], so feature CSS keeps reading --cm-wire-* only. */
     --cm-wire-bg: #f2f2f3;
     --cm-wire-surface: #e9e9ea;
     --cm-wire-ink: #1d1f20;
@@ -74,13 +76,20 @@
     --cm-wire-sent: #1d2d3d;
     --cm-wire-draft: #b7b7ba;
     --cm-wire-error: #c15f3c;
-   --cm-wire-dark-bg: #191b1c;
-   --cm-wire-dark-card: #222425;
-   --cm-wire-dark-ink: #e7e7ea;
-   --cm-wire-dark-title: #f2f2f3;
-   --cm-wire-dark-divider: rgb(231 231 234 / 18%);
-   --cm-wire-dark-accent: #94bce3;
-   --cm-wire-dark-error: #e0a08a;
+
+    /* The Wire's type scale (ADR-F54). The handoff's 9.5–12.5px labels were sub-legible on a
+       27" display; these sit one step up and in rem so browser zoom behaves like a
+       breakpoint. Card and lane geometry (--cm-wire-row-*) grows with them. */
+    --cm-wire-text-xs: 0.6875rem;    /* 11px  — receipts, kickers */
+    --cm-wire-text-sm: 0.75rem;      /* 12px  — meta, rulers, counts */
+    --cm-wire-text-md: 0.8125rem;    /* 13px  — footnotes, empty copy */
+    --cm-wire-text-body: 0.875rem;   /* 14px  — item titles, scope line */
+    --cm-wire-text-title: 1.0625rem; /* 17px  — queue/pipeline card titles */
+    --cm-wire-text-day: 1.125rem;    /* 18px  — day numerals */
+    --cm-wire-row-base: 60px;
+    --cm-wire-row-step: 72px;
+    --cm-wire-day-min: 72px;        /* every day lane, empty or not */
+    --cm-wire-day-gap: 10px;        /* air between day lanes */
 
     /* ---- Shape --------------------------------------------------------------- */
     --cm-radius-sm: var(--cmf-radius-sm);
@@ -137,6 +146,22 @@
     --cm-motion-duration: 200ms;
     --cm-motion-ease: cubic-bezier(0.2, 0, 0.2, 1);
     --cm-motion: var(--cm-motion-duration) var(--cm-motion-ease);
+}
+
+/* The Wire in dark mode (ADR-F54): same sheet, inverted. The dark values used to live under
+   separate names that no rule referenced, which is why The Wire ignored the theme toggle. */
+:root[data-cm-mode="dark"] {
+    --cm-wire-bg: #191b1c;
+    --cm-wire-surface: #222425;
+    --cm-wire-ink: #e7e7ea;
+    --cm-wire-divider: rgb(231 231 234 / 18%);
+    --cm-wire-hairline: rgb(231 231 234 / 10%);
+    --cm-wire-accent: #94bce3;
+    --cm-wire-accent-soft: #5980a6;
+    --cm-wire-queued: #9dbbd6;
+    --cm-wire-sent: #c9d6e2;
+    --cm-wire-draft: #5a5c60;
+    --cm-wire-error: #e0a08a;
 }
 
 /* Compact density: one number, whole app (E3.6). */

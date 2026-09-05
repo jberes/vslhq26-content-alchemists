@@ -74,4 +74,18 @@ public interface IMediaPipeline
 
     /// <summary>The most recently picked media this session — clip export's default source.</summary>
     PickedMedia? LastPicked { get; }
+
+    // ---- Media links (ADR-057). Defaults say "not on this shell" so web and tests need no code. ----
+
+    /// <summary>True when this shell can play a file at a local path (the desktop's loopback server).</summary>
+    bool CanPlayLocalFiles => false;
+
+    /// <summary>A URL the WebView can play for a local file, or null when the file is missing or the shell cannot serve it.</summary>
+    Task<string?> OpenLocalMediaAsync(string path) => Task.FromResult<string?>(null);
+
+    /// <summary>Cheap content fingerprint (size + head/tail SHA-256) used to re-link a moved recording.</summary>
+    Task<string?> FingerprintAsync(string path) => Task.FromResult<string?>(null);
+
+    /// <summary>Opens a local file for upload; null when the shell cannot read local paths.</summary>
+    Task<Stream?> OpenReadAsync(string path) => Task.FromResult<Stream?>(null);
 }

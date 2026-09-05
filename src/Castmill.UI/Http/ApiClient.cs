@@ -151,6 +151,14 @@ public sealed class ApiClient(HttpClient http)
         await ThrowIfFailedAsync(response, ct);
     }
 
+    /// <summary>DELETE that answers with the updated resource (clearing a slot's overlay, say).</summary>
+    public async Task<TResponse> DeleteAsync<TResponse>(string url, CancellationToken ct = default)
+    {
+        using var response = await http.DeleteAsync(url, ct);
+        await ThrowIfFailedAsync(response, ct);
+        return await ReadAsync<TResponse>(response, ct);
+    }
+
     /// <summary>Conditional POST — restore-style actions that are writes in POST clothing.</summary>
     public async Task<TResponse> PostWithETagAsync<TResponse>(
         string url,

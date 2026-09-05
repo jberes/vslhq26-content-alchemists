@@ -31,6 +31,8 @@ public static class EvidenceEndpoints
         group.MapPost("/{sourceAssetId:guid}/evidence/{revision:int}/approve", ApproveEvidenceAsync)
             .RequireRateLimiting("writes");
         group.MapGet("/citations/{stableId}", ResolveCitationAsync);
+        group.MapPatch("/{sourceAssetId:guid}/media", SetMediaLinkAsync)
+            .Validate<SourceMediaLinkRequest>().RequireRateLimiting("writes");
 
         return routes;
     }
@@ -426,6 +428,51 @@ public static class EvidenceEndpoints
             ToBlockResponse(match.Block)));
     }
 
+    /// <summary>
+    /// Media link (ADR-057): the desktop records where a recording lives and its fingerprint;
+    /// "Upload to Azure" attaches the private Asset that becomes the cloud copy. Null leaves a
+    /// field alone, an empty string clears it; the asset must be one this tenant can read.
+    /// </summary>
+    private static async Task<IResult> SetMediaLinkAsync(
+        Guid campaignId,
+        Guid sourceAssetId,
+        SourceMediaLinkRequest request,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var source = await db.SourceAssets.SingleOrDefaultAsync(
+            s => s.Id == sourceAssetId && s.CampaignId == campaignId, ct);
+        if (source is null)
+        {
+            return Results.NotFound();
+        }
+        if (request.MediaAssetId is { } assetId)
+        {
+            var asset = await db.Assets.SingleOrDefaultAsync(a => a.Id == assetId, ct);
+            if (asset is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest,
+                    detail: "That media asset does not exist or is not readable from this workspace.");
+            }
+            source.MediaAssetId = asset.Id;
+            source.BlobPath ??= asset.BlobPath;
+            source.ContentType ??= asset.ContentType;
+            source.SizeBytes ??= asset.SizeBytes;
+        }
+        if (request.LocalPath is not null)
+        {
+            source.LocalPath = request.LocalPath.Length == 0 ? null : request.LocalPath.Trim();
+        }
+        if (request.ContentHash is not null)
+        {
+            source.ContentHash = request.ContentHash.Length == 0 ? null : request.ContentHash.Trim();
+        }
+        source.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(ToSourceResponse(source));
+    }
+
     internal static SourceAssetResponse ToSourceResponse(SourceAsset source) => new(
         source.Id,
         source.CampaignId,
@@ -441,7 +488,11 @@ public static class EvidenceEndpoints
         source.CurrentEvidenceRevisionId,
         ToApprovedRevision(source),
         source.CreatedAt,
-        source.UpdatedAt);
+        source.UpdatedAt,
+        source.LocalPath,
+        source.ContentHash,
+        source.MediaAssetId,
+        source.ContentType);
 
     private static ApprovedEvidenceRevision? ToApprovedRevision(SourceAsset source) =>
         source.ApprovedEvidenceRevision is { } revision

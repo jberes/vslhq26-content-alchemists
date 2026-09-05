@@ -22,7 +22,7 @@ public sealed class BrandSharingUiTests : CastmillUiTestContext
 
         var view = Render<BrandEditor>(parameters => parameters.Add(page => page.BrandId, BrandId));
         await view.WaitForStateAsync(
-            () => view.FindAll("[role=tab]").Count == 5, TimeSpan.FromSeconds(5));
+            () => view.FindAll("[role=tab]").Count == 6, TimeSpan.FromSeconds(5));
 
         await Assert.Single(view.FindAll("[role=tab]"), tab => tab.TextContent.Trim() == "Sharing")
             .ClickAsync();
@@ -45,7 +45,7 @@ public sealed class BrandSharingUiTests : CastmillUiTestContext
 
         view.WaitForAssertion(() =>
         {
-            Assert.Equal(4, view.FindAll("[role=tab]").Count);
+            Assert.Equal(5, view.FindAll("[role=tab]").Count); // Knowledge tab is for collaborators too; only Sharing is owner-only
             Assert.DoesNotContain(view.FindAll("[role=tab]"),
                 tab => tab.TextContent.Trim() == "Sharing");
             Assert.Contains("Shared with you", view.Markup, StringComparison.Ordinal);

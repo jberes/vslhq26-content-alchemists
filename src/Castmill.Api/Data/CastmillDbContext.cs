@@ -38,6 +38,9 @@ public sealed class CastmillDbContext(
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
     public DbSet<BrandAsset> BrandAssets => Set<BrandAsset>();
     public DbSet<BrandTemplate> BrandTemplates => Set<BrandTemplate>();
+    public DbSet<BrandKnowledgeSource> BrandKnowledgeSources => Set<BrandKnowledgeSource>();
+    public DbSet<BrandSkill> BrandSkills => Set<BrandSkill>();
+    public DbSet<BrandMcpServer> BrandMcpServers => Set<BrandMcpServer>();
     public DbSet<BrandCollaborator> BrandCollaborators => Set<BrandCollaborator>();
     public DbSet<UserSetting> UserSettings => Set<UserSetting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
@@ -110,6 +113,8 @@ public sealed class CastmillDbContext(
             e.Property(source => source.OriginalUri).HasMaxLength(2000);
             e.Property(source => source.BlobPath).HasMaxLength(1000);
             e.Property(source => source.ContentType).HasMaxLength(200);
+            e.Property(source => source.LocalPath).HasMaxLength(2000);
+            e.Property(source => source.ContentHash).HasMaxLength(80);
             e.Property(source => source.SnapshotIdentity).HasMaxLength(200);
             e.Property(source => source.SnapshotHash).HasMaxLength(64);
             e.Property(source => source.ApprovedEvidenceHash).HasMaxLength(64);
@@ -222,6 +227,7 @@ public sealed class CastmillDbContext(
                 + "JSON_QUERY([ContentJson], '$.citations'), "
                 + "JSON_QUERY([ContentJson], '$.content.citations')) END");
             e.Property(a => a.Version).IsConcurrencyToken();
+            e.Property(a => a.TechnicalBriefJson).HasMaxLength(8000);
             e.HasIndex(a => new { a.TenantId, a.CampaignId });
             e.HasIndex(a => new { a.TenantId, a.ParentArtifactId });
             // The Front Page's review queue filters by status across the whole tenant.
@@ -257,6 +263,7 @@ public sealed class CastmillDbContext(
             e.Property(s => s.State).HasMaxLength(20);
             e.Property(s => s.PublishedUrl).HasMaxLength(2000);
             e.Property(s => s.BaseImagePath).HasMaxLength(1000);
+            e.Property(s => s.OverlaySpecJson).HasMaxLength(8000);
             e.Property(s => s.BaseImageUrl).HasMaxLength(2000);
             // One slot per kind per ARTIFACT, and one per campaign for the artifact-less
             // kinds. Widened from (Tenant, Campaign, Kind): that made blog-header unique per
@@ -423,6 +430,36 @@ public sealed class CastmillDbContext(
             e.Property(t => t.SteeringPrompt).HasMaxLength(20000);
             e.HasIndex(t => new { t.TenantId, t.BrandId, t.Kind, t.Name }).IsUnique();
             e.HasQueryFilter(t => t.TenantId == _tenantProvider.TenantId);
+        });
+
+        // Brand knowledge (ADR-056): per-brand RAG endpoint, skills, MCP servers. Same tenant
+        // filter as the other brand aggregates; brand access checks admit collaborators.
+        builder.Entity<BrandKnowledgeSource>(e =>
+        {
+            e.Property(k => k.Name).HasMaxLength(200);
+            e.Property(k => k.BaseUrl).HasMaxLength(2000);
+            e.Property(k => k.QueryPath).HasMaxLength(200);
+            e.Property(k => k.QueryField).HasMaxLength(100);
+            e.Property(k => k.TokenCiphertext).HasMaxLength(4000);
+            e.HasIndex(k => new { k.TenantId, k.BrandId });
+            e.HasQueryFilter(k => k.TenantId == _tenantProvider.TenantId);
+        });
+        builder.Entity<BrandSkill>(e =>
+        {
+            e.Property(k => k.Name).HasMaxLength(200);
+            e.Property(k => k.FileName).HasMaxLength(300);
+            e.Property(k => k.AppliesTo).HasMaxLength(400);
+            e.HasIndex(k => new { k.TenantId, k.BrandId });
+            e.HasQueryFilter(k => k.TenantId == _tenantProvider.TenantId);
+        });
+        builder.Entity<BrandMcpServer>(e =>
+        {
+            e.Property(k => k.Name).HasMaxLength(100);
+            e.Property(k => k.Url).HasMaxLength(2000);
+            e.Property(k => k.AuthorizationCiphertext).HasMaxLength(4000);
+            e.Property(k => k.AllowedToolsJson).HasMaxLength(2000);
+            e.HasIndex(k => new { k.TenantId, k.BrandId });
+            e.HasQueryFilter(k => k.TenantId == _tenantProvider.TenantId);
         });
 
         builder.Entity<UserSetting>(e =>

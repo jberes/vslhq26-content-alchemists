@@ -126,4 +126,42 @@ public sealed class BrandsClient(ApiClient api)
 
     public Task DeleteTemplateAsync(Guid brandId, Guid templateId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{brandId}/templates/{templateId}", ct);
+
+    // ---- Brand knowledge (ADR-056) ------------------------------------------------
+
+    public Task<BrandKnowledgeResponse> GetKnowledgeAsync(Guid brandId, CancellationToken ct = default) =>
+        api.GetAsync<BrandKnowledgeResponse>($"api/v1/brands/{brandId}/knowledge", ct);
+
+    public Task<BrandKnowledgeSourceResponse> SaveKnowledgeSourceAsync(
+        Guid brandId, Guid? id, BrandKnowledgeSourceRequest request, CancellationToken ct = default) =>
+        id is { } existing
+            ? api.PutAsync<BrandKnowledgeSourceRequest, BrandKnowledgeSourceResponse>(
+                $"api/v1/brands/{brandId}/knowledge/sources/{existing}", request, etag: null, ct)
+            : api.PostAsync<BrandKnowledgeSourceRequest, BrandKnowledgeSourceResponse>(
+                $"api/v1/brands/{brandId}/knowledge/sources", request, anonymous: false, ct);
+
+    public Task DeleteKnowledgeSourceAsync(Guid brandId, Guid id, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/brands/{brandId}/knowledge/sources/{id}", ct);
+
+    public Task<BrandSkillResponse> SaveSkillAsync(
+        Guid brandId, Guid? id, BrandSkillRequest request, CancellationToken ct = default) =>
+        id is { } existing
+            ? api.PutAsync<BrandSkillRequest, BrandSkillResponse>(
+                $"api/v1/brands/{brandId}/knowledge/skills/{existing}", request, etag: null, ct)
+            : api.PostAsync<BrandSkillRequest, BrandSkillResponse>(
+                $"api/v1/brands/{brandId}/knowledge/skills", request, anonymous: false, ct);
+
+    public Task DeleteSkillAsync(Guid brandId, Guid id, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/brands/{brandId}/knowledge/skills/{id}", ct);
+
+    public Task<BrandMcpServerResponse> SaveMcpServerAsync(
+        Guid brandId, Guid? id, BrandMcpServerRequest request, CancellationToken ct = default) =>
+        id is { } existing
+            ? api.PutAsync<BrandMcpServerRequest, BrandMcpServerResponse>(
+                $"api/v1/brands/{brandId}/knowledge/mcp-servers/{existing}", request, etag: null, ct)
+            : api.PostAsync<BrandMcpServerRequest, BrandMcpServerResponse>(
+                $"api/v1/brands/{brandId}/knowledge/mcp-servers", request, anonymous: false, ct);
+
+    public Task DeleteMcpServerAsync(Guid brandId, Guid id, CancellationToken ct = default) =>
+        api.DeleteAsync($"api/v1/brands/{brandId}/knowledge/mcp-servers/{id}", ct);
 }

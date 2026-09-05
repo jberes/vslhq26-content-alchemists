@@ -111,6 +111,8 @@ builder.Services.AddTextProviders(builder.Configuration);
 builder.Services.Configure<KnowledgeBaseOptions>(
     builder.Configuration.GetSection(KnowledgeBaseOptions.SectionName));
 builder.Services.AddScoped<IKnowledgeBaseClient, KnowledgeBaseClient>();
+// MCP-enabled Tech Edit (ADR-056): raw Messages API, MCP connector beta.
+builder.Services.AddScoped<IAnthropicMcpClient, AnthropicMcpClient>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<IBrandContextService, BrandContextService>();
 builder.Services.AddScoped<IContentDependencyService, ContentDependencyService>();
@@ -206,6 +208,10 @@ builder.Services.AddHttpClient("foundry-images", client => client.Timeout = Time
 builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
         client => client.Timeout = TimeSpan.FromSeconds(60))
     .AddStandardResilienceHandler();
+// No resilience handler: a retried Tech Edit re-bills a paid generation, and a rewrite that
+// consults MCP tools can legitimately run for minutes.
+builder.Services.AddHttpClient(AnthropicMcpClient.HttpClientName,
+    client => client.Timeout = TimeSpan.FromMinutes(6));
 
 /// <summary>
 /// Azure SQL Serverless auto-pauses when idle, and the FIRST connection after that has to

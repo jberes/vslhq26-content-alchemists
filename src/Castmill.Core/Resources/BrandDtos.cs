@@ -48,7 +48,8 @@ public sealed record BrandProfileDetailResponse(
     DateTimeOffset UpdatedAt, bool IsOwner = true);
 
 /// <summary>The light shape carried on campaign payloads and pickers.</summary>
-public sealed record BrandSummaryResponse(Guid Id, string Name);
+/// <summary>HasKnowledge: the brand carries a RAG endpoint, skills or MCP servers (ADR-056), so the Tech Edit can ground on it.</summary>
+public sealed record BrandSummaryResponse(Guid Id, string Name, bool HasKnowledge = false);
 
 public sealed record BrandCollaboratorRequest(
     [property: Required, EmailAddress, MaxLength(256)] string Email);
@@ -93,3 +94,48 @@ public sealed record CampaignLink(
     [property: Required, MaxLength(100)] string Label,
     [property: Required, MaxLength(2000), Url] string Url,
     [property: MaxLength(500)] string? Note = null);
+
+// ---- Brand knowledge (ADR-056) -----------------------------------------------
+
+public sealed record BrandKnowledgeSourceRequest(
+    [property: Required, MinLength(1), MaxLength(200)] string Name,
+    [property: Required, Url, MaxLength(2000)] string BaseUrl,
+    [property: MaxLength(200)] string QueryPath = "/query",
+    [property: MaxLength(100)] string QueryField = "query",
+    /// <summary>Bearer token. Null leaves the stored one; empty string clears it.</summary>
+    [property: MaxLength(4000)] string? Token = null,
+    bool Enabled = true);
+
+public sealed record BrandKnowledgeSourceResponse(
+    Guid Id, Guid BrandId, string Name, string BaseUrl, string QueryPath, string QueryField,
+    bool HasToken, bool Enabled, DateTimeOffset UpdatedAt);
+
+public sealed record BrandSkillRequest(
+    [property: Required, MinLength(1), MaxLength(200)] string Name,
+    [property: Required, MinLength(1), MaxLength(300)] string FileName,
+    [property: Required, MinLength(1), MaxLength(65536)] string Content,
+    /// <summary>Comma list of generator kinds this skill applies to; null = every kind.</summary>
+    [property: MaxLength(400)] string? AppliesTo = null,
+    bool Enabled = true);
+
+public sealed record BrandSkillResponse(
+    Guid Id, Guid BrandId, string Name, string FileName, string Content, string? AppliesTo,
+    bool Enabled, DateTimeOffset UpdatedAt);
+
+public sealed record BrandMcpServerRequest(
+    [property: Required, MinLength(1), MaxLength(100), RegularExpression("^[A-Za-z0-9_-]+$")] string Name,
+    [property: Required, Url, MaxLength(2000)] string Url,
+    /// <summary>Full Authorization header value (e.g. "Bearer …"). Null leaves the stored one; empty clears.</summary>
+    [property: MaxLength(4000)] string? Authorization = null,
+    [property: MaxLength(50)] IReadOnlyList<string>? AllowedTools = null,
+    bool Enabled = true);
+
+public sealed record BrandMcpServerResponse(
+    Guid Id, Guid BrandId, string Name, string Url, bool HasAuthorization,
+    IReadOnlyList<string>? AllowedTools, bool Enabled, DateTimeOffset UpdatedAt);
+
+/// <summary>One brand's whole knowledge configuration, as the editor's Knowledge tab loads it.</summary>
+public sealed record BrandKnowledgeResponse(
+    IReadOnlyList<BrandKnowledgeSourceResponse> Sources,
+    IReadOnlyList<BrandSkillResponse> Skills,
+    IReadOnlyList<BrandMcpServerResponse> McpServers);

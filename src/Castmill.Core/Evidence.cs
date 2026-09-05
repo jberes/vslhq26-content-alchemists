@@ -14,6 +14,15 @@ public sealed class SourceAsset : ITenantScoped
     public string? BlobPath { get; set; }
     public string? ContentType { get; set; }
     public long? SizeBytes { get; set; }
+    /// <summary>
+    /// Where the recording lives on the machine that transcribed it (ADR-057). Opaque to the
+    /// server — never dereferenced here; the desktop shell uses it to play and re-link.
+    /// </summary>
+    public string? LocalPath { get; set; }
+    /// <summary>Cheap content fingerprint (size + head/tail SHA-256) so a moved file can be re-linked with confidence.</summary>
+    public string? ContentHash { get; set; }
+    /// <summary>The optional cloud copy: an Asset in the private container, uploaded on request.</summary>
+    public Guid? MediaAssetId { get; set; }
     public required string SnapshotIdentity { get; set; }
     public required string SnapshotHash { get; set; }
     public int CurrentEvidenceRevision { get; set; }

@@ -480,12 +480,79 @@
                             }
                         </div>
                     }
-                    @if (KnowledgeBaseReady)
+                    @if (KnowledgeBaseReady || Campaign.Brand?.HasKnowledge == true)
                     {
                         <label class="cm-fanout__item">
                             <input type="checkbox" @bind="_useKnowledgeBase" />
-                            <span>Consult the knowledge base</span>
+                            <span>Consult the knowledge base@(Campaign.Brand?.HasKnowledge == true ? $" · {Campaign.Brand.Name}" : "")</span>
                         </label>
+                    }
+
+                    @* Technical brief (ADR-056): off by default. A piece that never opens this
+                       behaves exactly as before; a technical one hands every pass the facts. *@
+                    <details class="cm-techbrief" open="@_briefOpen" @ontoggle="() => _briefOpen = !_briefOpen">
+                        <summary>
+                            <span class="cm-kicker">Technical depth</span>
+                            <span class="cm-meta">@(_brief.IsEmpty ? "off — add product facts for a technical piece" : $"{_brief.Product ?? "brief"}{(string.IsNullOrWhiteSpace(_brief.Version) ? "" : " " + _brief.Version)} · feeds generation and Tech Edit")</span>
+                        </summary>
+                        <div class="cm-techbrief__grid">
+                            <label class="cm-field"><span class="cm-field__label">Product</span>
+                                <input class="cm-input" maxlength="200" value="@_brief.Product" @onchange="e => _brief = _brief with { Product = Text(e) }" /></label>
+                            <label class="cm-field"><span class="cm-field__label">Version</span>
+                                <input class="cm-input" maxlength="100" value="@_brief.Version" @onchange="e => _brief = _brief with { Version = Text(e) }" /></label>
+                            <label class="cm-field cm-techbrief__wide"><span class="cm-field__label">APIs, components, commands (exact names)</span>
+                                <textarea class="cm-input cm-textarea" rows="2" maxlength="2000" value="@_brief.Apis" @onchange="e => _brief = _brief with { Apis = Text(e) }"></textarea></label>
+                            <label class="cm-field cm-techbrief__wide"><span class="cm-field__label">Constraints and limitations</span>
+                                <textarea class="cm-input cm-textarea" rows="2" maxlength="2000" value="@_brief.Constraints" @onchange="e => _brief = _brief with { Constraints = Text(e) }"></textarea></label>
+                            <label class="cm-field"><span class="cm-field__label">Must mention</span>
+                                <textarea class="cm-input cm-textarea" rows="2" maxlength="2000" value="@_brief.MustMention" @onchange="e => _brief = _brief with { MustMention = Text(e) }"></textarea></label>
+                            <label class="cm-field"><span class="cm-field__label">Must NOT claim</span>
+                                <textarea class="cm-input cm-textarea" rows="2" maxlength="2000" value="@_brief.MustNotClaim" @onchange="e => _brief = _brief with { MustNotClaim = Text(e) }"></textarea></label>
+                            <label class="cm-fanout__item cm-techbrief__wide">
+                                <input type="checkbox" checked="@_brief.ConsultKnowledgeBase" @onchange="e => _brief = _brief with { ConsultKnowledgeBase = e.Value is true }" />
+                                <span>Ask the brand knowledge on every pass</span>
+                            </label>
+                        </div>
+                        <div class="cm-form__actions">
+                            <button type="button" class="cm-button cm-button--quiet" disabled="@_savingBrief" @onclick="SaveBriefAsync">
+                                @(_savingBrief ? "Saving…" : "Save brief")
+                            </button>
+                            @if (_briefStatus is { } briefStatus)
+                            {
+                                <span class="cm-meta" role="status">@briefStatus</span>
+                            }
+                        </div>
+                    </details>
+
+                    @if (_claims.Count > 0)
+                    {
+                        <section class="cm-claims" aria-label="Verification">
+                            <span class="cm-kicker">Verification</span>
+                            <p class="cm-meta">
+                                @_claims.Count(c => c.Verified) of @_claims.Count technical claims verified
+                                @if (_knowledgeAttached.Count > 0)
+                                {
+                                    <text> · grounded on @string.Join(", ", _knowledgeAttached)</text>
+                                }
+                            </p>
+                            <ul class="cm-claims__list">
+                                @foreach (var claim in _claims.OrderBy(c => c.Verified))
+                                {
+                                    <li class="cm-claims__item @(claim.Verified ? "cm-claims__item--ok" : "cm-claims__item--open")">
+                                        <span class="cm-claims__mark" aria-hidden="true">@(claim.Verified ? "✓" : "?")</span>
+                                        <span>@claim.Statement</span>
+                                        @if (claim.SourceUrl is { } url)
+                                        {
+                                            <a class="cm-meta" href="@url" target="_blank" rel="noopener noreferrer">source</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="cm-meta">unverified — check before publishing</span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        </section>
                     }
                     @* Shown whether or not the button is live: "this will run on Foundry
                        instead" is exactly the case where the control still works but the
@@ -652,15 +719,22 @@
                                              src="@(imageUrl + "?v=" + slot.UpdatedAt.ToUnixTimeSeconds())"
                                              width="@slot.TargetWidth" height="@slot.TargetHeight"
                                              alt="@ArtifactDisplay.SlotLabel(slot.Kind) keeper" />
-                                        @if (slot.KeeperVariantId is not null)
-                                        {
-                                            <button type="button" class="cm-plan__slot-download"
-                                                    disabled="@(_downloadingImageSlot == slot.Id)"
-                                                    title="Download image" aria-label="Download @ArtifactDisplay.SlotLabel(slot.Kind)"
-                                                    @onclick="() => DownloadSlotImageAsync(slot)">
-                                                <span aria-hidden="true">↓</span> Download
+                                        <div class="cm-plan__slot-actions">
+                                            <button type="button" class="cm-plan__slot-edit cm-plan__slot-action"
+                                                    title="Edit in Image Studio" aria-label="Edit @ArtifactDisplay.SlotLabel(slot.Kind)"
+                                                    @onclick="() => EditSlotImage(slot)">
+                                                <AppIcon Name="pencil" /> Edit
                                             </button>
-                                        }
+                                            @if (slot.KeeperVariantId is not null)
+                                            {
+                                                <button type="button" class="cm-plan__slot-download cm-plan__slot-action"
+                                                        disabled="@(_downloadingImageSlot == slot.Id)"
+                                                        title="Download image" aria-label="Download @ArtifactDisplay.SlotLabel(slot.Kind)"
+                                                        @onclick="() => DownloadSlotImageAsync(slot)">
+                                                    <span aria-hidden="true">↓</span> Download
+                                                </button>
+                                            }
+                                        </div>
                                     </div>
                                 }
                                 <span class="cm-plan__slot-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
@@ -774,6 +848,40 @@
     private bool _selecting;
     private Guid? _selectionCampaignId;
     private bool _useKnowledgeBase;
+
+    // Technical brief + verification (ADR-056)
+    private TechnicalBrief _brief = new();
+    private bool _briefOpen;
+    private bool _savingBrief;
+    private string? _briefStatus;
+    private List<ClaimCheck> _claims = [];
+    private List<string> _knowledgeAttached = [];
+
+    private static string? Text(ChangeEventArgs e) =>
+        e.Value?.ToString() is { Length: > 0 } text ? text : null;
+
+    private async Task SaveBriefAsync()
+    {
+        if (_artifact is null)
+        {
+            return;
+        }
+        _savingBrief = true;
+        try
+        {
+            var updated = await Campaigns.SetTechnicalBriefAsync(CampaignId, _artifact.Id, _brief);
+            _brief = updated.TechnicalBrief ?? new TechnicalBrief();
+            _briefStatus = _brief.IsEmpty ? "Brief cleared." : $"Saved · {DateTime.Now:HH:mm:ss}";
+        }
+        catch (ApiException ex)
+        {
+            _briefStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _savingBrief = false;
+        }
+    }
     private Guid? _autoGenerationStartedFor;
     private AiStatusResponse? _aiStatus;
     private SeoAnalysisReportResponse? _seoReport;
@@ -1018,6 +1126,11 @@
             _artifact = artifact;
             _artifactId = id;
             _etag = etag;
+            _brief = artifact.TechnicalBrief ?? new TechnicalBrief();
+            _briefOpen = !_brief.IsEmpty;
+            _briefStatus = null;
+            _claims = [];
+            _knowledgeAttached = [];
             _markdown = StructuredContent.IsStructured(artifact.Kind)
                 ? StructuredContent.ToEditorMarkdown(artifact.Kind, artifact.ContentJson)
                 : ArtifactContent.ToMarkdown(artifact.ContentJson);
@@ -1383,7 +1496,8 @@
                         : null
                     : _steering,
                 parentArtifactId: _artifact.ParentArtifactId,
-                replaceArtifactId: preview?.IsPlaceholder == true ? _artifact.Id : null);
+                replaceArtifactId: preview?.IsPlaceholder == true ? _artifact.Id : null,
+                technicalBrief: _brief.IsEmpty ? null : _brief);
 
             if (result.Success)
             {
@@ -1515,7 +1629,8 @@
             var result = await Generation.TechEditAsync(
                 CampaignId, _artifact.Id,
                 string.IsNullOrWhiteSpace(_steering) ? null : _steering,
-                _useKnowledgeBase);
+                _useKnowledgeBase,
+                technicalBrief: _brief.IsEmpty ? null : _brief);
 
             if (!result.Success)
             {
@@ -1531,6 +1646,15 @@
             foreach (var change in result.Changes)
             {
                 _producerLog.Add($"  · {change}");
+            }
+            _claims = result.Claims?.ToList() ?? [];
+            _knowledgeAttached = result.KnowledgeAttached?.ToList() ?? [];
+            if (_claims.Count > 0)
+            {
+                var open = _claims.Count(c => !c.Verified);
+                _producerLog.Add(open == 0
+                    ? $"  verification · all {_claims.Count} technical claims sourced"
+                    : $"  verification · {open} of {_claims.Count} claims unverified — listed below");
             }
 
             // Reload the artifact itself rather than the whole campaign: the id is unchanged,
@@ -1734,6 +1858,22 @@
 
     private string ImageStudioForArtifact(Guid artifactId) =>
         $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?artifact={artifactId}";
+
+    /// <summary>
+    /// Edit = the studio drawer for this card with the placed take's lightbox already open,
+    /// so steering, overlay text and regenerate are one click from the content. The slot
+    /// list here re-reads CampaignState on return, and the preview URL carries the slot's
+    /// UpdatedAt, so a changed image refreshes without a manual reload.
+    /// </summary>
+    private void EditSlotImage(ImageSlotResponse slot)
+    {
+        var path = ImageStudioPath(slot.Id);
+        if (slot.KeeperVariantId is { } take)
+        {
+            path += $"&take={take}";
+        }
+        Navigation.NavigateTo(path);
+    }
 
     private async Task DownloadSlotImageAsync(ImageSlotResponse slot)
     {

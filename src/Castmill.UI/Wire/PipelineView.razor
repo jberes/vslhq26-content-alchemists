@@ -6,11 +6,7 @@
 <section @ref="_root" class="cm-pipeline" aria-label="Wire pipeline">
     <div class="cm-pipeline__scope">
         <span>@ScopeLine</span>
-        <IgbButtonGroup Selection="ButtonGroupSelection.Single" aria-label="Pipeline scope">
-            <IgbToggleButton Value="campaign" Selected="CampaignOnly" Disabled="@(CampaignId is null)"
-                             @onclick="ToggleCampaignOnly">This campaign only</IgbToggleButton>
-        </IgbButtonGroup>
-        <IgbButton Variant="ButtonVariant.Outlined" @onclick="() => ConnectBroker.InvokeAsync()">Connect broker</IgbButton>
+        <IgbButton class="cm-pipeline__broker" Variant="ButtonVariant.Outlined" @onclick="() => ConnectBroker.InvokeAsync()">Connect broker</IgbButton>
     </div>
 
     <div class="cm-pipeline__columns">
@@ -95,9 +91,8 @@
     private SlotDialog? _slotDialog;
 
     [Parameter, EditorRequired] public WireBoardData Data { get; set; } = default!;
-    [Parameter] public bool CampaignOnly { get; set; }
-    [Parameter] public Guid? CampaignId { get; set; }
-    [Parameter] public EventCallback<bool> CampaignOnlyChanged { get; set; }
+    /// <summary>What the page's campaign selector narrowed the data to — "all campaigns" or a name.</summary>
+    [Parameter] public string ScopeLabel { get; set; } = "all campaigns";
     [Parameter] public EventCallback<WireQueueItem> EditQueue { get; set; }
     [Parameter] public EventCallback<WireScheduleItem> Edit { get; set; }
     [Parameter] public EventCallback<WireScheduleItem> Export { get; set; }
@@ -106,13 +101,9 @@
     [Parameter] public EventCallback<WireScheduleItem> Unschedule { get; set; }
     [Parameter] public EventCallback ConnectBroker { get; set; }
 
-    private IReadOnlyList<WireQueueItem> ReadyItems => Data.Queue
-        .Where(item => !CampaignOnly || item.CampaignId == CampaignId)
-        .ToList();
+    private IReadOnlyList<WireQueueItem> ReadyItems => Data.Queue;
 
-    private IReadOnlyList<WireScheduleItem> ScheduledItems => Data.Items
-        .Where(item => !CampaignOnly || item.CampaignId == CampaignId)
-        .ToList();
+    private IReadOnlyList<WireScheduleItem> ScheduledItems => Data.Items;
 
     private IReadOnlyList<WireScheduleItem> QueuedItems => ScheduledItems
         .Where(item => item.Status is WireDeliveryStatus.Draft or WireDeliveryStatus.Queued or WireDeliveryStatus.Staged)
@@ -138,21 +129,16 @@
                 .Concat(ScheduledItems.Select(item => item.CampaignId))
                 .Distinct()
                 .Count();
-            return $"{items} items in flight · Across all {campaigns} campaigns in this range";
+            var inFlight = $"{items} {(items == 1 ? "item" : "items")} in flight";
+            return ScopeLabel != "all campaigns"
+                ? $"{inFlight} · {ScopeLabel}"
+                : $"{inFlight} · across {campaigns} {(campaigns == 1 ? "campaign" : "campaigns")} in this range";
         }
     }
 
     private void OpenQueueSlot(WireQueueItem item) => _slotDialog?.Open(item, DefaultSlotDate, 9 * 60);
 
     private void OpenMove(WireScheduleItem item) => _slotDialog?.Open(item);
-
-    private async Task ToggleCampaignOnly()
-    {
-        if (CampaignId is not null)
-        {
-            await CampaignOnlyChanged.InvokeAsync(!CampaignOnly);
-        }
-    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

@@ -32,6 +32,11 @@ public static class ImageSlotEndpoints
             .Validate<ImageBatchGenerateRequest>().RequireRateLimiting("ai");
         group.MapPatch("/{slotId:guid}", PatchAsync).Validate<ImageSlotPatchRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
+        group.MapGet("/{slotId:guid}/prompt-preview", PromptPreviewAsync);
+        group.MapPut("/{slotId:guid}/overlay", SetOverlayAsync).Validate<OverlaySpec>().RequireRateLimiting("writes");
+        group.MapDelete("/{slotId:guid}/overlay", ClearOverlayAsync).RequireRateLimiting("writes");
+        group.MapPost("/{slotId:guid}/variants/{variantId:guid}/edit", EditRegionAsync)
+            .Validate<ImageRegionEditRequest>().RequireRateLimiting("ai");
         group.MapPost("/{slotId:guid}/place", PlaceAsync).Validate<PlaceVariantRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}", ClearAsync).RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}/variants/{variantId:guid}", DeleteVariantAsync)
@@ -63,7 +68,184 @@ public static class ImageSlotEndpoints
         new(s.Id, s.CampaignId, s.Kind, s.TargetWidth, s.TargetHeight, s.Prompt, s.ModelAlias,
             s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt,
             s.HeadlineBackground, s.ArtifactId, s.PromptMode,
-            [.. ImageReferenceResolver.ParseIds(s.ReferenceAssetIdsJson)]);
+            [.. ImageReferenceResolver.ParseIds(s.ReferenceAssetIdsJson)],
+            Overlay: ParseOverlay(s.OverlaySpecJson));
+
+    internal static OverlaySpec? ParseOverlay(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+        try
+        {
+            var spec = System.Text.Json.JsonSerializer.Deserialize<OverlaySpec>(json, JsonWeb);
+            return spec is { Boxes.Count: > 0 } ? spec : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Stores the overlay spec (ADR-055) and, when the slot has a placed image, re-composites
+    /// it immediately — editing the overlay is free, no model call. The spec replaces the
+    /// legacy single-headline composite for this slot.
+    /// </summary>
+    private static async Task<IResult> SetOverlayAsync(
+        Guid campaignId,
+        Guid slotId,
+        OverlaySpec request,
+        IPublicContentStore publicStore,
+        IImageComposer composer,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        var now = clock.GetUtcNow();
+        slot.OverlaySpecJson = request.Boxes.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(request, JsonWeb);
+        slot.UpdatedAt = now;
+
+        bool? fontFallback = null;
+        if (slot.BaseImagePath is not null)
+        {
+            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct);
+            if (composited is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "The slot's base image is no longer in the public container.");
+            }
+            fontFallback = composited.FontFallback;
+        }
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { slot = ToResponse(slot), fontFallback });
+    }
+
+    private static async Task<IResult> ClearOverlayAsync(
+        Guid campaignId, Guid slotId, IPublicContentStore publicStore, IImageComposer composer,
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        slot.OverlaySpecJson = null;
+        slot.UpdatedAt = clock.GetUtcNow();
+        if (slot.BaseImagePath is not null)
+        {
+            // Back to the plain take (or the legacy headline composite when one is set).
+            if (!string.IsNullOrWhiteSpace(slot.HeadlineText))
+            {
+                await CompositeSlotAsync(slot, slot.HeadlineText!, slot.SafeArea, slot.HeadlineBackground, publicStore, composer, slot.UpdatedAt, ct);
+            }
+            else
+            {
+                slot.PublishedUrl = slot.BaseImageUrl;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(ToResponse(slot));
+    }
+
+    /// <summary>Renders the stored overlay spec onto the base image and publishes the result. Null when the base blob is gone.</summary>
+    private static async Task<CompositeResult?> CompositeOverlayAsync(
+        ImageSlot slot, IPublicContentStore publicStore, IImageComposer composer, DateTimeOffset now, CancellationToken ct)
+    {
+        var spec = ParseOverlay(slot.OverlaySpecJson);
+        var baseBytes = await publicStore.ReadAsync(slot.BaseImagePath!, ct);
+        if (baseBytes is null)
+        {
+            return null;
+        }
+        if (spec is null)
+        {
+            slot.PublishedUrl = slot.BaseImageUrl;
+            slot.UpdatedAt = now;
+            return new CompositeResult(baseBytes, false, string.Empty);
+        }
+        var result = composer.ComposeOverlay(baseBytes, spec);
+        var url = await publicStore.PublishAsync(CompositePath(slot.CampaignId, slot.Kind), result.Image, "image/webp", ct);
+        slot.PublishedUrl = url.ToString();
+        slot.UpdatedAt = now;
+        return result;
+    }
+
+    /// <summary>
+    /// Region edit (ADR-055): repaint the masked part of an existing take. The result is a new
+    /// take with lineage to the source, in the same gallery, so the producer compares before
+    /// and after and keeps whichever wins.
+    /// </summary>
+    private static async Task<IResult> EditRegionAsync(
+        Guid campaignId,
+        Guid slotId,
+        Guid variantId,
+        ImageRegionEditRequest request,
+        ClaimsPrincipal principal,
+        HttpContext http,
+        IImageRenderer renderer,
+        IPublicContentStore publicStore,
+        IImageComposer composer,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (!publicStore.IsConfigured)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: "Storage is not configured for public publishing.");
+        }
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        var source = await db.ImageVariants.SingleOrDefaultAsync(
+            v => v.Id == variantId && v.SlotId == slotId && v.CampaignId == campaignId, ct);
+        if (source is null)
+        {
+            return Results.NotFound();
+        }
+        byte[] mask;
+        try
+        {
+            mask = Convert.FromBase64String(request.MaskPng.Contains(',', StringComparison.Ordinal)
+                ? request.MaskPng[(request.MaskPng.IndexOf(',', StringComparison.Ordinal) + 1)..]
+                : request.MaskPng);
+        }
+        catch (FormatException)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["MaskPng"] = ["The mask must be base64 PNG."] });
+        }
+        if (RegionEdits.MaskBounds(mask) is null)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["MaskPng"] = ["Paint the region to change first — the mask is empty."] });
+        }
+        var image = await publicStore.ReadAsync(source.BlobPath, ct);
+        if (image is null)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                detail: "The take to edit is no longer in the public container.");
+        }
+
+        var userId = AuthEndpoints.GetUserId(principal);
+        var model = string.IsNullOrWhiteSpace(request.ModelAlias) ? source.Model : request.ModelAlias.Trim();
+        var instruction = request.Instruction.Trim();
+        return await RenderBatchAsync(
+            slot, ImagePromptComposer.Steer(source.Prompt, $"[region edit] {instruction}"), request.Variants,
+            steeringNote: $"edit: {instruction}", sourceVariantId: source.Id,
+            principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
+            references: null, modelOverride: model, compareModels: null,
+            renderOverride: (alias, token) => renderer.RenderEditAsync(
+                userId, instruction, image, mask, slot.TargetWidth, slot.TargetHeight, alias, token));
+    }
 
     private static async Task<IResult> ListAsync(Guid campaignId, CastmillDbContext db, CancellationToken ct)
     {
@@ -330,21 +512,80 @@ public static class ImageSlotEndpoints
                 a => a.Id == artifactId && a.CampaignId == campaignId, ct)
             : null;
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
-        var basePrompt = slot.PromptMode == "Manual"
-            ? slot.Prompt!
-            : BuildAutoPrompt(slot, campaign, owner);
-        var effectivePrompt = ComposeEffectivePrompt(
-            basePrompt, slot.PromptMode == "Manual" ? null : brand.ImageStyleBlock, steeringNote: null,
-            slot.PromptMode == "Manual"
-                ? null
-                : CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
-        effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
-        effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
+        var effectivePrompt = ImagePromptComposer.Compose(slot, campaign, owner, brand, null, resolvedReferences);
+
+        var compare = request.ModelAliases?
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
             principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
-            resolvedReferences, request.ModelAlias);
+            resolvedReferences, request.ModelAlias,
+            compare is { Length: > 0 } ? compare : null);
+    }
+
+    /// <summary>
+    /// What a generate call would send RIGHT NOW (ADR-054), including the house composition
+    /// rules the renderer appends, so the studio can show the whole text instead of a
+    /// disabled textarea. Reference images are described, not resolved — resolving downloads
+    /// every attached asset, which a read-only preview must not do.
+    /// </summary>
+    private static async Task<IResult> PromptPreviewAsync(
+        Guid campaignId,
+        Guid slotId,
+        string? model,
+        ClaimsPrincipal principal,
+        IBrandContextService brands,
+        IImageRenderer renderer,
+        CastmillDbContext db,
+        CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
+        var brand = await brands.ResolveAsync(campaign, ct);
+        var owner = slot.ArtifactId is { } artifactId
+            ? await db.Artifacts.SingleOrDefaultAsync(
+                a => a.Id == artifactId && a.CampaignId == campaignId, ct)
+            : null;
+
+        // Mirrors ImageReferenceResolver's selection (explicit picks + the brand's product
+        // screenshots) as a yes/no, without downloading a byte.
+        var referencesAttach = campaign.BrandId is { } brandId
+            && (!string.IsNullOrWhiteSpace(slot.ReferenceAssetIdsJson) && slot.ReferenceAssetIdsJson.Trim() is not ("[]" or "null")
+                || await db.BrandAssets.IgnoreQueryFilters()
+                    .AnyAsync(asset => asset.BrandId == brandId && asset.Kind == "product", ct));
+
+        var prompt = slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt)
+            ? string.Empty
+            : ImagePromptComposer.Compose(slot, campaign, owner, brand, null,
+                referencesAttach ? [new ImageReference(Guid.Empty, "reference", "image/png", [], "product")] : null);
+
+        // The frame is the PROVIDER's: MAI paints the slot's exact size, Gemini a native 16:9
+        // frame, gpt-image one of three fixed sizes — so the crop, and the rules text that
+        // describes it, differ per model (ADR-055).
+        var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
+        var frame = await renderer.FrameForAsync(AuthEndpoints.GetUserId(principal), slot.TargetWidth, slot.TargetHeight, modelAlias, ct);
+        if (prompt.Length > 0)
+        {
+            prompt = ImagePromptRules.Apply(prompt, slot.TargetWidth, slot.TargetHeight, frame.Width, frame.Height);
+        }
+
+        var targetAspect = (double)slot.TargetWidth / slot.TargetHeight;
+        var frameAspect = (double)frame.Width / frame.Height;
+        var horizontal = targetAspect < frameAspect ? (1 - (targetAspect / frameAspect)) * 50 : 0;
+        var vertical = targetAspect > frameAspect ? (1 - (frameAspect / targetAspect)) * 50 : 0;
+
+        return Results.Ok(new ImagePromptPreviewResponse(
+            prompt, slot.PromptMode, slot.TargetWidth, slot.TargetHeight,
+            frame.Width, frame.Height,
+            Math.Round(horizontal, 1), Math.Round(vertical, 1), referencesAttach));
     }
 
     private static async Task<IResult> GeneratePendingAsync(
@@ -498,17 +739,7 @@ public static class ImageSlotEndpoints
 
                 var owner = slot.ArtifactId is { } ownerId
                     && owners.TryGetValue(ownerId, out var artifact) ? artifact : null;
-                var basePrompt = slot.PromptMode == "Manual"
-                    ? slot.Prompt!
-                    : BuildAutoPrompt(slot, campaign, owner);
-                var effectivePrompt = ComposeEffectivePrompt(
-                    basePrompt, slot.PromptMode == "Manual" ? null : brand.ImageStyleBlock,
-                    steeringNote: null,
-                    slot.PromptMode == "Manual"
-                        ? null
-                        : CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson).PrimaryKeyword);
-                effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
-                effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
+                var effectivePrompt = ImagePromptComposer.Compose(slot, campaign, owner, brand, null, resolvedReferences);
                 prepared.Add(new PreparedImageBatchSlot(
                     slot, work.Variants, effectiveModel, effectivePrompt, resolvedReferences));
             }
@@ -1011,11 +1242,9 @@ public static class ImageSlotEndpoints
         // the adjustment, so lineage is honest and reproducible. The note is optional:
         // steering by reference alone (ADR-025's real image inputs) is a complete request.
         var note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
-        var effectivePrompt = ComposeEffectivePrompt(source.Prompt, imageStyleBlock: null, note);
         var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
-        effectivePrompt = AppendReferenceInstructions(effectivePrompt, resolvedReferences);
-        effectivePrompt = AppendSlotCompositionGuardrails(effectivePrompt, slot);
+        var effectivePrompt = ImagePromptComposer.Steer(source.Prompt, note, resolvedReferences);
 
         return await RenderBatchAsync(
             slot, effectivePrompt, request.Variants, note, source.Id,
@@ -1041,9 +1270,19 @@ public static class ImageSlotEndpoints
         TimeProvider clock,
         CancellationToken ct,
         IReadOnlyList<ImageReference>? references = null,
-        string? modelOverride = null)
+        string? modelOverride = null,
+        IReadOnlyList<string>? compareModels = null,
+        Func<string?, CancellationToken, Task<byte[]>>? renderOverride = null)
     {
         var userId = AuthEndpoints.GetUserId(principal);
+        // Compare mode (ADR-054): the same prompt on every listed model, `count` takes each.
+        // One run row, one gallery, every take labelled with the model that painted it.
+        List<string?> jobs = compareModels is { Count: > 0 }
+            ? compareModels.SelectMany(alias => Enumerable.Range(1, count).Select(_ => (string?)alias)).ToList()
+            : Enumerable.Repeat(string.IsNullOrWhiteSpace(modelOverride) ? slot.ModelAlias : modelOverride.Trim(), count)
+                .ToList();
+        var comparing = jobs.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+        count = jobs.Count;
         GenerationRun? run = null;
         IResult? startError = null;
         var strategy = db.Database.CreateExecutionStrategy();
@@ -1085,9 +1324,6 @@ public static class ImageSlotEndpoints
             return startError;
         }
 
-        // The batch's model: the caller's choice for this run, else the slot's saved default.
-        // Recorded on every variant, so a gallery of takes from two models stays readable.
-        var model = string.IsNullOrWhiteSpace(modelOverride) ? slot.ModelAlias : modelOverride.Trim();
         if (run is null)
         {
             throw new InvalidOperationException("The image run did not start.");
@@ -1098,14 +1334,42 @@ public static class ImageSlotEndpoints
         var failures = new List<string>();
         var items = new List<object>();
 
-        for (var i = 1; i <= count; i++)
+        // Renders run concurrently across models (a compare batch would otherwise take
+        // N × one render); persistence stays on this thread because DbContext is not
+        // thread-safe. Each render is awaited in completion order so progress stays live.
+        var pending = jobs.Select((model, index) => RenderOneAsync(index + 1, model)).ToList();
+        async Task<(int Take, string? Model, byte[]? Webp, Exception? Error, long DurationMs)> RenderOneAsync(int take, string? model)
         {
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var webp = await renderer.RenderExactAsync(
-                    userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
-                    references ?? [], ct);
+                var webp = renderOverride is not null
+                    ? await renderOverride(model, ct)
+                    : await renderer.RenderExactAsync(
+                        userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
+                        references ?? [], ct);
+                return (take, model, webp, null, stopwatch.ElapsedMilliseconds);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return (take, model, null, ex, stopwatch.ElapsedMilliseconds);
+            }
+        }
+
+        while (pending.Count > 0)
+        {
+            var finished = await Task.WhenAny(pending);
+            pending.Remove(finished);
+            var (i, model, rendered, error, durationMs) = await finished;
+            // The batch's model, recorded on every variant so a gallery of takes from two
+            // models stays readable.
+            try
+            {
+                if (error is not null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+                }
+                var webp = rendered!;
                 var thumb = composer.ToThumbWebp(webp);
 
                 // Unique names: published blobs carry immutable cache headers, so a
@@ -1136,9 +1400,9 @@ public static class ImageSlotEndpoints
                 };
                 db.ImageVariants.Add(variant);
                 variants.Add(ToResponse(variant));
-                items.Add(new { kind = $"v{i}", success = true, durationMs = stopwatch.ElapsedMilliseconds });
+                items.Add(new { kind = $"v{i}", model, success = true, durationMs });
             }
-            catch (AiNotConfiguredException ex)
+            catch (AiNotConfiguredException ex) when (!comparing)
             {
                 await CompleteImageRunAsync(db, run, items, clock, ct);
                 return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: ex.Message);
@@ -1159,8 +1423,9 @@ public static class ImageSlotEndpoints
                     .CreateLogger("Castmill.ImageSlots")
                     .LogError(ex, "Image render v{Take}/{Count} for slot {SlotId} failed", i, count, slot.Id);
                 var reason = FailureReason(ex);
-                failures.Add($"v{i}: {reason}"); // partial failure never sinks the set
-                items.Add(new { kind = $"v{i}", success = false, error = reason, durationMs = stopwatch.ElapsedMilliseconds });
+                var label = comparing ? $"{model} v{i}" : $"v{i}";
+                failures.Add($"{label}: {reason}"); // partial failure never sinks the set
+                items.Add(new { kind = $"v{i}", model, success = false, error = reason, durationMs });
             }
 
             run.ItemsJson = System.Text.Json.JsonSerializer.Serialize(items, JsonWeb);
@@ -1205,141 +1470,9 @@ public static class ImageSlotEndpoints
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>
-    /// Typography safety, appended to EVERY image prompt.
-    ///
-    /// This is not stylistic advice — it compensates for something the pipeline actually does.
-    /// Image models emit their own fixed sizes (1024x1024, 1024x1536, 1536x1024), and the
-    /// renderer then crops that output to the slot's exact dimensions, which are a different
-    /// aspect ratio. Anything the model placed near an edge is inside the strip that gets cut,
-    /// which is why generated text kept arriving clipped along the top or the left.
-    ///
-    /// The margin is expressed as a fraction rather than pixels because the model does not
-    /// know the slot size and never sees the crop.
-    /// </summary>
-    internal const string TypographyGuardrails = """
-        Text rendering rules (follow exactly):
-        - Keep every word, letter, logo and supporting graphic inside the middle 76% of the
-          frame, leaving at least 12% clear on every edge. Nothing meaningful may touch or
-          run off an edge.
-        - Use only text explicitly requested by the prompt or visible in an authoritative
-          product reference. Do not invent extra marketing captions, statistics, feature
-          tiles, footers, badges or interface labels.
-        - Leave generous empty margin around any text. Keep a text block to at most three
-          short lines and no more than 55% of the image height.
-        - Render each word complete and correctly spelled. No cut-off glyphs, no clipped
-          descenders, no words continuing past the border.
-        - Use few words at a large size rather than many words small; if the text will not fit
-          comfortably inside the safe area, omit secondary copy instead of shrinking or
-          clipping it.
-        - Keep text on an area of flat, contrasting tone so it stays legible.
-        """;
-
-    /// <summary>slot prompt/base prompt + brand image style + campaign keyword + the user's adjustment.</summary>
-    internal static string ComposeEffectivePrompt(
-        string basePrompt, string? imageStyleBlock, string? steeringNote, string? primaryKeyword = null)
-    {
-        var prompt = basePrompt.Trim();
-        if (!string.IsNullOrWhiteSpace(imageStyleBlock))
-        {
-            prompt = $"{prompt}\n{imageStyleBlock}";
-        }
-
-        // The campaign's primary keyword steers any TEXT the image carries (thumbnail
-        // headlines especially): a thumbnail that says what people search for is the SEO
-        // surface YouTube actually shows. Phrasing only — the model must not paint keyword
-        // lists into scenery.
-        if (!string.IsNullOrWhiteSpace(primaryKeyword))
-        {
-            prompt = $"{prompt}\nIf the image contains any text, prefer wording that uses "
-                + $"\"{primaryKeyword.Trim()}\" naturally. Never render a list of keywords.";
-        }
-
-        if (!string.IsNullOrWhiteSpace(steeringNote))
-        {
-            prompt = $"{prompt}\nAdjustment: {steeringNote.Trim()}";
-        }
-
-        return prompt;
-    }
-
-    /// <summary>
-    /// Model providers render only a few native canvas sizes, then Castmill crops/resizes to
-    /// the durable slot. Giving the model the final dimensions and ratio makes it compose for
-    /// that destination; repeating the safe-zone rules last prevents brand/reference text
-    /// from pushing essential content into the crop.
-    /// </summary>
-    internal static string AppendSlotCompositionGuardrails(string prompt, ImageSlot slot)
-    {
-        var divisor = GreatestCommonDivisor(slot.TargetWidth, slot.TargetHeight);
-        var ratioWidth = slot.TargetWidth / divisor;
-        var ratioHeight = slot.TargetHeight / divisor;
-        return $$"""
-            {{prompt.Trim()}}
-            Final composition target (follow exactly):
-            - The published image is {{slot.TargetWidth}}×{{slot.TargetHeight}} pixels,
-              aspect ratio {{ratioWidth}}:{{ratioHeight}}. Compose for this landscape/portrait
-              ratio now; do not design an edge-to-edge layout that only works on a square canvas.
-            - Center the complete composition and keep every essential subject, product panel,
-              label and decorative element inside the middle 76% of the frame so the final
-              aspect-ratio crop cannot remove it.
-            - The frame must read as one finished composition at the target size. No partial
-              cards, clipped rows, cut-off panels or content continuing below the canvas.
-            {{TypographyGuardrails}}
-            """;
-    }
-
-    private static int GreatestCommonDivisor(int left, int right)
-    {
-        while (right != 0)
-        {
-            (left, right) = (right, left % right);
-        }
-        return Math.Max(1, Math.Abs(left));
-    }
-
-    internal static string BuildAutoPrompt(ImageSlot slot, Campaign campaign, Artifact? artifact)
-    {
-        var content = artifact?.ContentJson;
-        if (content is { Length: > 5000 })
-        {
-            content = content[..5000];
-        }
-        return $$"""
-            Create a {{ArtifactDisplayName(slot.Kind)}} for the content item
-            "{{artifact?.Title ?? campaign.Name}}".
-            Rebuild the composition from the current source every time; do not preserve a
-            person, background or product that is no longer present in the references.
-            Campaign brief: {{campaign.Brief ?? "(none)"}}
-            Content item: {{content ?? "(no structured content)"}}
-            {{(string.IsNullOrWhiteSpace(slot.Prompt) ? "" : $"Creative direction: {slot.Prompt}")}}
-            """;
-    }
-
-    private static string ArtifactDisplayName(string kind) => kind switch
-    {
-        "youtube-thumbnail" => "YouTube thumbnail",
-        "blog-header" => "blog header image",
-        _ when kind.StartsWith("blog-inline-", StringComparison.Ordinal) => "supporting blog figure",
-        "social-card" => "social-media image",
-        _ => "supporting image",
-    };
-
-    internal static string AppendReferenceInstructions(
-        string prompt, IReadOnlyList<ImageReference> references)
-    {
-        if (references.Count == 0)
-        {
-            return prompt;
-        }
-        var hasProduct = references.Any(r => r.Kind == "product");
-        return prompt + "\nActual reference images are attached. Use their pixels, not just "
-            + "their descriptions; preserve recognizable faces, objects and layouts."
-            + (hasProduct
-                ? " Product screenshots are authoritative: reproduce the real interface, "
-                    + "including its layout and controls, and never invent replacement UI."
-                : string.Empty);
-    }
+    /// <summary>Forwarder kept for callers/tests; the composer owns the digest (ADR-055).</summary>
+    internal static string? ContentDigest(string? contentJson, int maxChars = 1800) =>
+        ImagePromptComposer.ContentDigest(contentJson, maxChars);
 
     internal static ImageVariantResponse ToResponse(
         ImageVariant v, Guid? userId = null, Guid? campaignOwnerId = null) =>
@@ -1348,7 +1481,8 @@ public static class ImageSlotEndpoints
             v.LockedByUserId is not null,
             v.LockedByUserId is not null
                 && (v.LockedByUserId == userId || campaignOwnerId == userId),
-            v.LockedAt);
+            v.LockedAt,
+            v.Prompt);
 
     /// <summary>
     /// Places a chosen variant: the slot flips Filled, the headline (if any) is
@@ -1415,7 +1549,17 @@ public static class ImageSlotEndpoints
         slot.UpdatedAt = now;
 
         bool? fontFallback = null;
-        if (!string.IsNullOrWhiteSpace(slot.HeadlineText))
+        if (ParseOverlay(slot.OverlaySpecJson) is not null)
+        {
+            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct);
+            if (composited is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict,
+                    detail: "The chosen variant is no longer in the public container.");
+            }
+            fontFallback = composited.FontFallback;
+        }
+        else if (!string.IsNullOrWhiteSpace(slot.HeadlineText))
         {
             var composited = await CompositeSlotAsync(slot, slot.HeadlineText!, slot.SafeArea, slot.HeadlineBackground, publicStore, composer, now, ct);
             if (composited is null)

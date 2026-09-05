@@ -2,6 +2,7 @@ using Bunit;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Design;
+using Castmill.UI.State;
 using Castmill.UI.Editor;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
@@ -522,6 +523,31 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         var saved = Assert.Single(downloader.Saved);
         Assert.Equal("castmill-keeper.webp", saved.FileName);
         Assert.Equal([4, 5, 6], saved.Bytes);
+    }
+
+    /// <summary>
+    /// Edit beside Download: the studio drawer for this card with the placed take already
+    /// open, so steering and regenerate are one click from the content, not a hunt through
+    /// the sheet.
+    /// </summary>
+    [Fact]
+    public async Task Keeper_hover_edit_opens_the_studio_with_the_placed_take()
+    {
+        var slotId = Guid.NewGuid();
+        var keeperId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [Artifact(YouTubeId, "youtube", "Launch video package")],
+            [Slot("youtube-thumbnail", YouTubeId,
+                keeperUrl: "https://public.example/keeper.webp",
+                slotId: slotId, keeperVariantId: keeperId)], 0, 1));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll(".cm-plan__slot-edit").Count == 1,
+            TimeSpan.FromSeconds(5));
+        await view.Find("button[aria-label='Edit YouTube thumbnail']").ClickAsync();
+
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        Assert.EndsWith($"/{CampaignViews.Segment(CampaignView.ImageStudio)}?slot={slotId}&take={keeperId}", navigation.Uri, StringComparison.Ordinal);
     }
 
     // ---- helpers ---------------------------------------------------------------

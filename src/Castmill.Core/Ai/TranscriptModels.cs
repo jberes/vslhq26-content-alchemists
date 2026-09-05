@@ -27,7 +27,10 @@ public sealed record TranscriptIngestRequest(
     /// would round-trip through sentence-splitting and lose its genuine timestamps — and
     /// timestamps are the provenance backbone.
     /// </summary>
-    IReadOnlyList<TranscriptSegment>? Segments = null);
+    IReadOnlyList<TranscriptSegment>? Segments = null,
+    /// <summary>Desktop-local media (ADR-057): the file's path and fingerprint, stored opaquely on the source.</summary>
+    [property: MaxLength(2000)] string? LocalPath = null,
+    [property: MaxLength(80)] string? ContentHash = null);
 
 public sealed record GenerateRequest(
     Guid? TranscriptArtifactId,
@@ -43,7 +46,9 @@ public sealed record GenerateRequest(
     /// <summary>Optional blog/pillar that owns the generated derivative.</summary>
     Guid? ParentArtifactId = null,
     /// <summary>Optional placeholder artifact replaced in place by generation.</summary>
-    Guid? ReplaceArtifactId = null)
+    Guid? ReplaceArtifactId = null,
+    /// <summary>Technical brief for THIS generation (ADR-056); null uses the placeholder's stored brief, if any.</summary>
+    Castmill.Core.Resources.TechnicalBrief? TechnicalBrief = null)
 {
     public const int MaxCopies = 5;
 }
@@ -106,7 +111,12 @@ public sealed record ScoutRequest(
 public sealed record TechEditRequest(
     [property: MaxLength(4000)] string? Steering,
     /// <summary>Consult the customer knowledge base. Ignored when none is configured.</summary>
-    bool UseKnowledgeBase = false);
+    bool UseKnowledgeBase = false,
+    /// <summary>Overrides the artifact's stored technical brief for this pass (ADR-056).</summary>
+    Castmill.Core.Resources.TechnicalBrief? TechnicalBrief = null);
+
+/// <summary>One technical claim the Tech Edit made or kept, and whether a source backs it (ADR-056).</summary>
+public sealed record ClaimCheck(string Statement, string? SourceUrl, bool Verified);
 
 /// <summary>
 /// Outcome of a second pass. <see cref="Changes"/> is the model's own account of what it
@@ -121,7 +131,11 @@ public sealed record TechEditResult(
     bool KnowledgeBaseUsed,
     IReadOnlyList<string> Changes,
     IReadOnlyList<string> Warnings,
-    long DurationMs);
+    long DurationMs,
+    /// <summary>Claims the Tech Edit asserted, each with its source or flagged unverified (ADR-056).</summary>
+    IReadOnlyList<ClaimCheck>? Claims = null,
+    /// <summary>Which brand skills and MCP servers were attached to the pass.</summary>
+    IReadOnlyList<string>? KnowledgeAttached = null);
 
 /// <summary>
 /// The brief the model reads off a transcript, so step 3 of the run flow is a review rather

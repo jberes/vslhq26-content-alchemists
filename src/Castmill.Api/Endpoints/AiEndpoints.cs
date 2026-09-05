@@ -229,7 +229,8 @@ public static class AiEndpoints
             ? SourceModalities.Media
             : SourceModalities.Text;
         var persisted = await PersistTranscriptAsync(
-            campaignId, transcript, modality, null, tenant, db, clock, ct);
+            campaignId, transcript, modality, null, tenant, db, clock, ct,
+            request.LocalPath, request.ContentHash);
         return Results.Created(
             $"/api/v1/campaigns/{campaignId}/artifacts/{persisted.Id}",
             new { transcriptArtifactId = persisted.Id, segmentCount = transcript.Segments.Count });
@@ -404,19 +405,44 @@ public static class AiEndpoints
             return Results.Problem("The placeholder does not match this campaign and content kind.", statusCode: 400);
         }
 
+        // Technical brief (ADR-056): the request's, else the placeholder's stored one. It rides
+        // on the brief string so every generator path sees it, and it is stored on the result
+        // so Regenerate and the Tech Edit keep working from the same facts.
+        var technical = request.TechnicalBrief is { IsEmpty: false } supplied
+            ? supplied
+            : request.ReplaceArtifactId is { } replacing
+                ? TechnicalBriefs.Parse(await db.Artifacts
+                    .Where(a => a.Id == replacing && a.CampaignId == campaignId)
+                    .Select(a => a.TechnicalBriefJson)
+                    .FirstOrDefaultAsync(ct))
+                : null;
+        var brief = TechnicalBriefs.Merge(request.Brief, technical);
+
+        GenerationResult result;
         if (kind.Equals("blog", StringComparison.OrdinalIgnoreCase))
         {
-            return Results.Ok(await orchestrator.RunBlogAsync(
-                userId, campaign, transcript, request.Brief, ct, request.ReplaceArtifactId));
+            result = await orchestrator.RunBlogAsync(
+                userId, campaign, transcript, brief, ct, request.ReplaceArtifactId);
         }
-        var spec = Generators.Find(kind);
-        if (spec is null)
+        else
         {
-            return Results.NotFound();
+            var spec = Generators.Find(kind);
+            if (spec is null)
+            {
+                return Results.NotFound();
+            }
+            result = await orchestrator.RunGeneratorAsync(
+                userId, campaign, transcript, brief, spec, ct,
+                request.ParentArtifactId, request.ReplaceArtifactId);
         }
-        return Results.Ok(await orchestrator.RunGeneratorAsync(
-            userId, campaign, transcript, request.Brief, spec, ct,
-            request.ParentArtifactId, request.ReplaceArtifactId));
+
+        if (technical is not null && result.Success && result.ArtifactId is { } createdId)
+        {
+            await db.Artifacts
+                .Where(a => a.Id == createdId && a.CampaignId == campaignId)
+                .ExecuteUpdateAsync(set => set.SetProperty(a => a.TechnicalBriefJson, TechnicalBriefs.Serialize(technical)), ct);
+        }
+        return Results.Ok(result);
     }
 
     private static async Task<bool> HasApprovedSeoAnalysisAsync(
@@ -527,7 +553,10 @@ public static class AiEndpoints
 
         var result = await orchestrator.RunTechEditAsync(
             AuthEndpoints.GetUserId(principal), campaign, artifact, loaded.Value.Transcript,
-            request.Steering, request.UseKnowledgeBase, ct);
+            request.Steering, request.UseKnowledgeBase, ct,
+            request.TechnicalBrief is { IsEmpty: false } supplied
+                ? supplied
+                : TechnicalBriefs.Parse(artifact.TechnicalBriefJson));
 
         if (result.Success)
         {
@@ -789,7 +818,8 @@ public static class AiEndpoints
     internal static async Task<Artifact> PersistTranscriptAsync(
         Guid campaignId, TranscriptContent transcript, string modality, Asset? sourceMedia,
         ITenantProvider tenant,
-        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct,
+        string? localPath = null, string? contentHash = null)
     {
         var now = clock.GetUtcNow();
         var tenantId = tenant.TenantId!.Value;
@@ -892,6 +922,11 @@ public static class AiEndpoints
             BlobPath = sourceMedia?.BlobPath,
             ContentType = sourceMedia?.ContentType,
             SizeBytes = sourceMedia?.SizeBytes,
+            // Media link (ADR-057): where the recording lives on the transcribing machine, and
+            // the cloud copy when the upload path produced one.
+            LocalPath = string.IsNullOrWhiteSpace(localPath) ? null : localPath.Trim(),
+            ContentHash = string.IsNullOrWhiteSpace(contentHash) ? null : contentHash.Trim(),
+            MediaAssetId = sourceMedia?.Id,
             SnapshotIdentity = $"sha256:{snapshotHash}",
             SnapshotHash = snapshotHash,
             CurrentEvidenceRevision = 1,

@@ -6,6 +6,8 @@ namespace Castmill.UI.Http;
 /// <summary>Result of placing a variant (and of a headline re-composite).</summary>
 public sealed record PlaceResult(ImageSlotResponse Slot, long? BlogVersion, bool? FontFallback);
 
+public sealed record OverlaySaveResult(ImageSlotResponse Slot, bool? FontFallback);
+
 /// <summary>Where an editor-uploaded image ended up in the public container.</summary>
 public sealed record UploadedImage(string Url);
 
@@ -51,6 +53,42 @@ public sealed class ImagesClient(ApiClient api)
             new { variants, modelAlias },
             anonymous: false,
             ct);
+
+    /// <summary>Compare mode (ADR-054): the same prompt rendered once on each listed model, in one run.</summary>
+    public Task<VariantBatchResponse> CompareAsync(
+        Guid campaignId, Guid slotId, IReadOnlyList<string> modelAliases, int variantsPerModel = 1,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, VariantBatchResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
+            new { variants = variantsPerModel, modelAliases },
+            anonymous: false,
+            ct);
+
+    /// <summary>Saves the overlay editor's spec (ADR-055); a placed slot is re-composited server-side, free.</summary>
+    public Task<OverlaySaveResult> SetOverlayAsync(
+        Guid campaignId, Guid slotId, OverlaySpec spec, CancellationToken ct = default) =>
+        api.PutAsync<OverlaySpec, OverlaySaveResult>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", spec, etag: null, ct);
+
+    public Task<ImageSlotResponse> ClearOverlayAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
+        api.DeleteAsync<ImageSlotResponse>($"api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", ct);
+
+    /// <summary>Region edit (ADR-055): repaint the masked part of a take into a new take with lineage. Live call.</summary>
+    public Task<VariantBatchResponse> EditRegionAsync(
+        Guid campaignId, Guid slotId, Guid variantId, string maskPngBase64, string instruction,
+        int variants = 1, string? modelAlias = null, CancellationToken ct = default) =>
+        api.PostAsync<object, VariantBatchResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{variantId}/edit",
+            new { maskPng = maskPngBase64, instruction, variants, modelAlias },
+            anonymous: false,
+            ct);
+
+    /// <summary>The exact prompt a generate call would send for this slot right now.</summary>
+    public Task<ImagePromptPreviewResponse> GetPromptPreviewAsync(
+        Guid campaignId, Guid slotId, string? modelAlias = null, CancellationToken ct = default) =>
+        api.GetAsync<ImagePromptPreviewResponse>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/prompt-preview"
+            + (string.IsNullOrWhiteSpace(modelAlias) ? string.Empty : $"?model={Uri.EscapeDataString(modelAlias)}"), ct);
 
     /// <summary>
     /// Generates takes for every pending eligible slot in one durable campaign run. Null

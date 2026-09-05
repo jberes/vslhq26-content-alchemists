@@ -12,6 +12,7 @@
 @using Castmill.UI.Http
 @using Castmill.UI.State
 @implements IDisposable
+@implements IAsyncDisposable
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject ImagesClient Images
@@ -25,6 +26,7 @@
 @inject NavigationManager Navigation
 @inject IConfirmService Confirm
 @inject IFileDownloader Downloader
+@inject IJSRuntime JS
 
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
 
@@ -33,7 +35,7 @@
        scrollbar). The sheet and the drawer are independent scroll regions, so the drawer's
        bottom is always reachable regardless of the shell chrome above it. *@
     <div class="cm-page cm-page--fill">
-        <div class="cm-measure--dashboard cm-studio-fill">
+        <div class="cm-studio-fill">
             @if (!ImageContentItems.Any() && Campaign.ImageSlots.Count == 0)
             {
                 <EmptyState Kicker="Image studio"
@@ -208,8 +210,15 @@
                                 <div>
                                     <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
                                     <p class="cm-meta">
-                                        Generated at exactly @slot2.TargetWidth×@slot2.TargetHeight — the slot's published
-                                        size, no client-side cropping.
+                                        Published at @slot2.TargetWidth×@slot2.TargetHeight.
+                                        @if (_promptPreview is { } sizePreview && (sizePreview.CropPercentHorizontal > 0 || sizePreview.CropPercentVertical > 0))
+                                        {
+                                            <text>The model paints a @sizePreview.FrameWidth×@sizePreview.FrameHeight frame that Castmill centre-crops to this size — about @Math.Round(Math.Max(sizePreview.CropPercentHorizontal, sizePreview.CropPercentVertical))% of each cropped edge is lost, so exact text is composited after generation, never painted.</text>
+                                        }
+                                        else
+                                        {
+                                            <text>Rendered at the provider's nearest frame, then fitted to this size.</text>
+                                        }
                                         @if (ProvenanceLine(slot2) is { } prov)
                                         {
                                             <br />
@@ -286,6 +295,24 @@
                                 {
                                     <p class="cm-meta">Castmill rebuilds the prompt from this item's content, the approved SEO/AEO targets and the brand style every time.</p>
                                 }
+                                <details class="cm-studio__preview" open="@_promptPreviewOpen" @ontoggle="OnPreviewToggle">
+                                    <summary>
+                                        <span class="cm-kicker">Prompt Castmill will send</span>
+                                        <span class="cm-meta">
+                                            @(_promptPreview is { } pv
+                                                ? $"{pv.Prompt.Length:N0} chars · {pv.PromptMode} mode{(pv.ReferencesAttach ? " · references attach" : "")}"
+                                                : _promptPreviewError ?? "loading…")
+                                        </span>
+                                    </summary>
+                                    @if (_promptPreview is { } preview)
+                                    {
+                                        <pre class="cm-studio__preview-text">@preview.Prompt</pre>
+                                    }
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                            disabled="@_promptPreviewLoading" @onclick="LoadPromptPreviewAsync">
+                                        @(_promptPreviewLoading ? "Refreshing…" : "Refresh preview")
+                                    </button>
+                                </details>
                                 else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
                                 {
                                     <p class="cm-meta">
@@ -369,6 +396,14 @@
                                             @(UsesWorkspaceDefault ? "DEFAULT" : "THIS IMAGE")
                                         </span>
                                         <span class="cm-meta">@currentModel.Detail</span>
+                                        @if (_promptPreview is { } framePreview)
+                                        {
+                                            var loss = Math.Round(Math.Max(framePreview.CropPercentHorizontal, framePreview.CropPercentVertical));
+                                            <span class="cm-badge @(loss == 0 ? "cm-badge--done" : "cm-badge--empty") cm-studio__crop-badge"
+                                                  title="@(loss == 0 ? $"This model paints {framePreview.FrameWidth}×{framePreview.FrameHeight}: the slot's aspect, nothing is cropped away." : $"This model paints {framePreview.FrameWidth}×{framePreview.FrameHeight}; about {loss}% of each cropped edge is lost fitting it to {framePreview.TargetWidth}×{framePreview.TargetHeight}.")">
+                                                @(loss == 0 ? "NO CROP" : $"CROP {loss}%")
+                                            </span>
+                                        }
                                     </div>
                                     @if (!currentModel.Ready)
                                     {
@@ -428,6 +463,20 @@
                                 </button>
                                 <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
                             </div>
+                            @if (UsableModels.Count > 1)
+                            {
+                                <div class="cm-studio__row cm-studio__compare">
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(IsGenerating || !CanGenerate)"
+                                            title="@string.Join(", ", UsableModels)"
+                                            @onclick="CompareModelsAsync">
+                                        Compare @UsableModels.Count models
+                                    </button>
+                                    <span class="cm-meta">
+                                        Same prompt, one take each on @string.Join(", ", UsableModels) · ≈ @((UsableModels.Count * CostPerVariantUsd).ToString("$0.00"))
+                                    </span>
+                                </div>
+                            }
                             @if (Campaign.Brand is { } studioBrand)
                             {
                                 <p class="cm-meta">
@@ -676,6 +725,23 @@
                                             disabled="@_downloading" @onclick="() => DownloadAsync(take)">
                                         @(_downloading ? "Downloading…" : "↓ Download image")
                                     </button>
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@(IsGenerating || StudioRun.IsBatchRunning)"
+                                            title="Render a fresh take with this take's prompt and model"
+                                            @onclick="() => RegenerateTakeAsync(take)">Regenerate</button>
+                                    <button type="button" class="cm-button cm-button--quiet @(_editorMode == "boxes" ? "cm-button--on" : null)"
+                                            aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
+                                            title="Place and style text boxes on the image (composited after generation, no model call)"
+                                            @onclick="ToggleOverlayEditor">Text overlay</button>
+                                    <button type="button" class="cm-button cm-button--quiet @(_editorMode == "mask" ? "cm-button--on" : null)"
+                                            aria-pressed="@(_editorMode == "mask" ? "true" : "false")"
+                                            title="Draw a region, then tell the model what to change there"
+                                            @onclick="ToggleMaskTool">Select region</button>
+                                    <button type="button" class="cm-button cm-button--quiet @(_compareWith is not null ? "cm-button--on" : null)"
+                                            aria-pressed="@(_compareWith is not null ? "true" : "false")"
+                                            disabled="@(OrderedGallery.Count(v => v.Id != take.Id) == 0)"
+                                            title="Show another take beside this one"
+                                            @onclick="ToggleCompare">Compare</button>
                                     @if (take.State != "Discarded")
                                     {
                                         <button type="button" class="cm-button cm-button--quiet"
@@ -700,8 +766,38 @@
                                     <span aria-hidden="true">@(take.IsLocked ? "🔒" : "🔓")</span>
                                 </button>
                             </div>
-                            <figure class="cm-lightbox__canvas">
-                                <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                            <figure class="cm-lightbox__canvas @(_compareWith is not null ? "cm-lightbox__canvas--compare" : null)">
+                                @* The editor surface (ADR-055): the image plus positioned boxes,
+                                   measured by castmill-overlay-editor.js. Geometry lives in ratios
+                                   so the server composite lands where the preview showed it. *@
+                                <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode">
+                                    <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                                    @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null))
+                                    {
+                                        @foreach (var box in _overlayDraft)
+                                        {
+                                            <div class="cm-imgeditor__box @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null) @(_editorMode == "boxes" ? "cm-imgeditor__box--live" : null)"
+                                                 data-box="@box.Id" style="@BoxStyle(box)"
+                                                 @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
+                                                <span class="cm-imgeditor__text">@box.Text</span>
+                                                @if (_editorMode == "boxes")
+                                                {
+                                                    <span class="cm-imgeditor__handle" data-handle aria-hidden="true"></span>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                    <div class="cm-imgeditor__mask" data-mask-layer hidden aria-hidden="true"></div>
+                                </div>
+                                @if (_compareWith is { } other)
+                                {
+                                    <div class="cm-imgeditor cm-imgeditor--secondary">
+                                        <img class="cm-lightbox__image" src="@other.Url" alt="Take to compare" />
+                                        <span class="cm-imgeditor__label cm-mono">B · @other.Model</span>
+                                        <button type="button" class="cm-button cm-button--quiet cm-imgeditor__swap"
+                                                title="Make this the primary take" @onclick="() => SwapCompare(other)">Make primary</button>
+                                    </div>
+                                }
                             </figure>
                         </div>
 
@@ -716,6 +812,13 @@
                                 {
                                     <p class="cm-meta">Steered from an earlier take: “@note”</p>
                                 }
+                                @if (!string.IsNullOrWhiteSpace(take.Prompt))
+                                {
+                                    <details class="cm-studio__preview">
+                                        <summary><span class="cm-kicker">Prompt this take was rendered from</span></summary>
+                                        <pre class="cm-studio__preview-text">@take.Prompt</pre>
+                                    </details>
+                                }
                             </header>
 
                             @if (_supportingContext is { } dialogContext)
@@ -725,6 +828,159 @@
                                     <span class="cm-kicker">What this image supports</span>
                                     <strong>@dialogContext.Title</strong>
                                     <blockquote>@dialogContext.Excerpt</blockquote>
+                                </section>
+                            }
+
+                            @if (take.SourceVariantId is not null || _gallery.Any(v => v.SourceVariantId == take.Id))
+                            {
+                                <section class="cm-lightbox__group cm-lineage" aria-label="Take history">
+                                    <span class="cm-kicker">Take history</span>
+                                    <div class="cm-lineage__strip">
+                                        @foreach (var link in Lineage(take))
+                                        {
+                                            <button type="button" class="cm-lineage__node @(link.Id == take.Id ? "cm-lineage__node--current" : null)"
+                                                    title="@(link.SteeringNote ?? "original take")" @onclick="() => OpenVariant(link)">
+                                                <img src="@link.ThumbUrl" alt="" loading="lazy" />
+                                                <span class="cm-meta">@(link.Id == take.Id ? "this" : link.SteeringNote is { } n ? Truncate(n, 22) : "origin")</span>
+                                            </button>
+                                        }
+                                    </div>
+                                </section>
+                            }
+
+                            @if (_compareWith is not null || _pickingCompare)
+                            {
+                                <section class="cm-lightbox__group" aria-label="Compare">
+                                    <span class="cm-kicker">Compare with</span>
+                                    <div class="cm-studio__chips">
+                                        @foreach (var candidate in OrderedGallery.Where(v => v.Id != take.Id))
+                                        {
+                                            <button type="button" class="cm-studio__chip @(_compareWith?.Id == candidate.Id ? "cm-studio__chip--on" : null)"
+                                                    @onclick="() => _compareWith = candidate">
+                                                @candidate.Model · @candidate.CreatedAt.ToLocalTime().ToString("HH:mm")
+                                            </button>
+                                        }
+                                    </div>
+                                </section>
+                            }
+
+                            @if (_editorMode == "boxes")
+                            {
+                                <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Text overlay editor">
+                                    <span class="cm-kicker">Text overlay</span>
+                                    <p class="cm-meta">Drag a box to move it, drag its corner to resize. Saved boxes are composited onto the placed image — no model call.</p>
+                                    <div class="cm-studio__chips">
+                                        @foreach (var box in _overlayDraft)
+                                        {
+                                            <button type="button" class="cm-studio__chip @(box.Id == _selectedBoxId ? "cm-studio__chip--on" : null)"
+                                                    @onclick="() => _selectedBoxId = box.Id">@Truncate(box.Text, 18)</button>
+                                        }
+                                        <button type="button" class="cm-studio__chip" @onclick="AddBox">+ Add text box</button>
+                                    </div>
+                                    @if (SelectedBox is { } sel)
+                                    {
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Text</span>
+                                            <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Overlay text"
+                                                      value="@sel.Text" @oninput="e => UpdateBox(sel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
+                                        </label>
+                                        <div class="cm-imgeditor-panel__row">
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Size</span>
+                                                <input type="range" min="0.03" max="0.30" step="0.005" value="@sel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                                                       aria-label="Font size"
+                                                       @oninput="e => UpdateBox(sel with { FontSize = ParseDouble(e.Value, sel.FontSize) })" />
+                                            </label>
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Weight</span>
+                                                <select class="cm-input" value="@sel.Weight" aria-label="Font weight"
+                                                        @onchange="e => UpdateBox(sel with { Weight = int.TryParse(e.Value?.ToString(), out var w) ? w : sel.Weight })">
+                                                    <option value="400">Regular</option>
+                                                    <option value="600">Semibold</option>
+                                                    <option value="700">Bold</option>
+                                                </select>
+                                            </label>
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Align</span>
+                                                <select class="cm-input" value="@sel.Align" aria-label="Alignment"
+                                                        @onchange='e => UpdateBox(sel with { Align = e.Value?.ToString() ?? "left" })'>
+                                                    <option value="left">Left</option>
+                                                    <option value="center">Centre</option>
+                                                    <option value="right">Right</option>
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="cm-imgeditor-panel__row">
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Text colour</span>
+                                                <input type="color" class="cm-imgeditor-panel__color" value="@sel.Color" aria-label="Text colour"
+                                                       @onchange="e => UpdateBox(sel with { Color = e.Value?.ToString() ?? sel.Color })" />
+                                            </label>
+                                            <label class="cm-fanout__item cm-imgeditor-panel__toggle">
+                                                <input type="checkbox" checked="@(sel.Band is not null)" aria-label="Solid band behind the text"
+                                                       @onchange='e => UpdateBox(sel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
+                                                <span>Band behind text</span>
+                                            </label>
+                                            @if (sel.Band is { } band)
+                                            {
+                                                <label class="cm-field">
+                                                    <span class="cm-field__label">Band colour</span>
+                                                    <input type="color" class="cm-imgeditor-panel__color" value="@band.Color" aria-label="Band colour"
+                                                           @onchange="e => UpdateBox(sel with { Band = band with { Color = e.Value?.ToString() ?? band.Color } })" />
+                                                </label>
+                                                <label class="cm-field">
+                                                    <span class="cm-field__label">Opacity</span>
+                                                    <input type="range" min="0.2" max="1" step="0.05" value="@band.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Band opacity"
+                                                           @oninput="e => UpdateBox(sel with { Band = band with { Opacity = ParseDouble(e.Value, band.Opacity) } })" />
+                                                </label>
+                                            }
+                                        </div>
+                                        <div class="cm-form__actions">
+                                            <button type="button" class="cm-button cm-button--quiet cm-button--danger" @onclick="() => RemoveBox(sel.Id)">Remove box</button>
+                                        </div>
+                                    }
+                                    <div class="cm-form__actions">
+                                        <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0)" @onclick="SaveOverlayAsync">
+                                            @(_savingOverlay ? "Saving…" : "Save overlay")
+                                        </button>
+                                        @if (Selected?.Overlay is not null)
+                                        {
+                                            <button type="button" class="cm-button cm-button--quiet" disabled="@_savingOverlay" @onclick="ClearOverlayAsync">Clear overlay</button>
+                                        }
+                                    </div>
+                                    @if (_overlayStatus is { } overlayStatus)
+                                    {
+                                        <p class="cm-meta" role="status">@overlayStatus</p>
+                                    }
+                                </section>
+                            }
+
+                            @if (_editorMode == "mask")
+                            {
+                                <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Region edit">
+                                    <span class="cm-kicker">Edit a region</span>
+                                    <p class="cm-meta">
+                                        @(_maskRect is null
+                                            ? "Drag a rectangle on the image over the part to change — the background, a face, an object."
+                                            : $"Region selected: {Math.Round(_maskRect.Value.W * 100)}% × {Math.Round(_maskRect.Value.H * 100)}% of the frame.")
+                                    </p>
+                                    <textarea class="cm-input cm-textarea" rows="3" @bind="_maskInstruction" @bind:event="oninput"
+                                              aria-label="What to change in the region"
+                                              placeholder="e.g. replace the background with a bright studio · add the host from the kit · remove the laptop"></textarea>
+                                    <div class="cm-studio__chips">
+                                        @foreach (var chip in RegionChips)
+                                        {
+                                            <button type="button" class="cm-studio__chip" @onclick="() => _maskInstruction = chip">@chip</button>
+                                        }
+                                    </div>
+                                    <div class="cm-form__actions">
+                                        <button type="button" class="cm-button" disabled="@(_maskRect is null || string.IsNullOrWhiteSpace(_maskInstruction) || IsGenerating)"
+                                                @onclick="() => RepaintRegionAsync(take)">
+                                            Repaint region (≈ @CostPerVariantUsd.ToString("$0.00"))
+                                        </button>
+                                        <button type="button" class="cm-button cm-button--quiet" disabled="@(_maskRect is null)" @onclick="ClearMaskAsync">Clear selection</button>
+                                    </div>
+                                    <p class="cm-meta">The result is a new take with this one as its parent, so you compare before and after and keep the winner. Faces: use OpenAI direct or Nano Banana — Foundry's filters decline real-person edits.</p>
                                 </section>
                             }
 
@@ -852,12 +1108,20 @@
                                         <input class="cm-input" placeholder="Describe it — e.g. the host, short dark hair"
                                                aria-label="Description used as prompt text"
                                                @bind="_uploadLabel" @bind:event="oninput" />
-                                        <InputFile OnChange="UploadKitAssetAsync" accept="image/*"
+                                        <InputFile class="cm-kit__file" OnChange="UploadKitAssetAsync" accept="image/*"
+                                                   aria-label="Choose an image file for the kit"
+                                                   aria-describedby="cm-kit-upload-hint"
                                                    disabled="@(_uploading || string.IsNullOrWhiteSpace(_uploadLabel))" />
-                                        @if (_uploading)
-                                        {
-                                            <span class="cm-meta">Uploading…</span>
-                                        }
+                                        @* A disabled file picker with no reason read as broken. The
+                                           gate is deliberate (the description becomes prompt text), so
+                                           say so until it is satisfied. *@
+                                        <span id="cm-kit-upload-hint" class="cm-meta cm-kit__hint">
+                                            @(_uploading
+                                                ? "Uploading…"
+                                                : string.IsNullOrWhiteSpace(_uploadLabel)
+                                                    ? "Type a description first — it becomes the prompt text, then Choose File unlocks."
+                                                    : "Ready — choose an image (up to 20 MB).")
+                                        </span>
                                     </div>
                                     @if (_uploadError is { } kitError)
                                     {
@@ -1295,6 +1559,22 @@
     [SupplyParameterFromQuery(Name = "slot")]
     private Guid? RequestedSlot { get; set; }
 
+    /// <summary>Deep link from Focus's Edit button: open this take's lightbox once the gallery lands.</summary>
+    [SupplyParameterFromQuery(Name = "take")]
+    private Guid? RequestedTake { get; set; }
+
+    private ImagePromptPreviewResponse? _promptPreview;
+    private string? _promptPreviewError;
+    private bool _promptPreviewLoading;
+    private bool _promptPreviewOpen;
+
+    /// <summary>Every model that is ready and can take this card's references — the compare set.</summary>
+    private IReadOnlyList<string> UsableModels => ModelChoices
+        .Where(IsUsable)
+        .Select(choice => choice.Value)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
     // Same canonical ordering as the Mill Floor lanes and the Focus rail (ADR-F40): lane
     // first, then kind, then age — the three views must present content in one order.
     private IEnumerable<ArtifactPreviewResponse> ImageContentItems => Campaign.Artifacts
@@ -1649,6 +1929,10 @@
             await _dialogPanel.FocusAsync();
         }
 
+        // The editor island follows the lightbox: attached while a take is open, told the
+        // current tool on every render, detached when the dialog closes (ADR-055).
+        await EnsureEditorAttachedAsync();
+
         if (_drawerNeedsFocus)
         {
             _drawerNeedsFocus = false;
@@ -1766,6 +2050,11 @@
         if (requested is not null && requested.Id != _selectedId)
         {
             await SelectSlotAsync(requested);
+            if (RequestedTake is { } takeId
+                && _gallery.FirstOrDefault(variant => variant.Id == takeId) is { } take)
+            {
+                OpenVariant(take);
+            }
         }
         else if (_selectedId is { } current && Campaign.ImageSlots.All(s => s.Id != current))
         {
@@ -1803,18 +2092,337 @@
     private void OpenVariant(ImageVariantResponse variant)
     {
         _openVariant = variant;
+        _editorMode = "off";
+        _maskRect = null;
+        _compareWith = null;
+        _pickingCompare = false;
+        _overlayStatus = null;
+        SeedOverlayDraft();
         _steerNote = string.Empty;
         _dialogNeedsFocus = true;
     }
 
-    private void CloseVariant() => _openVariant = null;
+    private void CloseVariant()
+    {
+        _openVariant = null;
+        _editorMode = "off";
+        _compareWith = null;
+        _pickingCompare = false;
+    }
 
     private void OnDialogKey(KeyboardEventArgs e)
     {
         if (e.Key == "Escape")
         {
+            // Escape leaves a tool before it leaves the lightbox.
+            if (_editorMode != "off")
+            {
+                _editorMode = "off";
+                return;
+            }
             CloseVariant();
         }
+    }
+
+    // ---- Editor (ADR-055): overlay boxes, region mask, compare, lineage ----------------
+
+    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=1";
+    private ElementReference _editorStage;
+    private IJSObjectReference? _editorModule;
+    private IJSObjectReference? _editorHandle;
+    private DotNetObjectReference<ImageStudioView>? _editorSelf;
+    private string _editorMode = "off";
+    private List<OverlayBox> _overlayDraft = [];
+    private string? _selectedBoxId;
+    private bool _savingOverlay;
+    private string? _overlayStatus;
+    private (double X, double Y, double W, double H)? _maskRect;
+    private string _maskInstruction = string.Empty;
+    private ImageVariantResponse? _compareWith;
+    private bool _pickingCompare;
+
+    private static readonly string[] RegionChips =
+    [
+        "replace the background with a clean, bright studio",
+        "remove this object and fill in the background naturally",
+        "add the host from the reference images here, looking at the camera",
+        "make this area calmer and less busy",
+    ];
+
+    private OverlayBox? SelectedBox => _overlayDraft.FirstOrDefault(b => b.Id == _selectedBoxId);
+
+    private static double ParseDouble(object? value, double fallback) =>
+        double.TryParse(value?.ToString(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    /// <summary>Inline geometry from ratios; font size in container-query height units so the
+    /// preview scales with the image exactly as the server scales with the slot.</summary>
+    private static string BoxStyle(OverlayBox box)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var style = $"left:{box.X * 100:0.###}%;top:{box.Y * 100:0.###}%;width:{box.W * 100:0.###}%;height:{box.H * 100:0.###}%;"
+            + $"font-size:calc({box.FontSize.ToString("0.####", inv)} * 100cqh);font-weight:{box.Weight};color:{box.Color};text-align:{box.Align};";
+        if (box.Band is { } band)
+        {
+            var alpha = (int)Math.Clamp(Math.Round(band.Opacity * 255), 0, 255);
+            style += $"--cm-imgeditor-band:{band.Color}{alpha:X2};";
+        }
+        return style;
+    }
+
+    private void SeedOverlayDraft()
+    {
+        _overlayDraft = Selected?.Overlay is { Boxes.Count: > 0 } spec
+            ? [.. spec.Boxes]
+            : !string.IsNullOrWhiteSpace(_headline)
+                ? [new OverlayBox("box-1", _headline!, 0.08, 0.72, 0.84, 0.18, 0.11, 700, "#F2F2F3", "left",
+                    _headlineBackground is null ? null : new OverlayBand(_headlineBackground, 0.9))]
+                : [];
+        _selectedBoxId = _overlayDraft.FirstOrDefault()?.Id;
+    }
+
+    private void ToggleOverlayEditor()
+    {
+        if (_editorMode == "boxes")
+        {
+            _editorMode = "off";
+            return;
+        }
+        _editorMode = "boxes";
+        _maskRect = null;
+        if (_overlayDraft.Count == 0)
+        {
+            SeedOverlayDraft();
+        }
+        if (_overlayDraft.Count == 0)
+        {
+            AddBox();
+        }
+    }
+
+    private void ToggleMaskTool()
+    {
+        _editorMode = _editorMode == "mask" ? "off" : "mask";
+    }
+
+    private void ToggleCompare()
+    {
+        if (_compareWith is not null)
+        {
+            _compareWith = null;
+            _pickingCompare = false;
+            return;
+        }
+        _pickingCompare = true;
+        _compareWith = _openVariant is { } current
+            ? OrderedGallery.FirstOrDefault(v => v.Id != current.Id)
+            : null;
+    }
+
+    private void SwapCompare(ImageVariantResponse other)
+    {
+        var current = _openVariant;
+        _openVariant = other;
+        _compareWith = current;
+    }
+
+    private void AddBox()
+    {
+        var id = $"box-{Guid.NewGuid():N}"[..12];
+        _overlayDraft.Add(new OverlayBox(id, "Your headline", 0.08, 0.08 + (0.12 * Math.Min(_overlayDraft.Count, 5)), 0.6, 0.16, 0.09, 600, "#F2F2F3", "left"));
+        _selectedBoxId = id;
+    }
+
+    private void RemoveBox(string id)
+    {
+        _overlayDraft.RemoveAll(b => b.Id == id);
+        _selectedBoxId = _overlayDraft.FirstOrDefault()?.Id;
+    }
+
+    private void UpdateBox(OverlayBox updated)
+    {
+        var index = _overlayDraft.FindIndex(b => b.Id == updated.Id);
+        if (index >= 0)
+        {
+            _overlayDraft[index] = updated;
+        }
+    }
+
+    [JSInvokable]
+    public void BoxMoved(string id, double x, double y, double w, double h)
+    {
+        var index = _overlayDraft.FindIndex(b => b.Id == id);
+        if (index >= 0)
+        {
+            _overlayDraft[index] = _overlayDraft[index] with { X = x, Y = y, W = w, H = h };
+            _selectedBoxId = id;
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public void MaskDrawn(double x, double y, double w, double h)
+    {
+        _maskRect = (x, y, w, h);
+        StateHasChanged();
+    }
+
+    private async Task SaveOverlayAsync()
+    {
+        if (Selected is not { } slot || _overlayDraft.Count == 0)
+        {
+            return;
+        }
+        _savingOverlay = true;
+        _overlayStatus = null;
+        try
+        {
+            var result = await Images.SetOverlayAsync(CampaignId, slot.Id, new OverlaySpec([.. _overlayDraft]));
+            _overlayStatus = result.Slot.State == "Filled"
+                ? (result.FontFallback == true
+                    ? "Saved and composited (system typeface — the display font wasn't available server-side)."
+                    : "Saved and composited onto the placed image.")
+                : "Saved. It is composited when a take is placed.";
+            await Campaign.RefreshAsync(CampaignId);
+        }
+        catch (ApiException ex)
+        {
+            _overlayStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _savingOverlay = false;
+        }
+    }
+
+    private async Task ClearOverlayAsync()
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        _savingOverlay = true;
+        try
+        {
+            await Images.ClearOverlayAsync(CampaignId, slot.Id);
+            _overlayDraft = [];
+            _selectedBoxId = null;
+            _overlayStatus = "Overlay cleared.";
+            await Campaign.RefreshAsync(CampaignId);
+        }
+        catch (ApiException ex)
+        {
+            _overlayStatus = $"Not cleared — {ex.Message}";
+        }
+        finally
+        {
+            _savingOverlay = false;
+        }
+    }
+
+    private async Task ClearMaskAsync()
+    {
+        _maskRect = null;
+        if (_editorHandle is not null)
+        {
+            await _editorHandle.InvokeVoidAsync("clearMask");
+        }
+    }
+
+    private async Task RepaintRegionAsync(ImageVariantResponse take)
+    {
+        if (Selected is not { } slot || _maskRect is null || string.IsNullOrWhiteSpace(_maskInstruction) || _editorHandle is null)
+        {
+            return;
+        }
+        var size = await _editorHandle.InvokeAsync<int[]>("naturalSize");
+        var width = size is { Length: 2 } && size[0] > 0 ? size[0] : take.Width;
+        var height = size is { Length: 2 } && size[1] > 0 ? size[1] : take.Height;
+        var dataUrl = await _editorHandle.InvokeAsync<string?>("exportMask", width, height);
+        if (string.IsNullOrWhiteSpace(dataUrl))
+        {
+            Notifier.ShowWarning("Draw the region first.");
+            return;
+        }
+        _generateError = null;
+        _failures = [];
+        StudioRun.StartEdit(CampaignId, slot.Id, take.Id, dataUrl, _maskInstruction.Trim(),
+            ModelChoices.Any(c => string.Equals(c.Value, take.Model, StringComparison.OrdinalIgnoreCase)) ? take.Model : EffectiveAlias);
+        _editorMode = "off";
+        _maskRect = null;
+        _openVariant = null;
+        Notifier.ShowSuccess("Repainting the region — the new take lands in the gallery with this one as its parent.");
+    }
+
+    /// <summary>The chain of takes this one was steered or edited from, oldest first, then this one and its children.</summary>
+    private IEnumerable<ImageVariantResponse> Lineage(ImageVariantResponse take)
+    {
+        var chain = new List<ImageVariantResponse>();
+        var current = take;
+        var guard = 0;
+        while (current.SourceVariantId is { } parentId && guard++ < 12)
+        {
+            var parent = _gallery.FirstOrDefault(v => v.Id == parentId);
+            if (parent is null)
+            {
+                break;
+            }
+            chain.Insert(0, parent);
+            current = parent;
+        }
+        chain.Add(take);
+        chain.AddRange(_gallery.Where(v => v.SourceVariantId == take.Id).OrderBy(v => v.CreatedAt));
+        return chain;
+    }
+
+    private async Task EnsureEditorAttachedAsync()
+    {
+        if (_openVariant is null)
+        {
+            await DetachEditorAsync();
+            return;
+        }
+        if (_editorHandle is not null)
+        {
+            await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
+            return;
+        }
+        try
+        {
+            _editorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EditorModulePath);
+            _editorSelf ??= DotNetObjectReference.Create(this);
+            _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>("attach", _editorStage, _editorSelf);
+            await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
+        }
+        catch (JSException)
+        {
+            // bUnit and headless hosts have no module loader; the panel still renders.
+        }
+        catch (InvalidOperationException)
+        {
+            // Prerender or a disposed circuit: nothing to attach to.
+        }
+    }
+
+    private async Task DetachEditorAsync()
+    {
+        if (_editorHandle is not null)
+        {
+            try { await _editorHandle.InvokeVoidAsync("dispose"); } catch (JSException) { }
+            try { await _editorHandle.DisposeAsync(); } catch (JSException) { }
+            _editorHandle = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        await DetachEditorAsync();
+        if (_editorModule is not null)
+        {
+            try { await _editorModule.DisposeAsync(); } catch (JSException) { }
+        }
+        _editorSelf?.Dispose();
     }
 
     private bool SteerConstraintSelected(string chip) =>
@@ -1977,7 +2585,72 @@
             }
         }
         _drawerNeedsFocus = true;
-        await Task.WhenAll(ReloadGalleryAsync(), LoadSupportingContextAsync(slot));
+        _promptPreview = null;
+        _promptPreviewError = null;
+        await Task.WhenAll(ReloadGalleryAsync(), LoadSupportingContextAsync(slot), LoadPromptPreviewAsync());
+    }
+
+    /// <summary>
+    /// The exact text the next generate would send (ADR-054). Best-effort: a failure shows
+    /// in the summary line rather than blocking the drawer.
+    /// </summary>
+    private async Task LoadPromptPreviewAsync()
+    {
+        if (_selectedId is not { } slotId)
+        {
+            return;
+        }
+        _promptPreviewLoading = true;
+        try
+        {
+            await SavePromptAsync();
+            var preview = await Images.GetPromptPreviewAsync(CampaignId, slotId, EffectiveAlias);
+            if (_selectedId == slotId)
+            {
+                _promptPreview = preview;
+                _promptPreviewError = null;
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _promptPreviewError = ex is ApiException api ? api.Message : "preview unavailable";
+        }
+        finally
+        {
+            _promptPreviewLoading = false;
+        }
+    }
+
+    private void OnPreviewToggle(EventArgs _) => _promptPreviewOpen = !_promptPreviewOpen;
+
+    private async Task CompareModelsAsync()
+    {
+        if (Selected is not { } slot || UsableModels.Count < 2)
+        {
+            return;
+        }
+        await SavePromptAsync();
+        _generateError = null;
+        _failures = [];
+        StudioRun.StartCompare(CampaignId, slot.Id, UsableModels);
+    }
+
+    /// <summary>A fresh take with this take's model. The slot's current prompt is used —
+    /// the lightbox shows the old one, so the two are comparable.</summary>
+    private async Task RegenerateTakeAsync(ImageVariantResponse take)
+    {
+        if (Selected is not { } slot)
+        {
+            return;
+        }
+        await SavePromptAsync();
+        _generateError = null;
+        _failures = [];
+        _openVariant = null;
+        StudioRun.StartGenerate(CampaignId, slot.Id, 1,
+            ModelChoices.Any(choice => string.Equals(choice.Value, take.Model, StringComparison.OrdinalIgnoreCase))
+                ? take.Model
+                : EffectiveAlias);
     }
 
     /// <summary>
@@ -2271,6 +2944,7 @@
         try
         {
             await Images.PatchAsync(CampaignId, slot.Id, promptMode: mode);
+            _ = LoadPromptPreviewAsync();
         }
         catch (ApiException ex)
         {
@@ -2456,6 +3130,7 @@
                 _sessionModelOverrides[slot.Id] = _modelDraft;
             }
             _modelPickerOpen = false;
+            _ = LoadPromptPreviewAsync(); // the frame, and so the crop figures, are per model
             Notifier.ShowSuccess(UsesWorkspaceDefault
                 ? "This image now follows the workspace default model."
                 : "Image model updated for this image.");

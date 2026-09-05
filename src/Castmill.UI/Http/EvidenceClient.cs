@@ -4,6 +4,14 @@ namespace Castmill.UI.Http;
 
 public sealed class EvidenceClient(ApiClient api)
 {
+    /// <summary>Media link (ADR-057): local path + fingerprint and/or the cloud copy's asset id. Null leaves a field, empty clears it.</summary>
+    public Task<SourceAssetResponse> SetMediaLinkAsync(
+        Guid campaignId, Guid sourceAssetId, string? localPath = null, string? contentHash = null,
+        Guid? mediaAssetId = null, CancellationToken ct = default) =>
+        api.PatchAsync<SourceMediaLinkRequest, SourceAssetResponse>(
+            $"api/v1/campaigns/{campaignId}/sources/{sourceAssetId}/media",
+            new SourceMediaLinkRequest(localPath, contentHash, mediaAssetId), etag: null, ct);
+
     public Task<EvidenceRevisionResponse> ImportWebPageAsync(
         Guid campaignId, string url, string? label = null, CancellationToken ct = default) =>
         api.PostAsync<WebPageSourceImportRequest, EvidenceRevisionResponse>(

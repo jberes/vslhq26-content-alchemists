@@ -157,6 +157,46 @@ public sealed class TechEditTests : CastmillUiTestContext
 
     // ---- helpers ---------------------------------------------------------------
 
+    /// <summary>Technical brief (ADR-056): off by default, saved as metadata, sent with the Tech Edit.</summary>
+    [Fact]
+    public async Task The_technical_brief_saves_and_travels_with_the_tech_edit()
+    {
+        StubStatus(configured: true, provider: new TextProviderReadiness("anthropic", true, null));
+        var view = await OpenAsync();
+
+        Assert.Contains("off — add product facts", view.Find(".cm-techbrief summary").TextContent, StringComparison.Ordinal);
+        view.FindAll(".cm-techbrief input.cm-input")[0].Change("Ignite UI for React");
+        view.FindAll(".cm-techbrief input.cm-input")[1].Change("24.2");
+
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/artifacts/{BlogId}/technical-brief", new ArtifactResponse(
+            BlogId, CampaignId, "blog", "Launch-day blog post", """{"content":{"markdown":"x"}}""",
+            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            TechnicalBrief: new TechnicalBrief("Ignite UI for React", "24.2")));
+        await view.FindAll(".cm-techbrief button").Single(b => b.TextContent.Contains("Save brief", StringComparison.Ordinal)).ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+            Assert.Contains("\"product\":\"Ignite UI for React\"",
+                Http.Bodies.Single(b => b.Path.EndsWith("/technical-brief", StringComparison.Ordinal)).Body, StringComparison.Ordinal));
+
+        Http.OnPost($"api/v1/ai/campaigns/{CampaignId}/artifacts/{BlogId}/tech-edit",
+            new TechEditResult(true, null, BlogId, 2, "anthropic", true, [], [], 10,
+                Claims: [new ClaimCheck("IgbGrid supports virtualisation", "https://docs.example/grid", true),
+                         new ClaimCheck("Ships a Vue adapter", null, false)],
+                KnowledgeAttached: ["knowledge: Infragistics RAG", "skill: ignite-react"]));
+        await TechEditButton(view).ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+        {
+            var body = Http.Bodies.Last(b => b.Path.EndsWith("/tech-edit", StringComparison.Ordinal)).Body;
+            Assert.Contains("\"technicalBrief\":{", body, StringComparison.Ordinal);
+            Assert.Contains("Ignite UI for React", body, StringComparison.Ordinal);
+        });
+
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-claims")));
+        Assert.Contains("1 of 2 technical claims verified", view.Find(".cm-claims").TextContent, StringComparison.Ordinal);
+        Assert.Contains("grounded on knowledge: Infragistics RAG, skill: ignite-react", view.Find(".cm-claims").TextContent, StringComparison.Ordinal);
+        Assert.Single(view.FindAll(".cm-claims__item--open"));
+        Assert.Contains("unverified — check before publishing", view.Find(".cm-claims__item--open").TextContent, StringComparison.Ordinal);
+    }
+
     private async Task<IRenderedComponent<FocusView>> OpenAsync()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));

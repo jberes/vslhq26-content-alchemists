@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
+using SkiaSharp;
 using System.Text.Json;
 using Castmill.Api.Services.Images;
 using Castmill.Api.Services.Secrets;
@@ -29,8 +30,29 @@ public interface IImageProvider
 {
     string Name { get; }
     Task<ImageProviderStatus> StatusAsync(Guid userId, CancellationToken ct);
-    /// <summary>Returns raw encoded image bytes (PNG/JPEG/WebP) — the caller crops and re-encodes.</summary>
+    /// <summary>Returns raw encoded image bytes (PNG/JPEG/WebP) — the caller crops and re-encodes.
+    /// <paramref name="aspectRatio"/> is either a ratio ("16:9") or the slot's exact size
+    /// ("1280x720"); a provider that can paint exact sizes does, the others map it to their
+    /// nearest native frame (ADR-055).</summary>
     Task<byte[]> GenerateAsync(Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct);
+
+    /// <summary>
+    /// Region edit (ADR-055): repaint the masked part of <paramref name="image"/> per the
+    /// instruction and leave the rest alone. <paramref name="maskPng"/> is white/opaque where
+    /// the edit applies. Providers without a mask parameter receive the mask as a second
+    /// image plus a description of the region. Default: not supported.
+    /// </summary>
+    Task<byte[]> EditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct) =>
+        throw new ImageProviderException($"Image provider '{Name}' does not support region edits.");
+
+    /// <summary>
+    /// The frame this provider will actually paint for a slot of this size — what the crop
+    /// pass receives, and what the safe-margin rules are written against. Default: the
+    /// gpt-image fixed size set.
+    /// </summary>
+    Task<(int Width, int Height)> FrameForAsync(Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(ImageAspect.FixedFrame(ImageAspect.Describe(targetWidth, targetHeight)));
 
     Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias,
@@ -157,6 +179,76 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
     };
 
     private static string Key(string model, string parameter) => $"{model}{parameter}";
+}
+
+/// <summary>
+/// Aspect vocabulary shared by every provider (ADR-055). A request names either a ratio
+/// ("16:9", "landscape") or the slot's exact size ("1280x720"); these helpers translate
+/// both into what each provider can actually paint.
+/// </summary>
+public static class ImageAspect
+{
+    /// <summary>"1280x720" for an exact target — providers that can, paint it.</summary>
+    public static string Describe(int width, int height) => $"{width}x{height}";
+
+    /// <summary>Exact pixel size when the descriptor is one, else null.</summary>
+    public static (int Width, int Height)? ExactSize(string aspectOrSize)
+    {
+        var parts = aspectOrSize.Trim().Split('x', 'X', '×');
+        return parts.Length == 2
+            && int.TryParse(parts[0], out var w) && int.TryParse(parts[1], out var h)
+            && w > 0 && h > 0
+                ? (w, h)
+                : null;
+    }
+
+    /// <summary>The ratio class the fixed-size providers understand: 16:9, 9:16 or 1:1.</summary>
+    public static string Bucket(string aspectOrSize)
+    {
+        if (ExactSize(aspectOrSize) is { } size)
+        {
+            return Bucket(size.Width, size.Height);
+        }
+        return aspectOrSize.Trim() switch
+        {
+            "16:9" or "3:2" or "landscape" or "4:3" or "21:9" => "16:9",
+            "9:16" or "2:3" or "portrait" or "3:4" => "9:16",
+            _ => "1:1",
+        };
+    }
+
+    public static string Bucket(int width, int height) => ((float)width / height) switch
+    {
+        > 1.15f => "16:9",
+        < 0.87f => "9:16",
+        _ => "1:1",
+    };
+
+    /// <summary>The gpt-image family's fixed frames.</summary>
+    public static (int Width, int Height) FixedFrame(string aspectOrSize) => Bucket(aspectOrSize) switch
+    {
+        "16:9" => (1536, 1024),
+        "9:16" => (1024, 1536),
+        _ => (1024, 1024),
+    };
+
+    /// <summary>Width/height as a ratio pair, from either form.</summary>
+    public static (int Width, int Height) Ratio(string aspectOrSize)
+    {
+        if (ExactSize(aspectOrSize) is { } size)
+        {
+            return (size.Width, size.Height);
+        }
+        return aspectOrSize.Trim() switch
+        {
+            "landscape" => (16, 9),
+            "portrait" => (9, 16),
+            var value when value.Split(':') is [var w, var h]
+                && int.TryParse(w, out var parsedW) && int.TryParse(h, out var parsedH)
+                && parsedW > 0 && parsedH > 0 => (parsedW, parsedH),
+            _ => (1, 1),
+        };
+    }
 }
 
 /// <summary>
@@ -437,13 +529,132 @@ internal static class OpenAiShapedImages
     internal static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max].TrimEnd() + "…";
 
-    /// <summary>Fixed size set the gpt-image family accepts; the crop pass fixes the rest.</summary>
-    internal static string SizeFor(string aspectRatio) => aspectRatio.Trim() switch
+    /// <summary>
+    /// Multipart body for an edit of ONE image with an optional alpha mask. The image's own
+    /// size is requested back so the take stays the slot's size; the mask, when present, is
+    /// converted to the alpha convention and fitted to the image.
+    /// </summary>
+    internal static MultipartFormDataContent MaskedEditForm(
+        string prompt, string model, byte[] image, byte[]? maskPng, ISet<string> omit, IImageModelCapabilities capabilities)
     {
-        "16:9" or "3:2" or "landscape" => "1536x1024",
-        "9:16" or "2:3" or "portrait" => "1024x1536",
-        _ => "1024x1024",
-    };
+        using var decoded = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(image)
+            ?? throw new ImageProviderException("The take to edit is not a decodable image.");
+        var size = $"{ImageAspect.FixedFrame(ImageAspect.Describe(decoded.Width, decoded.Height)).Width}x{ImageAspect.FixedFrame(ImageAspect.Describe(decoded.Width, decoded.Height)).Height}";
+        var form = new MultipartFormDataContent
+        {
+            { new StringContent(prompt), "prompt" },
+            { new StringContent(model), "model" },
+            { new StringContent("1"), "n" },
+        };
+        if (maskPng is not null)
+        {
+            form.Add(new StringContent(size), "size");
+        }
+        if (!omit.Contains(ImageModelCapabilities.InputFidelity)
+            && capabilities.Supports(model, ImageModelCapabilities.InputFidelity))
+        {
+            form.Add(new StringContent("high"), ImageModelCapabilities.InputFidelity);
+        }
+        var imageContent = new ByteArrayContent(image);
+        imageContent.Headers.ContentType = new MediaTypeHeaderValue("image/webp");
+        form.Add(imageContent, maskPng is null ? "image" : "image[]", "take.webp");
+        if (maskPng is not null)
+        {
+            var mask = new ByteArrayContent(RegionEdits.ToAlphaMask(maskPng, decoded.Width, decoded.Height));
+            mask.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+            form.Add(mask, "mask", "mask.png");
+        }
+        return form;
+    }
+
+    /// <summary>Fixed size set the gpt-image family accepts; the crop pass fixes the rest.</summary>
+    internal static string SizeFor(string aspectRatio)
+    {
+        var (width, height) = ImageAspect.FixedFrame(aspectRatio);
+        return $"{width}x{height}";
+    }
+}
+
+/// <summary>Prompt and mask helpers for region edits (ADR-055), shared by every provider.</summary>
+internal static class RegionEdits
+{
+    internal static string EditPrompt(string instruction) =>
+        $"{instruction.Trim()}\nEdit ONLY the masked region. Everything outside the mask must stay "
+        + "pixel-identical: same subject, same lighting, same framing, same colours.";
+
+    /// <summary>
+    /// For providers that take no mask: the masked area's bounding box, as fractions of the
+    /// frame in plain words, so the model knows where the change belongs.
+    /// </summary>
+    internal static string DescribeRegion(string instruction, byte[] maskPng)
+    {
+        var box = MaskBounds(maskPng);
+        var where = box is null
+            ? "the region the producer selected"
+            : $"the region spanning {Pct(box.Value.Left)}–{Pct(box.Value.Right)} of the width and "
+              + $"{Pct(box.Value.Top)}–{Pct(box.Value.Bottom)} of the height (0% = left/top)";
+        return $"{instruction.Trim()}\nApply this change to {where} only, and keep everything "
+            + "outside it exactly as it is in the attached image.";
+    }
+
+    private static string Pct(float value) => $"{Math.Round(value * 100)}%";
+
+    /// <summary>Bounding box (fractions) of the opaque/white pixels in the mask; null when empty.</summary>
+    internal static (float Left, float Top, float Right, float Bottom)? MaskBounds(byte[] maskPng)
+    {
+        using var mask = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(maskPng);
+        if (mask is null)
+        {
+            return null;
+        }
+        int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1;
+        for (var y = 0; y < mask.Height; y++)
+        {
+            for (var x = 0; x < mask.Width; x++)
+            {
+                var c = mask.GetPixel(x, y);
+                if (c.Alpha > 127 && (c.Red + c.Green + c.Blue) > 3 * 127)
+                {
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        return maxX < 0
+            ? null
+            : ((float)minX / mask.Width, (float)minY / mask.Height, (float)(maxX + 1) / mask.Width, (float)(maxY + 1) / mask.Height);
+    }
+
+    /// <summary>
+    /// OpenAI-shaped edit masks are read from ALPHA: transparent = repaint. The editor draws
+    /// white-on-transparent, so white pixels become transparent and everything else opaque.
+    /// The mask is also resized to the image's own dimensions, which the API requires.
+    /// </summary>
+    internal static byte[] ToAlphaMask(byte[] maskPng, int width, int height)
+    {
+        using var mask = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(maskPng)
+            ?? throw new ImageProviderException("The mask is not a decodable PNG.");
+        using var fitted = mask.Width == width && mask.Height == height
+            ? mask.Copy()
+            : mask.Resize(new SKImageInfo(width, height), new SKSamplingOptions(SKFilterMode.Nearest))
+              ?? throw new ImageProviderException("The mask could not be resized.");
+        using var output = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var c = fitted.GetPixel(x, y);
+                var edit = c.Alpha > 127 && (c.Red + c.Green + c.Blue) > 3 * 127;
+                output.SetPixel(x, y, edit ? SKColors.Transparent : SKColors.Black);
+            }
+        }
+        using var image = SKImage.FromBitmap(output);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
+            ?? throw new ImageProviderException("The alpha mask could not be encoded.");
+        return encoded.ToArray();
+    }
 }
 
 /// <summary>
@@ -496,7 +707,16 @@ internal static class MaiImages
     /// </summary>
     internal static (int Width, int Height) FrameFor(string aspectRatio)
     {
-        var (wRatio, hRatio) = ParseRatio(aspectRatio);
+        // An exact slot size that satisfies both documented limits is painted as-is: a
+        // 1280×720 thumbnail comes back at 1280×720 and the crop pass removes nothing.
+        if (ImageAspect.ExactSize(aspectRatio) is { } exact
+            && exact.Width >= MinEdge && exact.Height >= MinEdge
+            && (long)exact.Width * exact.Height <= MaxPixels)
+        {
+            return exact;
+        }
+
+        var (wRatio, hRatio) = ImageAspect.Ratio(aspectRatio);
 
         // Spend the whole pixel budget at the requested ratio first — starting from the 768
         // floor instead would hand back 768×768 for a square slot and throw away three
@@ -532,16 +752,6 @@ internal static class MaiImages
         }
         return (Math.Max(width, MinEdge), Math.Max(height, MinEdge));
     }
-
-    private static (int Width, int Height) ParseRatio(string aspectRatio) => aspectRatio.Trim() switch
-    {
-        "landscape" => (16, 9),
-        "portrait" => (9, 16),
-        var value when value.Split(':') is [var w, var h]
-            && int.TryParse(w, out var parsedW) && int.TryParse(h, out var parsedH)
-            && parsedW > 0 && parsedH > 0 => (parsedW, parsedH),
-        _ => (1, 1),
-    };
 }
 
 /// <summary>
@@ -580,6 +790,28 @@ public sealed class FoundryImageProvider(
         Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct) =>
         GenerateAsync(userId, prompt, aspectRatio, modelAlias, [], ct);
 
+    public async Task<(int Width, int Height)> FrameForAsync(
+        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct)
+    {
+        var alias = string.IsNullOrWhiteSpace(modelAlias) || modelAlias.Equals(Name, StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : modelAlias;
+        var descriptor = ImageAspect.Describe(targetWidth, targetHeight);
+        try
+        {
+            var target = await clients.ResolveTargetAsync(userId, alias, ct);
+            if (target is not null && capabilities.DialectFor(target.Deployment) == ImageDialect.Mai)
+            {
+                return MaiImages.FrameFor(descriptor);
+            }
+        }
+        catch (AiNotConfiguredException)
+        {
+            // Unconfigured: report the conservative fixed frame; the render itself will say why.
+        }
+        return ImageAspect.FixedFrame(descriptor);
+    }
+
     public async Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias,
         IReadOnlyList<ImageReference> references, CancellationToken ct)
@@ -608,6 +840,39 @@ public sealed class FoundryImageProvider(
                     : references.Count == 0
                         ? OpenAiShapedImages.JsonBody(new { prompt, size = OpenAiShapedImages.SizeFor(aspectRatio), n = 1 })
                         : BuildEditForm(prompt, OpenAiShapedImages.SizeFor(aspectRatio), deployment, references, omit);
+                return request;
+            },
+            ct,
+            tryOtherDialect: () =>
+            {
+                dialect = dialect == ImageDialect.Mai ? ImageDialect.AzureOpenAI : ImageDialect.Mai;
+                capabilities.MarkDialect(deployment, dialect);
+                return true;
+            });
+    }
+
+    public async Task<byte[]> EditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct)
+    {
+        var alias = string.IsNullOrWhiteSpace(modelAlias) || modelAlias.Equals(Name, StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : modelAlias;
+        var target = await clients.ResolveTargetAsync(userId, alias, ct)
+            ?? throw new AiNotConfiguredException($"No Foundry credentials/deployment for image alias '{alias}'.");
+        var deployment = target.Deployment;
+        var label = $"Foundry deployment '{deployment}'";
+        var dialect = capabilities.DialectFor(deployment);
+
+        return await OpenAiShapedImages.SendWithParameterRepairAsync(
+            httpClients.CreateClient("foundry-images"), label, deployment, capabilities, logger,
+            omit =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, UrlFor(dialect, target, referenceCount: 1));
+                request.Headers.TryAddWithoutValidation("api-key", target.Credentials.ApiKey);
+                request.Content = dialect == ImageDialect.Mai
+                    // MAI edits take exactly one image and no mask: the region is described.
+                    ? OpenAiShapedImages.MaskedEditForm(RegionEdits.DescribeRegion(instruction, maskPng), deployment, image, null, omit, capabilities)
+                    : OpenAiShapedImages.MaskedEditForm(RegionEdits.EditPrompt(instruction), deployment, image, maskPng, omit, capabilities);
                 return request;
             },
             ct,
@@ -771,6 +1036,14 @@ public abstract class ConfiguredImageProvider(
     public abstract Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias,
         IReadOnlyList<ImageReference> references, CancellationToken ct);
+
+    public virtual Task<(int Width, int Height)> FrameForAsync(
+        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(ImageAspect.FixedFrame(ImageAspect.Describe(targetWidth, targetHeight)));
+
+    public virtual Task<byte[]> EditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct) =>
+        throw new ImageProviderException($"Image provider '{Name}' does not support region edits.");
 }
 
 /// <summary>
@@ -812,6 +1085,26 @@ public sealed class OpenAiImageProvider(
                 request.Content = references.Count == 0
                     ? OpenAiShapedImages.JsonBody(new { model, prompt, n = 1, size })
                     : BuildEditForm(prompt, size, model, references, omit);
+                return request;
+            },
+            ct);
+    }
+
+    public override async Task<byte[]> EditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct)
+    {
+        var key = await RequireKeyAsync(userId, ct);
+        var model = ModelFor(modelAlias);
+        var url = new Uri(new Uri(Options.Endpoint.TrimEnd('/') + "/"), "images/edits");
+        return await OpenAiShapedImages.SendWithParameterRepairAsync(
+            httpClients.CreateClient("imageprovider"), $"Image provider '{Name}'", model,
+            capabilities, logger,
+            omit =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+                request.Content = OpenAiShapedImages.MaskedEditForm(
+                    RegionEdits.EditPrompt(instruction), model, image, maskPng, omit, capabilities);
                 return request;
             },
             ct);
@@ -917,6 +1210,41 @@ public sealed class GeminiImageProvider(
         return ExtractInlineImage(payload, label);
     }
 
+    public override async Task<byte[]> EditAsync(
+        Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct)
+    {
+        var key = await RequireKeyAsync(userId, ct);
+        var model = ModelFor(modelAlias);
+        var label = $"Image provider '{Name}' ({model})";
+        var body = new
+        {
+            contents = (object[])[new
+            {
+                role = "user",
+                parts = (object[])
+                [
+                    new { text = RegionEdits.DescribeRegion(instruction, maskPng)
+                        + "\nThe first image is the photo to edit; the second is a mask where white marks the region to change." },
+                    new { inline_data = new { mime_type = "image/webp", data = Convert.ToBase64String(image) } },
+                    new { inline_data = new { mime_type = "image/png", data = Convert.ToBase64String(maskPng) } },
+                ],
+            }],
+            generationConfig = new { responseModalities = (string[])["IMAGE"] },
+        };
+        var url = new Uri(new Uri(Options.Endpoint.TrimEnd('/') + "/"), $"models/{Uri.EscapeDataString(model)}:generateContent");
+        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = OpenAiShapedImages.JsonBody(body) };
+        request.Headers.TryAddWithoutValidation("x-goog-api-key", key);
+        using var response = await httpClients.CreateClient("imageprovider").SendAsync(request, ct);
+        var payload = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = OpenAiShapedImages.Parse((int)response.StatusCode, payload);
+            logger.LogError("{Provider} edit failed: HTTP {Status} code={Code} message={Message}", label, error.Status, error.Code ?? "-", error.Message);
+            throw OpenAiShapedImages.ToException(label, error);
+        }
+        return ExtractInlineImage(payload, label);
+    }
+
     /// <summary>candidates[0].content.parts[*].inlineData.data — the first part that is an image.</summary>
     private static byte[] ExtractInlineImage(string payload, string label)
     {
@@ -969,15 +1297,39 @@ public sealed class GeminiImageProvider(
         }
     }
 
-    /// <summary>Gemini takes a ratio, not a pixel size; the crop pass produces slot dimensions.</summary>
-    private static string AspectFor(string aspectRatio) => aspectRatio.Trim() switch
+    /// <summary>
+    /// Gemini's documented output frames per aspect ratio. It takes a ratio, not a pixel
+    /// size, so a 16:9 slot is painted natively at 1344×768 and the crop pass removes
+    /// nothing but rounding.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, (int Width, int Height)> NativeFrames =
+        new Dictionary<string, (int, int)>(StringComparer.Ordinal)
+        {
+            ["1:1"] = (1024, 1024),
+            ["2:3"] = (832, 1248),
+            ["3:2"] = (1248, 832),
+            ["3:4"] = (864, 1184),
+            ["4:3"] = (1184, 864),
+            ["4:5"] = (896, 1152),
+            ["5:4"] = (1152, 896),
+            ["9:16"] = (768, 1344),
+            ["16:9"] = (1344, 768),
+            ["21:9"] = (1536, 672),
+        };
+
+    /// <summary>The supported ratio closest to the requested one (exact size or ratio string).</summary>
+    internal static string AspectFor(string aspectRatio)
     {
-        "16:9" or "landscape" => "16:9",
-        "3:2" => "3:2",
-        "9:16" or "portrait" => "9:16",
-        "2:3" => "2:3",
-        _ => "1:1",
-    };
+        var (w, h) = ImageAspect.Ratio(aspectRatio);
+        var wanted = (double)w / h;
+        return NativeFrames
+            .OrderBy(pair => Math.Abs(Math.Log((double)pair.Value.Width / pair.Value.Height) - Math.Log(wanted)))
+            .First().Key;
+    }
+
+    public override Task<(int Width, int Height)> FrameForAsync(
+        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(NativeFrames[AspectFor(ImageAspect.Describe(targetWidth, targetHeight))]);
 }
 
 /// <summary>Registers the Foundry provider plus every configured/built-in alternate.</summary>
