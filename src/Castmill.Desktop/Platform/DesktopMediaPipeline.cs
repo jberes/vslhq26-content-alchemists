@@ -10,7 +10,7 @@ namespace Castmill.Desktop.Platform;
 /// model, ffmpeg clip export. Everything runs on-device; nothing touches the network
 /// except the one-time model download.
 /// </summary>
-internal sealed class DesktopMediaPipeline : IMediaPipeline
+internal sealed class DesktopMediaPipeline : IMediaPipeline, IDisposable
 {
     /// <summary>base = the multilingual ~142 MB checkpoint: solid accuracy at laptop speed.
     /// A model picker is a settings story; the manager already takes any ggml name.</summary>
@@ -50,6 +50,9 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline
         Task.FromResult<Stream?>(File.Exists(path)
             ? new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true)
             : null);
+
+    /// <summary>Singleton for the app's life; the loopback listener closes with it.</summary>
+    public void Dispose() => _server.Dispose();
 
     public async Task<PickedMedia?> PickMediaAsync()
     {
