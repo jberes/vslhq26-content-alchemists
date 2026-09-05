@@ -43,8 +43,11 @@ public static class ImageModelCatalog
         foreach (var provider in status.ImageProviders.Where(provider =>
             !string.Equals(provider.Name, "foundry", StringComparison.OrdinalIgnoreCase)))
         {
+            // Label with the MODEL the provider asks for, so "own key" says which model that is.
             choices.Add(new ImageModelChoice(
-                provider.Name, provider.Name, ProviderDetail(provider.Name),
+                provider.Name,
+                string.IsNullOrWhiteSpace(provider.Model) ? provider.Name : provider.Model,
+                $"{ProviderDetail(provider.Name)} · {provider.Name}",
                 provider.Ready, provider.Reason, provider.SupportsReferenceImages));
         }
 

@@ -75,7 +75,7 @@ public sealed record AiStatusResponse(
     bool KnowledgeBaseReady = false);
 
 public sealed record ImageProviderReadiness(
-    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false);
+    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false, string? Model = null);
 
 public sealed record TextProviderReadiness(string Name, bool Ready, string? Reason);
 

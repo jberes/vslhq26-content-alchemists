@@ -9,7 +9,9 @@ using Microsoft.Extensions.Options;
 namespace Castmill.Api.Services.Ai;
 
 public sealed record ImageProviderStatus(
-    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false);
+    string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false,
+    /// <summary>The model id this provider will ask for by default — shown in the picker so "own key" is not a mystery.</summary>
+    string? Model = null);
 
 /// <summary>
 /// A provider refused or failed a render, with a message that is safe — and useful — to
@@ -778,7 +780,7 @@ public sealed class FoundryImageProvider(
             var target = await clients.ResolveTargetAsync(userId, "image", ct);
             return target is null
                 ? new ImageProviderStatus(Name, false, "No credentials or no deployment mapped for the 'image' alias.")
-                : new ImageProviderStatus(Name, true, null, SupportsReferenceImages: true);
+                : new ImageProviderStatus(Name, true, null, SupportsReferenceImages: true, Model: target.Deployment);
         }
         catch (AiNotConfiguredException ex)
         {
@@ -993,13 +995,13 @@ public abstract class ConfiguredImageProvider(
         if (!IsEnabled)
         {
             return new ImageProviderStatus(
-                Name, false, $"Ai:Providers:{Name} is disabled or has no Endpoint.", SupportsReferenceImages);
+                Name, false, $"Ai:Providers:{Name} is disabled or has no Endpoint.", SupportsReferenceImages, Options.Model);
         }
         var key = await ResolveKeyAsync(userId, ct);
         return string.IsNullOrWhiteSpace(key)
             ? new ImageProviderStatus(Name, false,
-                $"No API key stored. Add one in Settings (secret {Credential}).", SupportsReferenceImages)
-            : new ImageProviderStatus(Name, true, null, SupportsReferenceImages);
+                $"No API key stored. Add one in Settings (secret {Credential}).", SupportsReferenceImages, Options.Model)
+            : new ImageProviderStatus(Name, true, null, SupportsReferenceImages, Options.Model);
     }
 
     /// <summary>

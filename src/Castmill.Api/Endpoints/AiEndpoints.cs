@@ -191,7 +191,7 @@ public static class AiEndpoints
             options.Value.Speech.IsConfigured,
             probeResult,
             [.. providers.Select(p => new ImageProviderReadiness(
-                p.Name, p.Ready, p.Reason, p.SupportsReferenceImages))],
+                p.Name, p.Ready, p.Reason, p.SupportsReferenceImages, p.Model))],
             [.. text.Select(p => new TextProviderReadiness(p.Name, p.Ready, p.Reason))],
             knowledgeReady));
     }
