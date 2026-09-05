@@ -28,6 +28,8 @@
 @inject IFileDownloader Downloader
 @inject IJSRuntime JS
 
+@if (!Embedded)
+{
 <PageTitle>@(Campaign.Campaign?.Name ?? "Campaign") — Image studio</PageTitle>
 
 <CampaignShell CampaignId="CampaignId" View="CampaignView.ImageStudio">
@@ -627,618 +629,639 @@
                 </div>
             }
 
-            @if (_modelPickerOpen)
-            {
-                <div class="cm-modal" role="presentation" @onclick="CloseModelPicker">
-                    <div class="cm-modal__panel cm-modelpicker" role="dialog" aria-modal="true"
-                         aria-labelledby="cm-modelpicker-title" tabindex="-1"
-                         @ref="_modelPickerPanel" @onclick:stopPropagation @onkeydown="OnModelPickerKey">
-                        <header>
-                            <span class="cm-kicker">Image generator</span>
-                            <h2 id="cm-modelpicker-title" class="cm-modal__title">Choose a model</h2>
-                            <p class="cm-modal__message">
-                                This choice applies only to this image. Keep Workspace default
-                                selected to follow Settings automatically.
-                            </p>
-                        </header>
 
-                        @if (DefaultModel is { } defaultModel)
-                        {
-                            var defaultUsable = IsUsable(defaultModel);
-                            <label class="cm-modelpicker__choice @(!defaultUsable ? "cm-modelpicker__choice--off" : null)">
-                                <input type="radio" name="cm-modelpicker-model"
-                                       disabled="@(!defaultUsable)"
-                                       checked="@(_modelDraft == WorkspaceDefaultModel)"
-                                       @onchange="() => _modelDraft = WorkspaceDefaultModel" />
-                                <span>
-                                    <strong>Workspace default · @defaultModel.Label</strong>
-                                    <small>@(defaultModel.Detail ?? defaultModel.Value)</small>
-                                </span>
-                                <span class="cm-badge">DEFAULT</span>
-                            </label>
-                        }
 
-                        <div class="cm-modelpicker__choices">
-                            @foreach (var choice in ModelChoices)
-                            {
-                                var usable = IsUsable(choice);
-                                <label class="cm-modelpicker__choice @(!usable ? "cm-modelpicker__choice--off" : null)">
-                                    <input type="radio" name="cm-modelpicker-model"
-                                           disabled="@(!usable)"
-                                           checked="@(_modelDraft == choice.Value)"
-                                           @onchange="() => _modelDraft = choice.Value" />
-                                    <span>
-                                        <strong>@choice.Label</strong>
-                                        <small>@(choice.Detail ?? choice.Value)</small>
-                                        @if (!choice.Ready)
-                                        {
-                                            <small>Unavailable · @(choice.Reason ?? "not configured")</small>
-                                        }
-                                        else if (HasReferences && !choice.SupportsReferences)
-                                        {
-                                            <small>Cannot use this image's references</small>
-                                        }
-                                    </span>
-                                </label>
-                            }
-                        </div>
-
-                        @if (_modelPickerError is { } modelError)
-                        {
-                            <p class="cm-form__error" role="alert">@modelError</p>
-                        }
-                        <footer class="cm-modal__actions">
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    disabled="@_modelPickerBusy" @onclick="CloseModelPicker">Cancel</button>
-                            <button type="button" class="cm-button"
-                                    disabled="@(_modelPickerBusy || !CanApplyModel)"
-                                    @onclick="ApplyModelAsync">
-                                @(_modelPickerBusy ? "Saving…" : "Use model")
-                            </button>
-                        </footer>
-                    </div>
-                </div>
-            }
-
-            @if (_openVariant is { } take)
-            {
-                @* The take dialog: full-size view + steering + keep/discard/place. Custom
-                   .cm-modal like the app's confirm dialog — Escape closes, backdrop closes. *@
-                <div class="cm-modal" role="presentation" @onclick="RequestCloseAsync">
-                    <div class="cm-lightbox" role="dialog" aria-modal="true"
-                         aria-labelledby="cm-variant-title" tabindex="-1"
-                         @ref="_dialogPanel"
-                         @onclick:stopPropagation
-                         @onkeydown="OnDialogKey">
-
-                        @* The image is the subject, so it gets the room. Everything else is
-                           a rail beside it rather than a form the picture sits inside. *@
-                        <div class="cm-lightbox__stage">
-                            <div class="cm-lightbox__toolbar" role="toolbar" aria-label="Image actions">
-                                <div class="cm-lightbox__toolbar-actions">
-                                    <button type="button" class="cm-button cm-lightbox__save"
-                                            disabled="@(!_overlayDirty || _savingOverlay)"
-                                            title="@(_overlayDirty ? "Save the overlay changes to this image" : _overlaySavedAt is { } t ? $"Saved · {t:HH:mm:ss}" : "Nothing to save yet — edit the text overlay first")"
-                                            @onclick="SaveOverlayAsync">
-                                        @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save" : _overlaySavedAt is null ? "Save" : "Saved")
-                                    </button>
-                                    <button type="button" class="cm-button" disabled="@_placing"
-                                            title="Publish this take into the image slot and update linked content"
-                                            @onclick="() => PlaceAsync(take)">
-                                        @(_placing ? "Using…" : "Use this image")
-                                    </button>
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            disabled="@_downloading" @onclick="() => DownloadAsync(take)">
-                                        @(_downloading ? "Downloading…" : "↓ Download image")
-                                    </button>
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            disabled="@(IsGenerating || StudioRun.IsBatchRunning)"
-                                            title="Render a fresh take with this take's prompt and model"
-                                            @onclick="() => RegenerateTakeAsync(take)">Regenerate</button>
-                                    <button type="button" class="cm-button cm-button--quiet @(_editorMode == "boxes" ? "cm-button--on" : null)"
-                                            aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
-                                            title="Place and style text boxes on the image (composited after generation, no model call)"
-                                            @onclick="ToggleOverlayEditor">Text overlay</button>
-                                    <button type="button" class="cm-button cm-button--quiet @(_editorMode == "mask" ? "cm-button--on" : null)"
-                                            aria-pressed="@(_editorMode == "mask" ? "true" : "false")"
-                                            title="Draw a region, then tell the model what to change there"
-                                            @onclick="ToggleMaskTool">Select region</button>
-                                    <button type="button" class="cm-button cm-button--quiet @(_compareWith is not null ? "cm-button--on" : null)"
-                                            aria-pressed="@(_compareWith is not null ? "true" : "false")"
-                                            disabled="@(OrderedGallery.Count(v => v.Id != take.Id) == 0)"
-                                            title="Show another take beside this one"
-                                            @onclick="ToggleCompare">Compare</button>
-                                    @if (take.State != "Discarded")
-                                    {
-                                        <button type="button" class="cm-button cm-button--quiet"
-                                                title="Hide this take; it can be restored from discarded takes"
-                                                @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
-                                    }
-                                    else
-                                    {
-                                        <button type="button" class="cm-button cm-button--quiet"
-                                                @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
-                                    }
-                                    <button type="button" class="cm-button cm-button--quiet cm-button--danger"
-                                            disabled="@take.IsLocked"
-                                            title="@(take.IsLocked ? "Unlock this image before deleting it" : "Delete this image permanently")"
-                                            @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
-                                </div>
-                                <button type="button"
-                                        class="cm-button cm-button--quiet cm-button--icon cm-lightbox__lock"
-                                        disabled="@(_lockingVariant is not null || take.IsLocked && !take.CanUnlock)"
-                                        title="@LockTitle(take)" aria-label="@LockTitle(take)"
-                                        @onclick="() => ToggleLockAsync(take)">
-                                    <span aria-hidden="true">@(take.IsLocked ? "🔒" : "🔓")</span>
-                                </button>
-                            </div>
-                            <figure class="cm-lightbox__canvas @(_compareWith is not null ? "cm-lightbox__canvas--compare" : null)">
-                                @* The editor surface (ADR-055): the image plus positioned boxes,
-                                   measured by castmill-overlay-editor.js. Geometry lives in ratios
-                                   so the server composite lands where the preview showed it. *@
-                                <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode" style="@AspectStyle(take)">
-                                    <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
-                                    @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null))
-                                    {
-                                        @foreach (var box in _overlayDraft)
-                                        {
-                                            <div class="cm-imgeditor__box @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null) @(_editorMode == "boxes" ? "cm-imgeditor__box--live" : null)"
-                                                 data-box="@box.Id" style="@BoxStyle(box)"
-                                                 @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
-                                                <span class="cm-imgeditor__text">@box.Text</span>
-                                                @if (_editorMode == "boxes")
-                                                {
-                                                    <span class="cm-imgeditor__handle" data-handle aria-hidden="true"></span>
-                                                }
-                                            </div>
-                                        }
-                                    }
-                                    <div class="cm-imgeditor__mask" data-mask-layer hidden aria-hidden="true"></div>
-                                </div>
-                                @if (_compareWith is { } other)
-                                {
-                                    <div class="cm-imgeditor cm-imgeditor--secondary" style="@AspectStyle(other)">
-                                        <img class="cm-lightbox__image" src="@other.Url" alt="Take to compare" />
-                                        <span class="cm-imgeditor__label cm-mono">B · @other.Model</span>
-                                        <button type="button" class="cm-button cm-button--quiet cm-imgeditor__swap"
-                                                title="Make this the primary take" @onclick="() => SwapCompare(other)">Make primary</button>
-                                    </div>
-                                }
-                            </figure>
-                        </div>
-
-                        <button type="button" class="cm-dialog-close cm-lightbox__close"
-                                aria-label="Close image" title="Close (Esc)" @onclick="RequestCloseAsync">✕</button>
-
-                        <div class="cm-lightbox__rail">
-                            <header class="cm-lightbox__head">
-                                <h2 id="cm-variant-title">@ArtifactDisplay.SlotLabel(Selected?.Kind ?? "")</h2>
-                                <p class="cm-meta cm-mono">@take.Width×@take.Height · @take.Model</p>
-                                @if (take.SteeringNote is { } note)
-                                {
-                                    <p class="cm-meta">Steered from an earlier take: “@note”</p>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(take.Prompt))
-                                {
-                                    <details class="cm-studio__preview">
-                                        <summary><span class="cm-kicker">Prompt this take was rendered from</span></summary>
-                                        <pre class="cm-studio__preview-text">@take.Prompt</pre>
-                                    </details>
-                                }
-                            </header>
-
-                            @if (_supportingContext is { } dialogContext)
-                            {
-                                <section class="cm-lightbox__group cm-lightbox__context"
-                                         aria-label="Content this image supports">
-                                    <span class="cm-kicker">What this image supports</span>
-                                    <strong>@dialogContext.Title</strong>
-                                    <blockquote>@dialogContext.Excerpt</blockquote>
-                                </section>
-                            }
-
-                            @if (take.SourceVariantId is not null || _gallery.Any(v => v.SourceVariantId == take.Id))
-                            {
-                                <section class="cm-lightbox__group cm-lineage" aria-label="Take history">
-                                    <span class="cm-kicker">Take history</span>
-                                    <div class="cm-lineage__strip">
-                                        @foreach (var link in Lineage(take))
-                                        {
-                                            <button type="button" class="cm-lineage__node @(link.Id == take.Id ? "cm-lineage__node--current" : null)"
-                                                    title="@(link.SteeringNote ?? "original take")" @onclick="() => OpenVariant(link)">
-                                                <img src="@link.ThumbUrl" alt="" loading="lazy" />
-                                                <span class="cm-meta">@(link.Id == take.Id ? "this" : link.SteeringNote is { } n ? Truncate(n, 22) : "origin")</span>
-                                            </button>
-                                        }
-                                    </div>
-                                </section>
-                            }
-
-                            @if (_compareWith is not null || _pickingCompare)
-                            {
-                                <section class="cm-lightbox__group" aria-label="Compare">
-                                    <span class="cm-kicker">Compare with</span>
-                                    <div class="cm-studio__chips">
-                                        @foreach (var candidate in OrderedGallery.Where(v => v.Id != take.Id))
-                                        {
-                                            <button type="button" class="cm-studio__chip @(_compareWith?.Id == candidate.Id ? "cm-studio__chip--on" : null)"
-                                                    @onclick="() => _compareWith = candidate">
-                                                @candidate.Model · @candidate.CreatedAt.ToLocalTime().ToString("HH:mm")
-                                            </button>
-                                        }
-                                    </div>
-                                </section>
-                            }
-
-                            @if (_editorMode == "boxes")
-                            {
-                                <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Text overlay editor">
-                                    <span class="cm-kicker">Text overlay</span>
-                                    <p class="cm-meta">Drag a box to move it, drag its corner to resize. Saved boxes are composited onto the placed image — no model call.</p>
-                                    <div class="cm-studio__chips">
-                                        @foreach (var box in _overlayDraft)
-                                        {
-                                            <button type="button" class="cm-studio__chip @(box.Id == _selectedBoxId ? "cm-studio__chip--on" : null)"
-                                                    @onclick="() => _selectedBoxId = box.Id">@Truncate(box.Text, 18)</button>
-                                        }
-                                        <button type="button" class="cm-studio__chip" @onclick="AddBox">+ Add text box</button>
-                                    </div>
-                                    @if (SelectedBox is { } sel)
-                                    {
-                                        <label class="cm-field">
-                                            <span class="cm-field__label">Text</span>
-                                            <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Overlay text"
-                                                      value="@sel.Text" @oninput="e => UpdateBox(sel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
-                                        </label>
-                                        <div class="cm-imgeditor-panel__row">
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Size</span>
-                                                <input type="range" min="0.03" max="0.30" step="0.005" value="@sel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
-                                                       aria-label="Font size"
-                                                       @oninput="e => UpdateBox(sel with { FontSize = ParseDouble(e.Value, sel.FontSize) })" />
-                                            </label>
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Weight</span>
-                                                <select class="cm-input" value="@sel.Weight" aria-label="Font weight"
-                                                        @onchange="e => UpdateBox(sel with { Weight = int.TryParse(e.Value?.ToString(), out var w) ? w : sel.Weight })">
-                                                    <option value="400">Regular</option>
-                                                    <option value="600">Semibold</option>
-                                                    <option value="700">Bold</option>
-                                                </select>
-                                            </label>
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Align</span>
-                                                <select class="cm-input" value="@sel.Align" aria-label="Alignment"
-                                                        @onchange='e => UpdateBox(sel with { Align = e.Value?.ToString() ?? "left" })'>
-                                                    <option value="left">Left</option>
-                                                    <option value="center">Centre</option>
-                                                    <option value="right">Right</option>
-                                                </select>
-                                            </label>
-                                        </div>
-                                        <div class="cm-imgeditor-panel__row">
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Text colour</span>
-                                                <input type="color" class="cm-imgeditor-panel__color" value="@sel.Color" aria-label="Text colour"
-                                                       @onchange="e => UpdateBox(sel with { Color = e.Value?.ToString() ?? sel.Color })" />
-                                            </label>
-                                            <label class="cm-fanout__item cm-imgeditor-panel__toggle">
-                                                <input type="checkbox" checked="@(sel.Band is not null)" aria-label="Solid band behind the text"
-                                                       @onchange='e => UpdateBox(sel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
-                                                <span>Band behind text</span>
-                                            </label>
-                                            @if (sel.Band is { } band)
-                                            {
-                                                <label class="cm-field">
-                                                    <span class="cm-field__label">Band colour</span>
-                                                    <input type="color" class="cm-imgeditor-panel__color" value="@band.Color" aria-label="Band colour"
-                                                           @onchange="e => UpdateBox(sel with { Band = band with { Color = e.Value?.ToString() ?? band.Color } })" />
-                                                </label>
-                                                <label class="cm-field">
-                                                    <span class="cm-field__label">Opacity</span>
-                                                    <input type="range" min="0.2" max="1" step="0.05" value="@band.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Band opacity"
-                                                           @oninput="e => UpdateBox(sel with { Band = band with { Opacity = ParseDouble(e.Value, band.Opacity) } })" />
-                                                </label>
-                                            }
-                                        </div>
-                                        <div class="cm-form__actions">
-                                            <button type="button" class="cm-button cm-button--quiet cm-button--danger" @onclick="() => RemoveBox(sel.Id)">Remove box</button>
-                                        </div>
-                                    }
-                                    <div class="cm-form__actions">
-                                        <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0 || !_overlayDirty)" @onclick="SaveOverlayAsync">
-                                            @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save overlay" : "Saved")
-                                        </button>
-                                        @if (Selected?.Overlay is not null)
-                                        {
-                                            <button type="button" class="cm-button cm-button--quiet" disabled="@_savingOverlay" @onclick="ClearOverlayAsync">Clear overlay</button>
-                                        }
-                                    </div>
-                                    @if (_overlayStatus is { } overlayStatus)
-                                    {
-                                        <p class="cm-meta" role="status">@overlayStatus</p>
-                                    }
-                                </section>
-                            }
-
-                            @if (_editorMode == "mask")
-                            {
-                                <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Region edit">
-                                    <span class="cm-kicker">Edit a region</span>
-                                    <p class="cm-meta">
-                                        @(_maskRect is null
-                                            ? "Drag a rectangle on the image over the part to change — the background, a face, an object."
-                                            : $"Region selected: {Math.Round(_maskRect.Value.W * 100)}% × {Math.Round(_maskRect.Value.H * 100)}% of the frame.")
-                                    </p>
-                                    <textarea class="cm-input cm-textarea" rows="3" @bind="_maskInstruction" @bind:event="oninput"
-                                              aria-label="What to change in the region"
-                                              placeholder="e.g. replace the background with a bright studio · add the host from the kit · remove the laptop"></textarea>
-                                    <div class="cm-studio__chips">
-                                        @foreach (var chip in RegionChips)
-                                        {
-                                            <button type="button" class="cm-studio__chip" @onclick="() => _maskInstruction = chip">@chip</button>
-                                        }
-                                    </div>
-                                    <div class="cm-form__actions">
-                                        <button type="button" class="cm-button" disabled="@(_maskRect is null || string.IsNullOrWhiteSpace(_maskInstruction) || IsGenerating)"
-                                                @onclick="() => RepaintRegionAsync(take)">
-                                            Repaint region (≈ @CostPerVariantUsd.ToString("$0.00"))
-                                        </button>
-                                        <button type="button" class="cm-button cm-button--quiet" disabled="@(_maskRect is null)" @onclick="ClearMaskAsync">Clear selection</button>
-                                    </div>
-                                    <p class="cm-meta">The result is a new take with this one as its parent, so you compare before and after and keep the winner. Faces: use OpenAI direct or Nano Banana — Foundry's filters decline real-person edits.</p>
-                                </section>
-                            }
-
-                            @if (Selected is { } headlineSlot && headlineSlot.SafeArea)
-                            {
-                                @* Overlay controls live here because this is where you can SEE
-                                   the result. Models mangle small text, so the headline is
-                                   composited after generation (ADR-013) — editing it is free. *@
-                                <section class="cm-lightbox__group">
-                                    <span class="cm-kicker">Overlay text</span>
-                                    <input class="cm-input" maxlength="32" @bind="_headline"
-                                           placeholder="Up to 32 characters" />
-
-                                    <span class="cm-kicker">Behind the text</span>
-                                    <div class="cm-rings">
-                                        @foreach (var (label, value) in HeadlineBackgrounds)
-                                        {
-                                            <button type="button"
-                                                    class="cm-ring @(value is null ? "cm-ring--none" : null) @(_headlineBackground == value ? "cm-ring--on" : null)"
-                                                    style="@(value is null ? null : $"background:{value}")"
-                                                    title="@label"
-                                                    aria-label="@label"
-                                                    aria-pressed="@((_headlineBackground == value).ToString().ToLowerInvariant())"
-                                                    @onclick="() => _headlineBackground = value">
-                                            </button>
-                                        }
-                                    </div>
-
-                                    <label class="cm-fanout__item">
-                                        <input type="checkbox" @bind="_safeArea" />
-                                        <span>Keep clear of platform UI</span>
-                                    </label>
-
-                                    <button type="button" class="cm-button cm-button--quiet"
-                                            disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
-                                            @onclick="CompositeAsync">
-                                        @(_compositing ? "Applying…" : "Apply overlay")
-                                    </button>
-                                    <p class="cm-meta">No model call — editing the overlay is free.</p>
-                                </section>
-                            }
-
-                            <section class="cm-lightbox__group">
-                                <span class="cm-kicker">Steer a new take</span>
-                                <textarea class="cm-input cm-textarea" rows="3" @bind="_steerNote" @bind:event="oninput"
-                                          placeholder="e.g. warmer background, more negative space top-left"></textarea>
-                                <div class="cm-studio__chips">
-                                    @foreach (var chip in SteerChips)
-                                    {
-                                        var selected = SteerConstraintSelected(chip);
-                                        <button type="button"
-                                                class="cm-studio__chip @(selected ? "cm-studio__chip--on" : null)"
-                                                    aria-pressed="@(selected ? "true" : "false")"
-                                                @onclick="() => ToggleSteerChip(chip)">
-                                            @(selected ? "Applied · " : "Add · ")@chip
-                                        </button>
-                                    }
-                                </div>
-
-                                @* These are real image inputs persisted on the selected card.
-                                   The same references are reattached when steering from a take. *@
-                                <span class="cm-kicker">From @(Campaign.Brand?.Name ?? "the brand kit")</span>
-
-                                @if (Campaign.Brand is null)
-                                {
-                                    <p class="cm-meta">
-                                        This campaign has no brand, so there is no kit to draw on.
-                                        <a href="campaigns">Pick one on the campaign</a> to reuse faces
-                                        and backgrounds here.
-                                    </p>
-                                }
-                                else
-                                {
-                                    @if (ProductAssets.Count > 0)
-                                    {
-                                        <p class="cm-meta">Product screenshots stay attached automatically.</p>
-                                    }
-                                    @foreach (var group in ReferenceKit)
-                                    {
-                                        <div class="cm-studio__kit">
-                                            <span class="cm-meta">
-                                                @KindLabel(group.Key)
-                                                @if (_picked.TryGetValue(group.Key, out var chosen))
-                                                {
-                                                    <span class="cm-mono"> · @(chosen.Label ?? chosen.FileName)</span>
-                                                }
-                                            </span>
-                                            <div class="cm-studio__picks">
-                                                @foreach (var asset in group)
-                                                {
-                                                    var isOn = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
-                                                    <button type="button"
-                                                            class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
-                                                            aria-pressed="@(isOn ? "true" : "false")"
-                                                            title="@(asset.Label ?? asset.FileName)"
-                                                            @onclick="() => TogglePickAsync(group.Key, asset)">
-                                                        @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
-                                                        {
-                                                            <img src="@thumb" alt="" loading="lazy" />
-                                                        }
-                                                        <span class="cm-studio__pick-label">
-                                                            @(asset.Label ?? asset.FileName)
-                                                        </span>
-                                                    </button>
-                                                }
-                                            </div>
-                                        </div>
-                                    }
-
-                                    @if (!ReferenceKit.Any())
-                                    {
-                                        <p class="cm-meta">Nothing in the kit yet — add a face or background below.</p>
-                                    }
-
-                                    <div class="cm-studio__upload">
-                                        <select class="cm-input" @bind="_uploadKind" aria-label="What this asset is">
-                                            <option value="product">Product screenshot</option>
-                                            <option value="face">Face</option>
-                                            <option value="background">Background</option>
-                                            <option value="logo">Logo</option>
-                                            <option value="other">Other</option>
-                                        </select>
-                                        @* The label is load-bearing: it becomes the prompt text,
-                                           so an unlabelled upload steers nothing useful. *@
-                                        <input class="cm-input" placeholder="Describe it — e.g. the host, short dark hair"
-                                               aria-label="Description used as prompt text"
-                                               @bind="_uploadLabel" @bind:event="oninput" />
-                                        <InputFile class="cm-kit__file" OnChange="UploadKitAssetAsync" accept="image/*"
-                                                   aria-label="Choose an image file for the kit"
-                                                   aria-describedby="cm-kit-upload-hint"
-                                                   disabled="@(_uploading || string.IsNullOrWhiteSpace(_uploadLabel))" />
-                                        @* A disabled file picker with no reason read as broken. The
-                                           gate is deliberate (the description becomes prompt text), so
-                                           say so until it is satisfied. *@
-                                        <span id="cm-kit-upload-hint" class="cm-meta cm-kit__hint">
-                                            @(_uploading
-                                                ? "Uploading…"
-                                                : string.IsNullOrWhiteSpace(_uploadLabel)
-                                                    ? "Type a description first — it becomes the prompt text, then Choose File unlocks."
-                                                    : "Ready — choose an image (up to 20 MB).")
-                                        </span>
-                                    </div>
-                                    @if (_uploadError is { } kitError)
-                                    {
-                                        <p class="cm-form__error" role="alert">@kitError</p>
-                                    }
-                                    <p class="cm-meta">
-                                        Saved to @Campaign.Brand.Name, so it is available to every
-                                        campaign on this brand.
-                                    </p>
-                                }
-
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        disabled="@(!CanSteer || IsGenerating)"
-                                        @onclick="() => SteerAsync(take)">
-                                    New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
-                                </button>
-                                @if (!CanSteer)
-                                {
-                                    <p class="cm-meta">Pick a reference or type an adjustment — either is enough.</p>
-                                }
-                            </section>
-
-                        </div>
-                    </div>
-                </div>
-            }
-
-            @if (_kitPickerOpen && Campaign.Brand is { } kitBrand)
-            {
-                @* The kit picker: master–detail over the brand's reference assets. Left lists
-                   the kit grouped by type, right previews the selection at a judgeable size.
-                   Same .cm-modal chrome as the take lightbox — Escape closes, backdrop closes. *@
-                <div class="cm-modal" role="presentation" @onclick="CloseKitPicker">
-                    <div class="cm-kitpicker" role="dialog" aria-modal="true"
-                         aria-label="Choose reference images" tabindex="-1"
-                         @ref="_kitPickerPanel"
-                         @onclick:stopPropagation
-                         @onkeydown="OnKitPickerKey">
-                        <header class="cm-kitpicker__head">
-                            <div>
-                                <h2>Reference images</h2>
-                                <p class="cm-meta">From @kitBrand.Name's kit — one per type. A selection is a real image input to the model, not prompt text.</p>
-                            </div>
-                            <button type="button" class="cm-studio__drawer-close"
-                                    aria-label="Close" title="Close (Esc)" @onclick="CloseKitPicker">✕</button>
-                        </header>
-                        <div class="cm-kitpicker__body">
-                            <nav class="cm-kitpicker__list" aria-label="Kit assets by type">
-                                @foreach (var group in ReferenceKit)
-                                {
-                                    <span class="cm-kicker">@KindLabel(group.Key)</span>
-                                    <ul>
-                                        @foreach (var asset in group)
-                                        {
-                                            var isPicked = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
-                                            var isCurrent = _kitPreviewAsset?.Id == asset.Id;
-                                            <li>
-                                                <button type="button"
-                                                        class="cm-kitpicker__item @(isCurrent ? "cm-kitpicker__item--current" : null)"
-                                                        aria-current="@(isCurrent ? "true" : "false")"
-                                                        @onclick="() => _kitPreviewAsset = asset">
-                                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var listThumb))
-                                                    {
-                                                        <img src="@listThumb" alt="" loading="lazy" />
-                                                    }
-                                                    <span class="cm-kitpicker__item-label">@(asset.Label ?? asset.FileName)</span>
-                                                    @if (isPicked)
-                                                    {
-                                                        <span class="cm-kitpicker__tick" aria-label="Selected">✓</span>
-                                                    }
-                                                </button>
-                                            </li>
-                                        }
-                                    </ul>
-                                }
-                            </nav>
-                            <section class="cm-kitpicker__preview" aria-label="Preview">
-                                @if (_kitPreviewAsset is { } previewAsset)
-                                {
-                                    var previewKind = previewAsset.Kind.ToLowerInvariant();
-                                    var previewOn = _picked.TryGetValue(previewKind, out var chosenNow) && chosenNow.Id == previewAsset.Id;
-                                    @if (_kitPreviews.TryGetValue(previewAsset.AssetId, out var big))
-                                    {
-                                        <img src="@big" alt="@(previewAsset.Label ?? previewAsset.FileName)" />
-                                    }
-                                    <strong>@(previewAsset.Label ?? previewAsset.FileName)</strong>
-                                    <span class="cm-meta">@KindLabel(previewKind)</span>
-                                    <button type="button" class="cm-button"
-                                            @onclick="() => TogglePickAsync(previewKind, previewAsset)">
-                                        @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
-                                    </button>
-                                    @if (!previewOn && _picked.ContainsKey(previewKind))
-                                    {
-                                        <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
-                                    }
-                                }
-                                else
-                                {
-                                    <p class="cm-meta">Pick an asset on the left to preview it here.</p>
-                                }
-                            </section>
-                        </div>
-                        <footer class="cm-kitpicker__actions">
-                            <button type="button" class="cm-button" @onclick="CloseKitPicker">Done</button>
-                        </footer>
-                    </div>
-                </div>
-            }
         </div>
     </div>
 </CampaignShell>
+}
+
+@* Dialogs live outside the page frame (position: fixed) so the same component can host
+   them EMBEDDED in Focus (ADR-F56): Embedded renders only these, never the sheet or the drawer. *@
+@if (Embedded && _embeddedEmpty && _openVariant is null)
+{
+    <div class="cm-modal" role="presentation" @onclick="CloseVariant">
+        <div class="cm-modal__panel" role="dialog" aria-modal="true" aria-label="No takes yet" @onclick:stopPropagation>
+            <h2 class="cm-modal__title">No takes for this image yet</h2>
+            <p class="cm-meta">Generate the first take in Image Studio, then it opens here in place.</p>
+            <div class="cm-form__actions">
+                <a class="cm-button" href="@EmbeddedStudioHref">Open in Image Studio</a>
+                <button type="button" class="cm-button cm-button--quiet" @onclick="CloseVariant">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_modelPickerOpen)
+{
+    <div class="cm-modal" role="presentation" @onclick="CloseModelPicker">
+        <div class="cm-modal__panel cm-modelpicker" role="dialog" aria-modal="true"
+             aria-labelledby="cm-modelpicker-title" tabindex="-1"
+             @ref="_modelPickerPanel" @onclick:stopPropagation @onkeydown="OnModelPickerKey">
+            <header>
+                <span class="cm-kicker">Image generator</span>
+                <h2 id="cm-modelpicker-title" class="cm-modal__title">Choose a model</h2>
+                <p class="cm-modal__message">
+                    This choice applies only to this image. Keep Workspace default
+                    selected to follow Settings automatically.
+                </p>
+            </header>
+
+            @if (DefaultModel is { } defaultModel)
+            {
+                var defaultUsable = IsUsable(defaultModel);
+                <label class="cm-modelpicker__choice @(!defaultUsable ? "cm-modelpicker__choice--off" : null)">
+                    <input type="radio" name="cm-modelpicker-model"
+                           disabled="@(!defaultUsable)"
+                           checked="@(_modelDraft == WorkspaceDefaultModel)"
+                           @onchange="() => _modelDraft = WorkspaceDefaultModel" />
+                    <span>
+                        <strong>Workspace default · @defaultModel.Label</strong>
+                        <small>@(defaultModel.Detail ?? defaultModel.Value)</small>
+                    </span>
+                    <span class="cm-badge">DEFAULT</span>
+                </label>
+            }
+
+            <div class="cm-modelpicker__choices">
+                @foreach (var choice in ModelChoices)
+                {
+                    var usable = IsUsable(choice);
+                    <label class="cm-modelpicker__choice @(!usable ? "cm-modelpicker__choice--off" : null)">
+                        <input type="radio" name="cm-modelpicker-model"
+                               disabled="@(!usable)"
+                               checked="@(_modelDraft == choice.Value)"
+                               @onchange="() => _modelDraft = choice.Value" />
+                        <span>
+                            <strong>@choice.Label</strong>
+                            <small>@(choice.Detail ?? choice.Value)</small>
+                            @if (!choice.Ready)
+                            {
+                                <small>Unavailable · @(choice.Reason ?? "not configured")</small>
+                            }
+                            else if (HasReferences && !choice.SupportsReferences)
+                            {
+                                <small>Cannot use this image's references</small>
+                            }
+                        </span>
+                    </label>
+                }
+            </div>
+
+            @if (_modelPickerError is { } modelError)
+            {
+                <p class="cm-form__error" role="alert">@modelError</p>
+            }
+            <footer class="cm-modal__actions">
+                <button type="button" class="cm-button cm-button--quiet"
+                        disabled="@_modelPickerBusy" @onclick="CloseModelPicker">Cancel</button>
+                <button type="button" class="cm-button"
+                        disabled="@(_modelPickerBusy || !CanApplyModel)"
+                        @onclick="ApplyModelAsync">
+                    @(_modelPickerBusy ? "Saving…" : "Use model")
+                </button>
+            </footer>
+        </div>
+    </div>
+}
+
+@if (_openVariant is { } take)
+{
+    @* The take dialog: full-size view + steering + keep/discard/place. Custom
+       .cm-modal like the app's confirm dialog — Escape closes, backdrop closes. *@
+    <div class="cm-modal" role="presentation" @onclick="RequestCloseAsync">
+        <div class="cm-lightbox" role="dialog" aria-modal="true"
+             aria-labelledby="cm-variant-title" tabindex="-1"
+             @ref="_dialogPanel"
+             @onclick:stopPropagation
+             @onkeydown="OnDialogKey">
+
+            @* The image is the subject, so it gets the room. Everything else is
+               a rail beside it rather than a form the picture sits inside. *@
+            <div class="cm-lightbox__stage">
+                <div class="cm-lightbox__toolbar" role="toolbar" aria-label="Image actions">
+                    <div class="cm-lightbox__toolbar-actions">
+                        <button type="button" class="cm-button cm-lightbox__save"
+                                disabled="@(!_overlayDirty || _savingOverlay)"
+                                title="@(_overlayDirty ? "Save the overlay changes to this image" : _overlaySavedAt is { } t ? $"Saved · {t:HH:mm:ss}" : "Nothing to save yet — edit the text overlay first")"
+                                @onclick="SaveOverlayAsync">
+                            @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save" : _overlaySavedAt is null ? "Save" : "Saved")
+                        </button>
+                        <button type="button" class="cm-button" disabled="@_placing"
+                                title="Publish this take into the image slot and update linked content"
+                                @onclick="() => PlaceAsync(take)">
+                            @(_placing ? "Using…" : "Use this image")
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@_downloading" @onclick="() => DownloadAsync(take)">
+                            @(_downloading ? "Downloading…" : "↓ Download image")
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@(IsGenerating || StudioRun.IsBatchRunning)"
+                                title="Render a fresh take with this take's prompt and model"
+                                @onclick="() => RegenerateTakeAsync(take)">Regenerate</button>
+                        <button type="button" class="cm-button cm-button--quiet @(_editorMode == "boxes" ? "cm-button--on" : null)"
+                                aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
+                                title="Place and style text boxes on the image (composited after generation, no model call)"
+                                @onclick="ToggleOverlayEditor">Text overlay</button>
+                        <button type="button" class="cm-button cm-button--quiet @(_editorMode == "mask" ? "cm-button--on" : null)"
+                                aria-pressed="@(_editorMode == "mask" ? "true" : "false")"
+                                title="Draw a region, then tell the model what to change there"
+                                @onclick="ToggleMaskTool">Select region</button>
+                        <button type="button" class="cm-button cm-button--quiet @(_compareWith is not null ? "cm-button--on" : null)"
+                                aria-pressed="@(_compareWith is not null ? "true" : "false")"
+                                disabled="@(OrderedGallery.Count(v => v.Id != take.Id) == 0)"
+                                title="Show another take beside this one"
+                                @onclick="ToggleCompare">Compare</button>
+                        @if (take.State != "Discarded")
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    title="Hide this take; it can be restored from discarded takes"
+                                    @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
+                        }
+                        <button type="button" class="cm-button cm-button--quiet cm-button--danger"
+                                disabled="@take.IsLocked"
+                                title="@(take.IsLocked ? "Unlock this image before deleting it" : "Delete this image permanently")"
+                                @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
+                    </div>
+                    <button type="button"
+                            class="cm-button cm-button--quiet cm-button--icon cm-lightbox__lock"
+                            disabled="@(_lockingVariant is not null || take.IsLocked && !take.CanUnlock)"
+                            title="@LockTitle(take)" aria-label="@LockTitle(take)"
+                            @onclick="() => ToggleLockAsync(take)">
+                        <span aria-hidden="true">@(take.IsLocked ? "🔒" : "🔓")</span>
+                    </button>
+                </div>
+                <figure class="cm-lightbox__canvas @(_compareWith is not null ? "cm-lightbox__canvas--compare" : null)">
+                    @* The editor surface (ADR-055): the image plus positioned boxes,
+                       measured by castmill-overlay-editor.js. Geometry lives in ratios
+                       so the server composite lands where the preview showed it. *@
+                    <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode" style="@AspectStyle(take)">
+                        <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                        @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null))
+                        {
+                            @foreach (var box in _overlayDraft)
+                            {
+                                <div class="cm-imgeditor__box @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null) @(_editorMode == "boxes" ? "cm-imgeditor__box--live" : null)"
+                                     data-box="@box.Id" style="@BoxStyle(box)"
+                                     @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
+                                    <span class="cm-imgeditor__text">@box.Text</span>
+                                    @if (_editorMode == "boxes")
+                                    {
+                                        <span class="cm-imgeditor__handle" data-handle aria-hidden="true"></span>
+                                    }
+                                </div>
+                            }
+                        }
+                        <div class="cm-imgeditor__mask" data-mask-layer hidden aria-hidden="true"></div>
+                    </div>
+                    @if (_compareWith is { } other)
+                    {
+                        <div class="cm-imgeditor cm-imgeditor--secondary" style="@AspectStyle(other)">
+                            <img class="cm-lightbox__image" src="@other.Url" alt="Take to compare" />
+                            <span class="cm-imgeditor__label cm-mono">B · @other.Model</span>
+                            <button type="button" class="cm-button cm-button--quiet cm-imgeditor__swap"
+                                    title="Make this the primary take" @onclick="() => SwapCompare(other)">Make primary</button>
+                        </div>
+                    }
+                </figure>
+            </div>
+
+            <button type="button" class="cm-dialog-close cm-lightbox__close"
+                    aria-label="Close image" title="Close (Esc)" @onclick="RequestCloseAsync">✕</button>
+
+            <div class="cm-lightbox__rail">
+                <header class="cm-lightbox__head">
+                    <h2 id="cm-variant-title">@ArtifactDisplay.SlotLabel(Selected?.Kind ?? "")</h2>
+                    <p class="cm-meta cm-mono">@take.Width×@take.Height · @take.Model</p>
+                    @if (take.SteeringNote is { } note)
+                    {
+                        <p class="cm-meta">Steered from an earlier take: “@note”</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(take.Prompt))
+                    {
+                        <details class="cm-studio__preview">
+                            <summary><span class="cm-kicker">Prompt this take was rendered from</span></summary>
+                            <pre class="cm-studio__preview-text">@take.Prompt</pre>
+                        </details>
+                    }
+                </header>
+
+                @if (_supportingContext is { } dialogContext)
+                {
+                    <section class="cm-lightbox__group cm-lightbox__context"
+                             aria-label="Content this image supports">
+                        <span class="cm-kicker">What this image supports</span>
+                        <strong>@dialogContext.Title</strong>
+                        <blockquote>@dialogContext.Excerpt</blockquote>
+                    </section>
+                }
+
+                @if (take.SourceVariantId is not null || _gallery.Any(v => v.SourceVariantId == take.Id))
+                {
+                    <section class="cm-lightbox__group cm-lineage" aria-label="Take history">
+                        <span class="cm-kicker">Take history</span>
+                        <div class="cm-lineage__strip">
+                            @foreach (var link in Lineage(take))
+                            {
+                                <button type="button" class="cm-lineage__node @(link.Id == take.Id ? "cm-lineage__node--current" : null)"
+                                        title="@(link.SteeringNote ?? "original take")" @onclick="() => OpenVariant(link)">
+                                    <img src="@link.ThumbUrl" alt="" loading="lazy" />
+                                    <span class="cm-meta">@(link.Id == take.Id ? "this" : link.SteeringNote is { } n ? Truncate(n, 22) : "origin")</span>
+                                </button>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (_compareWith is not null || _pickingCompare)
+                {
+                    <section class="cm-lightbox__group" aria-label="Compare">
+                        <span class="cm-kicker">Compare with</span>
+                        <div class="cm-studio__chips">
+                            @foreach (var candidate in OrderedGallery.Where(v => v.Id != take.Id))
+                            {
+                                <button type="button" class="cm-studio__chip @(_compareWith?.Id == candidate.Id ? "cm-studio__chip--on" : null)"
+                                        @onclick="() => _compareWith = candidate">
+                                    @candidate.Model · @candidate.CreatedAt.ToLocalTime().ToString("HH:mm")
+                                </button>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (_editorMode == "boxes")
+                {
+                    <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Text overlay editor">
+                        <span class="cm-kicker">Text overlay</span>
+                        <p class="cm-meta">Drag a box to move it, drag its corner to resize. Saved boxes are composited onto the placed image — no model call.</p>
+                        <div class="cm-studio__chips">
+                            @foreach (var box in _overlayDraft)
+                            {
+                                <button type="button" class="cm-studio__chip @(box.Id == _selectedBoxId ? "cm-studio__chip--on" : null)"
+                                        @onclick="() => _selectedBoxId = box.Id">@Truncate(box.Text, 18)</button>
+                            }
+                            <button type="button" class="cm-studio__chip" @onclick="AddBox">+ Add text box</button>
+                        </div>
+                        @if (SelectedBox is { } sel)
+                        {
+                            <label class="cm-field">
+                                <span class="cm-field__label">Text</span>
+                                <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Overlay text"
+                                          value="@sel.Text" @oninput="e => UpdateBox(sel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
+                            </label>
+                            <div class="cm-imgeditor-panel__row">
+                                <label class="cm-field">
+                                    <span class="cm-field__label">Size</span>
+                                    <input type="range" min="0.03" max="0.30" step="0.005" value="@sel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                                           aria-label="Font size"
+                                           @oninput="e => UpdateBox(sel with { FontSize = ParseDouble(e.Value, sel.FontSize) })" />
+                                </label>
+                                <label class="cm-field">
+                                    <span class="cm-field__label">Weight</span>
+                                    <select class="cm-input" value="@sel.Weight" aria-label="Font weight"
+                                            @onchange="e => UpdateBox(sel with { Weight = int.TryParse(e.Value?.ToString(), out var w) ? w : sel.Weight })">
+                                        <option value="400">Regular</option>
+                                        <option value="600">Semibold</option>
+                                        <option value="700">Bold</option>
+                                    </select>
+                                </label>
+                                <label class="cm-field">
+                                    <span class="cm-field__label">Align</span>
+                                    <select class="cm-input" value="@sel.Align" aria-label="Alignment"
+                                            @onchange='e => UpdateBox(sel with { Align = e.Value?.ToString() ?? "left" })'>
+                                        <option value="left">Left</option>
+                                        <option value="center">Centre</option>
+                                        <option value="right">Right</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="cm-imgeditor-panel__row">
+                                <label class="cm-field">
+                                    <span class="cm-field__label">Text colour</span>
+                                    <input type="color" class="cm-imgeditor-panel__color" value="@sel.Color" aria-label="Text colour"
+                                           @onchange="e => UpdateBox(sel with { Color = e.Value?.ToString() ?? sel.Color })" />
+                                </label>
+                                <label class="cm-fanout__item cm-imgeditor-panel__toggle">
+                                    <input type="checkbox" checked="@(sel.Band is not null)" aria-label="Solid band behind the text"
+                                           @onchange='e => UpdateBox(sel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
+                                    <span>Band behind text</span>
+                                </label>
+                                @if (sel.Band is { } band)
+                                {
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Band colour</span>
+                                        <input type="color" class="cm-imgeditor-panel__color" value="@band.Color" aria-label="Band colour"
+                                               @onchange="e => UpdateBox(sel with { Band = band with { Color = e.Value?.ToString() ?? band.Color } })" />
+                                    </label>
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Opacity</span>
+                                        <input type="range" min="0.2" max="1" step="0.05" value="@band.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Band opacity"
+                                               @oninput="e => UpdateBox(sel with { Band = band with { Opacity = ParseDouble(e.Value, band.Opacity) } })" />
+                                    </label>
+                                }
+                            </div>
+                            <div class="cm-form__actions">
+                                <button type="button" class="cm-button cm-button--quiet cm-button--danger" @onclick="() => RemoveBox(sel.Id)">Remove box</button>
+                            </div>
+                        }
+                        <div class="cm-form__actions">
+                            <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0 || !_overlayDirty)" @onclick="SaveOverlayAsync">
+                                @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save overlay" : "Saved")
+                            </button>
+                            @if (Selected?.Overlay is not null)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet" disabled="@_savingOverlay" @onclick="ClearOverlayAsync">Clear overlay</button>
+                            }
+                        </div>
+                        @if (_overlayStatus is { } overlayStatus)
+                        {
+                            <p class="cm-meta" role="status">@overlayStatus</p>
+                        }
+                    </section>
+                }
+
+                @if (_editorMode == "mask")
+                {
+                    <section class="cm-lightbox__group cm-imgeditor-panel" aria-label="Region edit">
+                        <span class="cm-kicker">Edit a region</span>
+                        <p class="cm-meta">
+                            @(_maskRect is null
+                                ? "Drag a rectangle on the image over the part to change — the background, a face, an object."
+                                : $"Region selected: {Math.Round(_maskRect.Value.W * 100)}% × {Math.Round(_maskRect.Value.H * 100)}% of the frame.")
+                        </p>
+                        <textarea class="cm-input cm-textarea" rows="3" @bind="_maskInstruction" @bind:event="oninput"
+                                  aria-label="What to change in the region"
+                                  placeholder="e.g. replace the background with a bright studio · add the host from the kit · remove the laptop"></textarea>
+                        <div class="cm-studio__chips">
+                            @foreach (var chip in RegionChips)
+                            {
+                                <button type="button" class="cm-studio__chip" @onclick="() => _maskInstruction = chip">@chip</button>
+                            }
+                        </div>
+                        <div class="cm-form__actions">
+                            <button type="button" class="cm-button" disabled="@(_maskRect is null || string.IsNullOrWhiteSpace(_maskInstruction) || IsGenerating)"
+                                    @onclick="() => RepaintRegionAsync(take)">
+                                Repaint region (≈ @CostPerVariantUsd.ToString("$0.00"))
+                            </button>
+                            <button type="button" class="cm-button cm-button--quiet" disabled="@(_maskRect is null)" @onclick="ClearMaskAsync">Clear selection</button>
+                        </div>
+                        <p class="cm-meta">The result is a new take with this one as its parent, so you compare before and after and keep the winner. Faces: use OpenAI direct or Nano Banana — Foundry's filters decline real-person edits.</p>
+                    </section>
+                }
+
+                @if (Selected is { } headlineSlot && headlineSlot.SafeArea)
+                {
+                    @* Overlay controls live here because this is where you can SEE
+                       the result. Models mangle small text, so the headline is
+                       composited after generation (ADR-013) — editing it is free. *@
+                    <section class="cm-lightbox__group">
+                        <span class="cm-kicker">Overlay text</span>
+                        <input class="cm-input" maxlength="32" @bind="_headline"
+                               placeholder="Up to 32 characters" />
+
+                        <span class="cm-kicker">Behind the text</span>
+                        <div class="cm-rings">
+                            @foreach (var (label, value) in HeadlineBackgrounds)
+                            {
+                                <button type="button"
+                                        class="cm-ring @(value is null ? "cm-ring--none" : null) @(_headlineBackground == value ? "cm-ring--on" : null)"
+                                        style="@(value is null ? null : $"background:{value}")"
+                                        title="@label"
+                                        aria-label="@label"
+                                        aria-pressed="@((_headlineBackground == value).ToString().ToLowerInvariant())"
+                                        @onclick="() => _headlineBackground = value">
+                                </button>
+                            }
+                        </div>
+
+                        <label class="cm-fanout__item">
+                            <input type="checkbox" @bind="_safeArea" />
+                            <span>Keep clear of platform UI</span>
+                        </label>
+
+                        <button type="button" class="cm-button cm-button--quiet"
+                                disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
+                                @onclick="CompositeAsync">
+                            @(_compositing ? "Applying…" : "Apply overlay")
+                        </button>
+                        <p class="cm-meta">No model call — editing the overlay is free.</p>
+                    </section>
+                }
+
+                <section class="cm-lightbox__group">
+                    <span class="cm-kicker">Steer a new take</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_steerNote" @bind:event="oninput"
+                              placeholder="e.g. warmer background, more negative space top-left"></textarea>
+                    <div class="cm-studio__chips">
+                        @foreach (var chip in SteerChips)
+                        {
+                            var selected = SteerConstraintSelected(chip);
+                            <button type="button"
+                                    class="cm-studio__chip @(selected ? "cm-studio__chip--on" : null)"
+                                        aria-pressed="@(selected ? "true" : "false")"
+                                    @onclick="() => ToggleSteerChip(chip)">
+                                @(selected ? "Applied · " : "Add · ")@chip
+                            </button>
+                        }
+                    </div>
+
+                    @* These are real image inputs persisted on the selected card.
+                       The same references are reattached when steering from a take. *@
+                    <span class="cm-kicker">From @(Campaign.Brand?.Name ?? "the brand kit")</span>
+
+                    @if (Campaign.Brand is null)
+                    {
+                        <p class="cm-meta">
+                            This campaign has no brand, so there is no kit to draw on.
+                            <a href="campaigns">Pick one on the campaign</a> to reuse faces
+                            and backgrounds here.
+                        </p>
+                    }
+                    else
+                    {
+                        @if (ProductAssets.Count > 0)
+                        {
+                            <p class="cm-meta">Product screenshots stay attached automatically.</p>
+                        }
+                        @foreach (var group in ReferenceKit)
+                        {
+                            <div class="cm-studio__kit">
+                                <span class="cm-meta">
+                                    @KindLabel(group.Key)
+                                    @if (_picked.TryGetValue(group.Key, out var chosen))
+                                    {
+                                        <span class="cm-mono"> · @(chosen.Label ?? chosen.FileName)</span>
+                                    }
+                                </span>
+                                <div class="cm-studio__picks">
+                                    @foreach (var asset in group)
+                                    {
+                                        var isOn = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
+                                        <button type="button"
+                                                class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
+                                                aria-pressed="@(isOn ? "true" : "false")"
+                                                title="@(asset.Label ?? asset.FileName)"
+                                                @onclick="() => TogglePickAsync(group.Key, asset)">
+                                            @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
+                                            {
+                                                <img src="@thumb" alt="" loading="lazy" />
+                                            }
+                                            <span class="cm-studio__pick-label">
+                                                @(asset.Label ?? asset.FileName)
+                                            </span>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (!ReferenceKit.Any())
+                        {
+                            <p class="cm-meta">Nothing in the kit yet — add a face or background below.</p>
+                        }
+
+                        <div class="cm-studio__upload">
+                            <select class="cm-input" @bind="_uploadKind" aria-label="What this asset is">
+                                <option value="product">Product screenshot</option>
+                                <option value="face">Face</option>
+                                <option value="background">Background</option>
+                                <option value="logo">Logo</option>
+                                <option value="other">Other</option>
+                            </select>
+                            @* The label is load-bearing: it becomes the prompt text,
+                               so an unlabelled upload steers nothing useful. *@
+                            <input class="cm-input" placeholder="Describe it — e.g. the host, short dark hair"
+                                   aria-label="Description used as prompt text"
+                                   @bind="_uploadLabel" @bind:event="oninput" />
+                            <InputFile class="cm-kit__file" OnChange="UploadKitAssetAsync" accept="image/*"
+                                       aria-label="Choose an image file for the kit"
+                                       aria-describedby="cm-kit-upload-hint"
+                                       disabled="@(_uploading || string.IsNullOrWhiteSpace(_uploadLabel))" />
+                            @* A disabled file picker with no reason read as broken. The
+                               gate is deliberate (the description becomes prompt text), so
+                               say so until it is satisfied. *@
+                            <span id="cm-kit-upload-hint" class="cm-meta cm-kit__hint">
+                                @(_uploading
+                                    ? "Uploading…"
+                                    : string.IsNullOrWhiteSpace(_uploadLabel)
+                                        ? "Type a description first — it becomes the prompt text, then Choose File unlocks."
+                                        : "Ready — choose an image (up to 20 MB).")
+                            </span>
+                        </div>
+                        @if (_uploadError is { } kitError)
+                        {
+                            <p class="cm-form__error" role="alert">@kitError</p>
+                        }
+                        <p class="cm-meta">
+                            Saved to @Campaign.Brand.Name, so it is available to every
+                            campaign on this brand.
+                        </p>
+                    }
+
+                    <button type="button" class="cm-button cm-button--quiet"
+                            disabled="@(!CanSteer || IsGenerating)"
+                            @onclick="() => SteerAsync(take)">
+                        New take from this (≈ @CostPerVariantUsd.ToString("$0.00"))
+                    </button>
+                    @if (!CanSteer)
+                    {
+                        <p class="cm-meta">Pick a reference or type an adjustment — either is enough.</p>
+                    }
+                </section>
+
+            </div>
+        </div>
+    </div>
+}
+
+@if (_kitPickerOpen && Campaign.Brand is { } kitBrand)
+{
+    @* The kit picker: master–detail over the brand's reference assets. Left lists
+       the kit grouped by type, right previews the selection at a judgeable size.
+       Same .cm-modal chrome as the take lightbox — Escape closes, backdrop closes. *@
+    <div class="cm-modal" role="presentation" @onclick="CloseKitPicker">
+        <div class="cm-kitpicker" role="dialog" aria-modal="true"
+             aria-label="Choose reference images" tabindex="-1"
+             @ref="_kitPickerPanel"
+             @onclick:stopPropagation
+             @onkeydown="OnKitPickerKey">
+            <header class="cm-kitpicker__head">
+                <div>
+                    <h2>Reference images</h2>
+                    <p class="cm-meta">From @kitBrand.Name's kit — one per type. A selection is a real image input to the model, not prompt text.</p>
+                </div>
+                <button type="button" class="cm-studio__drawer-close"
+                        aria-label="Close" title="Close (Esc)" @onclick="CloseKitPicker">✕</button>
+            </header>
+            <div class="cm-kitpicker__body">
+                <nav class="cm-kitpicker__list" aria-label="Kit assets by type">
+                    @foreach (var group in ReferenceKit)
+                    {
+                        <span class="cm-kicker">@KindLabel(group.Key)</span>
+                        <ul>
+                            @foreach (var asset in group)
+                            {
+                                var isPicked = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
+                                var isCurrent = _kitPreviewAsset?.Id == asset.Id;
+                                <li>
+                                    <button type="button"
+                                            class="cm-kitpicker__item @(isCurrent ? "cm-kitpicker__item--current" : null)"
+                                            aria-current="@(isCurrent ? "true" : "false")"
+                                            @onclick="() => _kitPreviewAsset = asset">
+                                        @if (_kitPreviews.TryGetValue(asset.AssetId, out var listThumb))
+                                        {
+                                            <img src="@listThumb" alt="" loading="lazy" />
+                                        }
+                                        <span class="cm-kitpicker__item-label">@(asset.Label ?? asset.FileName)</span>
+                                        @if (isPicked)
+                                        {
+                                            <span class="cm-kitpicker__tick" aria-label="Selected">✓</span>
+                                        }
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </nav>
+                <section class="cm-kitpicker__preview" aria-label="Preview">
+                    @if (_kitPreviewAsset is { } previewAsset)
+                    {
+                        var previewKind = previewAsset.Kind.ToLowerInvariant();
+                        var previewOn = _picked.TryGetValue(previewKind, out var chosenNow) && chosenNow.Id == previewAsset.Id;
+                        @if (_kitPreviews.TryGetValue(previewAsset.AssetId, out var big))
+                        {
+                            <img src="@big" alt="@(previewAsset.Label ?? previewAsset.FileName)" />
+                        }
+                        <strong>@(previewAsset.Label ?? previewAsset.FileName)</strong>
+                        <span class="cm-meta">@KindLabel(previewKind)</span>
+                        <button type="button" class="cm-button"
+                                @onclick="() => TogglePickAsync(previewKind, previewAsset)">
+                            @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
+                        </button>
+                        @if (!previewOn && _picked.ContainsKey(previewKind))
+                        {
+                            <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
+                        }
+                    }
+                    else
+                    {
+                        <p class="cm-meta">Pick an asset on the left to preview it here.</p>
+                    }
+                </section>
+            </div>
+            <footer class="cm-kitpicker__actions">
+                <button type="button" class="cm-button" @onclick="CloseKitPicker">Done</button>
+            </footer>
+        </div>
+    </div>
+}
+
 
 @code {
 
@@ -1558,6 +1581,16 @@
         string Name, string Angle, string Prompt, string OverlayText, string Reason);
 
     [Parameter] public Guid CampaignId { get; set; }
+
+    /// <summary>
+    /// Host mode (ADR-F56): render only the take lightbox (and its pickers) for one slot, so
+    /// Focus can open an image in place instead of navigating away. No sheet, no drawer,
+    /// no URL writes; <see cref="Closed"/> fires when the dialog is dismissed.
+    /// </summary>
+    [Parameter] public bool Embedded { get; set; }
+    [Parameter] public Guid? EmbeddedSlotId { get; set; }
+    [Parameter] public Guid? EmbeddedTakeId { get; set; }
+    [Parameter] public EventCallback Closed { get; set; }
 
     [SupplyParameterFromQuery(Name = "artifact")]
     private Guid? RequestedArtifact { get; set; }
@@ -2040,26 +2073,39 @@
 
     private async Task SyncSelectionAsync()
     {
-        await LoadThumbnailConceptsAsync();
+        // Concepts are a nicety for the drawer; they must never delay opening a take.
+        _ = RunInBackgroundAsync(LoadThumbnailConceptsAsync);
 
         if (Campaign.ImageSlots.Count == 0)
         {
             return;
         }
 
-        var requested = RequestedSlot is { } slotId
+        var wantedSlot = Embedded ? EmbeddedSlotId : RequestedSlot;
+        var wantedArtifact = Embedded ? null : RequestedArtifact;
+        var wantedTake = Embedded ? EmbeddedTakeId : RequestedTake;
+
+        var requested = wantedSlot is { } slotId
             ? Campaign.ImageSlots.FirstOrDefault(s => s.Id == slotId)
-            : RequestedArtifact is { } artifactId
+            : wantedArtifact is { } artifactId
                 ? Campaign.ImageSlots.FirstOrDefault(s => s.ArtifactId == artifactId)
                 : null;
 
         if (requested is not null && requested.Id != _selectedId)
         {
             await SelectSlotAsync(requested);
-            if (RequestedTake is { } takeId
-                && _gallery.FirstOrDefault(variant => variant.Id == takeId) is { } take)
+            var take = wantedTake is { } takeId
+                ? _gallery.FirstOrDefault(variant => variant.Id == takeId)
+                : null;
+            // Embedded with no placed take yet: open the newest take so the dialog is never empty.
+            take ??= Embedded ? OrderedGallery.FirstOrDefault() : null;
+            if (take is not null)
             {
                 OpenVariant(take);
+            }
+            else if (Embedded)
+            {
+                _embeddedEmpty = true;
             }
         }
         else if (_selectedId is { } current && Campaign.ImageSlots.All(s => s.Id != current))
@@ -2116,6 +2162,10 @@
         _editorMode = "off";
         _compareWith = null;
         _pickingCompare = false;
+        if (Embedded)
+        {
+            _ = Closed.InvokeAsync();
+        }
     }
 
     private void OnDialogKey(KeyboardEventArgs e)
@@ -2629,8 +2679,32 @@
         _drawerNeedsFocus = true;
         _promptPreview = null;
         _promptPreviewError = null;
-        await Task.WhenAll(ReloadGalleryAsync(), LoadSupportingContextAsync(slot), LoadPromptPreviewAsync());
+        // The gallery gates the take dialog; the context blurb and the prompt preview are
+        // rail details and fill in behind it. Awaiting all three was the "very long delay".
+        await ReloadGalleryAsync();
+        _ = RunInBackgroundAsync(() => LoadSupportingContextAsync(slot));
+        _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
     }
+
+    /// <summary>Fire-and-forget with a re-render on completion; faults are swallowed here
+    /// because each loader already reports its own failure state.</summary>
+    private async Task RunInBackgroundAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Loader-owned failure state; nothing to add.
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private bool _embeddedEmpty;
+
+    private string EmbeddedStudioHref =>
+        $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={EmbeddedSlotId}";
 
     /// <summary>
     /// The exact text the next generate would send (ADR-054). Best-effort: a failure shows

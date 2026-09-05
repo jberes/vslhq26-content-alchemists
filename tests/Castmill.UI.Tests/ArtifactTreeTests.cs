@@ -530,8 +530,10 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     /// open, so steering and regenerate are one click from the content, not a hunt through
     /// the sheet.
     /// </summary>
+    /// <summary>Edit opens the studio's take dialog IN PLACE: Focus stays on screen, the URL does
+    /// not change, and the placed take is the one that opens.</summary>
     [Fact]
-    public async Task Keeper_hover_edit_opens_the_studio_with_the_placed_take()
+    public async Task Keeper_hover_edit_opens_the_take_dialog_inside_focus()
     {
         var slotId = Guid.NewGuid();
         var keeperId = Guid.NewGuid();
@@ -540,14 +542,33 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
             [Slot("youtube-thumbnail", YouTubeId,
                 keeperUrl: "https://public.example/keeper.webp",
                 slotId: slotId, keeperVariantId: keeperId)], 0, 1));
+        Http.OnGet("api/v1/ai/status", new Castmill.Core.Ai.AiStatusResponse(
+            "config", true, new Dictionary<string, string>(), false, null,
+            [new Castmill.Core.Ai.ImageProviderReadiness("foundry", true, null)]));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{slotId}/variants",
+            new List<ImageVariantResponse>
+            {
+                new(keeperId, slotId, "https://public.example/keeper-full.webp", "https://public.example/keeper.webp",
+                    "gpt-image-2", "Kept", null, null, 1280, 720, DateTimeOffset.UtcNow),
+            });
 
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(() => view.FindAll(".cm-plan__slot-edit").Count == 1,
             TimeSpan.FromSeconds(5));
+        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+        var before = navigation.Uri;
+
         await view.Find("button[aria-label='Edit YouTube thumbnail']").ClickAsync();
 
-        var navigation = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
-        Assert.EndsWith($"/{CampaignViews.Segment(CampaignView.ImageStudio)}?slot={slotId}&take={keeperId}", navigation.Uri, StringComparison.Ordinal);
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-lightbox")));
+        Assert.Equal("https://public.example/keeper-full.webp", view.Find(".cm-lightbox__image").GetAttribute("src"));
+        Assert.Equal(before, navigation.Uri);
+        // The studio's sheet never renders inside Focus — only its dialog.
+        Assert.Empty(view.FindAll(".cm-studio"));
+        Assert.NotNull(view.Find(".cm-producer__group")); // Focus rail still there
+
+        await view.Find("button.cm-lightbox__close").ClickAsync();
+        await view.WaitForAssertionAsync(() => Assert.Empty(view.FindAll(".cm-lightbox")));
     }
 
     // ---- helpers ---------------------------------------------------------------

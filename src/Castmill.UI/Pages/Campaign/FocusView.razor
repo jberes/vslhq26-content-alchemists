@@ -749,7 +749,8 @@
                                 @if ((slot.PublishedUrl ?? slot.KeeperThumbUrl) is { } imageUrl)
                                 {
                                     <div class="cm-plan__slot-preview">
-                                        <img class="cm-plan__slot-image"
+                                        <img class="cm-plan__slot-image" role="button" tabindex="0"
+                                             title="Edit this image" @onclick="() => EditSlotImage(slot)"
                                              src="@(imageUrl + "?v=" + slot.UpdatedAt.ToUnixTimeSeconds())"
                                              width="@slot.TargetWidth" height="@slot.TargetHeight"
                                              alt="@ArtifactDisplay.SlotLabel(slot.Kind) keeper" />
@@ -780,6 +781,12 @@
                             </li>
                         }
                     </ul>
+                    }
+                    @if (_imageDialogSlot is { } dialogSlot)
+                    {
+                        <ImageStudioView Embedded="true" CampaignId="CampaignId"
+                                         EmbeddedSlotId="dialogSlot" EmbeddedTakeId="_imageDialogTake"
+                                         Closed="CloseImageDialogAsync" />
                     }
                     <div class="cm-form__actions">
                         <button type="button" class="cm-button cm-button--quiet"
@@ -1925,14 +1932,22 @@
     /// list here re-reads CampaignState on return, and the preview URL carries the slot's
     /// UpdatedAt, so a changed image refreshes without a manual reload.
     /// </summary>
+    private Guid? _imageDialogSlot;
+    private Guid? _imageDialogTake;
+
+    /// <summary>Opens the studio's take dialog IN PLACE (ADR-F56): Focus keeps its context,
+    /// and the image card refreshes when the dialog closes.</summary>
     private void EditSlotImage(ImageSlotResponse slot)
     {
-        var path = ImageStudioPath(slot.Id);
-        if (slot.KeeperVariantId is { } take)
-        {
-            path += $"&take={take}";
-        }
-        Navigation.NavigateTo(path);
+        _imageDialogSlot = slot.Id;
+        _imageDialogTake = slot.KeeperVariantId;
+    }
+
+    private async Task CloseImageDialogAsync()
+    {
+        _imageDialogSlot = null;
+        _imageDialogTake = null;
+        await Campaign.RefreshAsync(CampaignId);
     }
 
     private async Task DownloadSlotImageAsync(ImageSlotResponse slot)
