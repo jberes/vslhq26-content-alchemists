@@ -263,7 +263,9 @@ public sealed record GenerateVariantsRequest(
     /// models in one run, so the gallery holds the same prompt from every provider side by
     /// side. Overrides <see cref="ModelAlias"/> when present. Each take records its model.
     /// </summary>
-    [property: MaxLength(6)] string[]? ModelAliases = null);
+    [property: MaxLength(6)] string[]? ModelAliases = null,
+    /// <summary>Art-director pass (ADR-058): a vision critic judges each take against the brief and re-renders with the defect named, up to the configured rounds.</summary>
+    bool Critique = false);
 
 /// <summary>
 /// The exact text a generate call would send for this slot right now (ADR-054). Auto mode

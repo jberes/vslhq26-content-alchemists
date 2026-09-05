@@ -485,6 +485,8 @@ public static class ImageSlotEndpoints
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
+        Castmill.Api.Services.Ai.Agents.IImageCritic critic,
+        Microsoft.Extensions.Options.IOptions<Castmill.Api.Services.Ai.AiOptions> aiOptions,
         CancellationToken ct)
     {
         if (!publicStore.IsConfigured)
@@ -524,7 +526,9 @@ public static class ImageSlotEndpoints
             slot, effectivePrompt, request.Variants, steeringNote: null, sourceVariantId: null,
             principal, http, renderer, publicStore, composer, tenant, db, clock, ct,
             resolvedReferences, request.ModelAlias,
-            compare is { Length: > 0 } ? compare : null);
+            compare is { Length: > 0 } ? compare : null,
+            critic: request.Critique ? critic : null,
+            criticOptions: request.Critique ? aiOptions.Value.Agents.ImageCritic : null);
     }
 
     /// <summary>
@@ -1272,7 +1276,9 @@ public static class ImageSlotEndpoints
         IReadOnlyList<ImageReference>? references = null,
         string? modelOverride = null,
         IReadOnlyList<string>? compareModels = null,
-        Func<string?, CancellationToken, Task<byte[]>>? renderOverride = null)
+        Func<string?, CancellationToken, Task<byte[]>>? renderOverride = null,
+        Castmill.Api.Services.Ai.Agents.IImageCritic? critic = null,
+        Castmill.Api.Services.Ai.AiOptions.ImageCriticOptions? criticOptions = null)
     {
         var userId = AuthEndpoints.GetUserId(principal);
         // Compare mode (ADR-054): the same prompt on every listed model, `count` takes each.
@@ -1338,7 +1344,7 @@ public static class ImageSlotEndpoints
         // N × one render); persistence stays on this thread because DbContext is not
         // thread-safe. Each render is awaited in completion order so progress stays live.
         var pending = jobs.Select((model, index) => RenderOneAsync(index + 1, model)).ToList();
-        async Task<(int Take, string? Model, byte[]? Webp, Exception? Error, long DurationMs)> RenderOneAsync(int take, string? model)
+        async Task<(int Take, string? Model, byte[]? Webp, Exception? Error, long DurationMs, string? Note)> RenderOneAsync(int take, string? model)
         {
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
@@ -1348,11 +1354,37 @@ public static class ImageSlotEndpoints
                     : await renderer.RenderExactAsync(
                         userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
                         references ?? [], ct);
-                return (take, model, webp, null, stopwatch.ElapsedMilliseconds);
+
+                // Art-director loop (ADR-058): judge the take against the brief; on a rejection
+                // re-render ONCE per round with the named defect, keeping the best-scoring take.
+                string? note = null;
+                if (critic is not null && criticOptions is { Enabled: true } && renderOverride is null)
+                {
+                    var verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, webp, ct);
+                    var best = (Webp: webp, verdict.Score);
+                    var rounds = 0;
+                    while (verdict.Ran && !verdict.Accept && rounds < criticOptions.MaxRounds && verdict.Fix is { Length: > 0 } fix)
+                    {
+                        rounds++;
+                        var retryPrompt = $"{effectivePrompt}\nArt director's fix for the previous render: {fix}";
+                        var retry = await renderer.RenderExactAsync(
+                            userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, references ?? [], ct);
+                        verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, retry, ct);
+                        if (!verdict.Ran || verdict.Score >= best.Score)
+                        {
+                            best = (retry, verdict.Score);
+                        }
+                    }
+                    webp = best.Webp;
+                    note = verdict.Ran
+                        ? $"{verdict.Summary}{(rounds > 0 ? $" · {rounds} re-render{(rounds == 1 ? "" : "s")}" : "")}"
+                        : verdict.Summary;
+                }
+                return (take, model, webp, null, stopwatch.ElapsedMilliseconds, note);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return (take, model, null, ex, stopwatch.ElapsedMilliseconds);
+                return (take, model, null, ex, stopwatch.ElapsedMilliseconds, null);
             }
         }
 
@@ -1360,7 +1392,7 @@ public static class ImageSlotEndpoints
         {
             var finished = await Task.WhenAny(pending);
             pending.Remove(finished);
-            var (i, model, rendered, error, durationMs) = await finished;
+            var (i, model, rendered, error, durationMs, criticNote) = await finished;
             // The batch's model, recorded on every variant so a gallery of takes from two
             // models stays readable.
             try
@@ -1391,7 +1423,7 @@ public static class ImageSlotEndpoints
                     ThumbBlobPath = thumbPath,
                     Model = model ?? "image",
                     Prompt = effectivePrompt,
-                    SteeringNote = steeringNote,
+                    SteeringNote = criticNote is null ? steeringNote : (steeringNote is null ? criticNote : $"{steeringNote} · {criticNote}"),
                     SourceVariantId = sourceVariantId,
                     State = "Candidate",
                     Width = slot.TargetWidth,
@@ -1400,7 +1432,7 @@ public static class ImageSlotEndpoints
                 };
                 db.ImageVariants.Add(variant);
                 variants.Add(ToResponse(variant));
-                items.Add(new { kind = $"v{i}", model, success = true, durationMs });
+                items.Add(new { kind = $"v{i}", model, success = true, durationMs, critic = criticNote });
             }
             catch (AiNotConfiguredException ex) when (!comparing)
             {

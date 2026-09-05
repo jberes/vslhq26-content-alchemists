@@ -32,6 +32,32 @@ public sealed class AiOptions
     /// <summary>REST version used for multipart image edits (reference-image generation).</summary>
     public string ImageApiVersion { get; set; } = "2025-04-01-preview";
 
+    /// <summary>The three agent loops (ADR-058). Each is on by default and bounded by a tool budget.</summary>
+    public AgentOptions Agents { get; set; } = new();
+
+    public sealed class AgentOptions
+    {
+        public AgentLoopOptions TechEditVerifier { get; set; } = new() { MaxToolCalls = 12 };
+        public ImageCriticOptions ImageCritic { get; set; } = new();
+        public AgentLoopOptions SeoResearch { get; set; } = new() { MaxToolCalls = 14 };
+    }
+
+    public sealed class AgentLoopOptions
+    {
+        public bool Enabled { get; set; } = true;
+        /// <summary>Hard cap on tool calls per run — the agent is told when it is spent and must conclude.</summary>
+        public int MaxToolCalls { get; set; } = 12;
+    }
+
+    public sealed class ImageCriticOptions
+    {
+        public bool Enabled { get; set; } = true;
+        /// <summary>Re-render rounds after the first take when the critic rejects it (each costs a render).</summary>
+        public int MaxRounds { get; set; } = 2;
+        /// <summary>Score (0–100) at or above which a take is accepted without another round.</summary>
+        public int AcceptScore { get; set; } = 70;
+    }
+
     public void NormalizeAppServiceKeys()
     {
         AddHyphenatedAliases(Models);

@@ -47,10 +47,10 @@ public sealed class ImagesClient(ApiClient api)
     /// The result carries persisted variants + a run id pollable at <c>runs/{id}</c>.</summary>
     public Task<VariantBatchResponse> GenerateAsync(
         Guid campaignId, Guid slotId, int variants, string? modelAlias = null,
-        CancellationToken ct = default) =>
+        bool critique = false, CancellationToken ct = default) =>
         api.PostAsync<object, VariantBatchResponse>(
             $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate",
-            new { variants, modelAlias },
+            new { variants, modelAlias, critique },
             anonymous: false,
             ct);
 

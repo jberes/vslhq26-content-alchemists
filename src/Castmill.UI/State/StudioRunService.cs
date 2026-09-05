@@ -60,9 +60,9 @@ public sealed class StudioRunService(ImagesClient images, GenerationClient gener
     /// Starts a fresh-generation run for the slot. <paramref name="modelAlias"/> renders this
     /// batch with a chosen model without changing the slot's saved default.
     /// </summary>
-    public void StartGenerate(Guid campaignId, Guid slotId, int variants, string? modelAlias = null) =>
+    public void StartGenerate(Guid campaignId, Guid slotId, int variants, string? modelAlias = null, bool critique = false) =>
         Start(campaignId, slotId, variants,
-            ct => images.GenerateAsync(campaignId, slotId, variants, modelAlias, ct));
+            ct => images.GenerateAsync(campaignId, slotId, variants, modelAlias, critique, ct));
 
     /// <summary>
     /// Compare mode: one take per listed model, same prompt, one run. The gallery labels

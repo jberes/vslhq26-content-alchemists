@@ -129,6 +129,55 @@ public sealed class TechEditApiTests(CastmillApiFactory factory)
 
     // ---- setup -----------------------------------------------------------------
 
+    [Fact]
+    public async Task The_verifier_agent_runs_when_a_knowledge_base_exists_and_its_verdicts_ride_out()
+    {
+        var verifier = new ScriptedVerifier();
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(_ => new FakeFactory(FakeTechEditor.WithClaims)));
+            services.Replace(ServiceDescriptor.Scoped<IKnowledgeBaseClient>(_ => new ConfiguredSilentKnowledge()));
+            services.Replace(ServiceDescriptor.Scoped<Castmill.Api.Services.Ai.Agents.ITechEditVerifier>(_ => verifier));
+        }));
+        var (client, campaignId, artifactId) = await SetUpAsync(app);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/tech-edit",
+            new { useKnowledgeBase = true });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<TechEditResult>();
+        Assert.True(result!.Success, result.Error);
+
+        // The editor's claim reached the verifier and came back verified with a quote.
+        Assert.Equal("blog", verifier.Kind);
+        Assert.Contains(verifier.Received, c => c.SourceUrl == "https://example.test/docs");
+        var claim = Assert.Single(result.Claims!);
+        Assert.True(claim.Verified);
+        Assert.Equal("Deployment time fell by 47%.", claim.Quote);
+        Assert.Contains(result.KnowledgeAttached!, a => a.StartsWith("agent: verifier (2 tool calls, 1/1 verified)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Without_a_knowledge_base_the_verifier_is_not_asked()
+    {
+        var verifier = new ScriptedVerifier();
+        await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(_ => new FakeFactory(FakeTechEditor.Good)));
+            services.Replace(ServiceDescriptor.Scoped<Castmill.Api.Services.Ai.Agents.ITechEditVerifier>(_ => verifier));
+        }));
+        var (client, campaignId, artifactId) = await SetUpAsync(app);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/tech-edit", new { });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<TechEditResult>();
+        Assert.True(result!.Success, result.Error);
+
+        Assert.Null(verifier.Kind);
+        Assert.DoesNotContain(result.KnowledgeAttached ?? [], a => a.StartsWith("agent:", StringComparison.Ordinal));
+    }
+
     private WebApplicationFactory<Program> WithFakeModel(Func<string, string> respond) =>
         factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
             services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
@@ -176,6 +225,34 @@ public sealed class TechEditApiTests(CastmillApiFactory factory)
 
     // ---- fakes -----------------------------------------------------------------
 
+    /// <summary>The verifier as the orchestrator sees it: every claim comes back quoted.</summary>
+    private sealed class ScriptedVerifier : Castmill.Api.Services.Ai.Agents.ITechEditVerifier
+    {
+        public string? Kind { get; private set; }
+        public IReadOnlyList<ClaimCheck> Received { get; private set; } = [];
+
+        public Task<Castmill.Api.Services.Ai.Agents.VerificationResult> VerifyAsync(
+            Guid userId, string kind, IReadOnlyList<ClaimCheck> claims, BrandContext brand, CancellationToken ct)
+        {
+            Kind = kind;
+            Received = claims;
+            var verified = claims.Select(c => new ClaimCheck(c.Statement, c.SourceUrl, true, "Deployment time fell by 47%.")).ToList();
+            return Task.FromResult(new Castmill.Api.Services.Ai.Agents.VerificationResult(
+                verified,
+                [new Castmill.Api.Services.Ai.Agents.AgentStep("ask_knowledge_base", "q", "answered"),
+                 new Castmill.Api.Services.Ai.Agents.AgentStep("fetch_source", "https://example.test/docs", "812 chars")],
+                2, true, null));
+        }
+    }
+
+    /// <summary>A configured gateway that has nothing to say — enough to gate the verifier on.</summary>
+    private sealed class ConfiguredSilentKnowledge : IKnowledgeBaseClient
+    {
+        public bool IsConfigured => true;
+        public Task<KnowledgeAnswer?> AskAsync(Guid userId, string question, CancellationToken ct) =>
+            Task.FromResult<KnowledgeAnswer?>(null);
+    }
+
     /// <summary>Canned second-pass responses, keyed off the editor instruction.</summary>
     private static class FakeTechEditor
     {
@@ -188,6 +265,18 @@ public sealed class TechEditApiTests(CastmillApiFactory factory)
                      "metaDescription":"d","citations":["S1","S2"]},
                      "changes":[{"what":"Replaced 'in half' with 47%","why":"The docs give the real figure",
                      "sourceUrl":"https://example.test/docs"}]}
+                    """
+                : Draft(prompt);
+
+        /// <summary>The editor asserts one sourced technical claim — what the verifier checks.</summary>
+        public static string WithClaims(string prompt) =>
+            IsTechEdit(prompt)
+                ? $$"""
+                    {"artifact":{"title":"Launch story","markdown":"{{Body}} cut deployment time by 47%.",
+                     "metaDescription":"d","citations":["S1","S2"]},
+                     "changes":[{"what":"Replaced 'in half' with 47%","why":"The docs give the real figure",
+                     "sourceUrl":"https://example.test/docs"}],
+                     "claims":[{"statement":"Deployment time fell by 47%","sourceUrl":"https://example.test/docs"}]}
                     """
                 : Draft(prompt);
 

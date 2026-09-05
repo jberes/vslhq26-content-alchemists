@@ -120,3 +120,13 @@ Both actions already read Steering (finding above). Add an optional **Technical 
 - ADR-F55: dashboards/campaign views fill the frame; wider studio drawer.
 - Focus: **Edit** beside Download on every image card → studio drawer + lightbox for the placed take.
 - Studio: honest size/crop copy, prompt preview, per-take prompt, Regenerate, Compare.
+
+## Addendum — agents (2026-09-05, evening) — BUILT
+- ADR-058 / ADR-F57: three bounded tool-loop agents, see [agents.md](agents.md).
+  - Tech Edit verifier: `ask_knowledge_base` / `fetch_source` (cited https hosts only) / `search_skills`; `ClaimCheck.Quote`; `agent: verifier (…)` in `KnowledgeAttached`.
+  - Image art director: `GenerateVariantsRequest.Critique` → studio **Art director pass** toggle → `RenderBatchAsync` reject/re-render loop; verdict on `SteeringNote`.
+  - SEO research agent decorates `SeoResearch`; metrics only from DataForSEO tool results.
+- Prompts: `Generators.AeoGuidance` on every reader-facing kind (answer-first, question headings, FAQ, keyword placement, YouTube description rules, syndication canonical).
+- Config: `Ai:Agents:{TechEditVerifier,ImageCritic,SeoResearch}` (structure in the committed template).
+- Backlog: DataForSEO `ai_keyword_data` / `llm_mentions` in the AEO scorecard; Content Analysis for syndication tracking; OnPage check after publish; critic for compare-mode takes.
+

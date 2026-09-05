@@ -116,7 +116,9 @@ public sealed record TechEditRequest(
     Castmill.Core.Resources.TechnicalBrief? TechnicalBrief = null);
 
 /// <summary>One technical claim the Tech Edit made or kept, and whether a source backs it (ADR-056).</summary>
-public sealed record ClaimCheck(string Statement, string? SourceUrl, bool Verified);
+public sealed record ClaimCheck(string Statement, string? SourceUrl, bool Verified,
+    /// <summary>The sentence in the source that supports the claim, when the verifier found one (ADR-058).</summary>
+    string? Quote = null);
 
 /// <summary>
 /// Outcome of a second pass. <see cref="Changes"/> is the model's own account of what it

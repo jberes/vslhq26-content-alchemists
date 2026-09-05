@@ -96,6 +96,31 @@ public sealed class ImageStudioPromptTests : CastmillUiTestContext
         });
     }
 
+    [Fact]
+    public async Task The_art_director_pass_is_off_by_default_and_rides_on_the_generate_request()
+    {
+        Http.OnPatch($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}", Slot());
+        var view = await OpenSlotAsync();
+
+        var toggle = view.Find(".cm-studio__critic input[type=checkbox]");
+        Assert.False(toggle.HasAttribute("checked"));
+        Assert.Contains("Off:", view.Find(".cm-studio__critic .cm-meta").TextContent, StringComparison.Ordinal);
+
+        await toggle.ChangeAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs { Value = true });
+        Assert.Contains("re-rendered on a defect", view.Find(".cm-studio__critic .cm-meta").TextContent, StringComparison.Ordinal);
+
+        await view.FindAll(".cm-studio__row > button.cm-button")
+            .Single(button => button.TextContent.Contains("Generate 1 variant", StringComparison.Ordinal)).ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var body = Http.Bodies.Single(b => b.Method == HttpMethod.Post
+                && b.Path.EndsWith("/generate", StringComparison.Ordinal)).Body;
+            Assert.Contains("\"critique\":true", body, StringComparison.Ordinal);
+            Assert.Contains("\"variants\":1", body, StringComparison.Ordinal);
+        });
+    }
+
     private async Task<IRenderedComponent<ImageStudioView>> OpenSlotAsync()
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));

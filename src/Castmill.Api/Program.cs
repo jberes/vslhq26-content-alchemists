@@ -113,6 +113,9 @@ builder.Services.Configure<KnowledgeBaseOptions>(
 builder.Services.AddScoped<IKnowledgeBaseClient, KnowledgeBaseClient>();
 // MCP-enabled Tech Edit (ADR-056): raw Messages API, MCP connector beta.
 builder.Services.AddScoped<IAnthropicMcpClient, AnthropicMcpClient>();
+// Agents (ADR-058): claim verifier and image critic. The SEO agent is registered with the SEO services.
+builder.Services.AddScoped<Castmill.Api.Services.Ai.Agents.ITechEditVerifier, Castmill.Api.Services.Ai.Agents.TechEditVerificationAgent>();
+builder.Services.AddScoped<Castmill.Api.Services.Ai.Agents.IImageCritic, Castmill.Api.Services.Ai.Agents.ImageCriticAgent>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<IBrandContextService, BrandContextService>();
 builder.Services.AddScoped<IContentDependencyService, ContentDependencyService>();
@@ -131,7 +134,9 @@ builder.Services.AddScoped<IBrandLookup, BrandLookup>();
 builder.Services.AddScoped<IResearchContextSuggester, ResearchContextSuggester>();
 builder.Services.AddScoped<IBriefSuggester, BriefSuggester>();
 builder.Services.AddScoped<IWorkspaceLinks, WorkspaceLinks>();
-builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoResearch, Castmill.Api.Services.Seo.SeoResearch>();
+// SEO research: the agent drives the DataForSEO tools and falls back to the fixed pipeline (ADR-058).
+builder.Services.AddScoped<Castmill.Api.Services.Seo.SeoResearch>();
+builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoResearch, Castmill.Api.Services.Seo.SeoResearchAgent>();
 builder.Services.AddScoped<Castmill.Api.Services.Seo.ISeoReportService, Castmill.Api.Services.Seo.SeoReportService>();
 builder.Services.AddHostedService<InterruptedRunSweeper>();
 // Its own client: a short timeout and no resilience retries, because re-fetching a slow
@@ -212,6 +217,13 @@ builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
 // consults MCP tools can legitimately run for minutes.
 builder.Services.AddHttpClient(AnthropicMcpClient.HttpClientName,
     client => client.Timeout = TimeSpan.FromMinutes(6));
+// The verifier fetches cited pages only (host allow-list in the agent); short timeout, no retries.
+builder.Services.AddHttpClient(Castmill.Api.Services.Ai.Agents.TechEditVerificationAgent.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Castmill-Verifier/1.0");
+    client.MaxResponseContentBufferSize = 2 * 1024 * 1024;
+});
 
 /// <summary>
 /// Azure SQL Serverless auto-pauses when idle, and the FIRST connection after that has to

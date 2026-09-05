@@ -465,6 +465,17 @@
                                 </button>
                                 <span class="cm-meta">≈ @((_variantCount * CostPerVariantUsd).ToString("$0.00")) estimated model spend</span>
                             </div>
+                            <div class="cm-studio__row cm-studio__critic">
+                                <label class="cm-studio__model" title="An art-director agent reviews each take against the brief and re-renders once or twice when it finds a defect. Slower and up to 3× the spend.">
+                                    <input type="checkbox" checked="@_critique" @onchange="e => _critique = e.Value is true" />
+                                    <span>Art director pass</span>
+                                </label>
+                                <span class="cm-meta">
+                                    @(_critique
+                                        ? "Each take is judged against the brief and re-rendered on a defect (up to 3× spend)."
+                                        : "Off: takes are rendered once and shown as-is.")
+                                </span>
+                            </div>
                             @if (UsableModels.Count > 1)
                             {
                                 <div class="cm-studio__row cm-studio__compare">
@@ -1314,6 +1325,8 @@
     private string? _modelPickerError;
     private string? _modelDraft;
     private int _variantCount = 1;
+    /// <summary>Art-director loop (ADR-058): opt-in per generate, off by default because it multiplies spend.</summary>
+    private bool _critique;
     private int _batchTakeTarget = 1;
     private Guid? _batchAttachCampaign;
     private Guid? _handledBatchRun;
@@ -3297,7 +3310,7 @@
         _failures = [];
         // The model goes with the request. Reading it from the slot instead meant a save that
         // failed (or simply hadn't landed) rendered with the previous model without saying so.
-        StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount, EffectiveAlias);
+        StudioRun.StartGenerate(CampaignId, slot.Id, _variantCount, EffectiveAlias, _critique);
     }
 
     private async Task GeneratePendingAsync()

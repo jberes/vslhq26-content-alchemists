@@ -30,6 +30,12 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - Headlines that must be exact are composited after generation (`ImageComposer`), never
   spelled by the model.
 
+## Agents (ADR-058)
+- Three bounded tool-loop agents, documented in [docs/agents.md](docs/agents.md): Tech Edit verifier, image art director, SEO research. Each is a decorator over the one-shot path and falls back to it on any failure; flags under `Ai:Agents:*`.
+- Policy lives in code, not prompts: a claim is verified only with a quote + http(s) source (`Merge`); the critic's score overrules its "accept" (`Parse`); SEO metrics and question sources come only from tool results (`Assemble`). Tests pin these — keep them when changing a prompt.
+- `fetch_source` fetches https only from hosts a claim, the knowledge base or the brand's links cited. Never widen that without an ADR.
+- Agent runs are opt-in and visible (ADR-F57): the critic runs only when the request says `critique`; results say which agent produced them.
+
 ## Security rules (non-negotiable)
 - **No secrets in the repo.** Committed `appsettings.json` holds structure only.
   - Dev config lives in `src/Castmill.Api/appsettings.Development.json` — **gitignored and publish-excluded**; it is the single local source for `ConnectionStrings:Castmill` (Azure SQL) and `Jwt:SigningKey` (≥32 bytes). Keys documented in the committed `appsettings.Development.template.json`. User-secrets are cleared/unused — don't reintroduce them, they silently override the file.

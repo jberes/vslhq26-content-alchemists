@@ -42,6 +42,32 @@ public static partial class Generators
         evidence block you drew from. Never invent or shorten a Citation ID.
         """;
 
+    /// <summary>
+    /// Search + answer-engine guidance appended to every reader-facing kind (ADR-058). Distilled
+    /// from the 2026 AEO/SEO practice: answer engines quote one self-contained paragraph, so
+    /// every priority question gets one; headings carry the questions people ask; the primary
+    /// keyword sits where it is weighted; syndicated copies point back to the original.
+    /// </summary>
+    public const string AeoGuidance = """
+        SEARCH AND ANSWER-ENGINE RULES
+        - Answer first: the opening paragraph must be a complete, quotable answer to the
+          piece's main question, understandable if it is the only paragraph anyone reads.
+        - Each priority question from the targets gets a heading phrased as the question and a
+          direct 2-4 sentence answer under it before any elaboration.
+        - Use the exact product, component and API names — answer engines match on them.
+        - Long-form pieces end with a short FAQ (3-5 questions, one-paragraph answers) drawn from
+          the target questions; never invent questions the source does not answer.
+        - Cite specifics the source provides (numbers, versions, outcomes); first-party facts
+          earn citations that generic statements never do.
+        - The primary keyword appears in the title, the first heading and the first 100 words,
+          worded naturally; secondary keywords only where they fit honestly.
+        - Video: the primary keyword in the description's first two sentences, chapters that
+          read like H2 headings, and a pinned-comment question that invites replies.
+        - Syndication: any copy meant for Medium, LinkedIn or dev.to must link to the original
+          article or video in its first paragraph and say it was first published there — the
+          canonical URL points home, never at the copy.
+        """;
+
     private static readonly string[] SocialPlatforms = ["x", "linkedin", "facebook", "instagram", "threads", "bluesky"];
 
     public static IReadOnlyList<GeneratorSpec> FanOut { get; } = BuildFanOut();
