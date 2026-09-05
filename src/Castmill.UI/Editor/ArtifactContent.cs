@@ -269,6 +269,50 @@ public static class StructuredContent
         }
     }
 
+    /// <summary>The YouTube package's title experiment: the recommended title plus the scored A/B/C options.</summary>
+    public static (string Recommended, IReadOnlyList<Castmill.Core.Resources.YoutubeTitleOptionResponse> Options) YoutubeTitles(string? contentJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson ?? "{}");
+            var root = document.RootElement;
+            var content = root.TryGetProperty("content", out var nested) ? nested : root;
+            var options = new List<Castmill.Core.Resources.YoutubeTitleOptionResponse>();
+            if (content.TryGetProperty("titleOptions", out var scored) && scored.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var option in scored.EnumerateArray())
+                {
+                    options.Add(new Castmill.Core.Resources.YoutubeTitleOptionResponse(
+                        Str(option, "slot"), Str(option, "title"), Str(option, "angle"),
+                        option.TryGetProperty("score", out var score) && score.ValueKind == JsonValueKind.Number ? score.GetDouble() : 0,
+                        Str(option, "rationale")));
+                }
+            }
+            return (Str(content, "title"), options);
+        }
+        catch (JsonException)
+        {
+            return (string.Empty, []);
+        }
+    }
+
+    /// <summary>Promotes one option to the package's recommended title, leaving everything else as it is.</summary>
+    public static string WithYoutubeTitle(string? originalJson, string title)
+    {
+        JsonObject root;
+        try
+        {
+            root = JsonNode.Parse(originalJson ?? "{}") as JsonObject ?? new JsonObject();
+        }
+        catch (JsonException)
+        {
+            root = new JsonObject();
+        }
+        var content = root["content"] as JsonObject ?? root;
+        content["title"] = title.Trim();
+        return root.ToJsonString();
+    }
+
     /// <summary>Patches rich-editor prose back into a typed package without dropping the
     /// validated fields, citations, audit result, or envelope around it.</summary>
     public static string FromEditorMarkdown(string kind, string? originalJson, string markdown)

@@ -1626,6 +1626,73 @@ button.cm-intent {
     padding: var(--cm-space-2);
 }
 
+/* YouTube title experiment (Focus): the recommended title and the A/B/C alternates as cards. */
+.cm-titles {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    margin-block-end: var(--cm-space-6);
+    padding: var(--cm-space-4);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+}
+
+.cm-titles__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--cm-space-3);
+}
+
+.cm-titles__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: var(--cm-space-3);
+}
+
+.cm-titles__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-inline-start: 3px solid var(--cm-status-draft);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+}
+
+.cm-titles__card--recommended {
+    border-inline-start-color: var(--cm-status-published);
+}
+
+.cm-titles__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+}
+
+.cm-titles__slot {
+    font-weight: 600;
+    color: var(--cm-accent);
+}
+
+.cm-titles__score {
+    font-weight: 600;
+}
+
+.cm-titles__chars--over {
+    color: var(--cm-warning);
+}
+
+.cm-titles__title {
+    margin: 0;
+    font-family: var(--cm-font-display);
+    font-size: var(--cm-text-h4);
+    line-height: var(--cm-leading-tight);
+}
+
 .cm-focus__head {
     margin-block-end: var(--cm-space-6);
 }

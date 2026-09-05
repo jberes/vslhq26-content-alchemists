@@ -254,6 +254,52 @@
                         </span>
                     }
                 }
+                @if (_artifact.Kind == "youtube")
+                {
+                    var titles = StructuredContent.YoutubeTitles(_previewRevision?.ContentJson ?? _artifact.ContentJson);
+                    <section class="cm-titles" aria-label="Title experiment">
+                        <div class="cm-titles__head">
+                            <span class="cm-kicker">Title experiment</span>
+                            <span class="cm-meta">Recommended title is what you paste; A/B/C are the alternates to test. Under 60 characters or search truncates it.</span>
+                        </div>
+                        @if (titles.Options.Count == 0)
+                        {
+                            <p class="cm-meta">This package has no scored title options yet — Regenerate whole writes three.</p>
+                        }
+                        <div class="cm-titles__grid">
+                            @foreach (var option in titles.Options)
+                            {
+                                var isRecommended = string.Equals(option.Title, titles.Recommended, StringComparison.Ordinal);
+                                <article class="cm-titles__card @(isRecommended ? "cm-titles__card--recommended" : null)">
+                                    <div class="cm-titles__meta cm-mono cm-meta">
+                                        <span class="cm-titles__slot">@option.Slot</span>
+                                        <span>@option.Angle</span>
+                                        <span class="cm-titles__score">@option.Score.ToString("0")/100</span>
+                                        <span class="@(option.Title.Length > 60 ? "cm-titles__chars--over" : null)">@option.Title.Length chars</span>
+                                        @if (isRecommended)
+                                        {
+                                            <span class="cm-badge cm-badge--done">RECOMMENDED</span>
+                                        }
+                                    </div>
+                                    <h3 class="cm-titles__title">@option.Title</h3>
+                                    @if (!string.IsNullOrWhiteSpace(option.Rationale))
+                                    {
+                                        <p class="cm-meta">@option.Rationale</p>
+                                    }
+                                    <div class="cm-form__actions">
+                                        <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                                disabled="@(_regenerating || isRecommended || _previewRevision is not null)"
+                                                @onclick="() => UseYoutubeTitleAsync(option.Title)">Use as title</button>
+                                        <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                                disabled="@(_regenerating || _previewRevision is not null)"
+                                                title="Write a new @option.Slot title with the current steering"
+                                                @onclick="() => RegenerateYoutubeTitleAsync(option.Slot)">Regenerate @option.Slot</button>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
                 <RichEditor @key="EditorKey"
                             Markdown="@DisplayedMarkdown"
                             Editable="@(_previewRevision is null && (!IsStructured || SupportsRichStructuredEditing))"
@@ -468,18 +514,6 @@
                             @(_regenerating ? "Working…" : $"Tech Edit · {TechEditProvider}")
                         </button>
                     </div>
-                    @if (_artifact.Kind == "youtube")
-                    {
-                        <div class="cm-form__actions cm-producer__actions" aria-label="YouTube title experiment controls">
-                            @foreach (var slot in new[] { "A", "B", "C" })
-                            {
-                                <button type="button" class="cm-button cm-button--quiet"
-                                        disabled="@_regenerating" @onclick="() => RegenerateYoutubeTitleAsync(slot)">
-                                    Regenerate title @slot
-                                </button>
-                            }
-                        </div>
-                    }
                     @if (KnowledgeBaseReady || Campaign.Brand?.HasKnowledge == true)
                     {
                         <label class="cm-fanout__item">
@@ -1556,6 +1590,32 @@
         }
         catch (ApiException ex) { Notifier.ShowError(ex.Message); }
         finally { _regenerating = false; }
+    }
+
+    /// <summary>Promotes an A/B/C option to the recommended title — the package's title field AND the artifact's title.</summary>
+    private async Task UseYoutubeTitleAsync(string title)
+    {
+        if (_artifact is null || _artifactId is not { } id)
+        {
+            return;
+        }
+        _saveState = "Saving…";
+        try
+        {
+            var contentJson = StructuredContent.WithYoutubeTitle(_artifact.ContentJson, title);
+            var saved = await Campaigns.SaveArtifactAsync(CampaignId, id, title.Trim(), contentJson, _etag);
+            _artifact = saved;
+            _etag = $"\"{saved.Version}\"";
+            _saveState = $"Saved · v{saved.Version}";
+            await LoadRevisionsAsync(id);
+            await Campaign.RefreshAsync(CampaignId);
+            Notifier.ShowSuccess("Recommended title updated.");
+        }
+        catch (ApiException ex)
+        {
+            _saveState = "Not saved";
+            Notifier.ShowError(ex.Message);
+        }
     }
 
     private async Task GenerateSocialSetAsync()

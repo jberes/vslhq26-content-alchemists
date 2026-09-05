@@ -197,6 +197,47 @@ public sealed class TechEditTests : CastmillUiTestContext
         Assert.Contains("unverified — check before publishing", view.Find(".cm-claims__item--open").TextContent, StringComparison.Ordinal);
     }
 
+    /// <summary>A YouTube package shows its scored A/B/C titles above the description, and one can be promoted.</summary>
+    [Fact]
+    public async Task A_youtube_package_shows_its_title_experiment_and_can_promote_an_option()
+    {
+        StubStatus(configured: true, provider: null);
+        var youtubeId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [new ArtifactPreviewResponse(youtubeId, CampaignId, "youtube", "Why Agent Skills Matter", ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)], [], 0, 0));
+        const string content = """
+            {"content":{"title":"Why Agent Skills Matter","description":"Body.",
+             "titleOptions":[
+               {"slot":"A","title":"Why Agent Skills Matter","angle":"seo","score":93,"rationale":"Names the tools."},
+               {"slot":"B","title":"Stop Guessing: Agent Skills for React","angle":"curiosity","score":96,"rationale":"Curiosity gap."},
+               {"slot":"C","title":"How to Ship a React CRM in 10 Minutes","angle":"how-to","score":88,"rationale":"How-to intent."}]}}
+            """;
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{youtubeId}", new ArtifactResponse(
+            youtubeId, CampaignId, "youtube", "Why Agent Skills Matter", content, ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{youtubeId}/revisions", new List<ArtifactRevisionResponse>());
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.Equal(3, view.FindAll(".cm-titles__card").Count));
+
+        var cards = view.FindAll(".cm-titles__card");
+        Assert.Contains("RECOMMENDED", cards[0].TextContent, StringComparison.Ordinal);
+        Assert.Contains("96/100", cards[1].TextContent, StringComparison.Ordinal);
+        Assert.Contains("Regenerate B", cards[1].TextContent, StringComparison.Ordinal);
+        // The rail no longer duplicates the per-slot buttons.
+        Assert.DoesNotContain("Regenerate title A", view.Markup, StringComparison.Ordinal);
+
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/artifacts/{youtubeId}", new ArtifactResponse(
+            youtubeId, CampaignId, "youtube", "Stop Guessing: Agent Skills for React", content.Replace("\"title\":\"Why Agent Skills Matter\",", "\"title\":\"Stop Guessing: Agent Skills for React\",", StringComparison.Ordinal),
+            ArtifactStatus.Draft, 2, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        await view.FindAll(".cm-titles__card")[1].QuerySelectorAll("button").First(b => b.TextContent.Contains("Use as title", StringComparison.Ordinal)).ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+        {
+            var body = Http.Bodies.Single(b => b.Method == HttpMethod.Put && b.Path.EndsWith($"/artifacts/{youtubeId}", StringComparison.Ordinal)).Body;
+            Assert.Contains("\"title\":\"Stop Guessing: Agent Skills for React\"", body, StringComparison.Ordinal);
+        });
+        await view.WaitForAssertionAsync(() => Assert.Contains("Saved · v2", view.Markup, StringComparison.Ordinal));
+    }
+
     private async Task<IRenderedComponent<FocusView>> OpenAsync()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
