@@ -1,8 +1,10 @@
 using Bunit;
 using Castmill.Core.Ai;
 using Castmill.Core.Resources;
+using Castmill.UI.Design;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -18,8 +20,11 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
     private static readonly Guid TakeA = Guid.Parse("b3333333-1111-1111-1111-333333333333");
     private static readonly Guid TakeB = Guid.Parse("b3333333-1111-1111-1111-444444444444");
 
+    private readonly RecordingConfirm _confirm = new();
+
     public ImageStudioEditorTests()
     {
+        Services.AddSingleton<IConfirmService>(_confirm);
         SignInTestUser();
         Http.OnGet("api/v1/campaigns", new List<CampaignResponse> { Campaign() });
         Http.OnGet("api/v1/ai/status", new AiStatusResponse(
@@ -54,6 +59,42 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
             Assert.Contains("Deploy time, halved", body, StringComparison.Ordinal);
         });
         Assert.Contains("composited onto the placed image", view.Markup, StringComparison.Ordinal);
+    }
+
+    /// <summary>The toolbar Save: disabled until an edit exists, saves, then reads Saved; closing with
+    /// unsaved edits asks first.</summary>
+    [Fact]
+    public async Task Toolbar_save_enables_on_edits_persists_and_guards_close()
+    {
+        var view = await OpenTakeAsync(TakeA);
+        var save = () => view.Find(".cm-lightbox__save");
+        Assert.True(save().HasAttribute("disabled"));
+
+        await ToolbarButton(view, "Text overlay").ClickAsync();
+        view.Find(".cm-imgeditor-panel textarea").Input("Ship it");
+        Assert.False(save().HasAttribute("disabled"));
+        Assert.Equal("Save", save().TextContent.Trim());
+
+        // Closing with unsaved edits asks; declining keeps the lightbox open.
+        _confirm.Answer = false;
+        await view.Find("button.cm-lightbox__close").ClickAsync();
+        Assert.NotEmpty(view.FindAll(".cm-lightbox"));
+        Assert.Contains("Unsaved overlay changes", Assert.Single(_confirm.Requests).Title, StringComparison.Ordinal);
+
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay", new OverlaySaveResult(Slot(), null));
+        await save().ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("Ship it", Http.Bodies.Single(b => b.Method == HttpMethod.Put && b.Path.EndsWith("/overlay", StringComparison.Ordinal)).Body, StringComparison.Ordinal);
+            Assert.Equal("Saved", save().TextContent.Trim());
+        });
+        Assert.True(save().HasAttribute("disabled"));
+
+        // Clean now: close needs no confirmation.
+        _confirm.Requests.Clear();
+        await view.Find("button.cm-lightbox__close").ClickAsync();
+        await view.WaitForAssertionAsync(() => Assert.Empty(view.FindAll(".cm-lightbox")));
+        Assert.Empty(_confirm.Requests);
     }
 
     [Fact]
@@ -121,4 +162,15 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
 
     private static CampaignResponse Campaign() =>
         new(CampaignId, Guid.NewGuid(), "Launch", null, DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+
+    private sealed class RecordingConfirm : IConfirmService
+    {
+        public bool Answer { get; set; } = true;
+        public List<ConfirmRequest> Requests { get; } = [];
+        public Task<bool> ConfirmAsync(ConfirmRequest request)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Answer);
+        }
+    }
 }

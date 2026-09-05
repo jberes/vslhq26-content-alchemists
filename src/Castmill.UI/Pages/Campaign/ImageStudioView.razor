@@ -704,7 +704,7 @@
             {
                 @* The take dialog: full-size view + steering + keep/discard/place. Custom
                    .cm-modal like the app's confirm dialog — Escape closes, backdrop closes. *@
-                <div class="cm-modal" role="presentation" @onclick="CloseVariant">
+                <div class="cm-modal" role="presentation" @onclick="RequestCloseAsync">
                     <div class="cm-lightbox" role="dialog" aria-modal="true"
                          aria-labelledby="cm-variant-title" tabindex="-1"
                          @ref="_dialogPanel"
@@ -716,6 +716,12 @@
                         <div class="cm-lightbox__stage">
                             <div class="cm-lightbox__toolbar" role="toolbar" aria-label="Image actions">
                                 <div class="cm-lightbox__toolbar-actions">
+                                    <button type="button" class="cm-button cm-lightbox__save"
+                                            disabled="@(!_overlayDirty || _savingOverlay)"
+                                            title="@(_overlayDirty ? "Save the overlay changes to this image" : _overlaySavedAt is { } t ? $"Saved · {t:HH:mm:ss}" : "Nothing to save yet — edit the text overlay first")"
+                                            @onclick="SaveOverlayAsync">
+                                        @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save" : _overlaySavedAt is null ? "Save" : "Saved")
+                                    </button>
                                     <button type="button" class="cm-button" disabled="@_placing"
                                             title="Publish this take into the image slot and update linked content"
                                             @onclick="() => PlaceAsync(take)">
@@ -802,7 +808,7 @@
                         </div>
 
                         <button type="button" class="cm-dialog-close cm-lightbox__close"
-                                aria-label="Close image" title="Close (Esc)" @onclick="CloseVariant">✕</button>
+                                aria-label="Close image" title="Close (Esc)" @onclick="RequestCloseAsync">✕</button>
 
                         <div class="cm-lightbox__rail">
                             <header class="cm-lightbox__head">
@@ -940,8 +946,8 @@
                                         </div>
                                     }
                                     <div class="cm-form__actions">
-                                        <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0)" @onclick="SaveOverlayAsync">
-                                            @(_savingOverlay ? "Saving…" : "Save overlay")
+                                        <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0 || !_overlayDirty)" @onclick="SaveOverlayAsync">
+                                            @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save overlay" : "Saved")
                                         </button>
                                         @if (Selected?.Overlay is not null)
                                         {
@@ -2097,6 +2103,8 @@
         _compareWith = null;
         _pickingCompare = false;
         _overlayStatus = null;
+        _overlayDirty = false;
+        _overlaySavedAt = null;
         SeedOverlayDraft();
         _steerNote = string.Empty;
         _dialogNeedsFocus = true;
@@ -2120,7 +2128,7 @@
                 _editorMode = "off";
                 return;
             }
-            CloseVariant();
+            _ = RequestCloseAsync();
         }
     }
 
@@ -2136,6 +2144,9 @@
     private string? _selectedBoxId;
     private bool _savingOverlay;
     private string? _overlayStatus;
+    /// <summary>Unsaved overlay edits: the toolbar Save enables and closing asks first.</summary>
+    private bool _overlayDirty;
+    private DateTimeOffset? _overlaySavedAt;
     private (double X, double Y, double W, double H)? _maskRect;
     private string _maskInstruction = string.Empty;
     private ImageVariantResponse? _compareWith;
@@ -2237,21 +2248,41 @@
         var id = $"box-{Guid.NewGuid():N}"[..12];
         _overlayDraft.Add(new OverlayBox(id, "Your headline", 0.08, 0.08 + (0.12 * Math.Min(_overlayDraft.Count, 5)), 0.6, 0.16, 0.09, 600, "#F2F2F3", "left"));
         _selectedBoxId = id;
+        _overlayDirty = true;
     }
 
     private void RemoveBox(string id)
     {
         _overlayDraft.RemoveAll(b => b.Id == id);
         _selectedBoxId = _overlayDraft.FirstOrDefault()?.Id;
+        _overlayDirty = true;
     }
 
     private void UpdateBox(OverlayBox updated)
     {
         var index = _overlayDraft.FindIndex(b => b.Id == updated.Id);
-        if (index >= 0)
+        if (index >= 0 && !_overlayDraft[index].Equals(updated))
         {
             _overlayDraft[index] = updated;
+            _overlayDirty = true;
         }
+    }
+
+    /// <summary>Backdrop, ✕ and Escape: never lose unsaved overlay edits silently.</summary>
+    private async Task RequestCloseAsync()
+    {
+        if (_overlayDirty)
+        {
+            var discard = await Confirm.ConfirmAsync(new ConfirmRequest(
+                "Unsaved overlay changes",
+                "The text overlay has edits that are not saved. Close and lose them?",
+                "Discard changes", Destructive: true));
+            if (!discard)
+            {
+                return;
+            }
+        }
+        CloseVariant();
     }
 
     [JSInvokable]
@@ -2262,6 +2293,7 @@
         {
             _overlayDraft[index] = _overlayDraft[index] with { X = x, Y = y, W = w, H = h };
             _selectedBoxId = id;
+            _overlayDirty = true;
             StateHasChanged();
         }
     }
@@ -2284,6 +2316,8 @@
         try
         {
             var result = await Images.SetOverlayAsync(CampaignId, slot.Id, new OverlaySpec([.. _overlayDraft]));
+            _overlayDirty = false;
+            _overlaySavedAt = DateTimeOffset.Now;
             _overlayStatus = result.Slot.State == "Filled"
                 ? (result.FontFallback == true
                     ? "Saved and composited (system typeface — the display font wasn't available server-side)."
@@ -2313,6 +2347,8 @@
             await Images.ClearOverlayAsync(CampaignId, slot.Id);
             _overlayDraft = [];
             _selectedBoxId = null;
+            _overlayDirty = false;
+            _overlaySavedAt = DateTimeOffset.Now;
             _overlayStatus = "Overlay cleared.";
             await Campaign.RefreshAsync(CampaignId);
         }
