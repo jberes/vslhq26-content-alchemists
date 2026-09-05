@@ -770,7 +770,7 @@
                                 @* The editor surface (ADR-055): the image plus positioned boxes,
                                    measured by castmill-overlay-editor.js. Geometry lives in ratios
                                    so the server composite lands where the preview showed it. *@
-                                <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode">
+                                <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode" style="@AspectStyle(take)">
                                     <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
                                     @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null))
                                     {
@@ -791,7 +791,7 @@
                                 </div>
                                 @if (_compareWith is { } other)
                                 {
-                                    <div class="cm-imgeditor cm-imgeditor--secondary">
+                                    <div class="cm-imgeditor cm-imgeditor--secondary" style="@AspectStyle(other)">
                                         <img class="cm-lightbox__image" src="@other.Url" alt="Take to compare" />
                                         <span class="cm-imgeditor__label cm-mono">B · @other.Model</span>
                                         <button type="button" class="cm-button cm-button--quiet cm-imgeditor__swap"
@@ -2155,13 +2155,19 @@
         double.TryParse(value?.ToString(), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
+    /// <summary>The take's width/height as a plain number, the CSS `--ar` the editor sizes itself from.</summary>
+    private static string AspectStyle(ImageVariantResponse take) =>
+        take.Height <= 0
+            ? "--ar:1.7778;"
+            : $"--ar:{((double)take.Width / take.Height).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)};";
+
     /// <summary>Inline geometry from ratios; font size in container-query height units so the
     /// preview scales with the image exactly as the server scales with the slot.</summary>
     private static string BoxStyle(OverlayBox box)
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var style = $"left:{box.X * 100:0.###}%;top:{box.Y * 100:0.###}%;width:{box.W * 100:0.###}%;height:{box.H * 100:0.###}%;"
-            + $"font-size:calc({box.FontSize.ToString("0.####", inv)} * 100cqh);font-weight:{box.Weight};color:{box.Color};text-align:{box.Align};";
+            + $"font-size:calc({box.FontSize.ToString("0.####", inv)} * 100cqw / var(--ar));font-weight:{box.Weight};color:{box.Color};text-align:{box.Align};";
         if (box.Band is { } band)
         {
             var alpha = (int)Math.Clamp(Math.Round(band.Opacity * 255), 0, 255);

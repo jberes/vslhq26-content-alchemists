@@ -5039,24 +5039,38 @@ button.cm-intent {
     min-block-size: 0;
     margin: 0;
     padding: var(--cm-space-8);
+    /* Size container for the editor wrapper (ADR-F56): cqw/cqh below are this box. */
+    container-type: size;
 }
 
 /* ---- Editor surface (ADR-055) --------------------------------------------------- */
 /* The image plus positioned overlay boxes and a mask rectangle. Geometry is in ratios of
    the image; container-query height units size the type so it scales with the picture. */
+/* The canvas is the size container; the editor wrapper takes the largest size that fits the
+   canvas at the take's aspect ratio (--ar, width/height, set inline per take). Its own width
+   is then the reference for the boxes' type (cqw), which is how the CSS preview and the
+   server's height-ratio font size agree. Never `container-type: size` on the wrapper itself —
+   that severs its size from the image and it collapses to nothing. */
 .cm-imgeditor {
+    --ar: 1.7778;
     position: relative;
-    display: inline-block;
-    max-inline-size: 100%;
-    max-block-size: 100%;
-    container-type: size;
+    inline-size: min(100cqw, calc(100cqh * var(--ar)));
+    aspect-ratio: var(--ar);
+    container-type: inline-size;
     line-height: 0;
+}
+
+.cm-lightbox__canvas--compare .cm-imgeditor {
+    inline-size: min(48cqw, calc(100cqh * var(--ar)));
 }
 
 .cm-imgeditor > img {
     display: block;
-    max-inline-size: 100%;
-    max-block-size: 100%;
+    inline-size: 100%;
+    block-size: 100%;
+    max-inline-size: none;
+    max-block-size: none;
+    object-fit: contain;
 }
 
 .cm-imgeditor[data-editor-mode="mask"] {
@@ -5147,14 +5161,10 @@ button.cm-intent {
 }
 
 .cm-lightbox__canvas--compare {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    display: flex;
     gap: var(--cm-space-4);
     align-items: center;
-}
-
-.cm-lightbox__canvas--compare .cm-imgeditor {
-    max-inline-size: 100%;
+    justify-content: center;
 }
 
 .cm-imgeditor-panel__row {
