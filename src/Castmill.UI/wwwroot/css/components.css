@@ -39,6 +39,20 @@
     color: var(--cm-on-surface);
 }
 
+/* Icon-only button: a square the height of a worded button, glyph centred, name in
+   .cm-sr-only + title. Same hover/on/danger treatment as any other .cm-button. */
+.cm-button--icon {
+    inline-size: 2.75rem;
+    min-block-size: 2.75rem;
+    padding: 0;
+    justify-content: center;
+}
+
+.cm-button--icon .cm-icon {
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+}
+
 .cm-button--danger {
     background: var(--cm-danger);
     color: var(--cm-on-accent);

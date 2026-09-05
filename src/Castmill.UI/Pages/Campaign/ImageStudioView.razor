@@ -763,42 +763,61 @@
                                 @onclick="() => PlaceAsync(take)">
                             @(_placing ? "Using…" : "Use this image")
                         </button>
-                        <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@_downloading" @onclick="() => DownloadAsync(take)">
-                            @(_downloading ? "Downloading…" : "↓ Download image")
+                        @* Secondary actions are icon buttons (ADR-F59): the accessible name is the
+                           visually hidden label (also the tooltip); the glyph is decorative. Save and
+                           Use this image stay worded because they commit something. *@
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon"
+                                disabled="@_downloading" aria-busy="@(_downloading ? "true" : "false")"
+                                title="Download image" @onclick="() => DownloadAsync(take)">
+                            <AppIcon Name="download" /><span class="cm-sr-only">@(_downloading ? "Downloading…" : "Download image")</span>
                         </button>
-                        <button type="button" class="cm-button cm-button--quiet"
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon"
                                 disabled="@(IsGenerating || StudioRun.IsBatchRunning)"
-                                title="Render a fresh take with this take's prompt and model"
-                                @onclick="() => RegenerateTakeAsync(take)">Regenerate</button>
-                        <button type="button" class="cm-button cm-button--quiet @(_editorMode == "boxes" ? "cm-button--on" : null)"
+                                title="Regenerate — render a fresh take with this take's prompt and model"
+                                @onclick="() => RegenerateTakeAsync(take)">
+                            <AppIcon Name="refresh" /><span class="cm-sr-only">Regenerate</span>
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_editorMode == "boxes" ? "cm-button--on" : null)"
                                 aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
-                                title="Place and style text boxes on the image (composited after generation, no model call)"
-                                @onclick="ToggleOverlayEditor">Text overlay</button>
-                        <button type="button" class="cm-button cm-button--quiet @(_editorMode == "mask" ? "cm-button--on" : null)"
+                                title="Text overlay — place and style text boxes on the image (composited after generation, no model call)"
+                                @onclick="ToggleOverlayEditor">
+                            <AppIcon Name="text" /><span class="cm-sr-only">Text overlay</span>
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_editorMode == "mask" ? "cm-button--on" : null)"
                                 aria-pressed="@(_editorMode == "mask" ? "true" : "false")"
-                                title="Draw a region, then tell the model what to change there"
-                                @onclick="ToggleMaskTool">Select region</button>
-                        <button type="button" class="cm-button cm-button--quiet @(_compareWith is not null ? "cm-button--on" : null)"
+                                title="Select region — draw a region, then tell the model what to change there"
+                                @onclick="ToggleMaskTool">
+                            <AppIcon Name="crop" /><span class="cm-sr-only">Select region</span>
+                        </button>
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_compareWith is not null ? "cm-button--on" : null)"
                                 aria-pressed="@(_compareWith is not null ? "true" : "false")"
                                 disabled="@(OrderedGallery.Count(v => v.Id != take.Id) == 0)"
-                                title="Show another take beside this one"
-                                @onclick="ToggleCompare">Compare</button>
+                                title="Compare — show another take beside this one"
+                                @onclick="ToggleCompare">
+                            <AppIcon Name="columns" /><span class="cm-sr-only">Compare</span>
+                        </button>
                         @if (take.State != "Discarded")
                         {
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    title="Hide this take; it can be restored from discarded takes"
-                                    @onclick='() => SetStateAsync(take, "Discarded")'>Discard</button>
+                            <button type="button" class="cm-button cm-button--quiet cm-button--icon"
+                                    title="Discard — hide this take; it can be restored from discarded takes"
+                                    @onclick='() => SetStateAsync(take, "Discarded")'>
+                                <AppIcon Name="eye-off" /><span class="cm-sr-only">Discard</span>
+                            </button>
                         }
                         else
                         {
-                            <button type="button" class="cm-button cm-button--quiet"
-                                    @onclick='() => SetStateAsync(take, "Candidate")'>Restore</button>
+                            <button type="button" class="cm-button cm-button--quiet cm-button--icon"
+                                    title="Restore this take"
+                                    @onclick='() => SetStateAsync(take, "Candidate")'>
+                                <AppIcon Name="undo" /><span class="cm-sr-only">Restore</span>
+                            </button>
                         }
-                        <button type="button" class="cm-button cm-button--quiet cm-button--danger"
+                        <button type="button" class="cm-button cm-button--quiet cm-button--icon cm-button--danger"
                                 disabled="@take.IsLocked"
-                                title="@(take.IsLocked ? "Unlock this image before deleting it" : "Delete this image permanently")"
-                                @onclick="() => DeleteTakeAsync(take)">Delete forever</button>
+                                title="@(take.IsLocked ? "Unlock this image before deleting it" : "Delete forever — delete this image permanently")"
+                                @onclick="() => DeleteTakeAsync(take)">
+                            <AppIcon Name="trash" /><span class="cm-sr-only">Delete forever</span>
+                        </button>
                     </div>
                     <button type="button"
                             class="cm-button cm-button--quiet cm-button--icon cm-lightbox__lock"

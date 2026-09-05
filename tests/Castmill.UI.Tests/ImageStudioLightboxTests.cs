@@ -190,4 +190,26 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
     private static CampaignResponse Campaign() =>
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+
+    [Fact]
+    public async Task Secondary_actions_are_icon_buttons_and_the_two_commits_stay_worded()
+    {
+        var view = await OpenAsync();
+
+        var toolbar = view.Find(".cm-lightbox__toolbar-actions");
+        var worded = toolbar.QuerySelectorAll("button:not(.cm-button--icon)");
+        Assert.Equal(["Save", "Use this image"], worded.Select(b => b.TextContent.Trim()).ToArray());
+
+        var icons = toolbar.QuerySelectorAll("button.cm-button--icon").ToList();
+        Assert.Equal(
+            ["Download image", "Regenerate", "Text overlay", "Select region", "Compare", "Discard", "Delete forever"],
+            icons.Select(b => b.QuerySelector(".cm-sr-only")!.TextContent.Trim()).ToArray());
+        Assert.All(icons, b =>
+        {
+            Assert.NotNull(b.QuerySelector("svg.cm-icon"));
+            Assert.False(string.IsNullOrWhiteSpace(b.GetAttribute("title")));
+            // Nothing visible but the glyph: every text node sits in the screen-reader span.
+            Assert.Equal(b.QuerySelector(".cm-sr-only")!.TextContent.Trim(), b.TextContent.Trim());
+        });
+    }
 }
