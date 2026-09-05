@@ -1965,7 +1965,10 @@
         if (_dialogNeedsFocus)
         {
             _dialogNeedsFocus = false;
-            await _dialogPanel.FocusAsync();
+            if (_openVariant is not null)
+            {
+                await FocusSafelyAsync(_dialogPanel);
+            }
         }
 
         // The editor island follows the lightbox: attached while a take is open, told the
@@ -1975,10 +1978,12 @@
         if (_drawerNeedsFocus)
         {
             _drawerNeedsFocus = false;
-            // Focus makes Escape-to-close work without a click into the drawer first.
-            if (_selectedId is not null && _openVariant is null && !_kitPickerOpen && !_modelPickerOpen)
+            // Focus makes Escape-to-close work without a click into the drawer first. The
+            // drawer does not exist in Embedded mode — focusing its reference there threw
+            // "ElementReference has not been configured correctly" and blanked Focus.
+            if (!Embedded && _selectedId is not null && _openVariant is null && !_kitPickerOpen && !_modelPickerOpen)
             {
-                await _drawerPanel.FocusAsync();
+                await FocusSafelyAsync(_drawerPanel);
             }
         }
 
@@ -1987,7 +1992,7 @@
             _kitPickerNeedsFocus = false;
             if (_kitPickerOpen)
             {
-                await _kitPickerPanel.FocusAsync();
+                await FocusSafelyAsync(_kitPickerPanel);
             }
         }
 
@@ -1996,7 +2001,7 @@
             _modelPickerNeedsFocus = false;
             if (_modelPickerOpen)
             {
-                await _modelPickerPanel.FocusAsync();
+                await FocusSafelyAsync(_modelPickerPanel);
             }
         }
     }
@@ -2465,6 +2470,23 @@
         chain.Add(take);
         chain.AddRange(_gallery.Where(v => v.SourceVariantId == take.Id).OrderBy(v => v.CreatedAt));
         return chain;
+    }
+
+    /// <summary>Focus is a courtesy, never a failure: an element that did not render this
+    /// cycle (a mode without it, a disposed circuit) must not throw out of a lifecycle method.</summary>
+    private static async Task FocusSafelyAsync(ElementReference element)
+    {
+        if (element.Context is null)
+        {
+            return;
+        }
+        try
+        {
+            await element.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+        }
     }
 
     private async Task EnsureEditorAttachedAsync()
