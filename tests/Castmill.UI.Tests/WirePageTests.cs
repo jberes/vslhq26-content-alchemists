@@ -372,12 +372,16 @@ public sealed class WirePageTests : CastmillUiTestContext
     public void The_wire_sheet_is_mode_aware_and_its_type_is_tokenised()
     {
         var semantic = ReadWorkspaceFile("src/Castmill.UI/wwwroot/css/tokens/semantic.css");
-        var darkBlock = Rule(semantic, ":root[data-cm-mode=\"dark\"]");
-        foreach (var token in new[] { "--cm-wire-bg", "--cm-wire-surface", "--cm-wire-ink", "--cm-wire-divider", "--cm-wire-accent", "--cm-wire-error" })
+        // ADR-F60: every Wire colour resolves through a semantic token, so the family AND the
+        // mode reach it through the family files — no literal, and no Wire-only dark block.
+        foreach (var token in new[] { "--cm-wire-bg", "--cm-wire-surface", "--cm-wire-ink", "--cm-wire-divider", "--cm-wire-hairline", "--cm-wire-accent", "--cm-wire-accent-soft", "--cm-wire-queued", "--cm-wire-sent", "--cm-wire-draft", "--cm-wire-error" })
         {
-            Assert.Contains(token + ":", darkBlock, StringComparison.Ordinal);
+            var match = System.Text.RegularExpressions.Regex.Match(semantic, System.Text.RegularExpressions.Regex.Escape(token) + @":\s*([^;]+);");
+            Assert.True(match.Success, token + " is not defined");
+            Assert.Matches(@"^var\(--cm-[a-z-]+\)$", match.Groups[1].Value.Trim());
         }
         Assert.DoesNotContain("--cm-wire-dark-", semantic, StringComparison.Ordinal);
+        Assert.DoesNotContain("--cm-wire-bg: #", semantic, StringComparison.Ordinal);
 
         // Every Wire type step is at least 11px (0.6875rem): the 9.5–10px labels were sub-legible.
         foreach (var token in new[] { "--cm-wire-text-xs", "--cm-wire-text-sm", "--cm-wire-text-md", "--cm-wire-text-body", "--cm-wire-text-title", "--cm-wire-text-day" })

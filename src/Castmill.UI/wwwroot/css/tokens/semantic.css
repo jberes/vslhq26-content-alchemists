@@ -61,21 +61,22 @@
    --cm-on-status-queued: var(--cmf-on-status-queued);
     --cm-status-bar-width: 3px;
 
-    /* The Wire keeps the approved Industry sheet regardless of the surrounding family.
-       Its error hue must remain distinct from Warm Editorial's ember accent. The sheet is
-       mode-aware (ADR-F54): these are the light values; the dark block below swaps them
-       under [data-cm-mode="dark"], so feature CSS keeps reading --cm-wire-* only. */
-    --cm-wire-bg: #f2f2f3;
-    --cm-wire-surface: #e9e9ea;
-    --cm-wire-ink: #1d1f20;
-    --cm-wire-divider: rgb(29 31 32 / 16%);
-    --cm-wire-hairline: rgb(29 31 32 / 10%);
-    --cm-wire-accent: #5980a6;
-    --cm-wire-accent-soft: #94bce3;
-    --cm-wire-queued: #416180;
-    --cm-wire-sent: #1d2d3d;
-    --cm-wire-draft: #b7b7ba;
-    --cm-wire-error: #c15f3c;
+    /* The Wire's sheet (ADR-F60). Derived from the semantic layer, so it follows the family
+       AND the mode like every other surface: Warm Editorial gives a warm sheet, Industry
+       Blueprint a cool one, and dark mode inverts both without a second block. Feature CSS
+       keeps reading --cm-wire-* only. (Before ADR-F60 these were literal Industry greys that
+       ignored the family switch — the "why does The Wire not use the theme" report.) */
+    --cm-wire-bg: var(--cm-surface-sunken);
+    --cm-wire-surface: var(--cm-surface);
+    --cm-wire-ink: var(--cm-on-surface);
+    --cm-wire-divider: var(--cm-rule-strong);
+    --cm-wire-hairline: var(--cm-rule);
+    --cm-wire-accent: var(--cm-accent-alt);
+    --cm-wire-accent-soft: var(--cm-accent-alt-wash);
+    --cm-wire-queued: var(--cm-status-queued);
+    --cm-wire-sent: var(--cm-status-published);
+    --cm-wire-draft: var(--cm-status-draft);
+    --cm-wire-error: var(--cm-danger);
 
     /* The Wire's type scale (ADR-F54). The handoff's 9.5–12.5px labels were sub-legible on a
        27" display; these sit one step up and in rem so browser zoom behaves like a
@@ -148,21 +149,8 @@
     --cm-motion: var(--cm-motion-duration) var(--cm-motion-ease);
 }
 
-/* The Wire in dark mode (ADR-F54): same sheet, inverted. The dark values used to live under
-   separate names that no rule referenced, which is why The Wire ignored the theme toggle. */
-:root[data-cm-mode="dark"] {
-    --cm-wire-bg: #191b1c;
-    --cm-wire-surface: #222425;
-    --cm-wire-ink: #e7e7ea;
-    --cm-wire-divider: rgb(231 231 234 / 18%);
-    --cm-wire-hairline: rgb(231 231 234 / 10%);
-    --cm-wire-accent: #94bce3;
-    --cm-wire-accent-soft: #5980a6;
-    --cm-wire-queued: #9dbbd6;
-    --cm-wire-sent: #c9d6e2;
-    --cm-wire-draft: #5a5c60;
-    --cm-wire-error: #e0a08a;
-}
+/* The Wire needs no dark block of its own (ADR-F60): its tokens resolve through the semantic
+   layer, which the family files already invert under [data-cm-mode="dark"]. */
 
 /* Compact density: one number, whole app (E3.6). */
 :root[data-cm-density="compact"] {

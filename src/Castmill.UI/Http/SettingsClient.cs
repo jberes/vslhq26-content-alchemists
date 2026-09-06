@@ -6,7 +6,9 @@ namespace Castmill.UI.Http;
 /// here — that is the whole point of the secret store, and a DTO with a value field would be
 /// an invitation to leak one into a log or a render.
 /// </summary>
-public sealed record SecretStatus(string Kind, bool Configured, DateTimeOffset? UpdatedAt);
+/// <summary><paramref name="Readable"/> is false for a stored value the server can no longer decrypt
+/// (encryption key rotated after it was saved) — the card asks for it again.</summary>
+public sealed record SecretStatus(string Kind, bool Configured, DateTimeOffset? UpdatedAt, bool Readable = true);
 
 public sealed record SecretWriteRequest(string Value);
 

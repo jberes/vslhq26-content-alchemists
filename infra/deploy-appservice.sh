@@ -120,7 +120,7 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/castmill-deploy.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 SETTINGS_FILE="$WORK_DIR/appsettings.json"
 EXPORTED_SETTINGS_FILE="$WORK_DIR/exported-appsettings.json"
-PRESERVED_SETTINGS_FILE="$WORK_DIR/preserved-external-auth-settings.json"
+PRESERVED_SETTINGS_FILE="$WORK_DIR/preserved-protected-settings.json"
 PUBLISH_DIR="$WORK_DIR/publish"
 PACKAGE_FILE="$WORK_DIR/castmill.zip"
 MIGRATION_FILE="$WORK_DIR/migrations.sql"
@@ -133,12 +133,17 @@ EXISTING_APP_NAME="$(az deployment group show \
   --query properties.outputs.deployment.value.appName \
   --output tsv 2>/dev/null || true)"
 if [[ -n "$EXISTING_APP_NAME" ]]; then
-  echo "Preserving protected external-provider settings..."
+  # Bicep replaces siteConfig.appSettings wholesale, so anything not in the template is
+  # gone the moment the deployment runs. Read the protected settings FIRST: the external
+  # provider secrets, and the two runtime keys. Regenerating Castmill__EncryptionKey makes
+  # every stored user secret unreadable and regenerating Jwt__SigningKey signs everyone out —
+  # which is exactly what happened on every deploy before this read moved ahead of Bicep.
+  echo "Preserving protected settings (external providers, runtime keys)..."
   az webapp config appsettings list \
     --subscription "$SUBSCRIPTION_ID" \
     --resource-group "$RESOURCE_GROUP" \
     --name "$EXISTING_APP_NAME" \
-    --query "[?starts_with(name, 'ExternalAuth__Providers__')]" \
+    --query "[?starts_with(name, 'ExternalAuth__Providers__') || name=='Jwt__SigningKey' || name=='Castmill__EncryptionKey']" \
     --output json > "$PRESERVED_SETTINGS_FILE"
 fi
 
@@ -170,15 +175,13 @@ IDENTITY_NAME="$(az deployment group show \
   --query properties.outputs.deployment.value.identityName \
   --output tsv)"
 
-RUNTIME_KEY_COUNT="$(az webapp config appsettings list \
-  --subscription "$SUBSCRIPTION_ID" \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$APP_NAME" \
-  --query "length([?name=='Jwt__SigningKey' || name=='Castmill__EncryptionKey'])" \
-  --output tsv)"
+# Counted from the PRESERVED snapshot, not from the app after Bicep ran (that list has just
+# been reset and would always say 0). Keys are generated only on a first deployment.
+RUNTIME_KEY_COUNT="$(jq '[.[] | select(.name == "Jwt__SigningKey" or .name == "Castmill__EncryptionKey")] | length' "$PRESERVED_SETTINGS_FILE")"
 
 KEY_ARGUMENT=()
 if [[ "$RUNTIME_KEY_COUNT" != "2" ]]; then
+  echo "Runtime keys not found on the existing app — generating a fresh pair (first deployment)."
   KEY_ARGUMENT=(--generate-runtime-keys)
 fi
 

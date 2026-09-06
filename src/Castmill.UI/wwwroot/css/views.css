@@ -1403,6 +1403,12 @@ button.cm-intent {
     color: var(--cm-on-surface-muted);
 }
 
+/* A stored value the server can no longer read: needs the producer's attention, not a failure. */
+.cm-badge--warn {
+    background: var(--cm-warning);
+    color: var(--cm-on-accent);
+}
+
 /* ---- Focus mode + editor ------------------------------------------------------- */
 
 .cm-focus {

@@ -30,12 +30,16 @@ public static class SecretsEndpoints
     private static async Task<IResult> StatusAsync(
         ClaimsPrincipal principal, IUserSecretsService secrets, CancellationToken ct)
     {
-        var status = await secrets.StatusAsync(AuthEndpoints.GetUserId(principal), ct);
+        var userId = AuthEndpoints.GetUserId(principal);
+        var status = await secrets.StatusAsync(userId, ct);
+        var unreadable = await secrets.UnreadableAsync(userId, ct);
         return Results.Ok(Enum.GetValues<SecretKind>().Select(k => new
         {
             Kind = k.ToString(),
             Configured = status.ContainsKey(k),
             UpdatedAt = status.TryGetValue(k, out var at) ? at : (DateTimeOffset?)null,
+            // False only for a stored value the current encryption key cannot open.
+            Readable = !unreadable.Contains(k),
         }));
     }
 

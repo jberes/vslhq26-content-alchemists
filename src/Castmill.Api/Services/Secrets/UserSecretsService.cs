@@ -36,13 +36,22 @@ public interface IUserSecretsService
     Task<string?> GetAsync(Guid userId, SecretKind kind, CancellationToken ct);
     Task<bool> RemoveAsync(Guid userId, SecretKind kind, CancellationToken ct);
     Task<IReadOnlyDictionary<SecretKind, DateTimeOffset>> StatusAsync(Guid userId, CancellationToken ct);
+
+    /// <summary>
+    /// Stored secrets that no longer decrypt under the current encryption key (the key was
+    /// rotated after they were saved). They read as absent everywhere else; the Settings page
+    /// asks for them again. Default keeps fakes compiling.
+    /// </summary>
+    Task<IReadOnlySet<SecretKind>> UnreadableAsync(Guid userId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlySet<SecretKind>>(new HashSet<SecretKind>());
 }
 
 public sealed class UserSecretsService(
     CastmillDbContext db,
     ISecretCipher cipher,
     ITenantProvider tenant,
-    TimeProvider clock) : IUserSecretsService
+    TimeProvider clock,
+    ILogger<UserSecretsService> logger) : IUserSecretsService
 {
     // Stored under the reserved prefix that the plaintext /settings group refuses.
     private static string KeyFor(SecretKind kind) => $"secret.{kind}";
@@ -81,7 +90,48 @@ public sealed class UserSecretsService(
         var key = KeyFor(kind);
         var setting = await db.UserSettings
             .SingleOrDefaultAsync(s => s.UserId == userId && s.Key == key && s.IsEncrypted, ct);
-        return setting is null ? null : cipher.Decrypt(setting.Value);
+        if (setting is null)
+        {
+            return null;
+        }
+        try
+        {
+            return cipher.Decrypt(setting.Value);
+        }
+        catch (System.Security.Cryptography.CryptographicException ex)
+        {
+            // A secret saved under a previous Castmill:EncryptionKey. Reading it as "not set"
+            // keeps every readiness call answering instead of failing the whole page; the
+            // Settings status marks it for re-entry.
+            logger.LogWarning(ex, "Stored secret {Kind} cannot be decrypted under the current encryption key.", kind);
+            return null;
+        }
+    }
+
+    public async Task<IReadOnlySet<SecretKind>> UnreadableAsync(Guid userId, CancellationToken ct)
+    {
+        var rows = await db.UserSettings
+            .Where(s => s.UserId == userId && s.IsEncrypted)
+            .Select(s => new { s.Key, s.Value })
+            .ToListAsync(ct);
+        var unreadable = new HashSet<SecretKind>();
+        foreach (var kind in Enum.GetValues<SecretKind>())
+        {
+            var row = rows.FirstOrDefault(r => r.Key == KeyFor(kind));
+            if (row is null)
+            {
+                continue;
+            }
+            try
+            {
+                cipher.Decrypt(row.Value);
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                unreadable.Add(kind);
+            }
+        }
+        return unreadable;
     }
 
     public async Task<bool> RemoveAsync(Guid userId, SecretKind kind, CancellationToken ct)

@@ -227,7 +227,11 @@
                     <article class="cm-settings__card">
                         <header class="cm-settings__card-head">
                             <span class="cm-settings__name">@Label(secret.Kind)</span>
-                            @if (secret.Configured)
+                            @if (secret.Configured && !secret.Readable)
+                            {
+                                <span class="cm-badge cm-badge--warn">RE-ENTER</span>
+                            }
+                            else if (secret.Configured)
                             {
                                 <span class="cm-badge cm-badge--done">STORED</span>
                             }
@@ -238,6 +242,13 @@
                         </header>
 
                         <p class="cm-meta">@Hint(secret.Kind)</p>
+                        @if (secret.Configured && !secret.Readable)
+                        {
+                            <p class="cm-meta cm-settings__reenter" role="alert">
+                                The server's encryption key changed after this was saved, so the stored value can't be read.
+                                Paste the key again to restore it.
+                            </p>
+                        }
                         @if (secret.Configured && secret.UpdatedAt is { } at)
                         {
                             <p class="cm-meta">Updated @ArtifactDisplay.Ago(at, DateTimeOffset.Now)</p>

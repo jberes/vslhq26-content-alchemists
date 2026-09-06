@@ -74,6 +74,45 @@ public sealed class SecretsApiTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task A_secret_saved_under_a_previous_encryption_key_reads_as_unreadable_not_as_a_500()
+    {
+        // Save under the factory's key…
+        var client = await AuthedClientAsync();
+        var set = await client.PutAsJsonAsync("/api/v1/settings/secrets/NanoBananaKey",
+            new SecretWriteRequestDto("AIza-old-key"));
+        Assert.Equal(HttpStatusCode.NoContent, set.StatusCode);
+
+        // …then boot the same database under a rotated key, as a redeploy that regenerated
+        // Castmill:EncryptionKey did in production (2026-09-06).
+        await using var rotated = factory.WithWebHostBuilder(builder => builder.UseSetting(
+            "Castmill:EncryptionKey", Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))));
+        var rotatedClient = rotated.CreateClient();
+        rotatedClient.DefaultRequestHeaders.Authorization = client.DefaultRequestHeaders.Authorization;
+
+        var status = await rotatedClient.GetAsync("/api/v1/settings/secrets");
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        var rows = await status.Content.ReadFromJsonAsync<List<SecretStatusRow>>();
+        var nano = rows!.Single(r => r.Kind == "NanoBananaKey");
+        Assert.True(nano.Configured);
+        Assert.False(nano.Readable);
+        Assert.All(rows!.Where(r => r.Kind != "NanoBananaKey"), r => Assert.True(r.Readable));
+
+        // The readiness call that used to 500 on this account answers, with the provider not ready.
+        var readiness = await rotatedClient.GetAsync("/api/v1/ai/status");
+        Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
+        Assert.Contains("NanoBananaKey", await readiness.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        // Re-entering the value under the current key clears the flag.
+        var reenter = await rotatedClient.PutAsJsonAsync("/api/v1/settings/secrets/NanoBananaKey",
+            new SecretWriteRequestDto("AIza-new-key"));
+        Assert.Equal(HttpStatusCode.NoContent, reenter.StatusCode);
+        var after = await rotatedClient.GetFromJsonAsync<List<SecretStatusRow>>("/api/v1/settings/secrets");
+        Assert.True(after!.Single(r => r.Kind == "NanoBananaKey").Readable);
+    }
+
+    private sealed record SecretStatusRow(string Kind, bool Configured, DateTimeOffset? UpdatedAt, bool Readable);
+
+    [Fact]
     public async Task Unknown_secret_kind_is_404()
     {
         var client = await AuthedClientAsync();

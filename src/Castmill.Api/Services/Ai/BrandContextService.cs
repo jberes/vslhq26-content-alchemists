@@ -140,8 +140,23 @@ public sealed class BrandContextService(
                 m.Name, m.Url, Decrypt(m.AuthorizationCiphertext), ParseTools(m.AllowedToolsJson))).ToList());
     }
 
-    private string? Decrypt(string? ciphertext) =>
-        string.IsNullOrWhiteSpace(ciphertext) ? null : cipher.Decrypt(ciphertext);
+    private string? Decrypt(string? ciphertext)
+    {
+        if (string.IsNullOrWhiteSpace(ciphertext))
+        {
+            return null;
+        }
+        try
+        {
+            return cipher.Decrypt(ciphertext);
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // Saved under a previous encryption key: the server is used without its token
+            // rather than failing every generation for the brand.
+            return null;
+        }
+    }
 
     internal static IReadOnlyList<string>? ParseTools(string? json)
     {

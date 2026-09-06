@@ -130,4 +130,4 @@ Both actions already read Steering (finding above). Add an optional **Technical 
 - Config: `Ai:Agents:{TechEditVerifier,ImageCritic,SeoResearch}` (structure in the committed template).
 - **Follow-up (same night) — BUILT, ADR-059 / ADR-F58:** DataForSEO `ai_keyword_data` + `llm_mentions` in the deep report; `POST /seo/distribution` Published page check (OnPage instant crawl judged in code, referring domains, Content Analysis title mentions) with a panel on the SEO desk; `chat-audit` (gpt-5.6-sol) probed with an image — vision confirmed; tiptap 3.31.3 (npm audit clean).
 - Backlog: critic for compare-mode takes; scheduled re-checks of the Published page check with diffs.
-
+- **2026-09-06 — ADR-060 / ADR-F60:** deploy script preserves the runtime keys across Bicep (every earlier deploy had rotated them → 500 on `/ai/status` for accounts with stored secrets); unreadable secrets degrade + RE-ENTER badge; The Wire's colours now derive from the semantic layer so the theme family applies; ADR-F59 lightbox icon buttons.
