@@ -2112,6 +2112,14 @@
 
             await ReloadGalleryAsync();
             await Campaign.RefreshAsync(CampaignId);
+
+            // In the Focus dialog the producer generated a take to look at it; leaving the old
+            // keeper open made the new image "not show up" (ADR-F66). Open the newest one.
+            if (Embedded && StudioRun.Result is { Variants.Count: > 0 } produced
+                && _gallery.FirstOrDefault(v => produced.Variants.Any(p => p.Id == v.Id)) is { } newest)
+            {
+                OpenVariant(OrderedGallery.FirstOrDefault(v => produced.Variants.Any(p => p.Id == v.Id)) ?? newest);
+            }
         }
     }, Notifier, StateHasChanged, "Loading the takes"));
 
@@ -3315,6 +3323,15 @@
         catch (ApiException ex)
         {
             _modelPickerError = ex.Message;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or TaskCanceledException)
+        {
+            // A dropped connection or an unreadable reply used to escape this handler and reach
+            // Blazor's global error bar as an unexplained failure, with the dialog stuck on
+            // "Saving…". Name it here and let the producer retry.
+            _modelPickerError = ex is TaskCanceledException
+                ? "The save timed out. Check the connection and try again."
+                : $"The model could not be saved: {ex.Message}";
         }
         finally
         {

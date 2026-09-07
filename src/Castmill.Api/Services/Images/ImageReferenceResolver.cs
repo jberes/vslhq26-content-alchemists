@@ -55,11 +55,16 @@ public sealed class ImageReferenceResolver(
 
         // Product assets are automatic but bounded; explicit references remain under the
         // user's control. The final cap protects both provider limits and request size.
+        // Order is meaning (ADR-074): on an edits endpoint the first image is the one the
+        // model composes onto, so the background leads, the people follow, product screens
+        // come last, and the prompt numbers them in this same order.
         var wanted = links
             .Where(x => x.Link.Kind != "product").Take(5)
             .Concat(links.Where(x => x.Link.Kind == "product").Take(3))
             .DistinctBy(x => x.Asset.Id)
             .Take(8)
+            .OrderBy(x => RoleRank(x.Link.Kind))
+            .ThenBy(x => x.Link.CreatedAt)
             .ToList();
 
         var result = new List<ImageReference>(wanted.Count);
@@ -116,6 +121,15 @@ public sealed class ImageReferenceResolver(
     /// one card is a multi-hundred-megabyte upload before the model even starts. Returns null
     /// when the bytes are not a decodable image.
     /// </summary>
+    /// <summary>Background first (the canvas), then people, then anything else, product last.</summary>
+    internal static int RoleRank(string? kind) => kind switch
+    {
+        "background" => 0,
+        "face" => 1,
+        "product" => 3,
+        _ => 2,
+    };
+
     internal static ImageReference? Normalize(Guid assetId, byte[] bytes, string kind)
     {
         using var decoded = TryDecode(bytes);

@@ -108,14 +108,34 @@ public static class ImagePromptComposer
         {
             return;
         }
-        var hasProduct = references.Any(r => r.Kind == "product");
-        text.AppendLine(
-            $"{references.Count} reference image{(references.Count == 1 ? " is" : "s are")} attached. "
-            + "Use their pixels, not just their descriptions; preserve recognisable faces, objects and layouts."
-            + (hasProduct
-                ? " Product screenshots are authoritative: reproduce the real interface and never invent replacement UI."
-                : string.Empty));
+        // Every image gets a number and a job (ADR-074). "3 reference images are attached" told
+        // the model nothing about which was the backdrop and which was the presenter, so it
+        // treated a headshot as a scene and a scene as decoration — the "it ignores my
+        // references" report. Numbering matches the order the images are sent in.
+        text.Append(references.Count).Append(" reference image").Append(references.Count == 1 ? " is" : "s are")
+            .AppendLine(" attached, in this order. Use their pixels, not descriptions of them:");
+        for (var i = 0; i < references.Count; i++)
+        {
+            text.Append("- Image ").Append(i + 1).Append(": ").AppendLine(RoleInstruction(references[i].Kind));
+        }
+        if (references.Any(r => r.Kind == "face"))
+        {
+            text.AppendLine("Any person shown must be the person in the face reference — same face, hair, skin tone, "
+                + "glasses and build. Do not substitute a different person, and do not paint text or a badge over them.");
+        }
     }
+
+    /// <summary>What the model should DO with each attached image, by the kind the brand kit gave it.</summary>
+    internal static string RoleInstruction(string? kind) => kind switch
+    {
+        "background" => "the BACKGROUND. Build the scene on this image: keep its setting, lighting, palette and depth, "
+            + "and place the other elements into it. Do not replace it with an invented environment.",
+        "face" => "the PRESENTER. Reproduce this exact person's likeness. Keep them recognisable at a glance.",
+        "product" => "the PRODUCT INTERFACE. Reproduce this real screen faithfully — its layout, controls and data. "
+            + "Never invent replacement UI, panels or fake rows.",
+        "logo" => "the LOGO. Reproduce it exactly, unwarped, in a clear area; never redraw or restyle it.",
+        _ => "a visual reference for style and subject. Match its look; do not copy text from it.",
+    };
 
     private static void AppendAdjustment(StringBuilder text, string? steeringNote)
     {

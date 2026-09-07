@@ -76,8 +76,10 @@ public sealed class ImagePromptComposerTests
 
         var withProduct = ImagePromptComposer.Compose(Slot(), Campaign, Owner, Brand, null,
             [new ImageReference(Guid.NewGuid(), "shot.png", "image/png", [1], "product")]);
-        Assert.Contains("1 reference image is attached", withProduct, StringComparison.Ordinal);
-        Assert.Contains("Product screenshots are authoritative", withProduct, StringComparison.Ordinal);
+        Assert.Contains("1 reference image is attached, in this order", withProduct, StringComparison.Ordinal);
+        // ADR-074: each image is numbered and given its job, not described as a group.
+        Assert.Contains("- Image 1: the PRODUCT INTERFACE", withProduct, StringComparison.Ordinal);
+        Assert.Contains("Never invent replacement UI", withProduct, StringComparison.Ordinal);
     }
 
     [Fact]
