@@ -101,4 +101,10 @@
         DestinationFiles="@(_DotNetRuntime->'$(PublishDir)wwwroot/_framework/dotnet.runtime.js')" />
   </Target>
 
+  <ItemGroup>
+    <!-- The editing brief is authored as a document and compiled in, so the file the team
+         edits and the text the model receives cannot drift (ADR-071). -->
+    <EmbeddedResource Include="..\..\docs\blog-editor.md" LogicalName="Castmill.Api.BlogEditor.md" />
+  </ItemGroup>
+
 </Project>

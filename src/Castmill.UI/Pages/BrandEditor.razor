@@ -3,6 +3,7 @@
    per-generator templates. Everything here flows into generation server-side through
    BrandContextService; nothing on this page talks to a model directly. *@
 @page "/brands/{BrandId:guid}"
+@using Castmill.Core
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
 @using Castmill.UI.Http
@@ -1230,63 +1231,8 @@
     /// minute instead of facing an empty box. These are starting points to edit, not rules —
     /// the shape of each one mirrors what its generator already asks the model for.
     /// </summary>
-    private static readonly Dictionary<string, string> Starters = new(StringComparer.Ordinal)
-    {
-        ["youtube"] = """
-            Act as an expert YouTube content strategist specializing in SEO, answer-engine
-            optimization, generative-search visibility and accurate technical content.
-
-            Priority order:
-            1. Accurately represent what is actually shown or discussed in the transcript.
-            2. Satisfy the search intent behind the approved primary keyword.
-            3. Make the title and first 1–2 description sentences compelling to a human.
-            4. Make the package easy for search engines and answer engines to understand.
-            5. Cover related entities, capabilities, problems and terminology only when the
-               transcript supports them.
-            6. Never use keyword stuffing, unsupported claims, generic hype or clickbait.
-
-            Before writing, determine the video's subject, problem, audience, learning outcome,
-            demonstrated products/features, supported claims and questions it answers. Silently
-            correct obvious transcription errors, but do not invent facts. Build a semantic topic
-            cluster around the approved primary keyword: close variants, category terms,
-            problem/feature/implementation searches, named technologies and natural questions.
-
-            Produce three genuinely different A/B/C title strategies using distinct supported
-            angles. Keep titles accurate and preferably 45–65 characters, front-load the important
-            concept where natural, and avoid minor rewrites of one title.
-
-            The first 200 description characters must explain exactly what the viewer will learn,
-            naturally use the primary phrase or strongest semantic variation, and name a concrete
-            capability or outcome. Follow with 2–4 short paragraphs covering the problem, major
-            capabilities, learning outcome, technologies and differentiators actually shown.
-            Where useful, add an "In this video, you'll learn" list with 4–8 concise bullets.
-
-            Write explicit, self-contained answer sentences that can be quoted by an AI system.
-            Prefer named entities and concrete nouns over vague pronouns. Answer what the subject
-            is, what it does, how it works and what problem it solves only when grounded in the
-            transcript.
-
-            Generate chapters only from reliable transcript timing. Start at 00:00, use concise
-            search-friendly titles, and never invent timestamps. End with one relevant CTA; use
-            the supplied product URL naturally when available. Generate 12–20 directly relevant
-            tags mixing the primary phrase, close variants, product/platform names, demonstrated
-            features and high-intent long-tail concepts.
-
-            The result must sound natural aloud, preserve important technical detail, avoid
-            repetitive AI phrasing and prioritize useful information over keyword density.
-            """,
-        ["blog"] = "Open with the reader's problem in one sentence — no throat-clearing.\nUse H2s that are statements, not labels.\n900–1400 words. Short paragraphs.\nShow one concrete example with real numbers or real code.\nClose with the single next action, not a summary.",
-        ["newsletter"] = "One idea per issue. Lead with it in the first line.\nWrite to one person, not a list.\n250–400 words.\nOne link that matters; do not pad with a round-up.\nSign off in the brand's voice, not a template.",
-        ["email-sequence"] = "Each email earns the next open — end on an unresolved thread.\nOne job per email: teach, prove, or ask.\n120–200 words each. Subject lines under 45 characters.\nNo email repeats another's argument.",
-        ["landing-page"] = "Headline states the outcome, not the feature.\nSubhead names who it is for.\nThree proof blocks: what it does, what it replaces, what it costs.\nOne call to action, repeated — never two competing ones.",
-        ["show-notes"] = "Two-sentence summary, then timestamped sections.\nPull three quotable lines verbatim.\nList every tool, person and link mentioned.",
-        ["social-x"] = "First line is the whole argument; assume the rest is never read.\nNo hashtags. No emoji unless the brand already uses them.\nUnder 280 characters. One idea.",
-        ["social-linkedin"] = "Open with a specific claim, not a question.\nShort lines, generous line breaks.\n120–200 words. End with a real question.\nNo hustle-culture register, no 'thrilled to announce'.",
-        ["social-facebook"] = "Conversational, complete sentences.\n80–150 words. Lead with the human angle.\nOne link, placed last.",
-        ["social-instagram"] = "Write for a caption read after the image.\nFirst line hooks; the rest can be longer.\n5–10 relevant hashtags on their own line.",
-        ["social-threads"] = "Casual and direct. Under 300 characters.\nOne observation, stated plainly. No hashtags.",
-        ["social-bluesky"] = "Plain, technical, no marketing register.\nUnder 300 characters. Links are fine without ceremony.",
-    };
+    // One copy, shared with the API so a seeded brand and "Reset to starter" cannot drift.
+    private static readonly IReadOnlyDictionary<string, string> Starters = BrandTemplateStarters.ByKind;
 
 
     [Parameter] public Guid BrandId { get; set; }

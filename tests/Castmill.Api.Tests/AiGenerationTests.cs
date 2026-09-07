@@ -748,6 +748,12 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             {
                 return """{"unsupportedClaims":[],"citations":["S1"]}""";
             }
+            // Stage 2 returns an ARTICLE, not JSON (ADR-071), and may append editorial notes.
+            if (prompt.Contains("You are the final technical editor", StringComparison.Ordinal))
+            {
+                var edited = string.Join(" ", Enumerable.Repeat("edited", 1800));
+                return $"## Edited section\n\n{edited}\n\n## Editorial notes\n- The version number is not in the evidence.";
+            }
             if (prompt.Contains("nurture sequence", StringComparison.Ordinal))
             {
                 return """{"title":"Emails","emails":[{"subject":"a","preview":"p","bodyMarkdown":"Watch: [YOUTUBE_VIDEO_URL]"},{"subject":"b","preview":"p","bodyMarkdown":"b"},{"subject":"c","preview":"p","bodyMarkdown":"b"}],"citations":["S1"]}""";

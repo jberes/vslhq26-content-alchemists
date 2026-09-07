@@ -95,9 +95,29 @@ public sealed class FoundryClientFactory(
 
     private sealed record AliasMapping(string Deployment, string? ResourceName);
 
+    /// <summary>
+    /// An App Service setting cannot carry a hyphen through to a Linux environment variable,
+    /// so the config exporter writes "Ai__Models__image_alt" and the alias arrives as
+    /// image_alt while the app asks for image-alt (ADR-072). Production therefore had no
+    /// image-alt and no chat-audit at all: the studio listed the same model twice, picking the
+    /// hyphenated one 500'd, and every "second opinion" quietly ran on the drafting model.
+    /// The two spellings are one alias.
+    /// </summary>
+    private bool TryLookup(string modelAlias, out string? value)
+    {
+        if (_options.Models.TryGetValue(modelAlias, out value) && !string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+        var swapped = modelAlias.Contains('-', StringComparison.Ordinal)
+            ? modelAlias.Replace('-', '_')
+            : modelAlias.Replace('_', '-');
+        return _options.Models.TryGetValue(swapped, out value) && !string.IsNullOrWhiteSpace(value);
+    }
+
     private AliasMapping? ResolveMapping(string modelAlias)
     {
-        if (!_options.Models.TryGetValue(modelAlias, out var value) || string.IsNullOrWhiteSpace(value))
+        if (!TryLookup(modelAlias, out var value) || string.IsNullOrWhiteSpace(value))
         {
             // The second-opinion aliases intentionally fall back to chat when unset, so a
             // deployment that has not configured them still gets a (same-family) pass rather

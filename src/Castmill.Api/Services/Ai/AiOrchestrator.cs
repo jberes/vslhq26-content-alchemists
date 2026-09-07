@@ -493,7 +493,12 @@ public sealed class AiOrchestrator(
             new YoutubeTitleOptionResponse(slot, title, angle, score, rationale));
     }
 
-    /// <summary>Blog pipeline (B5.2): outline → draft → cross-model audit.</summary>
+    /// <summary>
+    /// Blog pipeline: outline → draft → EDIT → validate (ADR-071). The edit is a second model
+    /// call that receives the draft, the original evidence and the authored editing brief and
+    /// returns a revised article; it replaced an audit that only listed unsupported claims and
+    /// left the draft's repetition and keyword-shaped headings in place.
+    /// </summary>
     public async Task<GenerationResult> RunBlogAsync(
         Guid userId, Campaign campaign, TranscriptContent transcript, string? brief,
         CancellationToken ct, Guid? replaceArtifactId = null)
@@ -539,32 +544,34 @@ public sealed class AiOrchestrator(
                 return Fail("blog", validation.FatalError!, stopwatch);
             }
 
-            // Cross-model audit: a second model (or the same one when chat-audit
-            // is unmapped) checks the draft against the transcript for unsupported claims.
-            var audit = await CallModelAsync(userId, "chat-audit", "blog-audit", BuildPrompt(
-                $$"""
-                You are auditing a blog draft against its approved source evidence. List any
-                claims in the draft that the evidence does not support.
-                Draft:
-                {{draftJson.GetProperty("markdown").GetString()}}
-
-                JSON schema: { "unsupportedClaims": [ { "claim": string, "reason": string } ], "citations": string[] }
-                """, brief: null, evidence), ct);
-
+            // Stage 2 — EDIT. A second model (or the same one when chat-audit is unmapped)
+            // rewrites the draft against the original evidence. The evidence is included so a
+            // wrong claim can be corrected rather than guessed at.
+            var draftMarkdown = draftJson.GetProperty("markdown").GetString()!;
+            var title = draftJson.GetProperty("title").GetString() ?? string.Empty;
             var warnings = new List<string>(validation.Warnings);
-            try
+            var edited = await EditBlogAsync(userId, title, draftMarkdown, evidence, brand, warnings, ct);
+
+            if (edited is not null)
             {
-                var auditJson = ParseModelJson(audit);
-                if (auditJson.TryGetProperty("unsupportedClaims", out var claims) && claims.ValueKind == JsonValueKind.Array)
+                draftJson = ArtifactContentJson.WithMarkdown(draftJson, edited);
+                // Stage 3 — VALIDATE. The edited article faces the same contract the draft had
+                // to pass; an edit may not produce something the draft stage would have failed.
+                var editedValidation = Generators.ValidateBlog(draftJson, evidence, TemplateGovernsBlog(brand));
+                if (!editedValidation.Passed)
                 {
-                    warnings.AddRange(claims.EnumerateArray()
-                        .Where(c => c.TryGetProperty("claim", out _))
-                        .Select(c => $"Audit: unsupported claim — {c.GetProperty("claim").GetString()}"));
+                    warnings.Add($"Edit pass rejected ({editedValidation.FatalError}); the unedited draft was kept.");
+                    draftJson = ArtifactContentJson.WithMarkdown(draftJson, draftMarkdown);
+                }
+                else
+                {
+                    warnings.AddRange(editedValidation.Warnings.Where(w => !warnings.Contains(w, StringComparer.Ordinal)));
                 }
             }
-            catch (JsonException)
+
+            foreach (var issue in BlogMarkdown.Problems(draftJson.GetProperty("markdown").GetString()!))
             {
-                warnings.Add("Audit pass returned unparseable output; review manually.");
+                warnings.Add($"Formatting: {issue}");
             }
 
             var artifactId = await PersistAsync(campaign, "blog", draftJson,
@@ -578,6 +585,63 @@ public sealed class AiOrchestrator(
             return Fail("blog", ex is AiNotConfiguredException ? ex.Message : $"Generation failed: {ex.GetType().Name}", stopwatch);
         }
     }
+
+    /// <summary>
+    /// Runs the edit stage and returns the revised markdown, or null when the draft should
+    /// stand. One retry when the revision comes back short: consolidation is the editor's job,
+    /// and it sometimes does it so well the article stops being worth publishing.
+    /// </summary>
+    private async Task<string?> EditBlogAsync(
+        Guid userId, string title, string draftMarkdown, GenerationEvidenceContext evidence,
+        BrandContext brand, List<string> warnings, CancellationToken ct)
+    {
+        var minimum = MinimumBlogWords(brand);
+        try
+        {
+            var reply = await CallModelAsync(userId, "chat-audit", "blog-edit", BuildPrompt(
+                BlogEditor.BuildPrompt(title, draftMarkdown, minimum),
+                brief: null, evidence, brand, "blog"), ct);
+            var (markdown, notes) = BlogEditor.Parse(reply);
+
+            if (BlogEditor.WordCount(markdown) < minimum)
+            {
+                var expanded = await CallModelAsync(userId, "chat-audit", "blog-edit-expand", BuildPrompt(
+                    BlogEditor.BuildPrompt(title, markdown, minimum)
+                    + $"\n\nThis revision is {BlogEditor.WordCount(markdown)} words, short of the {minimum}-word floor. "
+                    + "Deepen the sections the evidence can support — mechanism, tradeoffs, failure modes, "
+                    + "worked detail. Do not pad, and do not reintroduce the repetition you removed.",
+                    brief: null, evidence, brand, "blog"), ct);
+                var (longer, moreNotes) = BlogEditor.Parse(expanded);
+                if (BlogEditor.WordCount(longer) > BlogEditor.WordCount(markdown))
+                {
+                    markdown = longer;
+                    notes = moreNotes;
+                }
+            }
+
+            if (markdown.Length < 200)
+            {
+                warnings.Add("Edit pass returned too little to publish; the unedited draft was kept.");
+                return null;
+            }
+            warnings.AddRange(notes.Select(note => $"Editor: {note}"));
+            return markdown;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The draft already passed validation, so a failed edit costs polish, not the run.
+            logger.LogWarning(ex, "Blog edit stage failed; keeping the draft");
+            warnings.Add($"Edit pass unavailable ({ex.GetType().Name}); the unedited draft was kept.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The floor the finished article may not fall below. A brand template that sets its own
+    /// length governs (ADR-067), so the floor drops to the review minimum there.
+    /// </summary>
+    internal static int MinimumBlogWords(BrandContext? brand) =>
+        TemplateGovernsBlog(brand) ? 800 : 1400;
 
     /// <summary>
     /// The Tech Edit (ADR-020). Same schema in, same schema out: the model is handed the
@@ -925,8 +989,10 @@ public sealed class AiOrchestrator(
     /// </summary>
     internal static string BlogLengthRule(BrandContext? brand) =>
         TemplateGovernsBlog(brand)
-            ? "Follow the brand content template's length; where it gives none, target 1500-2500 words."
-            : "Target 1500-2500 words.";
+            ? "Follow the brand content template's length; where it gives none, target 1800-2600 words."
+            // Headroom for stage 2: the editor consolidates duplication, so a draft written to
+            // the finished length lands short of it (ADR-071).
+            : "Target 1800-2600 words.";
 
     private static bool TemplateGovernsBlog(BrandContext? brand) =>
         brand?.TemplateSteeringByKind.ContainsKey("blog") == true;
@@ -962,10 +1028,11 @@ public sealed class AiOrchestrator(
         var seoBlock = string.IsNullOrWhiteSpace(brand?.SeoTargetBlock)
             ? string.Empty
             : $"{brand!.SeoTargetBlock}\n";
-        // Reader-facing kinds get the AEO rules (ADR-058); internal kinds (transcript,
-        // image prompts, SEO reports, clip lists) do not write for a search engine.
-        var aeoBlock = kind is not null && Castmill.Core.ArtifactKinds.IsUserContent(Generators.Normalize(kind))
-            && !kind.StartsWith("clip", StringComparison.Ordinal)
+        // Only the indexed surfaces get the AEO rules (ADR-070). Applying them to every
+        // reader-facing kind pushed social posts over their character limits and asked an
+        // email for question headings.
+        var aeoBlock = kind is not null
+            && Castmill.Core.ArtifactKinds.IsSearchOptimized(Generators.Normalize(kind))
             ? $"{Generators.AeoGuidance}\n"
             : string.Empty;
 

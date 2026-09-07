@@ -89,10 +89,20 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
             new BrandTemplateRequest("youtube", "YouTube strategy", youtubePrompt, IsDefault: true));
         youtube.EnsureSuccessStatusCode();
 
-        var templates = await client.GetFromJsonAsync<List<BrandTemplateResponse>>(baseUrl);
-        Assert.Equal(3, templates!.Count);
+        var templates = (await client.GetFromJsonAsync<List<BrandTemplateResponse>>(baseUrl))!;
+        // Three added here, on top of the starters a new brand is seeded with (ADR-069).
+        Assert.Equal(2, templates.Count(t => t.Kind == "newsletter"));
+        Assert.Contains(templates, t => t.Kind == "blog");
+
+        // The invariant under test: one default per kind, whatever else exists.
+        foreach (var kind in templates.Select(t => t.Kind).Distinct(StringComparer.Ordinal))
+        {
+            Assert.True(templates.Count(t => t.Kind == kind && t.IsDefault) <= 1,
+                $"{kind} has more than one default template.");
+        }
         Assert.Equal("Launch special", Assert.Single(templates,
             t => t.Kind == "newsletter" && t.IsDefault).Name);
+        // Promoting a new youtube default demotes the seeded starter rather than joining it.
         Assert.Equal(youtubePrompt, Assert.Single(templates,
             t => t.Kind == "youtube" && t.IsDefault).SteeringPrompt);
     }

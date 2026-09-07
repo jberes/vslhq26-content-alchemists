@@ -151,9 +151,13 @@ public static class AiEndpoints
     {
         var userId = AuthEndpoints.GetUserId(principal);
         var credentials = await clients.ResolveCredentialsAsync(userId, ct);
+        // One canonical spelling out to the client (ADR-072). The config exporter turns
+        // "image-alt" into "image_alt" on its way to App Service, and the studio was listing
+        // both as separate models to compare.
         var models = options.Value.Models
             .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
-            .ToDictionary(kv => kv.Key, kv => kv.Value);
+            .GroupBy(kv => kv.Key.Replace('_', '-'), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase);
 
         string? probeResult = null;
         if (probe == true && credentials is not null && models.ContainsKey("chat"))

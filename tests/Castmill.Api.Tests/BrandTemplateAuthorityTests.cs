@@ -15,8 +15,8 @@ public sealed class BrandTemplateAuthorityTests
     [Fact]
     public void The_house_word_target_stands_down_when_a_blog_template_sets_the_length()
     {
-        Assert.Equal("Target 1500-2500 words.", AiOrchestrator.BlogLengthRule(BrandContext.Empty));
-        Assert.Equal("Target 1500-2500 words.", AiOrchestrator.BlogLengthRule(null));
+        Assert.Equal("Target 1800-2600 words.", AiOrchestrator.BlogLengthRule(BrandContext.Empty));
+        Assert.Equal("Target 1800-2600 words.", AiOrchestrator.BlogLengthRule(null));
 
         var withTemplate = BrandContext.Empty with
         {
@@ -26,7 +26,7 @@ public sealed class BrandTemplateAuthorityTests
             },
         };
         Assert.Equal(
-            "Follow the brand content template's length; where it gives none, target 1500-2500 words.",
+            "Follow the brand content template's length; where it gives none, target 1800-2600 words.",
             AiOrchestrator.BlogLengthRule(withTemplate));
     }
 

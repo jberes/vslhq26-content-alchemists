@@ -267,6 +267,7 @@ public static partial class BrandEndpoints
             UpdatedAt = clock.GetUtcNow(),
         };
         db.BrandProfiles.Add(brand);
+        SeedStarterTemplates(db, brand, clock.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/v1/brands/{brand.Id}", ToResponse(brand));
     }
@@ -916,6 +917,35 @@ public static partial class BrandEndpoints
             .Where(k => k.Id == itemId && k.BrandId == id && k.TenantId == grant.Brand.TenantId)
             .ExecuteDeleteAsync(ct);
         return removed == 0 ? Results.NotFound() : Results.NoContent();
+    }
+
+    /// <summary>
+    /// A new brand starts with the authored content briefs, not with nothing (ADR-069). The
+    /// template is the primary instruction every generation reads, so a brand created and used
+    /// the same afternoon was running on Castmill's generic guidance alone — which is what a
+    /// weak first blog actually was.
+    /// </summary>
+    private static void SeedStarterTemplates(CastmillDbContext db, BrandProfile brand, DateTimeOffset now)
+    {
+        foreach (var kind in BrandTemplateStarters.SeededKinds)
+        {
+            if (BrandTemplateStarters.For(kind) is not { Length: > 0 } steering)
+            {
+                continue;
+            }
+            db.BrandTemplates.Add(new BrandTemplate
+            {
+                Id = Guid.NewGuid(),
+                TenantId = brand.TenantId,
+                BrandId = brand.Id,
+                Kind = kind,
+                Name = "Starter",
+                SteeringPrompt = steering,
+                IsDefault = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
     }
 
     private static BrandKnowledgeSourceResponse ToResponse(BrandKnowledgeSource k) =>

@@ -20,6 +20,18 @@ public static class ArtifactKinds
         UserContent.Contains(kind, StringComparer.Ordinal);
 
     /// <summary>
+    /// The surfaces a search or answer engine actually indexes: they carry headings, they are
+    /// read cold by a stranger, and length is theirs to choose. Social posts, emails and clip
+    /// lists are none of those — telling a 280-character post to open with a quotable answer
+    /// paragraph and close with an FAQ made it fail its own character limit (ADR-070).
+    /// </summary>
+    public static readonly string[] SearchOptimized =
+        ["blog", "youtube", "show-notes", "landing-page"];
+
+    public static bool IsSearchOptimized(string kind) =>
+        SearchOptimized.Contains(kind, StringComparer.Ordinal);
+
+    /// <summary>
     /// Finished pieces that can be distributed to an audience. Clip suggestions are generated
     /// working instructions, not a publishable campaign deliverable; exported clips become
     /// distributable media through the clip pipeline.
