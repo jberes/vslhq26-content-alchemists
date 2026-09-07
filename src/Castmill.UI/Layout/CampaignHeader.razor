@@ -14,6 +14,7 @@
 @inject PressRunService PressRun
 @inject NavigationManager Navigation
 @inject CampaignsClient Campaigns
+@inject BrandsClient Brands
 @inject INotifier Notifier
 
 <header class="cm-campaign-header">
@@ -67,6 +68,21 @@
             <span class="cm-chip cm-mono" title="Campaign content format">
                 @CampaignContentType.DisplayLabel(campaign.ContentType)
             </span>
+            @* One campaign, one reader (ADR-F64). The options are the brand's own personas —
+               a piece written to the average of a developer and a CTO lands with neither. *@
+            @if (_personaTitles.Count > 0)
+            {
+                <select class="cm-chip cm-campaign-header__audience" title="Who this campaign is written for"
+                        aria-label="Audience for this campaign" disabled="@_saving"
+                        value="@(campaign.AudiencePersona ?? "")"
+                        @onchange="e => SaveAudienceAsync(campaign, e.Value?.ToString())">
+                    <option value="">Whole audience</option>
+                    @foreach (var persona in _personaTitles)
+                    {
+                        <option value="@persona">@persona</option>
+                    }
+                </select>
+            }
             <button type="button" class="cm-chip @(campaign.Status == CampaignStatus.Ready ? "cm-chip--on" : "")"
                     title="Toggle campaign readiness" @onclick="ToggleReadyAsync">
                 @(campaign.Status == CampaignStatus.Ready ? "Ready" : "Draft")
@@ -363,6 +379,56 @@
         await SaveCampaignAsync(campaign, campaign.Name, status);
     }
 
+    private readonly List<string> _personaTitles = [];
+    private Guid? _personaBrandId;
+
+    /// <summary>The picker offers the brand's personas; loading them must never block the header.</summary>
+    private async Task LoadPersonasAsync(Guid? brandId)
+    {
+        if (_personaBrandId == brandId)
+        {
+            return;
+        }
+        _personaBrandId = brandId;
+        _personaTitles.Clear();
+        if (brandId is not { } id)
+        {
+            return;
+        }
+        try
+        {
+            var brand = await Brands.GetAsync(id);
+            _personaTitles.AddRange((brand.StyleCard?.Personas ?? []).Select(p => p.Title));
+        }
+        catch (ApiException)
+        {
+            // No personas offered; the campaign simply keeps the brand's whole audience.
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SaveAudienceAsync(Castmill.Core.Resources.CampaignResponse campaign, string? audience)
+    {
+        _saving = true;
+        try
+        {
+            var updated = await Campaigns.UpdateAsync(campaign.Id, campaign.Name, campaign.Brief,
+                campaign.BrandId, campaign.Links, campaign.Status, campaign.ContentType,
+                skipSeoAnalysis: campaign.SkipSeoAnalysis,
+                audiencePersona: string.IsNullOrWhiteSpace(audience) ? null : audience);
+            Workspace.Synchronize(updated);
+            await Campaign.RefreshAsync(campaign.Id);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
     private async Task SaveCampaignAsync(Castmill.Core.Resources.CampaignResponse campaign, string name, string status)
     {
         _saving = true;
@@ -370,7 +436,8 @@
         {
             var updated = await Campaigns.UpdateAsync(campaign.Id, name, campaign.Brief, campaign.BrandId,
                 campaign.Links, status, campaign.ContentType,
-                skipSeoAnalysis: campaign.SkipSeoAnalysis);
+                skipSeoAnalysis: campaign.SkipSeoAnalysis,
+                audiencePersona: campaign.AudiencePersona);
             // CampaignState owns this view; WorkspaceState owns the persistent campaign
             // switcher. The API response is authoritative for both, so reconcile the rail
             // immediately rather than leaving its cached name stale until a page reload.
@@ -412,7 +479,15 @@
         }
     }
 
-    private void OnChanged() => InvokeAsync(StateHasChanged);
+    // Guarded: a store handler that dispatches async work throws into Blazor's renderer,
+    // where no ErrorBoundary can catch it (ADR-F26). The brand arrives with the campaign, so
+    // the persona list loads off the same signal rather than a second lifecycle hook.
+    private void OnChanged() => InvokeAsync(() => StoreEvents.GuardedAsync(
+        () => LoadPersonasAsync(Campaign.Campaign?.BrandId),
+        Notifier, StateHasChanged, "Reading the campaign"));
+
+    protected override async Task OnParametersSetAsync() =>
+        await LoadPersonasAsync(Campaign.Campaign?.BrandId);
 
     public void Dispose()
     {

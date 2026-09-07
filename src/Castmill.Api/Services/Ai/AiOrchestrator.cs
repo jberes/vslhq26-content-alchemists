@@ -522,7 +522,7 @@ public sealed class AiOrchestrator(
                 Write the full blog post following this outline exactly:
                 {{outline}}
 
-                Target 1500-2500 words. Use markdown. Insert image stub markers like
+                {{BlogLengthRule(brand)}} Use markdown. Insert image stub markers like
                 ![stub:blog-hero]() and ![stub:blog-inline-1]() where images belong.
                 JSON schema: { "title": string, "markdown": string, "metaDescription": string, "citations": string[] }
                 """, brief, evidence, brand, "blog"), ct);
@@ -533,7 +533,7 @@ public sealed class AiOrchestrator(
             {
                 return Fail("blog", citationError!, stopwatch);
             }
-            var validation = Generators.ValidateBlog(draftJson, evidence);
+            var validation = Generators.ValidateBlog(draftJson, evidence, TemplateGovernsBlog(brand));
             if (!validation.Passed)
             {
                 return Fail("blog", validation.FatalError!, stopwatch);
@@ -917,6 +917,20 @@ public sealed class AiOrchestrator(
     /// approved source evidence.
     /// Labeled sections let the model distinguish contract vs steering vs facts.
     /// </summary>
+    /// <summary>
+    /// The brand's content template claims to override generic guidance, so the house word
+    /// target must not sit next to it contradicting it (ADR-067). A brand whose blog template
+    /// says "900-1400 words" was being told "Target 1500-2500 words" in the same prompt, and
+    /// then warned by the validator for obeying whichever it picked.
+    /// </summary>
+    internal static string BlogLengthRule(BrandContext? brand) =>
+        TemplateGovernsBlog(brand)
+            ? "Follow the brand content template's length; where it gives none, target 1500-2500 words."
+            : "Target 1500-2500 words.";
+
+    private static bool TemplateGovernsBlog(BrandContext? brand) =>
+        brand?.TemplateSteeringByKind.ContainsKey("blog") == true;
+
     private static string BuildPrompt(
         string instructions, string? brief, GenerationEvidenceContext evidence,
         BrandContext? brand = null, string? kind = null)

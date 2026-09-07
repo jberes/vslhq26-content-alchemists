@@ -31,20 +31,25 @@ public static class BrandColorRoles
         }
         var lower = text.ToLowerInvariant();
         // Most specific first: "primary action" is a CTA, not the primary brand colour.
-        if (lower.Contains("cta", StringComparison.Ordinal) || lower.Contains("action", StringComparison.Ordinal)) return "cta";
-        if (lower.Contains("background", StringComparison.Ordinal) || lower.Contains(" bg", StringComparison.Ordinal)) return "background";
-        if (lower.Contains("surface", StringComparison.Ordinal)) return "surface";
-        if (lower.Contains("border", StringComparison.Ordinal) || lower.Contains("rule", StringComparison.Ordinal)) return "border";
-        if (lower.Contains("text", StringComparison.Ordinal) || lower.Contains("ink", StringComparison.Ordinal)) return "text";
-        if (lower.Contains("neutral", StringComparison.Ordinal) || lower.Contains("gray", StringComparison.Ordinal) || lower.Contains("grey", StringComparison.Ordinal)) return "neutral";
-        if (lower.Contains("secondary", StringComparison.Ordinal)) return "secondary";
-        if (lower.Contains("primary", StringComparison.Ordinal)) return "primary";
-        if (lower.Contains("accent", StringComparison.Ordinal) || lower.Contains("highlight", StringComparison.Ordinal)) return "accent";
-        if (lower.Contains("success", StringComparison.Ordinal)) return "success";
-        if (lower.Contains("warn", StringComparison.Ordinal)) return "warning";
-        if (lower.Contains("danger", StringComparison.Ordinal) || lower.Contains("error", StringComparison.Ordinal)) return "danger";
+        if (Word(lower, "cta") || Word(lower, "action")) return "cta";
+        if (Word(lower, "background") || Word(lower, "bg")) return "background";
+        if (Word(lower, "surface")) return "surface";
+        if (Word(lower, "border") || Word(lower, "rule")) return "border";
+        // Whole words only: "pink" contains "ink", which quietly turned every accent pink into
+        // a text colour the first time this ran.
+        if (Word(lower, "text") || Word(lower, "ink") || Word(lower, "foreground")) return "text";
+        if (Word(lower, "neutral") || Word(lower, "gray") || Word(lower, "grey")) return "neutral";
+        if (Word(lower, "secondary")) return "secondary";
+        if (Word(lower, "primary")) return "primary";
+        if (Word(lower, "accent") || Word(lower, "highlight")) return "accent";
+        if (Word(lower, "success")) return "success";
+        if (Word(lower, "warn") || Word(lower, "warning")) return "warning";
+        if (Word(lower, "danger") || Word(lower, "error")) return "danger";
         return text;
     }
+
+    private static bool Word(string text, string word) =>
+        System.Text.RegularExpressions.Regex.IsMatch(text, $@"\b{System.Text.RegularExpressions.Regex.Escape(word)}\b");
 
     /// <summary>
     /// One row per colour: the same hex twice is one colour with two names, and a role that

@@ -123,6 +123,86 @@
                 </label>
             </section>
 
+            @* Market and messaging (ADR-062). These are what make a draft this brand's rather
+               than anyone's — the claim, the evidence, and who it is aimed at. Every one is
+               optional, and the brand importer fills them from pasted material. *@
+            <section class="cm-brand__section">
+                <h2 class="cm-front__block-title">Market &amp; messaging</h2>
+                <p class="cm-meta">Injected into every written piece. Paste a positioning or market doc on the Brands page and these fill themselves.</p>
+                <label class="cm-field">
+                    <span class="cm-field__label">Positioning — what this is and who it is for</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_positioning" maxlength="4000"
+                              placeholder="Reveal is an embedded analytics platform for software teams that need dashboards inside their own application."></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Messaging pillars — one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_pillarsText"
+                              placeholder="Embedded&#10;Control&#10;Governance and security"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Differentiators — claims only this brand may make, one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_differentiatorsText"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Proof points — evidence for those claims, one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_proofPointsText"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Use cases — one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_useCasesText"></textarea>
+                </label>
+
+                <span class="cm-kicker">Competitors</span>
+                <p class="cm-meta">Named only when a piece genuinely compares. "When it comes up" keeps the comparison honest.</p>
+                @foreach (var rival in _competitors)
+                {
+                    <div class="cm-brand__color-row">
+                        <input class="cm-input" placeholder="Name" aria-label="Competitor name" maxlength="200" @bind="rival.Name" />
+                        <input class="cm-input cm-brand__grow" placeholder="When it comes up" aria-label="When this competitor comes up"
+                               maxlength="1000" @bind="rival.WhenItComesUp" />
+                        <button type="button" class="cm-tree__delete" aria-label="Remove competitor"
+                                @onclick="() => _competitors.Remove(rival)"><AppIcon Name="trash" /></button>
+                    </div>
+                }
+                <button type="button" class="cm-button cm-button--quiet" disabled="@(_competitors.Count >= 16)"
+                        @onclick="() => _competitors.Add(new CompetitorRow())">+ Add competitor</button>
+
+                <span class="cm-kicker">Personas</span>
+                <p class="cm-meta">Who the writing is for, in the detail a writer can act on.</p>
+                @foreach (var persona in _personas)
+                {
+                    <div class="cm-brand__persona">
+                        <div class="cm-brand__color-row">
+                            <input class="cm-input" placeholder="Title, e.g. Embedded Analytics Product Manager"
+                                   aria-label="Persona title" maxlength="200" @bind="persona.Title" />
+                            <input class="cm-input cm-brand__grow" placeholder="Role and responsibilities"
+                                   aria-label="Persona role" maxlength="1000" @bind="persona.Role" />
+                            <button type="button" class="cm-tree__delete" aria-label="Remove persona"
+                                    @onclick="() => _personas.Remove(persona)"><AppIcon Name="trash" /></button>
+                        </div>
+                        <textarea class="cm-input cm-textarea" rows="2" aria-label="Persona goals"
+                                  placeholder="Goals — one per line" @bind="persona.GoalsText"></textarea>
+                        <textarea class="cm-input cm-textarea" rows="2" aria-label="Persona pain points"
+                                  placeholder="Pain points — one per line" @bind="persona.PainPointsText"></textarea>
+                        <textarea class="cm-input cm-textarea" rows="2" aria-label="Persona decision criteria"
+                                  placeholder="Decision criteria — one per line" @bind="persona.DecisionCriteriaText"></textarea>
+                    </div>
+                }
+                <button type="button" class="cm-button cm-button--quiet" disabled="@(_personas.Count >= 6)"
+                        @onclick="() => _personas.Add(new PersonaRow())">+ Add persona</button>
+
+                <label class="cm-field">
+                    <span class="cm-field__label">Must not claim — one per line</span>
+                    <p class="cm-meta">The guardrail. Sibling products that must never be confused with this one belong here.</p>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_doNotClaimText"
+                              placeholder="Do not conflate Reveal with Ignite UI, App Builder or Slingshot"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">QA checklist — one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="3" @bind="_qaChecklistText"></textarea>
+                </label>
+            </section>
+
             <div class="cm-form__actions">
                 <button type="button" class="cm-button" disabled="@_saving" @onclick="SaveAsync">
                     @(_saving ? "Saving…" : "Save brand")
@@ -138,7 +218,7 @@
                 {
                     <div class="cm-brand__color-row">
                         <input class="cm-input cm-brand__color-role" placeholder="role (primary, background…)"
-                               maxlength="50" @bind="color.Role" />
+                               list="cm-brand-color-roles" maxlength="50" @bind="color.Role" />
                         @* The OS colour panel itself cannot be styled — but the swatch that
                            opens it can be a real target, and the hex is TYPED as often as it
                            is picked, so it is an input rather than a caption. *@
@@ -146,12 +226,37 @@
                                aria-label="Pick @color.Role colour" />
                         <input class="cm-input cm-mono cm-brand__color-hex" maxlength="7"
                                aria-label="Hex for @color.Role" @bind="color.Hex" />
+                        <input class="cm-input cm-mono cm-brand__color-token" maxlength="100"
+                               aria-label="Token for @color.Role" placeholder="--token (optional)" @bind="color.Token" />
                         <button type="button" class="cm-tree__delete" aria-label="Remove colour"
                             @onclick="() => _colors.Remove(color)"><AppIcon Name="trash" /></button>
                     </div>
                 }
                 <button type="button" class="cm-button cm-button--quiet" @onclick="AddColor"
                         disabled="@(_colors.Count >= 12)">+ Add colour</button>
+                @* Offered, not enforced: a brand may have a "wash" we have never heard of. *@
+                <datalist id="cm-brand-color-roles">
+                    @foreach (var role in BrandColorRoles.Known)
+                    {
+                        <option value="@role"></option>
+                    }
+                </datalist>
+
+                <span class="cm-kicker">Gradients</span>
+                <p class="cm-meta">A gradient cannot be a hex, so it lives here and reaches image prompts on its own.</p>
+                @foreach (var gradient in _gradients)
+                {
+                    <div class="cm-brand__color-row">
+                        <input class="cm-input cm-brand__color-role" placeholder="role" aria-label="Gradient role"
+                               maxlength="50" @bind="gradient.Role" />
+                        <input class="cm-input cm-mono cm-brand__grow" aria-label="Gradient CSS" maxlength="500"
+                               placeholder="linear-gradient(90deg,#FBB764 0%,#EC417A 40%)" @bind="gradient.Css" />
+                        <button type="button" class="cm-tree__delete" aria-label="Remove gradient"
+                                @onclick="() => _gradients.Remove(gradient)"><AppIcon Name="trash" /></button>
+                    </div>
+                }
+                <button type="button" class="cm-button cm-button--quiet" disabled="@(_gradients.Count >= 8)"
+                        @onclick="() => _gradients.Add(new GradientRow())">+ Add gradient</button>
             </section>
 
             <section class="cm-brand__section">
@@ -168,6 +273,33 @@
                     <span class="cm-field__label">Image style — steering appended to every image prompt</span>
                     <textarea class="cm-input cm-textarea" rows="3" @bind="_imageStyle" maxlength="4000"
                               placeholder="Clean editorial photography, soft natural light, muted blues, no text baked into the image."></textarea>
+                </label>
+                @* A palette says which colours exist; these say how to use them (ADR-062).
+                   Without the proportions an image model spends the accent everywhere. *@
+                <label class="cm-field">
+                    <span class="cm-field__label">Colour usage — proportions and placement</span>
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_colorUsage" maxlength="2000"
+                              placeholder="70-85% neutral, 10-20% blue, 5-10% pink. Primary CTA must be blue. Gradient only in the hero."></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Layout convention</span>
+                    <input class="cm-input" @bind="_layoutPattern" maxlength="1000"
+                           placeholder="Hero -> Features -> AI -> Governance -> CTA" />
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Never, visually — one per line</span>
+                    <textarea class="cm-input cm-textarea" rows="2" @bind="_visualDontText"
+                              placeholder="overuse pink&#10;heavy gradients&#10;clutter"></textarea>
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">Marketing surfaces</span>
+                    <input class="cm-input" @bind="_marketingMode" maxlength="1000"
+                           placeholder="More contrast, selective gradients." />
+                </label>
+                <label class="cm-field">
+                    <span class="cm-field__label">In-product surfaces</span>
+                    <input class="cm-input" @bind="_productMode" maxlength="1000"
+                           placeholder="Neutral, white-label ready, minimal branding." />
                 </label>
             </section>
 
@@ -799,9 +931,35 @@
     {
         public string Role { get; set; } = string.Empty;
         public string Hex { get; set; } = "#5980a6";
+        public string Token { get; set; } = string.Empty;
+    }
+
+    private sealed class CompetitorRow
+    {
+        public string Name { get; set; } = string.Empty;
+        public string WhenItComesUp { get; set; } = string.Empty;
+    }
+
+    private sealed class GradientRow
+    {
+        public string Role { get; set; } = "primary";
+        public string Css { get; set; } = string.Empty;
+    }
+
+    /// <summary>Lists are edited one-per-line: it is how brand docs are written and pasted.</summary>
+    private sealed class PersonaRow
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Role { get; set; } = string.Empty;
+        public string GoalsText { get; set; } = string.Empty;
+        public string PainPointsText { get; set; } = string.Empty;
+        public string DecisionCriteriaText { get; set; } = string.Empty;
     }
 
     private readonly List<ColorRow> _colors = [];
+    private readonly List<CompetitorRow> _competitors = [];
+    private readonly List<GradientRow> _gradients = [];
+    private readonly List<PersonaRow> _personas = [];
     private readonly List<BrandAssetResponse> _assets = [];
     private readonly List<BrandTemplateResponse> _templates = [];
     private readonly Dictionary<Guid, string> _assetPreviews = [];
@@ -1046,6 +1204,20 @@
     private string _voice = string.Empty;
     private string _audience = string.Empty;
     private string _bannedText = string.Empty;
+    // Market and messaging (ADR-062).
+    private string _positioning = string.Empty;
+    private string _pillarsText = string.Empty;
+    private string _differentiatorsText = string.Empty;
+    private string _proofPointsText = string.Empty;
+    private string _useCasesText = string.Empty;
+    private string _doNotClaimText = string.Empty;
+    private string _qaChecklistText = string.Empty;
+    // Visual rules.
+    private string _colorUsage = string.Empty;
+    private string _layoutPattern = string.Empty;
+    private string _visualDontText = string.Empty;
+    private string _marketingMode = string.Empty;
+    private string _productMode = string.Empty;
     private string _headingFont = string.Empty;
     private string _bodyFont = string.Empty;
     private string _imageStyle = string.Empty;
@@ -1141,7 +1313,39 @@
                 _bodyFont = card.BodyFont ?? string.Empty;
                 _imageStyle = card.ImageStyle ?? string.Empty;
                 _bannedText = string.Join('\n', card.BannedPhrases ?? []);
-                _colors.AddRange((card.Colors ?? []).Select(c => new ColorRow { Role = c.Role, Hex = c.Hex }));
+                _colors.AddRange((card.Colors ?? []).Select(c => new ColorRow
+                {
+                    Role = c.Role, Hex = c.Hex, Token = c.Token ?? string.Empty,
+                }));
+
+                _positioning = card.Positioning ?? string.Empty;
+                _pillarsText = Lines(card.MessagingPillars);
+                _differentiatorsText = Lines(card.Differentiators);
+                _proofPointsText = Lines(card.ProofPoints);
+                _useCasesText = Lines(card.UseCases);
+                _doNotClaimText = Lines(card.DoNotClaim);
+                _qaChecklistText = Lines(card.QaChecklist);
+                _colorUsage = card.ColorUsage ?? string.Empty;
+                _layoutPattern = card.LayoutPattern ?? string.Empty;
+                _visualDontText = Lines(card.VisualDontList);
+                _marketingMode = card.MarketingMode ?? string.Empty;
+                _productMode = card.ProductMode ?? string.Empty;
+                _competitors.AddRange((card.Competitors ?? []).Select(c => new CompetitorRow
+                {
+                    Name = c.Name, WhenItComesUp = c.WhenItComesUp ?? string.Empty,
+                }));
+                _gradients.AddRange((card.Gradients ?? []).Select(g => new GradientRow
+                {
+                    Role = g.Role, Css = g.Css,
+                }));
+                _personas.AddRange((card.Personas ?? []).Select(persona => new PersonaRow
+                {
+                    Title = persona.Title,
+                    Role = persona.Role ?? string.Empty,
+                    GoalsText = Lines(persona.Goals),
+                    PainPointsText = Lines(persona.PainPoints),
+                    DecisionCriteriaText = Lines(persona.DecisionCriteria),
+                }));
             }
 
             await ReloadKitAsync();
@@ -1208,12 +1412,42 @@
             ? null
             : [.. _colors
                 .Where(c => !string.IsNullOrWhiteSpace(c.Role))
-                .Select(c => new BrandColor(c.Role.Trim(), c.Hex))],
+                .Select(c => new BrandColor(c.Role.Trim(), c.Hex, NullIfEmpty(c.Token)))],
         HeadingFont: NullIfEmpty(_headingFont),
         BodyFont: NullIfEmpty(_bodyFont),
         ImageStyle: NullIfEmpty(_imageStyle),
-        BannedPhrases: _bannedText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            is { Length: > 0 } phrases ? phrases : null);
+        BannedPhrases: Split(_bannedText),
+        Positioning: NullIfEmpty(_positioning),
+        MessagingPillars: Split(_pillarsText),
+        Differentiators: Split(_differentiatorsText),
+        ProofPoints: Split(_proofPointsText),
+        Competitors: _competitors.Where(c => !string.IsNullOrWhiteSpace(c.Name))
+            .Select(c => new BrandCompetitor(c.Name.Trim(), NullIfEmpty(c.WhenItComesUp)))
+            .ToList() is { Count: > 0 } rivals ? rivals : null,
+        Personas: _personas.Where(p => !string.IsNullOrWhiteSpace(p.Title))
+            .Select(p => new BrandPersona(
+                p.Title.Trim(), NullIfEmpty(p.Role),
+                Split(p.GoalsText), Split(p.PainPointsText), Split(p.DecisionCriteriaText)))
+            .ToList() is { Count: > 0 } people ? people : null,
+        UseCases: Split(_useCasesText),
+        DoNotClaim: Split(_doNotClaimText),
+        ColorUsage: NullIfEmpty(_colorUsage),
+        Gradients: _gradients.Where(g => !string.IsNullOrWhiteSpace(g.Css))
+            .Select(g => new BrandGradient(
+                string.IsNullOrWhiteSpace(g.Role) ? "primary" : g.Role.Trim(), g.Css.Trim()))
+            .ToList() is { Count: > 0 } gradients ? gradients : null,
+        LayoutPattern: NullIfEmpty(_layoutPattern),
+        VisualDontList: Split(_visualDontText),
+        QaChecklist: Split(_qaChecklistText),
+        MarketingMode: NullIfEmpty(_marketingMode),
+        ProductMode: NullIfEmpty(_productMode));
+
+    /// <summary>One item per line; an empty box means the field is absent, not empty.</summary>
+    private static IReadOnlyList<string>? Split(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            is { Length: > 0 } items ? items : null;
+
+    private static string Lines(IReadOnlyList<string>? values) => string.Join('\n', values ?? []);
 
     private async Task SaveAsync()
     {

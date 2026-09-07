@@ -4755,6 +4755,34 @@ button.cm-intent {
     inline-size: 16rem;
 }
 
+/* Fills the row beside the fixed-width role and hex fields. */
+/* The audience picker reads as a chip, not a form control, so it sits in the header row. */
+.cm-campaign-header__audience {
+    max-inline-size: 14rem;
+}
+
+.cm-brand__grow {
+    flex: 1 1 20rem;
+    min-inline-size: 0;
+}
+
+.cm-brand__color-token {
+    inline-size: calc(18ch + 2 * var(--cm-space-3) + 2px);
+    flex: 0 0 auto;
+    font-family: var(--cm-font-mono);
+}
+
+/* A persona is several fields that belong together, so it gets a card rather than a row. */
+.cm-brand__persona {
+    display: grid;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-3);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-sunken);
+}
+
 .cm-brand__color-pick {
     inline-size: 3rem;
     block-size: 3rem;

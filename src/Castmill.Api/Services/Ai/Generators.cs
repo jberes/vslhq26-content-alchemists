@@ -661,6 +661,20 @@ public static partial class Generators
         ValidateYoutube(json, GenerationEvidenceContext.FromTranscript(transcript));
 
     /// <summary>Blog validator (B5.2): word band + citations.</summary>
+    /// <summary>
+    /// <paramref name="lengthFromTemplate"/> silences the house target band when the brand's
+    /// own content template sets the length (ADR-067). The 800–3200 guard stays either way:
+    /// it is a review floor, not a preference.
+    /// </summary>
+    public static ValidationOutcome ValidateBlog(
+        JsonElement json, GenerationEvidenceContext evidence, bool lengthFromTemplate)
+    {
+        var outcome = ValidateBlog(json, evidence);
+        return lengthFromTemplate
+            ? outcome with { Warnings = [.. outcome.Warnings.Where(w => !w.Contains("target band is 1500–2500", StringComparison.Ordinal))] }
+            : outcome;
+    }
+
     public static ValidationOutcome ValidateBlog(JsonElement json, GenerationEvidenceContext evidence)
     {
         var common = ValidateCommon(json, evidence, requireString: "markdown");

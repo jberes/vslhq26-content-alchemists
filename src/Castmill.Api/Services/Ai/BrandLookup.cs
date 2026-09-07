@@ -214,18 +214,48 @@ public sealed partial class BrandLookup(
               "voice": string,        // how this brand writes: register, stance, sentence shape
               "audience": string,     // who it is talking to
               "tagline": string,
-              "colors": [ { "role": string, "hex": "#RRGGBB" } ],
+              "colors": [ { "role": string, "hex": "#RRGGBB", "token": string } ],
               "headingFont": string,
               "bodyFont": string,
               "imageStyle": string,   // what its imagery looks like, as a prompt fragment
-              "bannedPhrases": [ string ]   // clichés this brand's voice would not use
+              "bannedPhrases": [ string ],  // clichés this brand's voice would not use
+
+              "positioning": string,        // what the product is and who it is for
+              "messagingPillars": [ string ],
+              "differentiators": [ string ],
+              "proofPoints": [ string ],    // outcomes, benchmarks, named wins
+              "competitors": [ { "name": string, "whenItComesUp": string } ],
+              "personas": [ { "title": string, "role": string, "goals": [ string ],
+                              "painPoints": [ string ], "decisionCriteria": [ string ] } ],
+              "useCases": [ string ],
+              "doNotClaim": [ string ],     // claims and confusions this brand must never make
+
+              "colorUsage": string,         // proportions and placement, e.g. "70-85% neutral; CTA blue"
+              "gradients": [ { "role": string, "css": string } ],
+              "layoutPattern": string,      // section order, e.g. "Hero -> Features -> CTA"
+              "visualDontList": [ string ],
+
+              "qaChecklist": [ string ],
+              "marketingMode": string,
+              "productMode": string
             }
 
             Rules:
-            - Every hex MUST be exactly #RRGGBB. Drop any colour you are unsure of.
+            - Every hex MUST be exactly #RRGGBB. Drop any colour you are unsure of. Put the
+              brand's own CSS variable in "token" only when the source names one.
+            - Give each colour a role from this set where one fits: primary, secondary, accent,
+              cta, neutral, background, surface, text, border, success, warning, danger.
+              Do not label three different colours "accent" — say which is which.
+            - A gradient goes in "gradients" with its full CSS, never in "colors".
             - "voice" should be usable as an instruction to a writer, not a description of it.
             - "bannedPhrases" is for generic marketing filler ("game-changing", "seamless"),
-              only where the page's own voice clearly avoids that register.
+              only where the source's own voice clearly avoids that register.
+            - "doNotClaim" is the guardrail. Sibling or adjacent products the source says this
+              brand must NOT be confused with belong here, worded as an instruction.
+            - "personas" is who the writing is for. Keep the source's own goals, pains and
+              decision criteria rather than paraphrasing them into generalities.
+            - Leave any field out entirely when the source does not support it. An empty list
+              or an invented sentence is worse than an absent field.
 
             URL: {{page.Url}}
             Site name: {{page.SiteName ?? "(none)"}}
@@ -257,7 +287,22 @@ public sealed partial class BrandLookup(
                 HeadingFont: Str(root, "headingFont"),
                 BodyFont: Str(root, "bodyFont"),
                 ImageStyle: Str(root, "imageStyle"),
-                BannedPhrases: Strings(root, "bannedPhrases")));
+                BannedPhrases: Strings(root, "bannedPhrases"),
+                Positioning: Str(root, "positioning"),
+                MessagingPillars: Strings(root, "messagingPillars"),
+                Differentiators: Strings(root, "differentiators"),
+                ProofPoints: Strings(root, "proofPoints"),
+                Competitors: Competitors(root),
+                Personas: Personas(root),
+                UseCases: Strings(root, "useCases"),
+                DoNotClaim: Strings(root, "doNotClaim"),
+                ColorUsage: Str(root, "colorUsage"),
+                Gradients: Gradients(root),
+                LayoutPattern: Str(root, "layoutPattern"),
+                VisualDontList: Strings(root, "visualDontList"),
+                QaChecklist: Strings(root, "qaChecklist"),
+                MarketingMode: Str(root, "marketingMode"),
+                ProductMode: Str(root, "productMode")));
 
         static string? Str(JsonElement root, string name) =>
             root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
@@ -287,11 +332,62 @@ public sealed partial class BrandLookup(
                 .Where(e => e.ValueKind == JsonValueKind.Object)
                 .Select(e => new BrandColor(
                     e.TryGetProperty("role", out var r) ? r.GetString() ?? "colour" : "colour",
-                    e.TryGetProperty("hex", out var h) ? h.GetString() ?? string.Empty : string.Empty))
+                    e.TryGetProperty("hex", out var h) ? h.GetString() ?? string.Empty : string.Empty,
+                    e.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(t.GetString()) ? t.GetString() : null))
                 .Where(c => HexColorStrict().IsMatch(c.Hex))
-                .Take(12)
                 .ToList();
-            return colors.Count > 0 ? colors : null;
+            // Roles onto the known set, one row per hex, repeats numbered (ADR-062). A guide
+            // that lists the same pink twice under two names used to import as two colours.
+            var deduped = BrandColorRoles.Dedupe(colors).Take(16).ToList();
+            return deduped.Count > 0 ? deduped : null;
+        }
+
+        static IReadOnlyList<BrandCompetitor>? Competitors(JsonElement root)
+        {
+            if (!root.TryGetProperty("competitors", out var array) || array.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+            var rows = array.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.Object)
+                .Select(e => new BrandCompetitor(Str(e, "name") ?? string.Empty, Str(e, "whenItComesUp")))
+                .Where(c => c.Name.Length > 0)
+                .Take(16)
+                .ToList();
+            return rows.Count > 0 ? rows : null;
+        }
+
+        static IReadOnlyList<BrandPersona>? Personas(JsonElement root)
+        {
+            if (!root.TryGetProperty("personas", out var array) || array.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+            var rows = array.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.Object)
+                .Select(e => new BrandPersona(
+                    Str(e, "title") ?? string.Empty, Str(e, "role"),
+                    Strings(e, "goals"), Strings(e, "painPoints"), Strings(e, "decisionCriteria")))
+                .Where(p => p.Title.Length > 0)
+                .Take(6)
+                .ToList();
+            return rows.Count > 0 ? rows : null;
+        }
+
+        static IReadOnlyList<BrandGradient>? Gradients(JsonElement root)
+        {
+            if (!root.TryGetProperty("gradients", out var array) || array.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+            var rows = array.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.Object)
+                .Select(e => new BrandGradient(Str(e, "role") ?? "primary", Str(e, "css") ?? string.Empty))
+                .Where(g => g.Css.Length > 0)
+                .Take(8)
+                .ToList();
+            return rows.Count > 0 ? rows : null;
         }
     }
 

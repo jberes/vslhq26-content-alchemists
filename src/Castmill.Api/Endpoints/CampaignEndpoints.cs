@@ -133,7 +133,10 @@ public static class CampaignEndpoints
         new(c.Id, c.OwnerId, c.Name, c.Brief, c.CreatedAt, c.UpdatedAt, c.BrandId,
             ParseLinks(c.ContextJson), c.Status, c.ContentType, c.Intent,
             ParseOutputRecipe(c.OutputRecipeJson), c.SkipSeoAnalysis,
-            actorUserId is null || c.OwnerId == actorUserId, c.ShareDomain);
+            actorUserId is null || c.OwnerId == actorUserId, c.ShareDomain, c.AudiencePersona);
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static readonly JsonSerializerOptions TargetsJson = new(JsonSerializerDefaults.Web);
 
@@ -699,6 +702,7 @@ public static class CampaignEndpoints
             Brief = request.Brief,
             BrandId = request.BrandId,
             ContentType = request.ContentType,
+            AudiencePersona = NullIfBlank(request.AudiencePersona),
             Intent = request.Intent,
             SkipSeoAnalysis = request.SkipSeoAnalysis,
             OutputRecipeJson = request.OutputRecipe is null
@@ -754,6 +758,7 @@ public static class CampaignEndpoints
         campaign.BrandId = request.BrandId;
         campaign.Status = request.Status;
         campaign.ContentType = request.ContentType;
+        campaign.AudiencePersona = NullIfBlank(request.AudiencePersona);
         campaign.Intent = nextIntent;
         campaign.SkipSeoAnalysis = request.SkipSeoAnalysis;
         campaign.OutputRecipeJson = nextRecipe.Count == 0

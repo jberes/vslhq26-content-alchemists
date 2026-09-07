@@ -125,7 +125,7 @@ public sealed class BrandContextService(
             .ToListAsync(ct);
 
         return new BrandContext(
-            BuildStyleBlock(grant.Brand.Name, card),
+            BuildStyleBlock(grant.Brand.Name, card, campaign.AudiencePersona),
             BuildImageStyleBlock(card, imageAssets.Select(a => (a.Kind, a.Label!))),
             templates,
             contextBlock,
@@ -305,7 +305,7 @@ public sealed class BrandContextService(
         }
     }
 
-    private static string? BuildStyleBlock(string brandName, BrandStyleCard? card)
+    private static string? BuildStyleBlock(string brandName, BrandStyleCard? card, string? audience = null)
     {
         if (card is null)
         {
@@ -325,6 +325,52 @@ public sealed class BrandContextService(
               .AppendLine(".");
         }
 
+        // Market and messaging (ADR-062). Ordered the way a writer needs them: what the product
+        // is, the themes to hit, the claims only this brand may make, then the evidence.
+        Append(sb, "Positioning", card.Positioning);
+        List(sb, "Messaging pillars — every piece should ladder up to these", card.MessagingPillars);
+        List(sb, "Differentiators this brand may claim", card.Differentiators);
+        List(sb, "Proof points to cite where they fit", card.ProofPoints);
+        List(sb, "Use cases this product is bought for", card.UseCases);
+
+        // One campaign, one reader (ADR-068). When the campaign names an audience, that
+        // persona is THE reader and the others are dropped: a piece written to the average of
+        // a developer, an architect and a CTO lands with none of them.
+        var chosen = card.Personas?.FirstOrDefault(p =>
+            string.Equals(p.Title, audience, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(audience) && chosen is null)
+        {
+            sb.Append("Write this campaign for: ").Append(audience.Trim()).AppendLine(".");
+        }
+
+        var personas = chosen is not null ? [chosen] : card.Personas ?? [];
+        if (personas.Count > 0)
+        {
+            sb.AppendLine(chosen is not null
+                ? "Write this campaign for this reader, and no other:"
+                : "Who this is written for:");
+            foreach (var persona in personas.Take(4))
+            {
+                sb.Append("- ").Append(persona.Title);
+                if (!string.IsNullOrWhiteSpace(persona.Role))
+                {
+                    sb.Append(" — ").Append(persona.Role!.Trim());
+                }
+                sb.AppendLine();
+                Inset(sb, "wants", persona.Goals);
+                Inset(sb, "struggles with", persona.PainPoints);
+                Inset(sb, "decides on", persona.DecisionCriteria);
+            }
+        }
+
+        if (card.Competitors is { Count: > 0 })
+        {
+            sb.Append("Competitors (name one only when the piece genuinely compares): ")
+              .AppendJoin("; ", card.Competitors.Take(10).Select(c =>
+                  string.IsNullOrWhiteSpace(c.WhenItComesUp) ? c.Name : $"{c.Name} — {c.WhenItComesUp}"))
+              .AppendLine(".");
+        }
+
         if (card.BannedPhrases is { Count: > 0 })
         {
             sb.Append("Never use these phrases: ")
@@ -332,7 +378,37 @@ public sealed class BrandContextService(
               .AppendLine(".");
         }
 
+        // Last, so it is the nearest instruction to the work: the things that make a draft
+        // wrong rather than merely weak. Sibling products live here.
+        if (card.DoNotClaim is { Count: > 0 })
+        {
+            sb.AppendLine("MUST NOT: these are wrong, not just off-brand:");
+            foreach (var rule in card.DoNotClaim.Take(12))
+            {
+                sb.Append("- ").AppendLine(rule.Trim());
+            }
+        }
+
         return sb.ToString().TrimEnd();
+    }
+
+    private static void List(StringBuilder sb, string label, IReadOnlyList<string>? values)
+    {
+        if (values is not { Count: > 0 })
+        {
+            return;
+        }
+        sb.Append(label).Append(": ").AppendJoin("; ", values.Take(12).Select(v => v.Trim())).AppendLine(".");
+    }
+
+    private static void Inset(StringBuilder sb, string label, IReadOnlyList<string>? values)
+    {
+        if (values is not { Count: > 0 })
+        {
+            return;
+        }
+        sb.Append("    ").Append(label).Append(": ")
+          .AppendJoin("; ", values.Take(6).Select(v => v.Trim())).AppendLine(".");
     }
 
     private static string? BuildImageStyleBlock(
@@ -349,6 +425,30 @@ public sealed class BrandContextService(
             sb.Append("Brand palette: ")
               .AppendJoin(", ", card.Colors.Select(c => $"{c.Role} {c.Hex}"))
               .AppendLine(".");
+        }
+
+        // A palette says which colours exist; these say how to use them (ADR-062). Without the
+        // proportions an image model spends the accent everywhere.
+        if (!string.IsNullOrWhiteSpace(card?.ColorUsage))
+        {
+            sb.Append("Colour usage: ").Append(card.ColorUsage.Trim()).AppendLine();
+        }
+
+        if (card?.Gradients is { Count: > 0 })
+        {
+            sb.Append("Brand gradients: ")
+              .AppendJoin("; ", card.Gradients.Take(4).Select(g => $"{g.Role} {g.Css}"))
+              .AppendLine(".");
+        }
+
+        if (!string.IsNullOrWhiteSpace(card?.LayoutPattern))
+        {
+            sb.Append("Layout convention: ").Append(card.LayoutPattern.Trim()).AppendLine();
+        }
+
+        if (card?.VisualDontList is { Count: > 0 })
+        {
+            sb.Append("Avoid: ").AppendJoin("; ", card.VisualDontList.Take(10).Select(v => v.Trim())).AppendLine(".");
         }
 
         var backgrounds = assets.Where(a => a.Kind == "background").Select(a => a.Label).ToList();

@@ -57,11 +57,13 @@ public sealed class CampaignsClient(ApiClient api)
         string status = "Draft", string? contentType = null,
         string? intent = null, IReadOnlyList<string>? outputRecipe = null,
         bool skipSeoAnalysis = false,
+        string? audiencePersona = null,
         CancellationToken ct = default) =>
         api.PutAsync<CampaignUpdateRequest, CampaignResponse>(
             $"api/v1/campaigns/{id}",
             new CampaignUpdateRequest(
-                name, brief, brandId, links, status, contentType, intent, outputRecipe, skipSeoAnalysis),
+                name, brief, brandId, links, status, contentType, intent, outputRecipe, skipSeoAnalysis,
+                audiencePersona),
             etag: null, ct);
 
     /// <summary>Deletes the campaign and everything in it — artifacts, revisions, slots,

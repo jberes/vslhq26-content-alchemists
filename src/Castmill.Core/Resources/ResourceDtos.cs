@@ -12,7 +12,9 @@ public sealed record CampaignCreateRequest(
     [property: MaxLength(30)] string? ContentType = null,
     [property: MaxLength(30)] string? Intent = null,
     IReadOnlyList<string>? OutputRecipe = null,
-    bool SkipSeoAnalysis = false);
+    bool SkipSeoAnalysis = false,
+    /// <summary>The brand persona this campaign is written for (ADR-068).</summary>
+    [property: MaxLength(200)] string? AudiencePersona = null);
 
 public sealed record CampaignUpdateRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,
@@ -23,7 +25,8 @@ public sealed record CampaignUpdateRequest(
     [property: MaxLength(30)] string? ContentType = null,
     [property: MaxLength(30)] string? Intent = null,
     IReadOnlyList<string>? OutputRecipe = null,
-    bool SkipSeoAnalysis = false);
+    bool SkipSeoAnalysis = false,
+    [property: MaxLength(200)] string? AudiencePersona = null);
 
 public sealed record CampaignResponse(
     Guid Id, Guid OwnerId, string Name, string? Brief,
@@ -36,7 +39,8 @@ public sealed record CampaignResponse(
     IReadOnlyList<string>? OutputRecipe = null,
     bool SkipSeoAnalysis = false,
     bool IsOwner = true,
-    string? ShareDomain = null);
+    string? ShareDomain = null,
+    string? AudiencePersona = null);
 
 public sealed record CampaignSharingRequest(bool DomainEnabled);
 

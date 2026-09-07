@@ -29,6 +29,12 @@ public sealed class Campaign : ITenantScoped
     public string Status { get; set; } = CampaignStatus.Draft;
     /// <summary>Tutorial | ProductDemo | Webinar | ThoughtLeadership.</summary>
     public string? ContentType { get; set; }
+    /// <summary>
+    /// Which of the brand's personas this campaign is written for (ADR-068). Free text so a
+    /// campaign is never blocked by the brand's list, but the picker offers the personas.
+    /// Null means "the brand's whole audience", which is how every campaign behaved before.
+    /// </summary>
+    public string? AudiencePersona { get; set; }
     /// <summary>Why this source is being milled; independent from source modality and format.</summary>
     public string? Intent { get; set; }
     /// <summary>JSON array of requested initial output kinds; the Press Run expands aliases.</summary>
