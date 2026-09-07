@@ -205,7 +205,8 @@ public sealed class ImageProviderTests
 
         Assert.Contains("/openai/deployments/gpt-image-2/images/generations", handler.RequestUri,
             StringComparison.Ordinal);
-        Assert.Contains("\"size\":\"1024x1536\"", handler.LastBody, StringComparison.Ordinal);
+        // gpt-image-2 paints arbitrary sizes: a 9:16 slot gets its native portrait frame (ADR-075).
+        Assert.Contains("\"size\":\"864x1536\"", handler.LastBody, StringComparison.Ordinal);
     }
 
     /// <summary>A URL-shaped response is followed rather than decoded as pixels — that
@@ -553,6 +554,89 @@ public sealed class ImageProviderTests
 
         Assert.False(merged["gpt-image"].Enabled);
         Assert.True(merged["nano-banana"].Enabled);
+    }
+
+    /// <summary>
+    /// ADR-075: gpt-image-2 paints arbitrary sizes, so a 16:9 slot is rendered at its native
+    /// 1536×864 — nothing for the crop pass to cut — and every gpt-image render asks for
+    /// quality "high". Both were silently missing: the 1536×1024 fixed frame lost 16% of the
+    /// height and the quality field was never sent.
+    /// </summary>
+    [Fact]
+    public async Task Gpt_image_2_renders_a_16_9_slot_at_its_native_frame_at_high_quality()
+    {
+        var handler = new CapturingImageHandler();
+        var provider = NewFoundryProvider(handler, deployment: "gpt-image-2");
+
+        await provider.GenerateAsync(Guid.NewGuid(), "thumbnail", "1280x720", null, [], TestContext.Current.CancellationToken);
+
+        Assert.Single(handler.Bodies);
+        Assert.Contains("\"size\":\"1536x864\"", handler.LastBody, StringComparison.Ordinal);
+        Assert.Contains("\"quality\":\"high\"", handler.LastBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Gpt_image_1_keeps_the_fixed_frame_but_still_asks_for_high_quality()
+    {
+        var handler = new CapturingImageHandler();
+        var provider = NewFoundryProvider(handler, deployment: "gpt-image-1");
+
+        await provider.GenerateAsync(Guid.NewGuid(), "thumbnail", "16:9", null, [], TestContext.Current.CancellationToken);
+
+        Assert.Contains("\"size\":\"1536x1024\"", handler.LastBody, StringComparison.Ordinal);
+        Assert.Contains("\"quality\":\"high\"", handler.LastBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A deployment that refuses the native size must fall back to the fixed frame — "size"
+    /// is not a parameter that can be dropped — and remember it for the process.
+    /// </summary>
+    [Fact]
+    public async Task A_refused_native_size_falls_back_to_the_fixed_frame_and_is_remembered()
+    {
+        var handler = new CapturingImageHandler
+        {
+            FirstResponse = (HttpStatusCode.BadRequest, """
+                {"error":{"message":"The size 1536x864 is not supported by this model. Supported sizes: 1024x1024, 1536x1024, 1024x1536.",
+                          "type":"invalid_request_error","param":"size","code":"invalid_value"}}
+                """),
+        };
+        var capabilities = new ImageModelCapabilities();
+        var provider = NewFoundryProvider(handler, deployment: "gpt-image-2", capabilities);
+
+        var result = await provider.GenerateAsync(Guid.NewGuid(), "thumbnail", "16:9", null, [], TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(result);
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.Contains("\"size\":\"1536x864\"", handler.Bodies[0], StringComparison.Ordinal);
+        Assert.Contains("\"size\":\"1536x1024\"", handler.Bodies[1], StringComparison.Ordinal);
+        Assert.Contains("\"quality\":\"high\"", handler.Bodies[1], StringComparison.Ordinal);
+        Assert.False(capabilities.Supports("gpt-image-2", ImageModelCapabilities.FlexibleSize));
+        Assert.Equal((1536, 1024), await provider.FrameForAsync(Guid.NewGuid(), 1280, 720, "image", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task The_reported_frame_is_the_native_one_for_a_flexible_model()
+    {
+        var provider = NewFoundryProvider(new CapturingImageHandler(), deployment: "gpt-image-2");
+        Assert.Equal((1536, 864), await provider.FrameForAsync(Guid.NewGuid(), 1280, 720, "image", TestContext.Current.CancellationToken));
+        Assert.True(await provider.RendersTextAsync(Guid.NewGuid(), "image", TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("16:9", 1536, 864)]
+    [InlineData("1280x720", 1536, 864)]
+    [InlineData("1200x630", 1536, 808)]
+    [InlineData("9:16", 864, 1536)]
+    [InlineData("1080x1350", 1232, 1536)]
+    [InlineData("1:1", 1024, 1024)]
+    [InlineData("1080x1080", 1024, 1024)]
+    public void The_native_frame_keeps_the_slots_aspect_on_a_1536_long_edge(string aspect, int width, int height)
+    {
+        Assert.Equal((width, height), ImageAspect.NativeFrame(aspect));
+        // Every edge is a multiple of 8 — the size grid gpt-image-2 accepts.
+        Assert.Equal(0, ImageAspect.NativeFrame(aspect).Height % 8);
+        Assert.Equal(0, ImageAspect.NativeFrame(aspect).Width % 8);
     }
 
     private static FoundryImageProvider NewFoundryProvider(

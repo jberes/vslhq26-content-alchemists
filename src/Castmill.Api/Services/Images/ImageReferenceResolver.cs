@@ -13,6 +13,10 @@ public sealed record ImageReference(Guid AssetId, string FileName, string Conten
 
 public interface IImageReferenceResolver
 {
+    /// <summary>Reference kinds in send order, no bytes. Default derives from the full resolve.</summary>
+    async Task<IReadOnlyList<string>> ResolveKindsAsync(Campaign campaign, ImageSlot slot, CancellationToken ct) =>
+        [.. (await ResolveAsync(campaign, slot, ct)).Select(r => r.Kind)];
+
     /// <summary>Explicit per-card references plus up to three product screenshots from the
     /// campaign brand. Product screenshots always attach (the product-fidelity rule).</summary>
     Task<IReadOnlyList<ImageReference>> ResolveAsync(
@@ -26,6 +30,38 @@ public sealed class ImageReferenceResolver(
     ILogger<ImageReferenceResolver> logger) : IImageReferenceResolver
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// The kinds that would be attached, in send order, without downloading a byte (ADR-075):
+    /// the prompt preview needs the same numbered reference note the render will get, or its
+    /// brief would be written against different inputs and cached separately.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ResolveKindsAsync(Campaign campaign, ImageSlot slot, CancellationToken ct)
+    {
+        if (campaign.BrandId is not { } brandId || !blobs.IsConfigured)
+        {
+            return [];
+        }
+        var grant = await brandAccess.FindAsync(brandId, campaign.OwnerId, campaign.TenantId, tracking: false, ct);
+        if (grant is null)
+        {
+            return [];
+        }
+        var selected = ParseIds(slot.ReferenceAssetIdsJson);
+        var kinds = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(a => a.BrandId == brandId && a.TenantId == grant.Brand.TenantId
+                && (selected.Contains(a.Id) || a.Kind == "product"))
+            .Select(a => new { a.Id, a.Kind, a.CreatedAt })
+            .ToListAsync(ct);
+        return kinds
+            .Where(x => x.Kind != "product").Take(5)
+            .Concat(kinds.Where(x => x.Kind == "product").Take(3))
+            .DistinctBy(x => x.Id)
+            .Take(8)
+            .OrderBy(x => RoleRank(x.Kind)).ThenBy(x => x.CreatedAt)
+            .Select(x => x.Kind)
+            .ToList();
+    }
 
     public async Task<IReadOnlyList<ImageReference>> ResolveAsync(
         Campaign campaign, ImageSlot slot, CancellationToken ct)

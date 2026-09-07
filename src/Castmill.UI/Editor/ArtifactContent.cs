@@ -580,27 +580,6 @@ public static class StructuredContent
     /// Existing Markdown is left unchanged.
     /// </summary>
 
-    /// <summary>
-    /// Two trailing spaces — Markdown's hard break — on every chapter line that is followed by
-    /// another. The line's own text, and therefore what gets published, is untouched.
-    /// </summary>
-    internal static string AddChapterLineBreaks(string markdown)
-    {
-        var lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var changed = false;
-        for (var i = 0; i < lines.Length - 1; i++)
-        {
-            if (ChapterLine.IsMatch(lines[i])
-                && ChapterLine.IsMatch(lines[i + 1])
-                && !lines[i].EndsWith("  ", StringComparison.Ordinal))
-            {
-                lines[i] += "  ";
-                changed = true;
-            }
-        }
-        return changed ? string.Join('\n', lines) : markdown;
-    }
-
     /// <summary>A line whose first token is a timestamp: "00:34 Title" or "1:02:03 Title".</summary>
     private static readonly Regex ChapterLine = new(@"^(?:\d{1,2}:)?\d{1,2}:\d{2}\s+\S", RegexOptions.Compiled);
 
@@ -612,12 +591,10 @@ public static class StructuredContent
             return markdown;
         }
 
-        // Chapters already on their own lines still render as one run-on paragraph, because a
-        // single newline is a soft break in Markdown. They cannot become list items: YouTube
-        // only makes chapters from a line that STARTS with the timestamp, and this text
-        // round-trips back into the published description. So the text is left exactly as the
-        // generator wrote it and only a hard break is added.
-        markdown = AddChapterLineBreaks(markdown);
+        // Chapter lines are left exactly as generated. Rendering one per line is the editor's
+        // job (ADR-F67: a newline is a line break and serializes back as a newline); an earlier
+        // attempt here appended Markdown's two-space hard break, which the editor wrote back
+        // out as a backslash — a literal "\" in the published description on first save.
 
         var output = new System.Text.StringBuilder(markdown.Length + 32);
         var lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');

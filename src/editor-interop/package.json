@@ -20,6 +20,7 @@
   "dependencies": {
     "@tiptap/core": "3.31.3",
     "@tiptap/extension-bubble-menu": "3.31.3",
+    "@tiptap/extension-hard-break": "3.31.3",
     "@tiptap/extension-image": "3.31.3",
     "@tiptap/extension-link": "3.31.3",
     "@tiptap/extension-placeholder": "3.31.3",

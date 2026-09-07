@@ -27,8 +27,18 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - Any prompt authored by a generator (`Generators.cs`) must ask for clear edge margins and
   centre-weighted composition. Prompts that place headlines, logos or key subjects near an
   edge are wrong regardless of how good the image looks before cropping.
-- Headlines that must be exact are composited after generation (`ImageComposer`), never
-  spelled by the model.
+- Text in images (ADR-075): a headline the producer configured (`HeadlineText`) is always
+  composited after generation (`ImageComposer`), never spelled by the model. A text-first slot
+  (`youtube-thumbnail`, `social-card`) with NO configured headline, rendered on a model that
+  spells reliably (gpt-image family), may render the exact quoted words the visual brief
+  chose — `ImagePromptRules.AllowsRenderedText` is the one place that decides, and the rules
+  block then permits only quoted text inside the safe area. Every other kind and model: no text.
+- Image prompts are WRITTEN, not concatenated (ADR-075): in Auto mode `VisualBriefWriter`
+  turns the piece into a visual brief (one hook, focal point, hierarchy, palette as used,
+  exact words where allowed) and `ImagePromptBuilder` caches it on the slot by input hash.
+  The composer's `FromBrief` then appends only the numbered reference roles; the renderer
+  appends the frame rules. gpt-image-2 renders its native frame (1536×864 for 16:9) at
+  `quality: high`; both fall back through the parameter-repair loop if a deployment refuses.
 
 ## Agents (ADR-058)
 - Three bounded tool-loop agents, documented in [docs/agents.md](docs/agents.md): Tech Edit verifier, image art director, SEO research. Each is a decorator over the one-shot path and falls back to it on any failure; flags under `Ai:Agents:*`.

@@ -240,6 +240,13 @@ public sealed class ImageSlot : ITenantScoped
     /// apart from non-negotiable safety/fidelity instructions.
     /// </summary>
     public string PromptMode { get; set; } = "Auto";
+    /// <summary>
+    /// The AI-written visual brief this slot renders from in Auto mode (ADR-075), cached with
+    /// a hash of its inputs so a preview or a re-render does not pay for another model call
+    /// until the piece, the brief, the brand look or the references change.
+    /// </summary>
+    public string? VisualBrief { get; set; }
+    public string? VisualBriefInputHash { get; set; }
     /// <summary>JSON array of explicitly selected BrandAsset ids. Product assets are not
     /// stored here: up to three attach automatically from the campaign brand.</summary>
     public string? ReferenceAssetIdsJson { get; set; }

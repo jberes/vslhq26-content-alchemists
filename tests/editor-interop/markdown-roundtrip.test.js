@@ -224,8 +224,11 @@ describe('callouts are not round-trip safe, which is why the palette has none', 
         expect(once).not.toContain('> [!WARNING]');
     });
 
-    it('drops the hard break, so the marker and the body collapse onto one line', () => {
+    it('keeps the line break (ADR-F67) — the marker escape alone is what makes callouts unsafe', () => {
+        // Before newlines were preserved this collapsed to one line, a second reason callouts
+        // were unsafe. That reason is gone; the escaped marker above is the one that remains.
         const once = roundTrip('> [!NOTE]\n> First.\n');
-        expect(once.trim().split('\n')).toHaveLength(1);
+        expect(once.trim().split('\n')).toHaveLength(2);
+        expect(once).toContain('\\[!NOTE\\]');
     });
 });

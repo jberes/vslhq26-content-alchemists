@@ -33,6 +33,7 @@ public static class ImageSlotEndpoints
         group.MapPatch("/{slotId:guid}", PatchAsync).Validate<ImageSlotPatchRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
         group.MapGet("/{slotId:guid}/prompt-preview", PromptPreviewAsync);
+        group.MapPost("/{slotId:guid}/brief/rewrite", RewriteBriefAsync).RequireRateLimiting("writes");
         group.MapPut("/{slotId:guid}/overlay", SetOverlayAsync).Validate<OverlaySpec>().RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}/overlay", ClearOverlayAsync).RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/variants/{variantId:guid}/edit", EditRegionAsync)
@@ -487,6 +488,7 @@ public static class ImageSlotEndpoints
         TimeProvider clock,
         Castmill.Api.Services.Ai.Agents.IImageCritic critic,
         Microsoft.Extensions.Options.IOptions<Castmill.Api.Services.Ai.AiOptions> aiOptions,
+        IImagePromptBuilder promptBuilder,
         CancellationToken ct)
     {
         if (!publicStore.IsConfigured)
@@ -514,7 +516,12 @@ public static class ImageSlotEndpoints
                 a => a.Id == artifactId && a.CampaignId == campaignId, ct)
             : null;
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
-        var effectivePrompt = ImagePromptComposer.Compose(slot, campaign, owner, brand, null, resolvedReferences);
+        var userId = AuthEndpoints.GetUserId(principal);
+        var allowText = ImagePromptRules.AllowsRenderedText(
+            slot.Kind, slot.HeadlineText,
+            await renderer.RendersTextAsync(userId, request.ModelAlias ?? slot.ModelAlias, ct));
+        var effectivePrompt = await promptBuilder.BuildAsync(
+            userId, slot, campaign, owner, brand, resolvedReferences, allowText, ct);
 
         var compare = request.ModelAliases?
             .Where(alias => !string.IsNullOrWhiteSpace(alias))
@@ -528,7 +535,23 @@ public static class ImageSlotEndpoints
             resolvedReferences, request.ModelAlias,
             compare is { Length: > 0 } ? compare : null,
             critic: request.Critique ? critic : null,
-            criticOptions: request.Critique ? aiOptions.Value.Agents.ImageCritic : null);
+            criticOptions: request.Critique ? aiOptions.Value.Agents.ImageCritic : null,
+            allowRenderedText: allowText);
+    }
+
+    /// <summary>Forgets the cached visual brief so the next preview or render writes a fresh
+    /// one (ADR-075). The slot itself is untouched.</summary>
+    private static async Task<IResult> RewriteBriefAsync(
+        Guid campaignId, Guid slotId, CastmillDbContext db, IImagePromptBuilder promptBuilder, CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        promptBuilder.Invalidate(slot);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     /// <summary>
@@ -542,6 +565,8 @@ public static class ImageSlotEndpoints
         Guid slotId,
         string? model,
         ClaimsPrincipal principal,
+        IImageReferenceResolver references,
+        IImagePromptBuilder promptBuilder,
         IBrandContextService brands,
         IImageRenderer renderer,
         CastmillDbContext db,
@@ -559,26 +584,33 @@ public static class ImageSlotEndpoints
                 a => a.Id == artifactId && a.CampaignId == campaignId, ct)
             : null;
 
-        // Mirrors ImageReferenceResolver's selection (explicit picks + the brand's product
-        // screenshots) as a yes/no, without downloading a byte.
-        var referencesAttach = campaign.BrandId is { } brandId
-            && (!string.IsNullOrWhiteSpace(slot.ReferenceAssetIdsJson) && slot.ReferenceAssetIdsJson.Trim() is not ("[]" or "null")
-                || await db.BrandAssets.IgnoreQueryFilters()
-                    .AnyAsync(asset => asset.BrandId == brandId && asset.Kind == "product", ct));
+        // The same kinds, in the same order, the render will attach — without downloading a
+        // byte — so the brief is written (and cached) against identical inputs (ADR-075).
+        var referenceKinds = await references.ResolveKindsAsync(campaign, slot, ct);
+        var referencesAttach = referenceKinds.Count > 0;
+        var placeholders = referenceKinds
+            .Select(kind => new ImageReference(Guid.Empty, kind, "image/png", [], kind))
+            .ToList();
 
+        var userId = AuthEndpoints.GetUserId(principal);
+        var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
+        var allowText = ImagePromptRules.AllowsRenderedText(
+            slot.Kind, slot.HeadlineText, await renderer.RendersTextAsync(userId, modelAlias, ct));
         var prompt = slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt)
             ? string.Empty
-            : ImagePromptComposer.Compose(slot, campaign, owner, brand, null,
-                referencesAttach ? [new ImageReference(Guid.Empty, "reference", "image/png", [], "product")] : null);
+            : await promptBuilder.BuildAsync(userId, slot, campaign, owner, brand, placeholders, allowText, ct);
 
         // The frame is the PROVIDER's: MAI paints the slot's exact size, Gemini a native 16:9
-        // frame, gpt-image one of three fixed sizes — so the crop, and the rules text that
-        // describes it, differ per model (ADR-055).
-        var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
-        var frame = await renderer.FrameForAsync(AuthEndpoints.GetUserId(principal), slot.TargetWidth, slot.TargetHeight, modelAlias, ct);
+        // frame, gpt-image-2 its native 16:9, older gpt-image one of three fixed sizes — so the
+        // crop, and the rules text that describes it, differ per model (ADR-055).
+        var frame = await renderer.FrameForAsync(userId, slot.TargetWidth, slot.TargetHeight, modelAlias, ct);
         if (prompt.Length > 0)
         {
             prompt = ImagePromptRules.Apply(prompt, slot.TargetWidth, slot.TargetHeight, frame.Width, frame.Height);
+            if (allowText)
+            {
+                prompt = ImagePromptRules.WithRenderedTextAllowed(prompt);
+            }
         }
 
         var targetAspect = (double)slot.TargetWidth / slot.TargetHeight;
@@ -607,6 +639,7 @@ public static class ImageSlotEndpoints
         ITenantProvider tenant,
         CastmillDbContext db,
         TimeProvider clock,
+        IImagePromptBuilder promptBuilder,
         CancellationToken requestCt)
     {
         if (!publicStore.IsConfigured)
@@ -743,9 +776,13 @@ public static class ImageSlotEndpoints
 
                 var owner = slot.ArtifactId is { } ownerId
                     && owners.TryGetValue(ownerId, out var artifact) ? artifact : null;
-                var effectivePrompt = ImagePromptComposer.Compose(slot, campaign, owner, brand, null, resolvedReferences);
+                var allowText = ImagePromptRules.AllowsRenderedText(
+                    slot.Kind, slot.HeadlineText,
+                    await renderer.RendersTextAsync(userId, effectiveModel, requestCt));
+                var effectivePrompt = await promptBuilder.BuildAsync(
+                    userId, slot, campaign, owner, brand, resolvedReferences, allowText, requestCt);
                 prepared.Add(new PreparedImageBatchSlot(
-                    slot, work.Variants, effectiveModel, effectivePrompt, resolvedReferences));
+                    slot, work.Variants, effectiveModel, effectivePrompt, resolvedReferences, allowText));
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !requestCt.IsCancellationRequested)
             {
@@ -880,9 +917,9 @@ public static class ImageSlotEndpoints
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
-                    var webp = await renderer.RenderExactAsync(
+                    var (webp, _) = await renderer.RenderExactReportingPromptAsync(
                         userId, work.EffectivePrompt, slot.TargetWidth, slot.TargetHeight,
-                        work.EffectiveModel, work.References, CancellationToken.None);
+                        work.EffectiveModel, work.References, CancellationToken.None, work.AllowRenderedText);
                     var thumb = composer.ToThumbWebp(webp);
                     var blobPath = VariantPath(slot.CampaignId, slot.Kind, variantIndex);
                     var thumbPath = ThumbPath(slot.CampaignId, slot.Kind);
@@ -950,7 +987,8 @@ public static class ImageSlotEndpoints
         int Variants,
         string? EffectiveModel,
         string EffectivePrompt,
-        IReadOnlyList<ImageReference> References);
+        IReadOnlyList<ImageReference> References,
+        bool AllowRenderedText = false);
 
     private static ImageBatchSlotResult Skipped(
         ImageSlot slot, int requestedVariants, string code, string message) =>
@@ -1278,7 +1316,8 @@ public static class ImageSlotEndpoints
         IReadOnlyList<string>? compareModels = null,
         Func<string?, CancellationToken, Task<byte[]>>? renderOverride = null,
         Castmill.Api.Services.Ai.Agents.IImageCritic? critic = null,
-        Castmill.Api.Services.Ai.AiOptions.ImageCriticOptions? criticOptions = null)
+        Castmill.Api.Services.Ai.AiOptions.ImageCriticOptions? criticOptions = null,
+        bool allowRenderedText = false)
     {
         var userId = AuthEndpoints.GetUserId(principal);
         // Compare mode (ADR-054): the same prompt on every listed model, `count` takes each.
@@ -1361,7 +1400,7 @@ public static class ImageSlotEndpoints
                 {
                     (webp, sentPrompt) = await renderer.RenderExactReportingPromptAsync(
                         userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
-                        references ?? [], ct);
+                        references ?? [], ct, allowRenderedText);
                 }
 
                 // Art-director loop (ADR-058): judge the take against the brief; on a rejection
@@ -1377,7 +1416,8 @@ public static class ImageSlotEndpoints
                         rounds++;
                         var retryPrompt = $"{effectivePrompt}\nArt director's fix for the previous render: {fix}";
                         var (retry, retrySent) = await renderer.RenderExactReportingPromptAsync(
-                            userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, references ?? [], ct);
+                            userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, references ?? [], ct,
+                            allowRenderedText);
                         verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, retry, ct);
                         if (!verdict.Ran || verdict.Score >= best.Score)
                         {

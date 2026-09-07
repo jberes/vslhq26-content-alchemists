@@ -13,7 +13,40 @@ import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { TableKit } from '@tiptap/extension-table';
+import HardBreak from '@tiptap/extension-hard-break';
 import { Markdown } from 'tiptap-markdown';
+
+/**
+ * A newline is a newline (ADR-F67). Published text — a YouTube description above all — puts
+ * each chapter on its own line, and the platform reads exactly that. CommonMark calls a
+ * single newline a soft break and renders it as a space, so the editor showed chapters as
+ * one run-on paragraph. Two fixes were wrong before this one: leaving it (run-on), and adding
+ * two trailing spaces (renders, but tiptap-markdown serializes a hard break as "\\\n" and the
+ * published description gained literal backslashes on the first save).
+ *
+ * So: `breaks: true` makes a single newline a hard break in the document, and this extension
+ * writes a hard break back out as the plain newline it came from — byte-identical round trip,
+ * one line per chapter on screen. Pinned by tests/editor-interop/line-breaks.test.js.
+ */
+const NewlineHardBreak = HardBreak.extend({
+    addStorage() {
+        return {
+            markdown: {
+                serialize(state, node, parent, index) {
+                    for (let i = index + 1; i < parent.childCount; i++) {
+                        if (parent.child(i).type !== node.type) {
+                            state.write(state.inTable ? '<br>' : '\n');
+                            return;
+                        }
+                    }
+                },
+                parse: {
+                    // handled by markdown-it with breaks: true
+                },
+            },
+        };
+    },
+});
 
 /**
  * The extension set, shared by the live editor and the headless one used for conversion so
@@ -32,7 +65,10 @@ export function extensions({ placeholder = null } = {}) {
             // Provenance and history are our concern, not the editor's: undo depth beyond a
             // reasonable burst just holds memory in a WASM app.
             undoRedo: { depth: 100 },
+            // Replaced below by NewlineHardBreak, which serializes as a newline (ADR-F67).
+            hardBreak: false,
         }),
+        NewlineHardBreak,
         // inline: true is load-bearing, not a preference. As a block node, an image
         // serializes without a trailing blank line, so "![hero](…)" immediately followed by
         // a list came back out as one joined line — and the next round trip then escaped the
@@ -53,7 +89,7 @@ export function extensions({ placeholder = null } = {}) {
             tightLists: true,
             bulletListMarker: '-',
             linkify: false,         // do not invent links the author did not write
-            breaks: false,          // a single newline is not a <br> in CommonMark
+            breaks: true,           // a single newline IS a line break here — see NewlineHardBreak
             transformPastedText: true,
             transformCopiedText: true,
         }),

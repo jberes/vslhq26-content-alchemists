@@ -60,6 +60,10 @@ public interface IImageProvider
         Guid userId, string prompt, string aspectRatio, string? modelAlias,
         IReadOnlyList<ImageReference> references, CancellationToken ct) =>
         GenerateAsync(userId, prompt, aspectRatio, modelAlias, ct);
+
+    /// <summary>Whether the model behind this alias spells text well enough to be asked for
+    /// exact quoted words (ADR-075). Default: no — the compositor handles text.</summary>
+    Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) => Task.FromResult(false);
 }
 
 public interface IImageProviderRegistry
@@ -142,6 +146,10 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
 {
     /// <summary>Fidelity-preserving reference input. gpt-image-1 only, at time of writing.</summary>
     public const string InputFidelity = "input_fidelity";
+    /// <summary>Render quality tier; the gpt-image family accepts "high" (ADR-075).</summary>
+    public const string Quality = "quality";
+    /// <summary>Arbitrary sizes such as 1536x864 rather than the three fixed frames (gpt-image-2).</summary>
+    public const string FlexibleSize = "size";
 
     private readonly ConcurrentDictionary<string, bool> _unsupported = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ImageDialect> _dialects = new(StringComparer.OrdinalIgnoreCase);
@@ -177,8 +185,16 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
     private static bool SupportedByDefault(string model, string parameter) => parameter switch
     {
         InputFidelity => model.Contains("gpt-image-1", StringComparison.OrdinalIgnoreCase),
+        Quality => model.Contains("gpt-image", StringComparison.OrdinalIgnoreCase),
+        // Only gpt-image-2 is known to paint arbitrary frames; a rejection is remembered and
+        // the render falls back to the fixed frame, so a wrong guess costs one retry.
+        FlexibleSize => model.Contains("gpt-image-2", StringComparison.OrdinalIgnoreCase),
         _ => true,
     };
+
+    /// <summary>Whether this model spells text well enough to be asked for exact words (ADR-075).</summary>
+    public static bool RendersText(string model) =>
+        model.Contains("gpt-image", StringComparison.OrdinalIgnoreCase);
 
     private static string Key(string model, string parameter) => $"{model}{parameter}";
 }
@@ -226,13 +242,36 @@ public static class ImageAspect
         _ => "1:1",
     };
 
-    /// <summary>The gpt-image family's fixed frames.</summary>
+    /// <summary>The gpt-image-1 family's fixed frames.</summary>
     public static (int Width, int Height) FixedFrame(string aspectOrSize) => Bucket(aspectOrSize) switch
     {
         "16:9" => (1536, 1024),
         "9:16" => (1024, 1536),
         _ => (1024, 1024),
     };
+
+    /// <summary>
+    /// The frame a size-flexible model (gpt-image-2) paints for a slot (ADR-075): the slot's
+    /// own aspect at 1536 on the long edge, so a 16:9 thumbnail is generated AS 16:9 and the
+    /// crop pass has nothing to cut — the safe margin that made every subject huddle in the
+    /// middle 60% of the frame is no longer needed for it.
+    /// </summary>
+    public static (int Width, int Height) NativeFrame(string aspectOrSize)
+    {
+        var (w, h) = Ratio(aspectOrSize);
+        var aspect = (double)w / h;
+        if (aspect > 1.05)
+        {
+            var height = (int)Math.Round(1536 / aspect / 8) * 8;
+            return (1536, Math.Clamp(height, 640, 1536));
+        }
+        if (aspect < 0.95)
+        {
+            var width = (int)Math.Round(1536 * aspect / 8) * 8;
+            return (Math.Clamp(width, 640, 1536), 1536);
+        }
+        return (1024, 1024);
+    }
 
     /// <summary>Width/height as a ratio pair, from either form.</summary>
     public static (int Width, int Height) Ratio(string aspectOrSize)
@@ -441,6 +480,13 @@ internal static class OpenAiShapedImages
         {
             return named;
         }
+        // A refused frame ("size … is not supported") means this model wants the fixed set;
+        // SizeFor treats "size" in the omit set as "fall back", never as "send no size".
+        if (string.Equals(error.Param, "size", StringComparison.OrdinalIgnoreCase)
+            || error.Message.Contains("size", StringComparison.OrdinalIgnoreCase) && error.Message.Contains("support", StringComparison.OrdinalIgnoreCase))
+        {
+            return ImageModelCapabilities.FlexibleSize;
+        }
 
         var code = error.Code ?? string.Empty;
         var unsupportedCode =
@@ -570,11 +616,55 @@ internal static class OpenAiShapedImages
     }
 
     /// <summary>Fixed size set the gpt-image family accepts; the crop pass fixes the rest.</summary>
+    /// <summary>
+    /// The JSON body of a generation (ADR-075): the model's native frame where it paints one,
+    /// and "quality": "high" wherever the family accepts it — every render, every model that
+    /// can. Both fall away on rejection through the repair loop.
+    /// </summary>
+    internal static ByteArrayContent GenerationBody(
+        string prompt, string aspectRatio, string model, IImageModelCapabilities capabilities, ISet<string> omit, bool includeModel)
+    {
+        var body = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["prompt"] = prompt,
+            ["size"] = SizeFor(aspectRatio, model, capabilities, omit),
+            ["n"] = 1,
+        };
+        if (includeModel)
+        {
+            body["model"] = model;
+        }
+        if (!omit.Contains(ImageModelCapabilities.Quality) && capabilities.Supports(model, ImageModelCapabilities.Quality))
+        {
+            body[ImageModelCapabilities.Quality] = "high";
+        }
+        return JsonBody(body);
+    }
+
     internal static string SizeFor(string aspectRatio)
     {
         var (width, height) = ImageAspect.FixedFrame(aspectRatio);
         return $"{width}x{height}";
     }
+
+    /// <summary>
+    /// The size to ask this model for: its native frame when it paints arbitrary sizes and
+    /// has not rejected one, else the fixed frame. "size" in <paramref name="omit"/> means the
+    /// provider refused the native size on this very request — fall back, do not drop it.
+    /// </summary>
+    internal static string SizeFor(string aspectRatio, string model, IImageModelCapabilities capabilities, ISet<string> omit)
+    {
+        var flexible = !omit.Contains(ImageModelCapabilities.FlexibleSize)
+            && capabilities.Supports(model, ImageModelCapabilities.FlexibleSize);
+        var (width, height) = flexible ? ImageAspect.NativeFrame(aspectRatio) : ImageAspect.FixedFrame(aspectRatio);
+        return $"{width}x{height}";
+    }
+
+    /// <summary>The frame a model will paint, for the rules text and the crop figures.</summary>
+    internal static (int Width, int Height) FrameFor(string aspectRatio, string model, IImageModelCapabilities capabilities) =>
+        capabilities.Supports(model, ImageModelCapabilities.FlexibleSize)
+            ? ImageAspect.NativeFrame(aspectRatio)
+            : ImageAspect.FixedFrame(aspectRatio);
 }
 
 /// <summary>Prompt and mask helpers for region edits (ADR-055), shared by every provider.</summary>
@@ -806,12 +896,32 @@ public sealed class FoundryImageProvider(
             {
                 return MaiImages.FrameFor(descriptor);
             }
+            if (target is not null)
+            {
+                return OpenAiShapedImages.FrameFor(descriptor, target.Deployment, capabilities);
+            }
         }
         catch (AiNotConfiguredException)
         {
             // Unconfigured: report the conservative fixed frame; the render itself will say why.
         }
         return ImageAspect.FixedFrame(descriptor);
+    }
+
+    public async Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct)
+    {
+        var alias = string.IsNullOrWhiteSpace(modelAlias) || modelAlias.Equals(Name, StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : modelAlias;
+        try
+        {
+            var target = await clients.ResolveTargetAsync(userId, alias, ct);
+            return target is not null && ImageModelCapabilities.RendersText(target.Deployment);
+        }
+        catch (AiNotConfiguredException)
+        {
+            return false;
+        }
     }
 
     public async Task<byte[]> GenerateAsync(
@@ -840,8 +950,8 @@ public sealed class FoundryImageProvider(
                 request.Content = dialect == ImageDialect.Mai
                     ? BuildMaiContent(prompt, aspectRatio, deployment, references)
                     : references.Count == 0
-                        ? OpenAiShapedImages.JsonBody(new { prompt, size = OpenAiShapedImages.SizeFor(aspectRatio), n = 1 })
-                        : BuildEditForm(prompt, OpenAiShapedImages.SizeFor(aspectRatio), deployment, references, omit);
+                        ? OpenAiShapedImages.GenerationBody(prompt, aspectRatio, deployment, capabilities, omit, includeModel: false)
+                        : BuildEditForm(prompt, OpenAiShapedImages.SizeFor(aspectRatio, deployment, capabilities, omit), deployment, references, omit);
                 return request;
             },
             ct,
@@ -955,6 +1065,11 @@ public sealed class FoundryImageProvider(
         {
             form.Add(new StringContent("high"), ImageModelCapabilities.InputFidelity);
         }
+        if (!omit.Contains(ImageModelCapabilities.Quality)
+            && capabilities.Supports(deployment, ImageModelCapabilities.Quality))
+        {
+            form.Add(new StringContent("high"), ImageModelCapabilities.Quality);
+        }
 
         foreach (var reference in references)
         {
@@ -1035,6 +1150,9 @@ public abstract class ConfiguredImageProvider(
     public abstract Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct);
 
+    /// <summary>Default no: only the gpt-image family overrides this (ADR-075).</summary>
+    public virtual Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) => Task.FromResult(false);
+
     public abstract Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias,
         IReadOnlyList<ImageReference> references, CancellationToken ct);
@@ -1073,7 +1191,6 @@ public sealed class OpenAiImageProvider(
     {
         var key = await RequireKeyAsync(userId, ct);
         var model = ModelFor(modelAlias);
-        var size = OpenAiShapedImages.SizeFor(aspectRatio);
         var url = new Uri(new Uri(Options.Endpoint.TrimEnd('/') + "/"),
             references.Count == 0 ? "images/generations" : "images/edits");
 
@@ -1085,12 +1202,20 @@ public sealed class OpenAiImageProvider(
                 var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
                 request.Content = references.Count == 0
-                    ? OpenAiShapedImages.JsonBody(new { model, prompt, n = 1, size })
-                    : BuildEditForm(prompt, size, model, references, omit);
+                    ? OpenAiShapedImages.GenerationBody(prompt, aspectRatio, model, capabilities, omit, includeModel: true)
+                    : BuildEditForm(prompt, OpenAiShapedImages.SizeFor(aspectRatio, model, capabilities, omit), model, references, omit);
                 return request;
             },
             ct);
     }
+
+    public override Task<(int Width, int Height)> FrameForAsync(
+        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(OpenAiShapedImages.FrameFor(
+            ImageAspect.Describe(targetWidth, targetHeight), ModelFor(modelAlias), capabilities));
+
+    public override Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(ImageModelCapabilities.RendersText(ModelFor(modelAlias)));
 
     public override async Task<byte[]> EditAsync(
         Guid userId, string instruction, byte[] image, byte[] maskPng, string? modelAlias, CancellationToken ct)
@@ -1127,6 +1252,11 @@ public sealed class OpenAiImageProvider(
             && capabilities.Supports(model, ImageModelCapabilities.InputFidelity))
         {
             form.Add(new StringContent("high"), ImageModelCapabilities.InputFidelity);
+        }
+        if (!omit.Contains(ImageModelCapabilities.Quality)
+            && capabilities.Supports(model, ImageModelCapabilities.Quality))
+        {
+            form.Add(new StringContent("high"), ImageModelCapabilities.Quality);
         }
         foreach (var reference in references)
         {

@@ -37,6 +37,56 @@ public static class ImagePromptRules
           but meaning must not.
         """;
 
+    /// <summary>Slot kinds whose whole job is a headline read at thumbnail size (ADR-075).</summary>
+    public static bool IsTextFirst(string? kind) =>
+        kind is "youtube-thumbnail" or "social-card";
+
+    /// <summary>
+    /// A text-first slot with no composited headline configured, on a model that spells
+    /// reliably, may render the exact words the brief quotes (ADR-075). Everything else keeps
+    /// the compositor path: the model paints no text and Castmill places the authored words.
+    /// </summary>
+    public static bool AllowsRenderedText(string? kind, string? headlineText, bool modelRendersText) =>
+        IsTextFirst(kind) && string.IsNullOrWhiteSpace(headlineText) && modelRendersText;
+
+    // Raw string literals strip their common indentation, so the bullets below are matched
+    // exactly as they appear in the emitted text: at column 0 with two-space continuations.
+    private const string NoTextBulletLong =
+        "- Do not render any new text, letters, numbers, captions, headlines, labels, badges\n"
+        + "  or logos. Castmill composites exact authored text after generation. If an\n"
+        + "  authoritative reference image already contains text, keep the entire referenced\n"
+        + "  panel inside the safe area without recreating, enlarging or repositioning its text.";
+
+    private const string ExactTextBulletLong =
+        "- Render ONLY the text the brief puts in quotation marks, spelled exactly, in a bold\n"
+        + "  highly legible face, fully inside the safe area. No other words, labels, badges,\n"
+        + "  watermarks or logos. If a reference image already contains text, keep that panel\n"
+        + "  inside the safe area without recreating or repositioning its text.";
+
+    private const string NoTextBulletShort =
+        "- Do not render any new text. Reserve clean negative space for Castmill's\n"
+        + "  deterministic, crop-safe text compositor.";
+
+    private const string ExactTextBulletShort =
+        "- Render ONLY the text the brief quotes, spelled exactly and fully legible; no\n"
+        + "  other words. Keep it well inside the safe area.";
+
+    /// <summary>
+    /// Swaps the no-text rules for the exact-text rules when the slot may carry rendered words.
+    /// Throws if the rules text has drifted so neither bullet is found: silently leaving the
+    /// no-text rule in place would make every text-first render contradict its own brief.
+    /// </summary>
+    public static string WithRenderedTextAllowed(string rulesText)
+    {
+        if (!rulesText.Contains(NoTextBulletLong, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The composition rules no longer contain the no-text bullet this swap expects.");
+        }
+        return rulesText
+            .Replace(NoTextBulletLong, ExactTextBulletLong, StringComparison.Ordinal)
+            .Replace(NoTextBulletShort, ExactTextBulletShort, StringComparison.Ordinal);
+    }
+
     /// <summary>Appends the house rules to a prompt. Blank prompts are returned unchanged.</summary>
     public static string Apply(string prompt) =>
         string.IsNullOrWhiteSpace(prompt) ? prompt : $"{prompt.TrimEnd()}\n\n{Composition}";

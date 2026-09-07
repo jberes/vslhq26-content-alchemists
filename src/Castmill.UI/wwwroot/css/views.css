@@ -4274,6 +4274,13 @@ button.cm-intent {
     cursor: pointer;
 }
 
+.cm-studio__preview-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+    align-items: center;
+}
+
 .cm-studio__preview-text {
     margin: 0;
     padding: var(--cm-space-3);

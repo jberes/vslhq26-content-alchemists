@@ -69,6 +69,21 @@ public static class ImagePromptComposer
     }
 
     /// <summary>
+    /// Compose from an AI-written visual brief (ADR-075). The brief already carries subject,
+    /// composition, style, palette and any exact quoted text; this adds only the two things
+    /// it cannot know at writing time — which images are attached and in what order, and a
+    /// steering adjustment. Still the single assembly point: nothing else appends.
+    /// </summary>
+    public static string FromBrief(string brief, IReadOnlyList<ImageReference>? references = null, string? steeringNote = null)
+    {
+        var text = new StringBuilder();
+        text.AppendLine(brief.Trim());
+        AppendReferenceNote(text, references);
+        AppendAdjustment(text, steeringNote);
+        return text.ToString().TrimEnd();
+    }
+
+    /// <summary>
     /// Compose a steered take from an earlier take's stored prompt: the same brief plus the
     /// adjustment. Legacy prompts carried the old guardrail blocks; they are stripped so a
     /// steer from an old take does not resurrect contradictory rules.

@@ -275,7 +275,7 @@
                                             disabled="@_changingPromptMode"
                                             @onclick='() => ChangePromptModeAsync("Auto")'>
                                         <strong>Auto</strong>
-                                        <span>Rebuild from this item</span>
+                                        <span>AI-written visual brief</span>
                                     </button>
                                     <button type="button"
                                             class="cm-studio__mode @(!IsAutoPrompt ? "cm-studio__mode--on" : null)"
@@ -295,7 +295,7 @@
                                           placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
                                 @if (IsAutoPrompt)
                                 {
-                                    <p class="cm-meta">Castmill rebuilds the prompt from this item's content, the approved SEO/AEO targets and the brand style every time.</p>
+                                    <p class="cm-meta">An art-director pass writes a visual brief for this image — one hook, a focal point, the layout, the brand palette as used — from this item's content, the campaign and the brand style. The brief is kept until the inputs change; rewrite it to try a different take.</p>
                                 }
                                 else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
                                 {
@@ -321,10 +321,20 @@
                                     {
                                         <pre class="cm-studio__preview-text">@preview.Prompt</pre>
                                     }
-                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact"
-                                            disabled="@_promptPreviewLoading" @onclick="LoadPromptPreviewAsync">
-                                        @(_promptPreviewLoading ? "Refreshing…" : "Refresh preview")
-                                    </button>
+                                    <div class="cm-studio__preview-actions">
+                                        <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                                disabled="@_promptPreviewLoading" @onclick="LoadPromptPreviewAsync">
+                                            @(_promptPreviewLoading ? "Refreshing…" : "Refresh preview")
+                                        </button>
+                                        @if (IsAutoPrompt)
+                                        {
+                                            <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                                    disabled="@(_promptPreviewLoading || _rewritingBrief)" @onclick="RewriteBriefAsync"
+                                                    title="Forget the cached brief and write a new one from the same inputs">
+                                                @(_rewritingBrief ? "Rewriting brief…" : "Rewrite brief")
+                                            </button>
+                                        }
+                                    </div>
                                 </details>
                                 <div class="cm-studio__chips">
                                     @foreach (var chip in ConstraintChips)
@@ -2807,6 +2817,33 @@
     }
 
     private void OnPreviewToggle(EventArgs _) => _promptPreviewOpen = !_promptPreviewOpen;
+
+    private bool _rewritingBrief;
+
+    /// <summary>Drops the cached visual brief (ADR-F68); the preview that follows writes a new one.</summary>
+    private async Task RewriteBriefAsync()
+    {
+        if (_selectedId is not { } slotId || _rewritingBrief)
+        {
+            return;
+        }
+        _rewritingBrief = true;
+        try
+        {
+            await Images.RewriteBriefAsync(CampaignId, slotId);
+            _promptPreview = null;
+            _promptPreviewOpen = true;
+            await LoadPromptPreviewAsync();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _promptPreviewError = ex is ApiException api ? api.Message : "brief not rewritten";
+        }
+        finally
+        {
+            _rewritingBrief = false;
+        }
+    }
 
     private async Task CompareModelsAsync()
     {

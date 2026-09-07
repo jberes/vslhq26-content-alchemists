@@ -43,6 +43,10 @@ public sealed class ImagesClient(ApiClient api)
             etag: null,
             ct);
 
+    /// <summary>Forgets the slot's cached visual brief so the next preview or render writes a fresh one (ADR-075).</summary>
+    public Task RewriteBriefAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
+        api.PostAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}/brief/rewrite", new { }, ct: ct);
+
     /// <summary>Generates N variants against the slot's model. Live call — costs money.
     /// The result carries persisted variants + a run id pollable at <c>runs/{id}</c>.</summary>
     public Task<VariantBatchResponse> GenerateAsync(

@@ -29,8 +29,11 @@ public interface IImageRenderer
     /// </summary>
     async Task<(byte[] Webp, string Prompt)> RenderExactReportingPromptAsync(
         Guid userId, string prompt, int width, int height, string? modelAlias,
-        IReadOnlyList<ImageReference> references, CancellationToken ct) =>
+        IReadOnlyList<ImageReference> references, CancellationToken ct, bool allowRenderedText = false) =>
         (await RenderExactAsync(userId, prompt, width, height, modelAlias, references, ct), prompt);
+
+    /// <summary>Whether the resolved model may be asked for exact quoted text (ADR-075).</summary>
+    Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) => Task.FromResult(false);
 
     /// <summary>Region edit of an existing take (ADR-055): the provider repaints the masked area,
     /// the result is fitted back to the take's own size and WebP-encoded. No house rules are
@@ -90,13 +93,17 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
 
     public async Task<(byte[] Webp, string Prompt)> RenderExactReportingPromptAsync(
         Guid userId, string prompt, int width, int height, string? modelAlias,
-        IReadOnlyList<ImageReference> references, CancellationToken ct)
+        IReadOnlyList<ImageReference> references, CancellationToken ct, bool allowRenderedText = false)
     {
         var provider = providers.Resolve(modelAlias);
         var frame = await provider.FrameForAsync(userId, width, height, modelAlias, ct);
         // Composed once and handed to the provider verbatim, so what is stored is exactly
         // what was sent — the rules are still applied at this single choke point.
         var finalPrompt = ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height);
+        if (allowRenderedText)
+        {
+            finalPrompt = ImagePromptRules.WithRenderedTextAllowed(finalPrompt);
+        }
         var raw = await provider.GenerateAsync(
             userId, finalPrompt, ImageAspect.Describe(width, height), modelAlias, references, ct);
         return (composer.ToSlotWebp(raw, width, height), finalPrompt);
@@ -105,6 +112,9 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
     public Task<(int Width, int Height)> FrameForAsync(
         Guid userId, int width, int height, string? modelAlias, CancellationToken ct) =>
         providers.Resolve(modelAlias).FrameForAsync(userId, width, height, modelAlias, ct);
+
+    public Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) =>
+        providers.Resolve(modelAlias).RendersTextAsync(userId, modelAlias, ct);
 
     public async Task<byte[]> RenderEditAsync(
         Guid userId, string instruction, byte[] image, byte[] maskPng, int width, int height, string? modelAlias, CancellationToken ct)
