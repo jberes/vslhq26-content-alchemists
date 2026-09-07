@@ -321,10 +321,57 @@
                                 <div>
                                     <strong>@source.Name</strong> <span class="cm-meta cm-mono">@source.BaseUrl</span>
                                     <span class="cm-meta"> · @(source.HasToken ? "token stored" : "no token") · @(source.Enabled ? "enabled" : "disabled")</span>
+                                    @if (!string.IsNullOrWhiteSpace(source.ProductType))
+                                    {
+                                        <span class="cm-chip cm-chip--on">@source.ProductField: @source.ProductType</span>
+                                    }
                                 </div>
                                 <div class="cm-knowledge__row-actions">
                                     <button type="button" class="cm-button cm-button--quiet cm-button--compact" @onclick="() => EditSource(source)">Edit</button>
                                     <button type="button" class="cm-button cm-button--quiet cm-button--compact cm-button--danger" @onclick="() => DeleteSourceAsync(source)">Remove</button>
+                                </div>
+                            </div>
+                        }
+                        @if (OtherBrands.Count > 0)
+                        {
+                            <div class="cm-knowledge__reuse">
+                                <span class="cm-kicker">Use settings from another brand</span>
+                                <p class="cm-meta">
+                                    Copies the endpoint, path, field and token as they are stored — the token never
+                                    leaves the server. Set the product this brand should ask about.
+                                </p>
+                                <div class="cm-knowledge__form">
+                                    <select class="cm-input" aria-label="Brand to copy from"
+                                            value="@(_copyBrandId?.ToString() ?? "")"
+                                            @onchange="OnCopyBrandChangedAsync">
+                                        <option value="">Choose a brand…</option>
+                                        @foreach (var other in OtherBrands)
+                                        {
+                                            <option value="@other.Id">@other.Name</option>
+                                        }
+                                    </select>
+                                    @if (_copySources is { Count: > 0 })
+                                    {
+                                        <select class="cm-input" aria-label="Knowledge base to copy"
+                                                value="@(_copySourceId?.ToString() ?? "")"
+                                                @onchange="e => _copySourceId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
+                                            <option value="">Choose a knowledge base…</option>
+                                            @foreach (var candidate in _copySources)
+                                            {
+                                                <option value="@candidate.Id">@candidate.Name (@candidate.BaseUrl)</option>
+                                            }
+                                        </select>
+                                        <input class="cm-input" placeholder="Product for this brand, e.g. reveal"
+                                               aria-label="Product for the copy" @bind="_copyProduct" />
+                                        <div class="cm-form__actions">
+                                            <button type="button" class="cm-button" disabled="@(_knowledgeBusy || _copySourceId is null)"
+                                                    @onclick="CopySourceAsync">Use these settings</button>
+                                        </div>
+                                    }
+                                    else if (_copyBrandId is not null)
+                                    {
+                                        <p class="cm-meta">That brand has no knowledge base configured.</p>
+                                    }
                                 </div>
                             </div>
                         }
@@ -333,6 +380,9 @@
                             <input class="cm-input" placeholder="https://rag.example.com" aria-label="Base URL" @bind="_srcUrl" />
                             <input class="cm-input" placeholder="/query" aria-label="Query path" @bind="_srcPath" />
                             <input class="cm-input" placeholder="query" aria-label="Query field" @bind="_srcField" />
+                            @* One gateway, several products (ADR-061): the product rides beside the
+                               question as its own field, so brands can share an endpoint and token. *@
+                            <input class="cm-input" placeholder="Product, e.g. reveal (optional)" aria-label="Product" @bind="_srcProduct" />
                             <input class="cm-input" type="password" placeholder="Bearer token (leave blank to keep)" aria-label="Bearer token" @bind="_srcToken" autocomplete="off" />
                             <div class="cm-form__actions">
                                 <button type="button" class="cm-button" disabled="@(_knowledgeBusy || string.IsNullOrWhiteSpace(_srcName) || string.IsNullOrWhiteSpace(_srcUrl))" @onclick="SaveSourceAsync">
@@ -763,7 +813,12 @@
     private BrandKnowledgeResponse? _knowledge;
     private bool _knowledgeBusy;
     private string? _knowledgeStatus;
-    private Guid? _srcId; private string _srcName = ""; private string _srcUrl = ""; private string _srcPath = "/query"; private string _srcField = "query"; private string _srcToken = "";
+    private Guid? _srcId; private string _srcName = ""; private string _srcUrl = ""; private string _srcPath = "/query"; private string _srcField = "query"; private string _srcToken = ""; private string _srcProduct = "";
+    // Reuse another brand's gateway (ADR-061).
+    private Guid? _copyBrandId; private Guid? _copySourceId; private string _copyProduct = "";
+    private List<BrandKnowledgeSourceResponse>? _copySources;
+    private List<BrandProfileDetailResponse> OtherBrands => [.. _allBrands.Where(b => b.Id != BrandId)];
+    private List<BrandProfileDetailResponse> _allBrands = [];
     private Guid? _skillId; private string _skillName = ""; private string _skillFile = "SKILL.md"; private string _skillAppliesTo = ""; private string _skillContent = "";
     private Guid? _mcpId; private string _mcpName = ""; private string _mcpUrl = ""; private string _mcpAuth = ""; private string _mcpTools = "";
 
@@ -772,6 +827,9 @@
         try
         {
             _knowledge = await Brands.GetKnowledgeAsync(BrandId);
+            // Reuse needs the other brands the user can already see; a failure here must not
+            // stop the knowledge tab from rendering.
+            try { _allBrands = await Brands.ListAsync(); } catch (ApiException) { _allBrands = []; }
         }
         catch (ApiException ex)
         {
@@ -782,12 +840,12 @@
 
     private void EditSource(BrandKnowledgeSourceResponse source)
     {
-        _srcId = source.Id; _srcName = source.Name; _srcUrl = source.BaseUrl; _srcPath = source.QueryPath; _srcField = source.QueryField; _srcToken = "";
+        _srcId = source.Id; _srcName = source.Name; _srcUrl = source.BaseUrl; _srcPath = source.QueryPath; _srcField = source.QueryField; _srcToken = ""; _srcProduct = source.ProductType ?? "";
     }
 
     private void ResetSourceForm()
     {
-        _srcId = null; _srcName = ""; _srcUrl = ""; _srcPath = "/query"; _srcField = "query"; _srcToken = "";
+        _srcId = null; _srcName = ""; _srcUrl = ""; _srcPath = "/query"; _srcField = "query"; _srcToken = ""; _srcProduct = "";
     }
 
     private async Task SaveSourceAsync()
@@ -797,7 +855,8 @@
         {
             await Brands.SaveKnowledgeSourceAsync(BrandId, _srcId, new BrandKnowledgeSourceRequest(
                 _srcName.Trim(), _srcUrl.Trim(), _srcPath.Trim(), _srcField.Trim(),
-                Token: _srcId is null ? (_srcToken.Length == 0 ? null : _srcToken) : (_srcToken.Length == 0 ? null : _srcToken)));
+                Token: _srcToken.Length == 0 ? null : _srcToken,
+                ProductType: _srcProduct.Trim().Length == 0 ? null : _srcProduct.Trim()));
             _knowledgeStatus = "Knowledge base saved.";
             ResetSourceForm();
             await LoadKnowledgeAsync();
@@ -805,6 +864,52 @@
         catch (ApiException ex)
         {
             _knowledgeStatus = $"Not saved — {ex.Message}";
+        }
+        finally
+        {
+            _knowledgeBusy = false;
+        }
+    }
+
+    private async Task OnCopyBrandChangedAsync(ChangeEventArgs e)
+    {
+        _copyBrandId = Guid.TryParse(e.Value?.ToString(), out var brandId) ? brandId : null;
+        _copySourceId = null;
+        _copySources = null;
+        if (_copyBrandId is not { } chosen)
+        {
+            return;
+        }
+        try
+        {
+            var knowledge = await Brands.GetKnowledgeAsync(chosen);
+            _copySources = [.. knowledge.Sources];
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Couldn't read that brand's knowledge — {ex.Message}";
+        }
+    }
+
+    private async Task CopySourceAsync()
+    {
+        if (_copyBrandId is not { } sourceBrand || _copySourceId is not { } sourceId)
+        {
+            return;
+        }
+        _knowledgeBusy = true;
+        try
+        {
+            await Brands.CopyKnowledgeSourceAsync(BrandId, new BrandKnowledgeSourceCopyRequest(
+                sourceBrand, sourceId,
+                ProductType: _copyProduct.Trim().Length == 0 ? null : _copyProduct.Trim()));
+            _knowledgeStatus = "Knowledge base copied.";
+            _copyBrandId = null; _copySourceId = null; _copyProduct = ""; _copySources = null;
+            await LoadKnowledgeAsync();
+        }
+        catch (ApiException ex)
+        {
+            _knowledgeStatus = $"Not copied — {ex.Message}";
         }
         finally
         {

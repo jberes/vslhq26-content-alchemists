@@ -1344,16 +1344,25 @@ public static class ImageSlotEndpoints
         // N × one render); persistence stays on this thread because DbContext is not
         // thread-safe. Each render is awaited in completion order so progress stays live.
         var pending = jobs.Select((model, index) => RenderOneAsync(index + 1, model)).ToList();
-        async Task<(int Take, string? Model, byte[]? Webp, Exception? Error, long DurationMs, string? Note)> RenderOneAsync(int take, string? model)
+        async Task<(int Take, string? Model, byte[]? Webp, Exception? Error, long DurationMs, string? Note, string Prompt)> RenderOneAsync(int take, string? model)
         {
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var webp = renderOverride is not null
-                    ? await renderOverride(model, ct)
-                    : await renderer.RenderExactAsync(
+                byte[] webp;
+                // The prompt stored on the take is the one the provider was given, rules and
+                // all (ADR-065) — a producer diagnosing a bad image needs the real text.
+                var sentPrompt = effectivePrompt;
+                if (renderOverride is not null)
+                {
+                    webp = await renderOverride(model, ct);
+                }
+                else
+                {
+                    (webp, sentPrompt) = await renderer.RenderExactReportingPromptAsync(
                         userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
                         references ?? [], ct);
+                }
 
                 // Art-director loop (ADR-058): judge the take against the brief; on a rejection
                 // re-render ONCE per round with the named defect, keeping the best-scoring take.
@@ -1367,12 +1376,13 @@ public static class ImageSlotEndpoints
                     {
                         rounds++;
                         var retryPrompt = $"{effectivePrompt}\nArt director's fix for the previous render: {fix}";
-                        var retry = await renderer.RenderExactAsync(
+                        var (retry, retrySent) = await renderer.RenderExactReportingPromptAsync(
                             userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, references ?? [], ct);
                         verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, retry, ct);
                         if (!verdict.Ran || verdict.Score >= best.Score)
                         {
                             best = (retry, verdict.Score);
+                            sentPrompt = retrySent;
                         }
                     }
                     webp = best.Webp;
@@ -1380,11 +1390,11 @@ public static class ImageSlotEndpoints
                         ? $"{verdict.Summary}{(rounds > 0 ? $" · {rounds} re-render{(rounds == 1 ? "" : "s")}" : "")}"
                         : verdict.Summary;
                 }
-                return (take, model, webp, null, stopwatch.ElapsedMilliseconds, note);
+                return (take, model, webp, null, stopwatch.ElapsedMilliseconds, note, sentPrompt);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                return (take, model, null, ex, stopwatch.ElapsedMilliseconds, null);
+                return (take, model, null, ex, stopwatch.ElapsedMilliseconds, null, effectivePrompt);
             }
         }
 
@@ -1392,7 +1402,7 @@ public static class ImageSlotEndpoints
         {
             var finished = await Task.WhenAny(pending);
             pending.Remove(finished);
-            var (i, model, rendered, error, durationMs, criticNote) = await finished;
+            var (i, model, rendered, error, durationMs, criticNote, sentPrompt) = await finished;
             // The batch's model, recorded on every variant so a gallery of takes from two
             // models stays readable.
             try
@@ -1422,7 +1432,7 @@ public static class ImageSlotEndpoints
                     ThumbUrl = thumbUrl.ToString(),
                     ThumbBlobPath = thumbPath,
                     Model = model ?? "image",
-                    Prompt = effectivePrompt,
+                    Prompt = sentPrompt,
                     SteeringNote = criticNote is null ? steeringNote : (steeringNote is null ? criticNote : $"{steeringNote} · {criticNote}"),
                     SourceVariantId = sourceVariantId,
                     State = "Candidate",

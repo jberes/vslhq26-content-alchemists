@@ -146,7 +146,8 @@ public static partial class Generators
             "suggestedPinnedComment" must refer to one concrete transcript moment, add useful
             context rather than repeat the description, and end with an open question.
             """,
-            ValidateYoutube));
+            ValidateYoutube,
+            ChapterTimes.Apply));
 
         foreach (var platform in SocialPlatforms)
         {
@@ -620,6 +621,19 @@ public static partial class Generators
         if (!first.TryGetProperty("startSeconds", out var start) || start.GetDouble() != 0)
         {
             return new ValidationOutcome(false, [], "YouTube chapters must start at 0:00.");
+        }
+        // Backstop for ChapterTimes.Apply (ADR-063). Times that do not advance make YouTube
+        // drop the chapter list entirely, so this is fatal rather than a warning.
+        var previous = -1d;
+        foreach (var chapter in chapters.EnumerateArray())
+        {
+            var seconds = chapter.TryGetProperty("startSeconds", out var value)
+                && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : -1;
+            if (seconds <= previous)
+            {
+                return new ValidationOutcome(false, [], "YouTube chapters must be in ascending order.");
+            }
+            previous = seconds;
         }
         if (!json.TryGetProperty("suggestedPinnedComment", out var commentNode)
             || commentNode.ValueKind != JsonValueKind.String

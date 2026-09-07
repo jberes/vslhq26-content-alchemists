@@ -2464,6 +2464,20 @@ button.cm-intent {
     grid-column: 1 / -1;
 }
 
+/* Reuse another brand's gateway (ADR-F61): a well, so it reads as an alternative to filling
+   the form below rather than another field in it. */
+.cm-knowledge__reuse {
+    margin-block-end: var(--cm-space-4);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-sunken);
+}
+
+.cm-knowledge__reuse .cm-meta {
+    margin-block: var(--cm-space-1) var(--cm-space-2);
+}
+
 .cm-source__segments {
     list-style: none;
     margin: 0;
@@ -7677,9 +7691,17 @@ body.cm-wire-dragging [data-wire-drag] {
 
 /* ---- Brand editor: colour row, asset cards, template editor, danger zone ----------- */
 
+/* #RRGGBB is 7 mono characters, but inputs are border-box (base.css), so the declared width
+   also has to carry this input's own padding and borders — a bare 8.5ch measured barely 6
+   characters of text and clipped the last of every value. 8ch of text leaves room for the
+   caret; the calc follows --cm-space-3, so compact density stays correct too. */
 .cm-brand__color-hex {
-    inline-size: 8.5ch;
+    inline-size: calc(8ch + 2 * var(--cm-space-3) + 2px);
     flex: 0 0 auto;
+    /* .cm-mono on the element loses to .cm-input's font-family: both are one class, and
+       components.css is imported after base.css. A hex is a code value — it belongs in the
+       mono face, and ch units only measure honestly once it is. */
+    font-family: var(--cm-font-mono);
 }
 
 /* Square cards in a grid: ten portrait rows was a page of scrolling that said nothing a

@@ -469,6 +469,14 @@ public sealed class BrandKnowledgeSource : ITenantScoped
     public required string BaseUrl { get; set; }
     public string QueryPath { get; set; } = "/query";
     public string QueryField { get; set; } = "query";
+    /// <summary>
+    /// Optional product/agent selector posted alongside the question (ADR-061). One gateway
+    /// serves several products — the Infragistics gateway routes on "productType" — so brands
+    /// that share an endpoint differ only by this value.
+    /// </summary>
+    public string? ProductType { get; set; }
+    /// <summary>Name of the body field the product goes in; the gateway's is "productType".</summary>
+    public string ProductField { get; set; } = "productType";
     /// <summary>Encrypted bearer token; null when the gateway is open or uses the workspace token.</summary>
     public string? TokenCiphertext { get; set; }
     public bool Enabled { get; set; } = true;

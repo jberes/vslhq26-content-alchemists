@@ -65,6 +65,8 @@ public static partial class BrandEndpoints
         group.MapPut("/{id:guid}/knowledge/sources/{itemId:guid}", UpsertKnowledgeSourceAsync)
             .Validate<BrandKnowledgeSourceRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{id:guid}/knowledge/sources/{itemId:guid}", DeleteKnowledgeSourceAsync).RequireRateLimiting("writes");
+        group.MapPost("/{id:guid}/knowledge/sources/copy", CopyKnowledgeSourceAsync)
+            .Validate<BrandKnowledgeSourceCopyRequest>().RequireRateLimiting("writes");
         group.MapPost("/{id:guid}/knowledge/skills", UpsertSkillAsync)
             .Validate<BrandSkillRequest>().RequireRateLimiting("writes");
         group.MapPut("/{id:guid}/knowledge/skills/{itemId:guid}", UpsertSkillAsync)
@@ -704,6 +706,8 @@ public static partial class BrandEndpoints
         row.BaseUrl = request.BaseUrl.Trim();
         row.QueryPath = string.IsNullOrWhiteSpace(request.QueryPath) ? "/query" : request.QueryPath.Trim();
         row.QueryField = string.IsNullOrWhiteSpace(request.QueryField) ? "query" : request.QueryField.Trim();
+        row.ProductType = string.IsNullOrWhiteSpace(request.ProductType) ? null : request.ProductType.Trim();
+        row.ProductField = string.IsNullOrWhiteSpace(request.ProductField) ? "productType" : request.ProductField.Trim();
         row.Enabled = request.Enabled;
         if (request.Token is not null)
         {
@@ -720,6 +724,59 @@ public static partial class BrandEndpoints
         return itemId is null
             ? Results.Created($"/api/v1/brands/{id}/knowledge/sources/{row.Id}", ToResponse(row))
             : Results.Ok(ToResponse(row));
+    }
+
+    /// <summary>
+    /// Copies another brand's gateway settings onto this brand (ADR-061), token included, with
+    /// only the product changed. Server-side because the token is write-only. The caller must
+    /// hold access to BOTH brands: without that check, access to one brand would let someone
+    /// mint a working copy of a gateway credential they were never granted.
+    /// </summary>
+    private static async Task<IResult> CopyKnowledgeSourceAsync(
+        Guid id, BrandKnowledgeSourceCopyRequest request, ClaimsPrincipal principal,
+        ITenantProvider tenant, IBrandAccessService access,
+        CastmillDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var target = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        var source = await FindAccessAsync(request.SourceBrandId, principal, tenant, access, tracking: false, ct);
+        if (target is null || source is null)
+        {
+            return Results.NotFound();
+        }
+        // Same tenant only: the token ciphertext is copied verbatim, and it is readable only
+        // under the workspace cipher that encrypted it.
+        if (target.Brand.TenantId != source.Brand.TenantId)
+        {
+            return Results.NotFound();
+        }
+        var row = await db.BrandKnowledgeSources.IgnoreQueryFilters().SingleOrDefaultAsync(
+            k => k.Id == request.SourceId && k.BrandId == request.SourceBrandId
+                && k.TenantId == source.Brand.TenantId, ct);
+        if (row is null)
+        {
+            return Results.NotFound();
+        }
+
+        var now = clock.GetUtcNow();
+        var copy = new BrandKnowledgeSource
+        {
+            Id = Guid.NewGuid(),
+            TenantId = target.Brand.TenantId,
+            BrandId = id,
+            Name = string.IsNullOrWhiteSpace(request.Name) ? row.Name : request.Name.Trim(),
+            BaseUrl = row.BaseUrl,
+            QueryPath = row.QueryPath,
+            QueryField = row.QueryField,
+            ProductType = string.IsNullOrWhiteSpace(request.ProductType) ? row.ProductType : request.ProductType.Trim(),
+            ProductField = row.ProductField,
+            TokenCiphertext = row.TokenCiphertext,
+            Enabled = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.BrandKnowledgeSources.Add(copy);
+        await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/v1/brands/{id}/knowledge/sources/{copy.Id}", ToResponse(copy));
     }
 
     private static async Task<IResult> DeleteKnowledgeSourceAsync(
@@ -862,7 +919,8 @@ public static partial class BrandEndpoints
     }
 
     private static BrandKnowledgeSourceResponse ToResponse(BrandKnowledgeSource k) =>
-        new(k.Id, k.BrandId, k.Name, k.BaseUrl, k.QueryPath, k.QueryField, k.TokenCiphertext is not null, k.Enabled, k.UpdatedAt);
+        new(k.Id, k.BrandId, k.Name, k.BaseUrl, k.QueryPath, k.QueryField, k.TokenCiphertext is not null,
+            k.Enabled, k.UpdatedAt, k.ProductType, k.ProductField);
 
     private static BrandSkillResponse ToResponse(BrandSkill k) =>
         new(k.Id, k.BrandId, k.Name, k.FileName, k.Content, k.AppliesTo, k.Enabled, k.UpdatedAt);

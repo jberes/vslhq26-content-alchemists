@@ -143,6 +143,13 @@ public sealed class BrandsClient(ApiClient api)
     public Task DeleteKnowledgeSourceAsync(Guid brandId, Guid id, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{brandId}/knowledge/sources/{id}", ct);
 
+    /// <summary>Reuse another brand's gateway settings, token included (ADR-061). The copy is
+    /// server-side: the token is write-only, so the client has nothing to copy.</summary>
+    public Task<BrandKnowledgeSourceResponse> CopyKnowledgeSourceAsync(
+        Guid brandId, BrandKnowledgeSourceCopyRequest request, CancellationToken ct = default) =>
+        api.PostAsync<BrandKnowledgeSourceCopyRequest, BrandKnowledgeSourceResponse>(
+            $"api/v1/brands/{brandId}/knowledge/sources/copy", request, anonymous: false, ct);
+
     public Task<BrandSkillResponse> SaveSkillAsync(
         Guid brandId, Guid? id, BrandSkillRequest request, CancellationToken ct = default) =>
         id is { } existing

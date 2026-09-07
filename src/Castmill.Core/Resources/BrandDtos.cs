@@ -2,11 +2,99 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Castmill.Core.Resources;
 
-/// <summary>One named colour in a brand's scheme. Role is free-form ("primary",
-/// "background", "highlight"); Hex is validated at the boundary.</summary>
+/// <summary>One named colour in a brand's scheme. Role stays free text — a brand may have a
+/// "wash" or a "chart series 3" — but <see cref="BrandColorRoles"/> is the offered set, and the
+/// importer maps onto it so three colours do not all arrive called "accent" (ADR-062).
+/// <see cref="Token"/> is the brand's own CSS variable name when its guide names one.</summary>
 public sealed record BrandColor(
     [property: Required, MaxLength(50)] string Role,
-    [property: Required, RegularExpression("^#[0-9a-fA-F]{6}$")] string Hex);
+    [property: Required, RegularExpression("^#[0-9a-fA-F]{6}$")] string Hex,
+    [property: MaxLength(100)] string? Token = null);
+
+/// <summary>The roles the editor offers and the importer maps onto. Free text still allowed.</summary>
+public static class BrandColorRoles
+{
+    public static readonly IReadOnlyList<string> Known =
+        ["primary", "secondary", "accent", "cta", "neutral", "background", "surface", "text", "border", "success", "warning", "danger"];
+
+    /// <summary>
+    /// Maps a guide's own wording onto a known role: "Primary Blue (CTA)" → "cta",
+    /// "Border Gray" → "border", "Inverse Text" → "text". Anything unrecognised is kept as
+    /// written, trimmed — a brand's vocabulary is not ours to overwrite.
+    /// </summary>
+    public static string Normalize(string? role)
+    {
+        var text = role?.Trim() ?? string.Empty;
+        if (text.Length == 0)
+        {
+            return "accent";
+        }
+        var lower = text.ToLowerInvariant();
+        // Most specific first: "primary action" is a CTA, not the primary brand colour.
+        if (lower.Contains("cta", StringComparison.Ordinal) || lower.Contains("action", StringComparison.Ordinal)) return "cta";
+        if (lower.Contains("background", StringComparison.Ordinal) || lower.Contains(" bg", StringComparison.Ordinal)) return "background";
+        if (lower.Contains("surface", StringComparison.Ordinal)) return "surface";
+        if (lower.Contains("border", StringComparison.Ordinal) || lower.Contains("rule", StringComparison.Ordinal)) return "border";
+        if (lower.Contains("text", StringComparison.Ordinal) || lower.Contains("ink", StringComparison.Ordinal)) return "text";
+        if (lower.Contains("neutral", StringComparison.Ordinal) || lower.Contains("gray", StringComparison.Ordinal) || lower.Contains("grey", StringComparison.Ordinal)) return "neutral";
+        if (lower.Contains("secondary", StringComparison.Ordinal)) return "secondary";
+        if (lower.Contains("primary", StringComparison.Ordinal)) return "primary";
+        if (lower.Contains("accent", StringComparison.Ordinal) || lower.Contains("highlight", StringComparison.Ordinal)) return "accent";
+        if (lower.Contains("success", StringComparison.Ordinal)) return "success";
+        if (lower.Contains("warn", StringComparison.Ordinal)) return "warning";
+        if (lower.Contains("danger", StringComparison.Ordinal) || lower.Contains("error", StringComparison.Ordinal)) return "danger";
+        return text;
+    }
+
+    /// <summary>
+    /// One row per colour: the same hex twice is one colour with two names, and a role that
+    /// repeats is numbered rather than dropped — a brand really can have three accents.
+    /// </summary>
+    public static IReadOnlyList<BrandColor> Dedupe(IEnumerable<BrandColor> colors)
+    {
+        var byHex = new Dictionary<string, BrandColor>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<string>();
+        foreach (var color in colors)
+        {
+            var hex = color.Hex.Trim().ToUpperInvariant();
+            if (byHex.ContainsKey(hex))
+            {
+                continue;
+            }
+            byHex[hex] = color with { Role = Normalize(color.Role), Hex = hex };
+            order.Add(hex);
+        }
+
+        var used = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<BrandColor>(order.Count);
+        foreach (var hex in order)
+        {
+            var color = byHex[hex];
+            var seen = used.GetValueOrDefault(color.Role);
+            used[color.Role] = seen + 1;
+            result.Add(seen == 0 ? color : color with { Role = $"{color.Role} {seen + 1}" });
+        }
+        return result;
+    }
+}
+
+/// <summary>A competitor and the situation it turns up in — enough for comparison content.</summary>
+public sealed record BrandCompetitor(
+    [property: Required, MaxLength(200)] string Name,
+    [property: MaxLength(1000)] string? WhenItComesUp = null);
+
+/// <summary>Who the content is written for, in the detail a writer can act on.</summary>
+public sealed record BrandPersona(
+    [property: Required, MaxLength(200)] string Title,
+    [property: MaxLength(1000)] string? Role = null,
+    IReadOnlyList<string>? Goals = null,
+    IReadOnlyList<string>? PainPoints = null,
+    IReadOnlyList<string>? DecisionCriteria = null);
+
+/// <summary>A gradient the palette cannot express as a single hex.</summary>
+public sealed record BrandGradient(
+    [property: Required, MaxLength(50)] string Role,
+    [property: Required, MaxLength(500)] string Css);
 
 /// <summary>
 /// The typed style card serialized into <c>BrandProfile.StyleCardJson</c> (ADR-003:
@@ -21,7 +109,41 @@ public sealed record BrandStyleCard(
     [property: MaxLength(200)] string? HeadingFont = null,
     [property: MaxLength(200)] string? BodyFont = null,
     [property: MaxLength(4000)] string? ImageStyle = null,
-    IReadOnlyList<string>? BannedPhrases = null);
+    IReadOnlyList<string>? BannedPhrases = null,
+
+    // ---- Market and messaging (ADR-062). What makes a piece this brand's rather than
+    // ---- anyone's: the claim it makes, the evidence for it, and who it is aimed at.
+    /// <summary>What the product is and who it is for, in the brand's own words.</summary>
+    [property: MaxLength(4000)] string? Positioning = null,
+    /// <summary>The handful of themes every piece should ladder up to.</summary>
+    IReadOnlyList<string>? MessagingPillars = null,
+    /// <summary>Claims this brand may make that its competitors cannot.</summary>
+    IReadOnlyList<string>? Differentiators = null,
+    /// <summary>Evidence for those claims — outcomes, benchmarks, named wins.</summary>
+    IReadOnlyList<string>? ProofPoints = null,
+    IReadOnlyList<BrandCompetitor>? Competitors = null,
+    IReadOnlyList<BrandPersona>? Personas = null,
+    /// <summary>Concrete scenarios the product is bought for.</summary>
+    IReadOnlyList<string>? UseCases = null,
+    /// <summary>Guardrail: claims and conflations this brand must never make. Sibling products
+    /// belong here — confusing them is the failure mode a generator falls into most easily.</summary>
+    IReadOnlyList<string>? DoNotClaim = null,
+
+    // ---- Visual rules (ADR-062). A palette says which colours exist; these say how to use them.
+    /// <summary>Proportions and placement rules, e.g. "70-85% neutral; CTA must be blue".</summary>
+    [property: MaxLength(2000)] string? ColorUsage = null,
+    IReadOnlyList<BrandGradient>? Gradients = null,
+    /// <summary>The section order a page follows, e.g. "Hero -> Features -> CTA".</summary>
+    [property: MaxLength(1000)] string? LayoutPattern = null,
+    /// <summary>Visual things to avoid — the negative half of the image brief.</summary>
+    IReadOnlyList<string>? VisualDontList = null,
+
+    // ---- Review (ADR-062).
+    /// <summary>What a finished piece is checked against before it ships.</summary>
+    IReadOnlyList<string>? QaChecklist = null,
+    /// <summary>How marketing surfaces differ from in-product surfaces.</summary>
+    [property: MaxLength(1000)] string? MarketingMode = null,
+    [property: MaxLength(1000)] string? ProductMode = null);
 
 /// <summary>Draft a brand from its public website. The result is never saved automatically —
 /// it populates the editor for the user to accept or change.</summary>
@@ -104,11 +226,28 @@ public sealed record BrandKnowledgeSourceRequest(
     [property: MaxLength(100)] string QueryField = "query",
     /// <summary>Bearer token. Null leaves the stored one; empty string clears it.</summary>
     [property: MaxLength(4000)] string? Token = null,
-    bool Enabled = true);
+    bool Enabled = true,
+    /// <summary>Product this brand asks about on a shared gateway, e.g. "reveal" (ADR-061).</summary>
+    [property: MaxLength(100)] string? ProductType = null,
+    [property: MaxLength(100)] string ProductField = "productType");
 
 public sealed record BrandKnowledgeSourceResponse(
     Guid Id, Guid BrandId, string Name, string BaseUrl, string QueryPath, string QueryField,
-    bool HasToken, bool Enabled, DateTimeOffset UpdatedAt);
+    bool HasToken, bool Enabled, DateTimeOffset UpdatedAt,
+    string? ProductType = null, string ProductField = "productType");
+
+/// <summary>
+/// Reuse another brand's gateway settings (ADR-061). The copy happens server-side because the
+/// bearer token is write-only — the client never sees it and so could not copy it. Only the
+/// product differs, which is why it is the one field this request supplies.
+/// </summary>
+public sealed record BrandKnowledgeSourceCopyRequest(
+    [property: Required] Guid SourceBrandId,
+    [property: Required] Guid SourceId,
+    /// <summary>Product for the NEW brand, e.g. "reveal". Null copies the source's.</summary>
+    [property: MaxLength(100)] string? ProductType = null,
+    /// <summary>Name for the copy; null keeps the source's name.</summary>
+    [property: MaxLength(200)] string? Name = null);
 
 public sealed record BrandSkillRequest(
     [property: Required, MinLength(1), MaxLength(200)] string Name,

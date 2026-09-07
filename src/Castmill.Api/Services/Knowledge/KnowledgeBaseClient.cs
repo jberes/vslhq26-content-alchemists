@@ -77,7 +77,14 @@ public sealed record KnowledgeAnswer(
 }
 
 /// <summary>A brand's own RAG gateway (ADR-056), token already decrypted for this request.</summary>
-public sealed record KnowledgeEndpoint(string BaseUrl, string QueryPath, string QueryField, string? Token, string Name);
+/// <summary>
+/// One brand's gateway. <paramref name="ProductType"/> is posted beside the question under
+/// <paramref name="ProductField"/> when set (ADR-061) — the Infragistics gateway routes to a
+/// per-product agent on "productType", so several brands share one endpoint and token.
+/// </summary>
+public sealed record KnowledgeEndpoint(
+    string BaseUrl, string QueryPath, string QueryField, string? Token, string Name,
+    string? ProductType = null, string ProductField = "productType");
 
 public interface IKnowledgeBaseClient
 {
@@ -126,7 +133,9 @@ public sealed class KnowledgeBaseClient(
         // A brand endpoint without its own token borrows the workspace token, so one gateway
         // configured both ways keeps working.
         var token = endpoint.Token ?? await secrets.GetAsync(userId, SecretKind.KnowledgeBaseToken, ct);
-        return await QueryAsync(endpoint.BaseUrl, endpoint.QueryPath, endpoint.QueryField, token, question, ct);
+        return await QueryAsync(
+            endpoint.BaseUrl, endpoint.QueryPath, endpoint.QueryField, token, question, ct,
+            endpoint.ProductType, endpoint.ProductField);
     }
 
     public async Task<KnowledgeAnswer?> AskAsync(Guid userId, string question, CancellationToken ct)
@@ -145,7 +154,8 @@ public sealed class KnowledgeBaseClient(
     }
 
     private async Task<KnowledgeAnswer?> QueryAsync(
-        string baseUrl, string queryPath, string queryField, string? token, string question, CancellationToken ct)
+        string baseUrl, string queryPath, string queryField, string? token, string question, CancellationToken ct,
+        string? productType = null, string productField = "productType")
     {
         var client = httpClients.CreateClient(HttpClientName);
         client.BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/");
@@ -155,6 +165,12 @@ public sealed class KnowledgeBaseClient(
         }
 
         var body = new Dictionary<string, object?> { [queryField] = question };
+        // The product selector rides beside the question, never inside it: a gateway that routes
+        // on a field cannot be steered by prose, and prose the model wrote could not be trusted to.
+        if (!string.IsNullOrWhiteSpace(productType) && !string.IsNullOrWhiteSpace(productField))
+        {
+            body[productField.Trim()] = productType.Trim();
+        }
 
         try
         {

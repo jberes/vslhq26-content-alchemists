@@ -134,7 +134,8 @@ public sealed class BrandContextService(
                 ? null
                 : new Castmill.Api.Services.Knowledge.KnowledgeEndpoint(
                     knowledgeRow.BaseUrl, knowledgeRow.QueryPath, knowledgeRow.QueryField,
-                    Decrypt(knowledgeRow.TokenCiphertext), knowledgeRow.Name),
+                    Decrypt(knowledgeRow.TokenCiphertext), knowledgeRow.Name,
+                    knowledgeRow.ProductType, knowledgeRow.ProductField),
             skills,
             mcpRows.Select(m => new McpServerDefinition(
                 m.Name, m.Url, Decrypt(m.AuthorizationCiphertext), ParseTools(m.AllowedToolsJson))).ToList());

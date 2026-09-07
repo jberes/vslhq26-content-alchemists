@@ -297,6 +297,17 @@
                                 {
                                     <p class="cm-meta">Castmill rebuilds the prompt from this item's content, the approved SEO/AEO targets and the brand style every time.</p>
                                 }
+                                else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
+                                {
+                                    <p class="cm-meta">
+                                        No prompt yet — write one, or let the AI draft a prompt for
+                                        every slot from the transcript's strongest moments.
+                                    </p>
+                                    <button type="button" class="cm-button cm-button--quiet" disabled="@_seeding"
+                                            @onclick="SeedPromptsAsync">
+                                        @(_seeding ? "Writing prompts from the source… (~30s)" : "Seed all prompts from the source")
+                                    </button>
+                                }
                                 <details class="cm-studio__preview" open="@_promptPreviewOpen" @ontoggle="OnPreviewToggle">
                                     <summary>
                                         <span class="cm-kicker">Prompt Castmill will send</span>
@@ -315,17 +326,6 @@
                                         @(_promptPreviewLoading ? "Refreshing…" : "Refresh preview")
                                     </button>
                                 </details>
-                                else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
-                                {
-                                    <p class="cm-meta">
-                                        No prompt yet — write one, or let the AI draft a prompt for
-                                        every slot from the transcript's strongest moments.
-                                    </p>
-                                    <button type="button" class="cm-button cm-button--quiet" disabled="@_seeding"
-                                            @onclick="SeedPromptsAsync">
-                                        @(_seeding ? "Writing prompts from the source… (~30s)" : "Seed all prompts from the source")
-                                    </button>
-                                }
                                 <div class="cm-studio__chips">
                                     @foreach (var chip in ConstraintChips)
                                     {

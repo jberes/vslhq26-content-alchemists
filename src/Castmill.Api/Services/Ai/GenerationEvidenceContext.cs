@@ -8,6 +8,14 @@ namespace Castmill.Api.Services.Ai;
 
 public sealed class GenerationEvidenceException(string message) : Exception(message);
 
+/// <summary>
+/// The model's reply could not be read as JSON. Derives from <see cref="JsonException"/> so the
+/// callers that already treat unparseable output as "no result" keep working, but carries a
+/// message a producer can act on — "JsonReaderException" (System.Text.Json's internal parse
+/// type) was what reached the screen before (ADR-066).
+/// </summary>
+public sealed class ModelJsonException(string message) : JsonException(message);
+
 public sealed record GenerationEvidenceBlock(
     Guid? SourceAssetId,
     string SourceLabel,
@@ -151,27 +159,52 @@ public sealed record GenerationEvidenceContext(
                     block.StableId,
                     qualified.EvidenceBlockId,
                     StringComparison.OrdinalIgnoreCase));
-            if (exact is null)
+            if (exact is not null)
             {
-                error = $"Citation references unknown approved evidence: {value}.";
-                return false;
+                canonical = exact.CitationId;
+                return true;
             }
-            canonical = exact.CitationId;
-            return true;
+            // Right shape, wrong source: fall through to the block id, which is the part the
+            // model actually read off the evidence.
+            return TryResolveBlockId(qualified.EvidenceBlockId, value, out canonical, out error);
         }
 
+        // A qualified id whose 32-character source guid the model mis-transcribed. Observed in
+        // production: "evidence:b88337dc671846a986e8da611ad94df:s19" for source
+        // b88337dc-6718-46a9-863e-8da611ad94df — one character dropped, so the codec rejects it
+        // and the whole string became the block id, matching nothing. The block id after the
+        // last colon is still the real one, so resolve on that and let the ambiguity check
+        // below decide. A citation is only ever accepted when it names a real approved block.
+        return TryResolveBlockId(RecoverBlockId(value), value, out canonical, out error);
+    }
+
+    /// <summary>The trailing block id of a qualified-looking reference, else the value itself.</summary>
+    internal static string RecoverBlockId(string value)
+    {
+        if (!value.StartsWith("evidence:", StringComparison.Ordinal))
+        {
+            return value;
+        }
+        var lastColon = value.LastIndexOf(':');
+        return lastColon > 0 && lastColon < value.Length - 1 ? value[(lastColon + 1)..] : value;
+    }
+
+    private bool TryResolveBlockId(string blockId, string original, out string canonical, out string? error)
+    {
+        canonical = original;
+        error = null;
         var matches = Blocks.Where(block =>
-                string.Equals(block.StableId, value, StringComparison.OrdinalIgnoreCase))
+                string.Equals(block.StableId, blockId, StringComparison.OrdinalIgnoreCase))
             .Take(2)
             .ToList();
         if (matches.Count == 0)
         {
-            error = $"Citation references unknown approved evidence: {value}.";
+            error = $"Citation references unknown approved evidence: {original}.";
             return false;
         }
         if (matches.Count > 1)
         {
-            error = $"Citation '{value}' is ambiguous across approved sources; use its qualified evidence id.";
+            error = $"Citation '{original}' is ambiguous across approved sources; use its qualified evidence id.";
             return false;
         }
 

@@ -51,10 +51,20 @@ public sealed class UserSecretsService(
     ISecretCipher cipher,
     ITenantProvider tenant,
     TimeProvider clock,
-    ILogger<UserSecretsService> logger) : IUserSecretsService
+    ILogger<UserSecretsService> logger) : IUserSecretsService, IDisposable
 {
+    public void Dispose() => _gate.Dispose();
+
     // Stored under the reserved prefix that the plaintext /settings group refuses.
     private static string KeyFor(SecretKind kind) => $"secret.{kind}";
+
+    // Reads are cached for the life of the scope and serialised behind this gate (ADR-064).
+    // Image generation fans several renders out in parallel over ONE request scope, and every
+    // provider resolves its credentials on the way through — concurrent reads on a scoped
+    // DbContext threw "A second operation was started on this context instance" and failed the
+    // take. Secrets cannot change underneath a single request, so one read each is also correct.
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<SecretKind, string?> _cache = [];
 
     public async Task SetAsync(Guid userId, SecretKind kind, string value, CancellationToken ct)
     {
@@ -83,9 +93,29 @@ public sealed class UserSecretsService(
             setting.UpdatedAt = now;
         }
         await db.SaveChangesAsync(ct);
+        _cache.Remove(kind);
     }
 
     public async Task<string?> GetAsync(Guid userId, SecretKind kind, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (_cache.TryGetValue(kind, out var cached))
+            {
+                return cached;
+            }
+            var value = await ReadAsync(userId, kind, ct);
+            _cache[kind] = value;
+            return value;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<string?> ReadAsync(Guid userId, SecretKind kind, CancellationToken ct)
     {
         var key = KeyFor(kind);
         var setting = await db.UserSettings
@@ -144,6 +174,7 @@ public sealed class UserSecretsService(
         }
         db.UserSettings.Remove(setting);
         await db.SaveChangesAsync(ct);
+        _cache.Remove(kind);
         return true;
     }
 

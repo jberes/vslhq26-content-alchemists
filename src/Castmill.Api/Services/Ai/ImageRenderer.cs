@@ -21,6 +21,17 @@ public interface IImageRenderer
         IReadOnlyList<ImageReference> references, CancellationToken ct) =>
         RenderExactAsync(userId, prompt, width, height, modelAlias, ct);
 
+    /// <summary>
+    /// The render plus the prompt the provider was actually given (ADR-065). What a producer
+    /// needs to diagnose a bad image is the FINAL text, including the safe-margin block
+    /// <see cref="ImagePromptRules"/> appends in here — storing the pre-rules brief showed
+    /// them something the model never saw. Default keeps test doubles compiling.
+    /// </summary>
+    async Task<(byte[] Webp, string Prompt)> RenderExactReportingPromptAsync(
+        Guid userId, string prompt, int width, int height, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct) =>
+        (await RenderExactAsync(userId, prompt, width, height, modelAlias, references, ct), prompt);
+
     /// <summary>Region edit of an existing take (ADR-055): the provider repaints the masked area,
     /// the result is fitted back to the take's own size and WebP-encoded. No house rules are
     /// appended: the frame IS the take, nothing is cropped.</summary>
@@ -75,6 +86,20 @@ public sealed class ImageRenderer(IImageProviderRegistry providers, IImageCompos
             userId, ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height),
             ImageAspect.Describe(width, height), modelAlias, references, ct);
         return composer.ToSlotWebp(raw, width, height);
+    }
+
+    public async Task<(byte[] Webp, string Prompt)> RenderExactReportingPromptAsync(
+        Guid userId, string prompt, int width, int height, string? modelAlias,
+        IReadOnlyList<ImageReference> references, CancellationToken ct)
+    {
+        var provider = providers.Resolve(modelAlias);
+        var frame = await provider.FrameForAsync(userId, width, height, modelAlias, ct);
+        // Composed once and handed to the provider verbatim, so what is stored is exactly
+        // what was sent — the rules are still applied at this single choke point.
+        var finalPrompt = ImagePromptRules.Apply(prompt, width, height, frame.Width, frame.Height);
+        var raw = await provider.GenerateAsync(
+            userId, finalPrompt, ImageAspect.Describe(width, height), modelAlias, references, ct);
+        return (composer.ToSlotWebp(raw, width, height), finalPrompt);
     }
 
     public Task<(int Width, int Height)> FrameForAsync(

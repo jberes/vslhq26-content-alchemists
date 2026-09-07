@@ -289,7 +289,7 @@ public sealed class AiOrchestrator(
         {
             logger.LogWarning(ex, "Generator {Kind} failed", spec.Kind);
             return Fail(spec.Kind,
-                ex is AiNotConfiguredException or GenerationEvidenceException
+                ex is AiNotConfiguredException or GenerationEvidenceException or ModelJsonException
                     ? ex.Message
                     : $"Generation failed: {ex.GetType().Name}",
                 stopwatch);
@@ -386,7 +386,7 @@ public sealed class AiOrchestrator(
         {
             logger.LogWarning(ex, "YouTube pipeline failed");
             return Fail("youtube",
-                ex is AiNotConfiguredException ? ex.Message : $"Generation failed: {ex.GetType().Name}",
+                ex is AiNotConfiguredException or ModelJsonException ? ex.Message : $"Generation failed: {ex.GetType().Name}",
                 stopwatch);
         }
     }
@@ -768,7 +768,9 @@ public sealed class AiOrchestrator(
         {
             logger.LogWarning(ex, "Tech edit failed for artifact {ArtifactId}", artifact.Id);
             return TechEditFail(artifact,
-                ex is AiNotConfiguredException or InvalidOperationException ? ex.Message : $"Tech edit failed: {ex.GetType().Name}",
+                ex is AiNotConfiguredException or InvalidOperationException or ModelJsonException
+                    ? ex.Message
+                    : $"Tech edit failed: {ex.GetType().Name}",
                 stopwatch, provider, knowledgeUsed);
         }
     }
@@ -1042,8 +1044,39 @@ public sealed class AiOrchestrator(
                 trimmed = trimmed[(firstNewline + 1)..lastFence].Trim();
             }
         }
-        using var doc = JsonDocument.Parse(trimmed);
-        return doc.RootElement.Clone();
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            // Models sometimes wrap the object in a sentence ("Here is the updated artifact:")
+            // — recoverable, so take the outermost braces and try once more. Observed on Tech
+            // Edit runs with a knowledge-base block attached, where the extra context made the
+            // model chattier (ADR-066).
+            var open = trimmed.IndexOf('{', StringComparison.Ordinal);
+            var close = trimmed.LastIndexOf('}');
+            if (open >= 0 && close > open)
+            {
+                try
+                {
+                    using var salvaged = JsonDocument.Parse(trimmed[open..(close + 1)]);
+                    return salvaged.RootElement.Clone();
+                }
+                catch (JsonException)
+                {
+                    // Fall through to the readable error.
+                }
+            }
+
+            // "JsonReaderException" told a producer nothing. Say what happened and show the
+            // start of what came back; InvalidOperationException is surfaced verbatim.
+            var excerpt = trimmed.Length <= 160 ? trimmed : trimmed[..160] + "…";
+            throw new ModelJsonException(
+                "The model did not return JSON. It replied: "
+                + (excerpt.Length == 0 ? "(nothing)" : excerpt));
+        }
     }
 
     private async Task<Guid> PersistAsync(

@@ -76,6 +76,59 @@ public sealed class RazorMarkupSanityTests
             + string.Join("\n  ", offenders));
     }
 
+    /// <summary>
+    /// An <c>else</c> whose <c>@if</c> block no longer sits directly above it is not a compile
+    /// error — Razor treats it as literal text and prints the C# on the page.
+    ///
+    /// Shipped exactly that way (2026-09-06, Image Studio): a prompt-preview
+    /// <c>&lt;details&gt;</c> was inserted between an <c>@if</c> and its <c>else if</c>, so the
+    /// studio drawer rendered
+    /// "else if (string.IsNullOrWhiteSpace(_prompt) &amp;&amp; Campaign.TranscriptArtifactId is
+    /// not null) {" as body copy, and a stray "}" after the button. bUnit saw only text, so
+    /// every component test stayed green.
+    /// </summary>
+    [Fact]
+    public void No_else_branch_is_orphaned_from_its_if_block()
+    {
+        var offenders = new List<string>();
+
+        foreach (var file in Directory.EnumerateFiles(UiRoot(), "*.razor", SearchOption.AllDirectories))
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].Trim();
+                if (!line.StartsWith("else", StringComparison.Ordinal)
+                    || (line.Length > 4 && char.IsLetterOrDigit(line[4])))
+                {
+                    continue;
+                }
+
+                // Valid Razor always closes the preceding branch immediately above the else.
+                var previous = string.Empty;
+                for (var back = i - 1; back >= 0; back--)
+                {
+                    if (lines[back].Trim().Length > 0)
+                    {
+                        previous = lines[back].Trim();
+                        break;
+                    }
+                }
+                // A brace-less C# else inside @code legitimately follows a statement; the
+                // defect is an else separated from its block by MARKUP, so a closing tag
+                // immediately above is the signature to catch.
+                if (previous.EndsWith('>'))
+                {
+                    offenders.Add($"{Path.GetFileName(file)}:{i + 1}: '{line}' follows markup '{previous}'");
+                }
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "An 'else' that does not directly follow the '}' of its own block is rendered as "
+            + "literal text on the page, not as control flow:\n  " + string.Join("\n  ", offenders));
+    }
+
     private static string UiRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

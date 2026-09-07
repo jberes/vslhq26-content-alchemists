@@ -42,9 +42,12 @@ public sealed class ImageCriticLoopTests(CastmillApiFactory factory)
         var take = Assert.Single(batch.Variants);
         Assert.Contains("art director 86/100", take.SteeringNote, StringComparison.Ordinal);
         Assert.Contains("1 re-render", take.SteeringNote, StringComparison.Ordinal);
-        // The take's own prompt stays the brief the producer wrote — the fix is a render-time
-        // instruction, not a change to the slot.
-        Assert.DoesNotContain("Art director's fix", take.Prompt ?? string.Empty, StringComparison.Ordinal);
+        // The take records the prompt that actually produced it, fix included (ADR-065) — that
+        // is the text a producer needs when diagnosing the image. The SLOT's own prompt is
+        // untouched: the fix is a render-time instruction, not an edit to the brief.
+        Assert.Contains("Art director's fix", take.Prompt ?? string.Empty, StringComparison.Ordinal);
+        // Still the producer's brief with the fix appended, not a replacement for it.
+        Assert.Contains("a bold thumbnail", take.Prompt, StringComparison.Ordinal);
     }
 
     [Fact]
