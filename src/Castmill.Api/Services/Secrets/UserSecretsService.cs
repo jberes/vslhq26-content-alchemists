@@ -69,7 +69,10 @@ public sealed class UserSecretsService(
     public async Task SetAsync(Guid userId, SecretKind kind, string value, CancellationToken ct)
     {
         var key = KeyFor(kind);
-        var encrypted = cipher.Encrypt(value);
+        // Trimmed before encryption (ADR-073). A key pasted with a trailing newline or a
+        // stray quote was stored and sent verbatim, and the provider answered "API key not
+        // valid" — a failure that reads as a wrong key rather than a copy-paste artefact.
+        var encrypted = cipher.Encrypt(value.Trim());
         var now = clock.GetUtcNow();
 
         var setting = await db.UserSettings.SingleOrDefaultAsync(s => s.UserId == userId && s.Key == key, ct);

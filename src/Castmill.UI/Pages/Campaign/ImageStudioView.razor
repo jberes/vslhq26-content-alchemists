@@ -1075,12 +1075,19 @@
                             <span>Keep clear of platform UI</span>
                         </label>
 
+                        @* The overlay composites onto the slot's PLACED image, so a take that
+                           has not been used yet has nothing to composite onto (ADR-F65). The
+                           label says what the click will do rather than failing afterwards. *@
                         <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@(_compositing || string.IsNullOrWhiteSpace(_headline))"
+                                disabled="@(_compositing || _placing || OverlayNeedsPlacing || string.IsNullOrWhiteSpace(_headline))"
                                 @onclick="CompositeAsync">
                             @(_compositing ? "Applying…" : "Apply overlay")
                         </button>
-                        <p class="cm-meta">No model call — editing the overlay is free.</p>
+                        <p class="cm-meta">
+                            @(OverlayNeedsPlacing
+                                ? "The overlay composites onto the image in this slot. Choose Use this image first."
+                                : "No model call — editing the overlay is free.")
+                        </p>
                     </section>
                 }
 
@@ -3412,6 +3419,14 @@
             _downloading = false;
         }
     }
+
+    /// <summary>
+    /// The overlay composites onto the image placed IN THE SLOT (ADR-055), so an unplaced slot
+    /// has nothing to land on. Placing is deliberately not automatic here: it also rewrites the
+    /// linked blog's image markers, which is not something an overlay button should do quietly.
+    /// </summary>
+    private bool OverlayNeedsPlacing =>
+        Selected is { } slot && string.IsNullOrWhiteSpace(slot.BaseImageUrl);
 
     private async Task CompositeAsync()
     {
