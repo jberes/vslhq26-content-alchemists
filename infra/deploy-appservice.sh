@@ -117,7 +117,28 @@ fi
 
 umask 077
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/castmill-deploy.XXXXXX")"
-trap 'rm -rf "$WORK_DIR"' EXIT
+SETTINGS_APPLIED=false
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0
+    && "$SETTINGS_APPLIED" != true
+    && -n "${APP_NAME:-${EXISTING_APP_NAME:-}}"
+    && -s "${PRESERVED_SETTINGS_FILE:-}" ]] \
+    && [[ "$(jq 'length' "$PRESERVED_SETTINGS_FILE" 2>/dev/null || printf '0')" -gt 0 ]]; then
+    echo "Deployment stopped before merged settings were applied; restoring protected settings..." >&2
+    az webapp config appsettings set \
+      --subscription "$SUBSCRIPTION_ID" \
+      --resource-group "$RESOURCE_GROUP" \
+      --name "${APP_NAME:-$EXISTING_APP_NAME}" \
+      --settings "@$PRESERVED_SETTINGS_FILE" \
+      --output none \
+      || echo "WARNING: automatic protected-settings restoration failed." >&2
+  fi
+  rm -rf "$WORK_DIR"
+  exit "$status"
+}
+trap cleanup EXIT
 SETTINGS_FILE="$WORK_DIR/appsettings.json"
 EXPORTED_SETTINGS_FILE="$WORK_DIR/exported-appsettings.json"
 PRESERVED_SETTINGS_FILE="$WORK_DIR/preserved-protected-settings.json"
@@ -207,6 +228,7 @@ az webapp config appsettings set \
   --name "$APP_NAME" \
   --settings "@$SETTINGS_FILE" \
   --output none
+SETTINGS_APPLIED=true
 
 echo "Granting the managed identity data access in Azure SQL..."
 sqlcmd \
