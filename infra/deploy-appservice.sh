@@ -179,18 +179,23 @@ IDENTITY_NAME="$(az deployment group show \
 # been reset and would always say 0). Keys are generated only on a first deployment.
 RUNTIME_KEY_COUNT="$(jq '[.[] | select(.name == "Jwt__SigningKey" or .name == "Castmill__EncryptionKey")] | length' "$PRESERVED_SETTINGS_FILE")"
 
-KEY_ARGUMENT=()
+EXPORT_ARGUMENTS=(
+  export
+  "$CONFIG_PATH"
+  "$EXPORTED_SETTINGS_FILE"
+  --web-base-url
+  "$APP_URL"
+)
 if [[ "$RUNTIME_KEY_COUNT" != "2" ]]; then
   echo "Runtime keys not found on the existing app — generating a fresh pair (first deployment)."
-  KEY_ARGUMENT=(--generate-runtime-keys)
+  EXPORT_ARGUMENTS+=(--generate-runtime-keys)
 fi
 
 echo "Applying production configuration without exposing secret values..."
 dotnet run \
   --project "$REPO_ROOT/tools/Castmill.AzureConfig/Castmill.AzureConfig.csproj" \
   --configuration Release \
-  -- export "$CONFIG_PATH" "$EXPORTED_SETTINGS_FILE" "${KEY_ARGUMENT[@]}" \
-  --web-base-url "$APP_URL"
+  -- "${EXPORT_ARGUMENTS[@]}"
 jq -s '
   reduce (.[0] + .[1])[] as $setting
     ({}; .[$setting.name] = $setting)
