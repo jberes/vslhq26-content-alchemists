@@ -22,6 +22,59 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class TechEditApiTests(CastmillApiFactory factory)
 {
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("malformed", false)]
+    [InlineData("missing-citations", false)]
+    public async Task Malformed_json_is_retried_once_and_only_validated_content_is_saved(
+        string retryResponse, bool succeeds)
+    {
+        var attempts = 0;
+        await using var app = WithFakeModel(prompt =>
+        {
+            if (!prompt.Contains("You are the technical editor", StringComparison.Ordinal))
+            {
+                return FakeTechEditor.Good(prompt);
+            }
+            attempts++;
+            if (attempts == 1 || retryResponse == "malformed")
+            {
+                return """{"artifact":{"title":"Private draft","markdown":"unfinished""";
+            }
+            Assert.Contains("valid JSON", prompt, StringComparison.Ordinal);
+            return retryResponse == "missing-citations"
+                ? FakeTechEditor.DropsCitations(prompt)
+                : FakeTechEditor.Good(prompt);
+        });
+        var (client, campaignId, artifactId) = await SetUpAsync(app);
+        var before = await GetArtifactAsync(client, campaignId, artifactId);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/artifacts/{artifactId}/tech-edit",
+            new { useKnowledgeBase = true });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<TechEditResult>();
+        Assert.Equal(succeeds, result!.Success);
+        Assert.Equal(2, attempts);
+
+        var after = await GetArtifactAsync(client, campaignId, artifactId);
+        var revisions = await client.GetFromJsonAsync<List<ArtifactRevisionResponse>>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{artifactId}/revisions");
+        if (succeeds)
+        {
+            Assert.Equal(before.Version + 1, after.Version);
+            Assert.Contains("deployment time by 47%", after.ContentJson, StringComparison.Ordinal);
+            Assert.Single(revisions!);
+        }
+        else
+        {
+            Assert.Equal(before.Version, after.Version);
+            Assert.Equal(before.ContentJson, after.ContentJson);
+            Assert.Empty(revisions!);
+            Assert.DoesNotContain("Private draft", result.Error!, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task A_tech_edit_revises_in_place_and_rings_the_revision_filmstrip()
     {

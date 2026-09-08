@@ -55,6 +55,31 @@ public sealed class BlogEditorTests
         Assert.DoesNotContain("Editorial notes", markdown, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("## Editorial notes")]
+    [InlineData("### Editorial Notes:")]
+    [InlineData("# Editor's notes")]
+    [InlineData("**Editorial notes**")]
+    [InlineData("## Notes to the editor")]
+    [InlineData("## Publication blockers")]
+    public void Every_name_a_model_gives_its_notes_is_cut_out_of_the_article(string heading)
+    {
+        var (markdown, notes) = BlogEditor.StripNotes(
+            $"# Title\n\n## One\nProse.\n\n{heading}\n\nThe supplied evidence is a screen recording, not API documentation.\n");
+
+        Assert.Equal("# Title\n\n## One\nProse.", markdown);
+        Assert.Equal(["The supplied evidence is a screen recording, not API documentation."], notes.ToArray());
+    }
+
+    [Fact]
+    public void A_heading_that_merely_mentions_notes_in_the_body_is_left_alone()
+    {
+        var article = "# Title\n\n## Release notes for 24.2\nWhat shipped.\n\n## Editorial calendar tips\nPlan ahead.";
+        var (markdown, notes) = BlogEditor.StripNotes(article);
+        Assert.Equal(article, markdown);
+        Assert.Empty(notes);
+    }
+
     [Fact]
     public void A_reply_wrapped_in_one_fence_is_unwrapped()
     {

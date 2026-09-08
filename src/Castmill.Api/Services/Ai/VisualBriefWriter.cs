@@ -18,7 +18,10 @@ public sealed record VisualBriefRequest(
     string? BrandLook,
     string? Audience,
     IReadOnlyList<string> ReferenceKinds,
-    bool TextMayBeRendered);
+    bool TextMayBeRendered,
+    /// <summary>Castmill will composite a headline on this image after generation, so the brief
+    /// must reserve calm space for it. False for supporting figures, which fill the frame.</summary>
+    bool HeadlineWillBeComposited = false);
 
 public interface IVisualBriefWriter
 {
@@ -113,6 +116,16 @@ public sealed class VisualBriefWriter(
             - No people unless a face reference is attached. No stock-photo look, no platform
               logos, no watermark.
             - For reference-based work, say what must be preserved and what may change.
+            - The result must read as a finished, rich image at thumbnail size: real depth,
+              lighting, materials and contrast, with a clear light-versus-dark structure. Never
+              a flat wireframe, never grey placeholder bars standing in for content, never a
+              diagram of empty boxes and lines, never a large empty white field. A dark or
+              richly toned backdrop with one strong light source usually beats flat white unless
+              the brand look demands light.
+            - A product screenshot reference is real UI: describe it as the sharp, faithful
+              screen it is, with its own on-screen text intact, framed with depth (a tilted
+              device, a floating panel with a shadow, a glow behind it) — not redrawn as an
+              abstract grid.
 
             Output ONLY the final image-generation prompt. No preamble, no headings, no notes.
             """);
@@ -124,8 +137,15 @@ public sealed class VisualBriefWriter(
         text.Append("- Text in the image: ").AppendLine(r.TextMayBeRendered
             ? "ALLOWED. Choose a short headline of at most six words in two or three lines and give it in quotation marks, "
               + "plus at most one small label. Big, high contrast, readable at 320 pixels wide."
-            : "NOT allowed. No letters, words, numbers or logos anywhere; Castmill composites text afterwards. "
-              + "Leave calm, clear space where a headline will sit.");
+            : r.HeadlineWillBeComposited
+                ? "NOT allowed. No NEW letters, words, numbers or logos; Castmill composites the headline afterwards. "
+                  + "Leave one calm, clear area where that headline will sit, and fill the rest of the frame."
+                : "NOT allowed. No NEW letters, words, numbers or logos. Nothing is composited later, so fill the "
+                  + "whole frame with the subject — do not reserve empty areas for text.");
+        if (r.ReferenceKinds.Contains("product", StringComparer.OrdinalIgnoreCase))
+        {
+            text.AppendLine("- The attached product screenshot may be reproduced faithfully, including the text already on that screen; only invented text is forbidden.");
+        }
         if (r.ReferenceKinds.Count > 0)
         {
             text.Append("- Attached references, in order: ").AppendLine(string.Join(", ", r.ReferenceKinds));

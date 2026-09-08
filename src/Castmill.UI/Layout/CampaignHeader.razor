@@ -8,6 +8,7 @@
 @using Castmill.Core.Resources
 @using Castmill.UI.Http
 @using Castmill.UI.Design
+@using Microsoft.JSInterop
 @implements IDisposable
 @inject CampaignState Campaign
 @inject WorkspaceState Workspace
@@ -16,9 +17,14 @@
 @inject CampaignsClient Campaigns
 @inject BrandsClient Brands
 @inject INotifier Notifier
+@inject IJSRuntime JS
 
 <header class="cm-campaign-header">
     <div class="cm-campaign-header__identity">
+        @* A real way back (ADR-F69): the browser/webview history, so "Add image" in Focus
+           mode → studio → Back lands on the item that was being edited. *@
+        <button type="button" class="cm-button cm-button--quiet cm-button--compact cm-campaign-header__back"
+                title="Go back" aria-label="Go back" @onclick="GoBackAsync">← Back</button>
         <a class="cm-meta" href="campaigns">Campaigns /</a>
         @if (_renaming)
         {
@@ -30,6 +36,14 @@
         else
         {
             <h1 class="cm-campaign-header__name">@(Campaign.Campaign?.Name ?? "…")</h1>
+            <nav class="cm-meta cm-campaign-header__trail" aria-label="Where you are">
+                <span>/ @CampaignViews.Label(Current)</span>
+                @if (ContextArtifact is { } crumb)
+                {
+                    <span>/</span>
+                    <a href="@FocusPathFor(crumb)" title="Open this item in Focus mode">@crumb.Title</a>
+                }
+            </nav>
             <div class="cm-campaign-header__actions" aria-label="Campaign actions">
                 <button type="button" class="cm-button cm-button--quiet cm-campaign-header__icon"
                         title="Rename campaign" aria-label="Rename campaign" @onclick="BeginRename">
@@ -400,9 +414,11 @@
             var brand = await Brands.GetAsync(id);
             _personaTitles.AddRange((brand.StyleCard?.Personas ?? []).Select(p => p.Title));
         }
-        catch (ApiException)
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or TaskCanceledException)
         {
-            // No personas offered; the campaign simply keeps the brand's whole audience.
+            // No personas offered; the campaign simply keeps the brand's whole audience. An
+            // unreachable API must not take the tab strip down with it (ADR-F69): the header
+            // is the only way back out of a view.
         }
         await InvokeAsync(StateHasChanged);
     }
@@ -469,6 +485,43 @@
     {
         Campaign.Changed += OnChanged;
         PressRun.Changed += OnChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// The content item the current URL is about (<c>?artifact=</c>, or the owner of
+    /// <c>?slot=</c>), so the trail can name it and link back to it in Focus mode.
+    /// </summary>
+    private ArtifactPreviewResponse? ContextArtifact
+    {
+        get
+        {
+            var query = System.Web.HttpUtility.ParseQueryString(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+            Guid? artifactId = Guid.TryParse(query["artifact"], out var a) ? a : null;
+            if (artifactId is null && Guid.TryParse(query["slot"], out var slotId))
+            {
+                artifactId = Campaign.ImageSlots.FirstOrDefault(s => s.Id == slotId)?.ArtifactId;
+            }
+            return artifactId is { } id ? Campaign.Artifacts.FirstOrDefault(x => x.Id == id) : null;
+        }
+    }
+
+    private static string FocusPathFor(ArtifactPreviewResponse artifact) =>
+        $"{CampaignViews.PathFor(artifact.CampaignId, CampaignView.Focus)}?artifact={artifact.Id}";
+
+    private async Task GoBackAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("history.back");
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            Navigation.NavigateTo("campaigns");
+        }
     }
 
     private void Go(CampaignView view)
@@ -493,5 +546,6 @@
     {
         Campaign.Changed -= OnChanged;
         PressRun.Changed -= OnChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 }

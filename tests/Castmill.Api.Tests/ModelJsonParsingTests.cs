@@ -48,7 +48,21 @@ public sealed class ModelJsonParsingTests
         var error = Assert.Throws<Castmill.Api.Services.Ai.ModelJsonException>(
             () => AiOrchestrator.ParseModelJson("""{"title":"A","markdown":"half a sent"""));
 
-        Assert.Contains("did not return JSON", error.Message, StringComparison.Ordinal);
+        Assert.Contains("invalid or incomplete JSON", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 1", error.Message, StringComparison.Ordinal);
+        Assert.Contains("byte", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("half a sent", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Malformed_tech_edit_reports_location_without_exposing_the_manuscript()
+    {
+        var error = Assert.Throws<ModelJsonException>(() => AiOrchestrator.ParseModelJson(
+            """{"artifact":{"title":"Private draft","markdown":"An unescaped "quote"."},"changes":[],"claims":[]}"""));
+
+        Assert.Contains("invalid or incomplete JSON", error.Message, StringComparison.Ordinal);
+        Assert.Contains("line 1", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Private draft", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

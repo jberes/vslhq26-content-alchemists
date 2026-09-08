@@ -212,12 +212,14 @@ public sealed class AgentTests
         {
             Suggestions = [new SeoKeyword("deployment automation", 5400, 32, 0.4, 3.1, "informational"),
                            new SeoKeyword("ci cd pipeline automation", 900, 18, 0.2, 4.0, "informational")],
+            Ideas = [new SeoKeyword("release orchestration", 700, 21, 0.3, 3.4, "informational")],
             Questions = ["What is deployment automation?", "How do you automate deployments?"],
         };
         var model = new ScriptedToolClient(
             calls:
             [
-                ("keyword_ideas", new Dictionary<string, object?> { ["seed"] = "deployment automation" }),
+                ("keyword_suggestions", new Dictionary<string, object?> { ["seed"] = "deployment automation" }),
+                ("keyword_ideas", new Dictionary<string, object?> { ["keywords"] = new[] { "deployment automation", "ci cd" } }),
                 ("people_also_ask", new Dictionary<string, object?> { ["keyword"] = "deployment automation" }),
             ],
             final: """
@@ -247,9 +249,11 @@ public sealed class AgentTests
         Assert.Equal("model", result.Questions.Single(q => q.Question == "Is it free?").Source);
         Assert.Contains(result.Questions, q => q.Question == "How do you automate deployments?" && q.Source == "paa");
         Assert.Contains("dataforseo_labs/google/keyword_suggestions/live", result.ProviderLookups!);
+        Assert.Contains("dataforseo_labs/google/keyword_ideas/live", result.ProviderLookups!);
         Assert.Contains("serp/google/organic/live/advanced", result.ProviderLookups!);
         Assert.Contains("AI Overview present for the head term", result.Notes);
         Assert.Equal(1, seo.SuggestionCalls);
+        Assert.Equal(1, seo.IdeaCalls);
         Assert.Contains(log.Entries, e => e.Kind == "seo-research-agent" && e.Success);
     }
 
@@ -369,8 +373,10 @@ public sealed class AgentTests
     private sealed class StubSeo(bool configured) : ISeoProvider
     {
         public IReadOnlyList<SeoKeyword> Suggestions { get; init; } = [];
+        public IReadOnlyList<SeoKeyword> Ideas { get; init; } = [];
         public IReadOnlyList<string> Questions { get; init; } = [];
         public int SuggestionCalls { get; private set; }
+        public int IdeaCalls { get; private set; }
 
         public bool IsConfigured => configured;
 
@@ -381,6 +387,13 @@ public sealed class AgentTests
         {
             SuggestionCalls++;
             return Task.FromResult(Suggestions);
+        }
+
+        public Task<IReadOnlyList<SeoKeyword>> GetKeywordIdeasAsync(
+            IReadOnlyList<string> seedKeywords, int limit, CancellationToken ct)
+        {
+            IdeaCalls++;
+            return Task.FromResult(Ideas);
         }
 
         public Task<SeoAnalysis> AnalyzeAsync(string keyword, string? targetUrl, CancellationToken ct) =>

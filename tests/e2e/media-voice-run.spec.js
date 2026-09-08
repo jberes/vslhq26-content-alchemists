@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 test('uploaded media and a recorded voice note reach analysis and Press Run', async ({ page, request }) => {
     const uploads = new Map();
@@ -192,7 +192,7 @@ async function completeAnalysisAndPressRun(page, campaignId, intentName) {
 }
 
 async function signIn(page, request) {
-    const credentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+    const credentials = await request.get('http://localhost:5015/api/v1/dev/demo-credentials');
     const { email, password } = await credentials.json();
     await page.goto('/sign-in');
     await expect(page.getByLabel('Email')).toHaveValue(email);

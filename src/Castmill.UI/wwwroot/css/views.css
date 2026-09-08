@@ -4274,6 +4274,37 @@ button.cm-intent {
     cursor: pointer;
 }
 
+.cm-studio__brief {
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm, 4px);
+    max-block-size: 18rem;
+    white-space: pre-wrap;
+}
+
+.cm-studio__back {
+    display: inline-block;
+    margin-block-end: var(--cm-space-1);
+    text-decoration: underline;
+}
+
+.cm-campaign-header__trail {
+    display: inline-flex;
+    gap: var(--cm-space-1);
+    min-inline-size: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cm-campaign-header__trail a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.cm-campaign-header__back {
+    flex: none;
+}
+
 .cm-studio__preview-actions {
     display: flex;
     flex-wrap: wrap;

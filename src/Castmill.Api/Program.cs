@@ -416,7 +416,7 @@ builder.Services.AddCors(options =>
         .WithHeaders(
             "Authorization", "Content-Type", "If-Match", "X-Correlation-ID", "X-Content-SHA256")
         .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE")
-        .WithExposedHeaders("ETag", "X-Correlation-ID"));
+        .WithExposedHeaders("ETag", "X-Correlation-ID", "Content-Disposition"));
 });
 
 if (builder.Environment.IsDevelopment())

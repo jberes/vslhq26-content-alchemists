@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 const sourceId = '92900000-0000-0000-0000-000000000001';
 const revisionOneId = '92900000-0000-0000-0000-000000000002';
@@ -104,7 +104,7 @@ test.describe('webpage Start a Run', () => {
 });
 
 async function signIn(page, request) {
-    const credentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+    const credentials = await request.get('http://localhost:5015/api/v1/dev/demo-credentials');
     expect(credentials.ok()).toBeTruthy();
     const { email, password } = await credentials.json();
 
@@ -120,7 +120,7 @@ async function signIn(page, request) {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
-    const apiLogin = await request.post('http://localhost:5005/api/v1/auth/login', {
+    const apiLogin = await request.post('http://localhost:5015/api/v1/auth/login', {
         data: { email, password },
     });
     expect(apiLogin.ok()).toBeTruthy();
@@ -128,7 +128,7 @@ async function signIn(page, request) {
 }
 
 async function deleteCampaign(request, accessToken, campaignId) {
-    const response = await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+    const response = await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
     expect(response.ok()).toBeTruthy();

@@ -33,6 +33,10 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
   spells reliably (gpt-image family), may render the exact quoted words the visual brief
   chose — `ImagePromptRules.AllowsRenderedText` is the one place that decides, and the rules
   block then permits only quoted text inside the safe area. Every other kind and model: no text.
+- A safety refusal on a render that carries a `face` reference is retried once without the
+  face (`RenderWithSafetyFallbackAsync`, ADR-076) and the take says so; any other refusal
+  reaches the producer unchanged. Azure OpenAI declines photographs of real people unless the
+  deployment has modified content filters.
 - Image prompts are WRITTEN, not concatenated (ADR-075): in Auto mode `VisualBriefWriter`
   turns the piece into a visual brief (one hook, focal point, hierarchy, palette as used,
   exact words where allowed) and `ImagePromptBuilder` caches it on the slot by input hash.

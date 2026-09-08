@@ -60,12 +60,26 @@ public sealed class SeoResearchAgent(
                     var rows = await seo.GetSuggestionsAsync(seed, 25, ct);
                     lookups.Add("dataforseo_labs/google/keyword_suggestions/live");
                     foreach (var row in rows) metrics[row.Term] = row;
-                    trace.Add(new AgentStep("keyword_ideas", seed, $"{rows.Count} rows"));
+                    trace.Add(new AgentStep("keyword_suggestions", seed, $"{rows.Count} rows"));
+                    return JsonSerializer.Serialize(rows.Select(Compact), Json);
+                },
+                "keyword_suggestions",
+                "Phrase-match search suggestions for one seed, with monthly volume, difficulty, CPC and intent."),
+
+            AIFunctionFactory.Create(
+                async (string[] keywords) =>
+                {
+                    if (++calls > settings.MaxToolCalls) return Spent();
+                    var seeds = keywords.Where(keyword => !string.IsNullOrWhiteSpace(keyword)).Take(12).ToList();
+                    var rows = await seo.GetKeywordIdeasAsync(seeds, 40, ct);
+                    lookups.Add("dataforseo_labs/google/keyword_ideas/live");
+                    foreach (var row in rows) metrics[row.Term] = row;
+                    trace.Add(new AgentStep("keyword_ideas", string.Join(", ", seeds.Take(5)), $"{rows.Count} rows"));
                     return JsonSerializer.Serialize(rows.Select(Compact), Json);
                 },
                 "keyword_ideas",
-                "Related search phrases for a seed, with monthly volume, difficulty, CPC and intent. "
-                + "Use several seeds: a head term, the product name, and the problem the content solves."),
+                "Category-adjacent keyword ideas for several source-grounded seeds (up to 12), with "
+                + "monthly volume, difficulty, CPC and intent."),
 
             AIFunctionFactory.Create(
                 async (string[] keywords) =>
@@ -166,8 +180,9 @@ public sealed class SeoResearchAgent(
         You are the search strategist for a content campaign. From the source below, build the
         keyword and question plan the writers will target, using the tools to ground every
         choice in real data:
-        1. Propose 2-3 seeds (the head term, the product/technology name, the problem solved)
-           and expand each with keyword_ideas.
+        1. Propose 2-3 seeds (the head term, the product/technology name, the problem solved).
+           Expand the strongest one with keyword_suggestions, then send the complete seed set to
+           keyword_ideas so the plan includes both phrase-match and category-adjacent demand.
         2. Price your shortlist with keyword_metrics; read serp_snapshot for the 2-3 phrases you
            most want to win to judge intent and whether an AI Overview already answers it.
         3. Pull people_also_ask for the primary phrase and knowledge_questions for the topic.

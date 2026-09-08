@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -502,46 +503,98 @@ public static partial class Generators
     /// polished audit response cannot silently omit the A/B/C experiment or pinned comment.</summary>
     internal static JsonElement NormalizeYoutubeTitleOptions(JsonElement json)
     {
-        if (!json.TryGetProperty("titleOptions", out var optionsElement)
-            || optionsElement.ValueKind != JsonValueKind.Array
-            || optionsElement.GetArrayLength() != 3
-            || JsonNode.Parse(json.GetRawText()) is not JsonObject root
-            || root["titleOptions"] is not JsonArray options
-            || options.Any(option => option is not JsonObject))
+        if (json.ValueKind != JsonValueKind.Object
+            || JsonNode.Parse(json.GetRawText()) is not JsonObject root)
         {
             return json;
         }
 
-        var expectedSlots = new[] { "A", "B", "C" };
-        var titleOptions = options.Select(option => (JsonObject)option!.DeepClone()).ToList();
-        var bySlot = titleOptions
-            .Select(option => (Option: option, Slot: CanonicalSlot(NodeString(option["slot"]))))
-            .Where(item => item.Slot is not null)
-            .ToList();
-        if (bySlot.Count == 3 && bySlot.Select(item => item.Slot).Distinct(StringComparer.Ordinal).Count() == 3)
+        if (root["titleOptions"] is JsonArray { Count: 3 } options
+            && options.All(option => option is JsonObject))
         {
-            titleOptions = expectedSlots
-                .Select(slot => bySlot.Single(item => item.Slot == slot).Option)
+            var expectedSlots = new[] { "A", "B", "C" };
+            var titleOptions = options.Select(option => (JsonObject)option!.DeepClone()).ToList();
+            var bySlot = titleOptions
+                .Select(option => (Option: option, Slot: CanonicalSlot(NodeString(option["slot"]))))
+                .Where(item => item.Slot is not null)
                 .ToList();
-        }
-
-        var seenAngles = new HashSet<string>(StringComparer.Ordinal);
-        var fallbackAngles = new[] { "seo", "curiosity", "problem-solution" };
-        for (var index = 0; index < titleOptions.Count; index++)
-        {
-            var option = titleOptions[index];
-            option["slot"] = expectedSlots[index];
-            var angle = CanonicalAngle(NodeString(option["angle"]));
-            if (angle is null || !seenAngles.Add(angle))
+            if (bySlot.Count == 3 && bySlot.Select(item => item.Slot).Distinct(StringComparer.Ordinal).Count() == 3)
             {
-                angle = fallbackAngles.First(candidate => !seenAngles.Contains(candidate));
-                seenAngles.Add(angle);
+                titleOptions = expectedSlots
+                    .Select(slot => bySlot.Single(item => item.Slot == slot).Option)
+                    .ToList();
             }
-            option["angle"] = angle;
+
+            var seenAngles = new HashSet<string>(StringComparer.Ordinal);
+            var fallbackAngles = new[] { "seo", "curiosity", "problem-solution" };
+            for (var index = 0; index < titleOptions.Count; index++)
+            {
+                var option = titleOptions[index];
+                option["slot"] = expectedSlots[index];
+                var angle = CanonicalAngle(NodeString(option["angle"]));
+                if (angle is null || !seenAngles.Add(angle))
+                {
+                    angle = fallbackAngles.First(candidate => !seenAngles.Contains(candidate));
+                    seenAngles.Add(angle);
+                }
+                option["angle"] = angle;
+            }
+
+            root["titleOptions"] = new JsonArray(titleOptions.Select(option => (JsonNode)option).ToArray());
         }
 
-        root["titleOptions"] = new JsonArray(titleOptions.Select(option => (JsonNode)option).ToArray());
+        // Audit models sometimes use YouTube's display-oriented `timestamp: "MM:SS"`
+        // even though the persistence contract requests numeric startSeconds. The two are
+        // equivalent, so canonicalize the former instead of asking a model to rewrite it.
+        if (root["chapters"] is JsonArray chapters)
+        {
+            for (var index = 0; index < chapters.Count; index++)
+            {
+                if (chapters[index] is JsonObject chapter)
+                {
+                    var displayTime = NodeString(chapter["timestamp"])
+                        ?? NodeString(chapter["time"])
+                        ?? NodeString(chapter["startTime"]);
+                    if (chapter["startSeconds"] is null
+                        && TryParseYoutubeTime(displayTime, out var seconds))
+                    {
+                        chapter["startSeconds"] = seconds;
+                    }
+                }
+                else if (NodeString(chapters[index]) is { } line)
+                {
+                    var match = Regex.Match(line,
+                        @"^(?<time>\d{1,2}:\d{2}(?::\d{2})?)\s+(?<title>\S.*)$",
+                        RegexOptions.CultureInvariant);
+                    if (match.Success
+                        && TryParseYoutubeTime(match.Groups["time"].Value, out var seconds))
+                    {
+                        chapters[index] = new JsonObject
+                        {
+                            ["startSeconds"] = seconds,
+                            ["title"] = match.Groups["title"].Value,
+                        };
+                    }
+                }
+            }
+        }
+
         return JsonSerializer.SerializeToElement(root);
+    }
+
+    private static bool TryParseYoutubeTime(string? value, out double seconds)
+    {
+        seconds = 0;
+        if (value is null
+            || !TimeSpan.TryParseExact(value,
+                [@"m\:ss", @"mm\:ss", @"h\:mm\:ss", @"hh\:mm\:ss"],
+                CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        seconds = parsed.TotalSeconds;
+        return true;
     }
 
     private static string? NodeString(JsonNode? node) =>
@@ -575,6 +628,10 @@ public static partial class Generators
 
     internal static ValidationOutcome ValidateYoutube(JsonElement json, GenerationEvidenceContext evidence)
     {
+        if (json.ValueKind != JsonValueKind.Object)
+        {
+            return new ValidationOutcome(false, [], "The YouTube package must be a JSON object.");
+        }
         var common = ValidateCommon(json, evidence, requireString: "description");
         if (!common.Passed)
         {
@@ -593,9 +650,17 @@ public static partial class Generators
         var index = 0;
         foreach (var option in options.EnumerateArray())
         {
-            var slot = option.TryGetProperty("slot", out var slotNode) ? slotNode.GetString() : null;
-            var angle = option.TryGetProperty("angle", out var angleNode) ? angleNode.GetString() : null;
-            var title = option.TryGetProperty("title", out var titleNode) ? titleNode.GetString() : null;
+            if (option.ValueKind != JsonValueKind.Object)
+            {
+                return new ValidationOutcome(false, [],
+                    $"Title slot {expectedSlots[index]} must be a JSON object.");
+            }
+            var slot = option.TryGetProperty("slot", out var slotNode)
+                && slotNode.ValueKind == JsonValueKind.String ? slotNode.GetString() : null;
+            var angle = option.TryGetProperty("angle", out var angleNode)
+                && angleNode.ValueKind == JsonValueKind.String ? angleNode.GetString() : null;
+            var title = option.TryGetProperty("title", out var titleNode)
+                && titleNode.ValueKind == JsonValueKind.String ? titleNode.GetString() : null;
             if (!string.Equals(slot, expectedSlots[index], StringComparison.OrdinalIgnoreCase)
                 || angle is null || !allowedAngles.Contains(angle) || !seenAngles.Add(angle))
             {
@@ -618,7 +683,11 @@ public static partial class Generators
             return new ValidationOutcome(false, [], "At least three keyworded YouTube chapters are required.");
         }
         var first = chapters[0];
-        if (!first.TryGetProperty("startSeconds", out var start) || start.GetDouble() != 0)
+        if (first.ValueKind != JsonValueKind.Object
+            || !first.TryGetProperty("startSeconds", out var start)
+            || start.ValueKind != JsonValueKind.Number
+            || !start.TryGetDouble(out var firstSeconds)
+            || firstSeconds != 0)
         {
             return new ValidationOutcome(false, [], "YouTube chapters must start at 0:00.");
         }
@@ -627,8 +696,10 @@ public static partial class Generators
         var previous = -1d;
         foreach (var chapter in chapters.EnumerateArray())
         {
-            var seconds = chapter.TryGetProperty("startSeconds", out var value)
-                && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : -1;
+            var seconds = chapter.ValueKind == JsonValueKind.Object
+                && chapter.TryGetProperty("startSeconds", out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetDouble(out var parsedSeconds) ? parsedSeconds : -1;
             if (seconds <= previous)
             {
                 return new ValidationOutcome(false, [], "YouTube chapters must be in ascending order.");

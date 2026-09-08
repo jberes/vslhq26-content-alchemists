@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 test('Mill Floor Edit opens the clicked artifact and Back keeps completed progress closed', async ({ page, request }) => {
     const email = `edit-navigation-${randomUUID()}@castmill.local`;
@@ -8,13 +8,13 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
     let accessToken;
 
     try {
-        const registration = await request.post('http://localhost:5005/api/v1/auth/register', {
+        const registration = await request.post('http://localhost:5015/api/v1/auth/register', {
             data: { email, password, displayName: 'Edit Navigation E2E' },
         });
         expect(registration.status()).toBe(200);
         accessToken = (await registration.json()).accessToken;
 
-        const campaign = await request.post('http://localhost:5005/api/v1/campaigns', {
+        const campaign = await request.post('http://localhost:5015/api/v1/campaigns', {
             headers: bearer(accessToken),
             data: { name: `Edit Navigation ${Date.now()}`, brief: null },
         });
@@ -22,7 +22,7 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
         campaignId = (await campaign.json()).id;
 
         const transcript = await request.post(
-            `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/transcripts`, {
+            `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/transcripts`, {
                 headers: bearer(accessToken),
                 data: {
                     source: 'navigation-e2e',
@@ -32,7 +32,7 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
         expect(transcript.status()).toBe(201);
 
         const artifact = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'blog',
@@ -65,7 +65,7 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
             }));
 
         await page.goto('/sign-in');
-        const demoCredentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+        const demoCredentials = await request.get('http://localhost:5015/api/v1/dev/demo-credentials');
         expect(demoCredentials.ok()).toBeTruthy();
         const demo = await demoCredentials.json();
         await expect(page.getByLabel('Email')).toHaveValue(demo.email);
@@ -92,7 +92,7 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
         await expect(page.getByRole('button', { name: 'Done — back to the board' })).toHaveCount(0);
     } finally {
         if (campaignId && accessToken) {
-            await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+            await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
             });
         }

@@ -210,6 +210,11 @@
                                  @ref="_drawerPanel" @onkeydown="OnDrawerKey">
                             <header class="cm-studio__drawer-head">
                                 <div>
+                                    @if (SelectedOwner is { } backOwner)
+                                    {
+                                        <a class="cm-meta cm-studio__back" href="@FocusPathFor(backOwner.Id)"
+                                           title="Back to this item in Focus mode">← Back to “@backOwner.Title”</a>
+                                    }
                                     <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
                                     <p class="cm-meta">
                                         Published at @slot2.TargetWidth×@slot2.TargetHeight.
@@ -286,16 +291,36 @@
                                         <span>Use this prompt verbatim</span>
                                     </button>
                                 </div>
-                                <span class="cm-kicker">Prompt</span>
-                                @* oninput, not onchange: the Generate button must enable while
-                                   typing, not after the field loses focus. The PATCH waits for blur. *@
-                                <textarea class="cm-studio__prompt" @bind="_prompt" @bind:event="oninput"
-                                          @onblur="SavePromptAsync"
-                                          disabled="@IsAutoPrompt"
-                                          placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
+                                <span class="cm-kicker">@(IsAutoPrompt ? "Visual brief (AI-written)" : "Prompt")</span>
                                 @if (IsAutoPrompt)
                                 {
-                                    <p class="cm-meta">An art-director pass writes a visual brief for this image — one hook, a focal point, the layout, the brand palette as used — from this item's content, the campaign and the brand style. The brief is kept until the inputs change; rewrite it to try a different take.</p>
+                                    @* No disabled empty textarea: in Auto mode the brief IS the
+                                       prompt, and it must be readable right here (ADR-F68). *@
+                                    @if (_promptPreview is { } brief)
+                                    {
+                                        <pre class="cm-studio__preview-text cm-studio__brief">@brief.Prompt</pre>
+                                    }
+                                    else
+                                    {
+                                        <p class="cm-meta" role="status">
+                                            <span class="cm-ai-dot" aria-hidden="true"></span>
+                                            @(_promptPreviewError ?? "Writing the visual brief from this item's content, the campaign and the brand style…")
+                                        </p>
+                                    }
+                                    <p class="cm-meta">An art-director pass writes this brief — one hook, a focal point, the layout, the brand palette as used — and it is kept until the inputs change. Rewrite it to try a different take, or switch to Manual to write your own.</p>
+                                    <button type="button" class="cm-button cm-button--quiet cm-button--compact"
+                                            disabled="@(_promptPreviewLoading || _rewritingBrief)" @onclick="RewriteBriefAsync"
+                                            title="Forget this brief and write a new one from the same inputs">
+                                        @(_rewritingBrief ? "Rewriting brief…" : "Rewrite brief")
+                                    </button>
+                                }
+                                else
+                                {
+                                    @* oninput, not onchange: the Generate button must enable while
+                                       typing, not after the field loses focus. The PATCH waits for blur. *@
+                                    <textarea class="cm-studio__prompt" @bind="_prompt" @bind:event="oninput"
+                                              @onblur="SavePromptAsync"
+                                              placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
                                 }
                                 else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
                                 {
@@ -310,7 +335,7 @@
                                 }
                                 <details class="cm-studio__preview" open="@_promptPreviewOpen" @ontoggle="OnPreviewToggle">
                                     <summary>
-                                        <span class="cm-kicker">Prompt Castmill will send</span>
+                                        <span class="cm-kicker">Prompt Castmill will send@(IsAutoPrompt ? " (brief + reference roles + frame rules)" : "")</span>
                                         <span class="cm-meta">
                                             @(_promptPreview is { } pv
                                                 ? $"{pv.Prompt.Length:N0} chars · {pv.PromptMode} mode{(pv.ReferencesAttach ? " · references attach" : "")}"
@@ -326,14 +351,6 @@
                                                 disabled="@_promptPreviewLoading" @onclick="LoadPromptPreviewAsync">
                                             @(_promptPreviewLoading ? "Refreshing…" : "Refresh preview")
                                         </button>
-                                        @if (IsAutoPrompt)
-                                        {
-                                            <button type="button" class="cm-button cm-button--quiet cm-button--compact"
-                                                    disabled="@(_promptPreviewLoading || _rewritingBrief)" @onclick="RewriteBriefAsync"
-                                                    title="Forget the cached brief and write a new one from the same inputs">
-                                                @(_rewritingBrief ? "Rewriting brief…" : "Rewrite brief")
-                                            </button>
-                                        }
                                     </div>
                                 </details>
                                 <div class="cm-studio__chips">
@@ -2817,6 +2834,9 @@
     }
 
     private void OnPreviewToggle(EventArgs _) => _promptPreviewOpen = !_promptPreviewOpen;
+
+    private string FocusPathFor(Guid artifactId) =>
+        $"{CampaignViews.PathFor(CampaignId, CampaignView.Focus)}?artifact={artifactId}";
 
     private bool _rewritingBrief;
 

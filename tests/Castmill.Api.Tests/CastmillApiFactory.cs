@@ -15,6 +15,7 @@ namespace Castmill.Api.Tests;
 /// </summary>
 public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    private readonly ApiInteractionCoverage _coverage = new();
     private readonly MsSqlContainer _sql =
         new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
 
@@ -31,12 +32,14 @@ public sealed class CastmillApiFactory : WebApplicationFactory<Program>, IAsyncL
 
     public override async ValueTask DisposeAsync()
     {
+        await _coverage.WriteReportAsync(Services);
         await base.DisposeAsync();
         await _sql.DisposeAsync();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureServices(services => services.AddSingleton<IStartupFilter>(_coverage));
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:Castmill", _sql.GetConnectionString());
         builder.UseSetting("Jwt:SigningKey", SigningKey);

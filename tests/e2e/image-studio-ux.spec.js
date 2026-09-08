@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 test('Brand asset types and Image Studio controls update in place', async ({ page, request }) => {
     let accessToken = null;
@@ -10,7 +10,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
     try {
         const email = `image-ux-e2e-${crypto.randomUUID()}@castmill.local`;
         const password = 'image-ux-e2e-password-2026';
-        const registration = await request.post('http://localhost:5005/api/v1/auth/register', {
+        const registration = await request.post('http://localhost:5015/api/v1/auth/register', {
             data: { email, password, displayName: 'Image UX E2E' },
         });
         const registrationBody = await registration.text();
@@ -18,28 +18,28 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const auth = JSON.parse(registrationBody);
         accessToken = auth.accessToken;
 
-        const brand = await request.post('http://localhost:5005/api/v1/brands', {
+        const brand = await request.post('http://localhost:5015/api/v1/brands', {
             headers: bearer(accessToken),
             data: { name: `Image UX E2E ${Date.now()}`, styleCard: { voice: 'Clear and direct.' } },
         });
         expect(brand.status()).toBe(201);
         brandId = (await brand.json()).id;
 
-        const asset = await request.post('http://localhost:5005/api/v1/assets', {
+        const asset = await request.post('http://localhost:5015/api/v1/assets', {
             headers: bearer(accessToken),
             data: { fileName: 'studio-wall.png', contentType: 'image/png', sizeBytes: 128 },
         });
         expect(asset.status()).toBe(201);
         assetId = (await asset.json()).id;
 
-        const link = await request.post(`http://localhost:5005/api/v1/brands/${brandId}/assets`, {
+        const link = await request.post(`http://localhost:5015/api/v1/brands/${brandId}/assets`, {
             headers: bearer(accessToken),
             data: { assetId, kind: 'background', label: 'Studio wall' },
         });
         expect(link.status()).toBe(201);
 
         campaignName = `Image UX E2E ${Date.now()}`;
-        const campaign = await request.post('http://localhost:5005/api/v1/campaigns', {
+        const campaign = await request.post('http://localhost:5015/api/v1/campaigns', {
             headers: bearer(accessToken),
             data: {
                 name: campaignName,
@@ -52,7 +52,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         campaignId = (await campaign.json()).id;
 
         const blog = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'blog',
@@ -63,7 +63,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(blog.status()).toBe(201);
 
         const youtube = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'youtube',
@@ -80,7 +80,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(youtube.status()).toBe(201);
 
         const artifact = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'social-x',
@@ -92,7 +92,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const artifactId = (await artifact.json()).id;
 
         const transcript = await request.post(
-            `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/transcripts`, {
+            `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/transcripts`, {
                 headers: bearer(accessToken),
                 data: {
                     source: 'e2e',
@@ -102,7 +102,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(transcript.status()).toBe(201);
 
         const summary = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'campaign-summary',
@@ -113,7 +113,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(summary.status()).toBe(201);
 
         const slot = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/image-slots`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/image-slots`, {
                 headers: bearer(accessToken),
                 data: { artifactId, promptMode: 'Auto', prompt: 'Clean editorial composition' },
             });
@@ -121,7 +121,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const slotId = (await slot.json()).id;
 
         const seoReport = await request.post(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
                 headers: bearer(accessToken),
                 data: {
                     kind: 'seo-report',
@@ -132,14 +132,14 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(seoReport.status()).toBe(201);
         const reportArtifact = await seoReport.json();
         const submitReport = await request.patch(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts/${reportArtifact.id}/status`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts/${reportArtifact.id}/status`, {
                 headers: { ...bearer(accessToken), 'If-Match': `"${reportArtifact.version}"` },
                 data: { status: 'InReview' },
             });
         expect(submitReport.ok()).toBeTruthy();
 
         await page.goto('/sign-in');
-        const demoCredentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+        const demoCredentials = await request.get('http://localhost:5015/api/v1/dev/demo-credentials');
         expect(demoCredentials.ok()).toBeTruthy();
         const demo = await demoCredentials.json();
         await expect(page.getByLabel('Email')).toHaveValue(demo.email);
@@ -226,12 +226,11 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.getByText('Face · 1')).toBeVisible();
         await expect(typeSwitcher).toHaveValue('face');
 
-        const createTemplate = page.waitForResponse(response =>
-            response.url().endsWith(`/api/v1/brands/${brandId}/templates`)
-            && response.request().method() === 'POST');
+        // Starter templates are seeded when the brand is created (ADR-069), so opening the tab
+        // no longer POSTs a default — the editor simply opens on the seeded YouTube template.
         await page.getByRole('tab', { name: 'Templates' }).click();
-        await createTemplate;
         const templateKind = page.locator('.cm-brand__kind');
+        await expect(templateKind).toBeVisible();
         await expect(templateKind).toHaveValue('youtube');
         await expect(templateKind.locator('option[value="youtube"]')).toHaveText('YouTube package');
         await expect(templateKind.locator('option')).toHaveCount(13);
@@ -262,7 +261,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(JSON.parse(saveTemplateBody).steeringPrompt).toBe(longYoutubeTemplate);
         await page.getByRole('tab', { name: 'Asset kit' }).click();
         const storedTemplates = await request.get(
-            `http://localhost:5005/api/v1/brands/${brandId}/templates?verify=${Date.now()}`, {
+            `http://localhost:5015/api/v1/brands/${brandId}/templates?verify=${Date.now()}`, {
                 headers: { ...bearer(accessToken), 'Cache-Control': 'no-cache' },
             });
         expect(storedTemplates.ok()).toBeTruthy();
@@ -431,17 +430,17 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-focus__head h1')).toHaveText('Launch post');
     } finally {
         if (accessToken && campaignId) {
-            await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+            await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
             });
         }
         if (accessToken && brandId) {
-            await request.delete(`http://localhost:5005/api/v1/brands/${brandId}`, {
+            await request.delete(`http://localhost:5015/api/v1/brands/${brandId}`, {
                 headers: bearer(accessToken),
             });
         }
         if (accessToken && assetId) {
-            await request.delete(`http://localhost:5005/api/v1/assets/${assetId}`, {
+            await request.delete(`http://localhost:5015/api/v1/assets/${assetId}`, {
                 headers: bearer(accessToken),
             });
         }

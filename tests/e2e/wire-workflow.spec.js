@@ -1,6 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { expect, test } from './fixtures.js';
 
+// Runs as a freshly registered user, not the demo account: the queue counts and the visual
+// snapshot below assume an otherwise empty workspace, and the demo account carries real work.
 test('The Wire schedules by keyboard and drag across three projections', async ({ page, request }) => {
+    const email = `wire-${randomUUID()}@castmill.local`;
+    const password = 'wire-workflow-password-2026';
     let accessToken;
     let campaignId;
     let scheduleGetCount = 0;
@@ -11,17 +16,17 @@ test('The Wire schedules by keyboard and drag across three projections', async (
     });
 
     try {
-        const credentials = await request.get('http://localhost:5005/api/v1/dev/demo-credentials');
+        const credentials = await request.get('http://localhost:5015/api/v1/dev/demo-credentials');
         expect(credentials.ok()).toBeTruthy();
         const demo = await credentials.json();
 
-        const login = await request.post('http://localhost:5005/api/v1/auth/login', {
-            data: { email: demo.email, password: demo.password },
+        const registration = await request.post('http://localhost:5015/api/v1/auth/register', {
+            data: { email, password, displayName: 'Wire E2E' },
         });
-        expect(login.ok()).toBeTruthy();
-        accessToken = (await login.json()).accessToken;
+        expect(registration.status()).toBe(200);
+        accessToken = (await registration.json()).accessToken;
 
-        const campaign = await request.post('http://localhost:5005/api/v1/campaigns', {
+        const campaign = await request.post('http://localhost:5015/api/v1/campaigns', {
             headers: bearer(accessToken),
             data: { name: `Wire E2E ${Date.now()}`, brief: 'Run of Show interaction fixture.' },
         });
@@ -35,16 +40,19 @@ test('The Wire schedules by keyboard and drag across three projections', async (
 
         await page.setViewportSize({ width: 1440, height: 900 });
         await page.goto('/sign-in');
-        await page.getByLabel('Email').fill(demo.email);
-        await page.getByLabel('Password').fill(demo.password);
+        // Wait for the dev form's demo pre-fill to land before typing, or it overwrites the input.
+        await expect(page.getByLabel('Email')).toHaveValue(demo.email);
+        await page.getByLabel('Email').fill(email);
+        await page.getByLabel('Password').fill(password);
         await page.getByRole('button', { name: 'Sign in' }).click();
         await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
         await page.goto('/wire');
         await expect(page.locator('.cm-run-show__timeline')).toBeVisible();
         await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(2);
-        await expect(page.locator('.cm-run-show__day--empty').first()).toHaveCSS('height', '30px');
-        await expect(page.locator('.cm-run-show__day--weekend')).toHaveCSS('height', '30px');
+        // Every day is a full lane (--cm-wire-day-min), empty or weekend included (backlog 2026-09-05).
+        await expect(page.locator('.cm-run-show__day--empty').first()).toHaveCSS('height', '72px');
+        await expect(page.locator('.cm-run-show__day--weekend').first()).toHaveCSS('height', '72px');
 
         const geometry = await page.evaluate(() => {
             const timeline = document.querySelector('.cm-run-show__timeline');
@@ -63,13 +71,21 @@ test('The Wire schedules by keyboard and drag across three projections', async (
         expect(geometry.queueWidth).toBe(288);
         expect(geometry.clamp).toBe('2');
 
+        const previousWeek = await page.getByRole('heading', { name: /^Week of / }).textContent();
         await page.getByText('Next →', { exact: true }).click();
-        await page.locator('.cm-run-show__queue-card', { hasText: 'Keyboard scheduled story' })
-            .getByText('Slot', { exact: true }).click();
+        await expect(page.getByRole('heading', { name: /^Week of / })).not.toHaveText(previousWeek);
+        // Card actions are icon buttons revealed on hover (no worded buttons inside cards).
+        const keyboardCard = page.locator('.cm-run-show__queue-card', { hasText: 'Keyboard scheduled story' });
+        await keyboardCard.hover();
+        await keyboardCard.getByRole('button', { name: 'Slot' }).click();
         await expect(page.locator('igc-dialog[open]')).toBeVisible();
         await page.locator('igc-dialog[open]').getByText('Schedule', { exact: true }).click();
-        await expect(page.getByText(/Keyboard scheduled story.*staged locally/)).toBeVisible();
-        await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(1);
+        // Assert the durable outcome, not the transient toast: the card leaves the queue and the
+        // item appears on the timeline (the toast auto-dismisses and races a slow first paint).
+        await expect(page.locator('igc-dialog[open]')).toHaveCount(0);
+        // The schedule POST round-trips Azure SQL, which can take 10s+ when it is warming up.
+        await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(1, { timeout: 90_000 });
+        await expect(page.locator('.cm-run-show__item', { hasText: 'Keyboard scheduled story' })).toBeVisible();
 
         const dragCard = page.locator('.cm-run-show__queue-card', { hasText: 'Dragged story' });
         const targetLane = page.locator('.cm-run-show__lane').filter({ hasNotText: 'collapsed' }).nth(2);
@@ -86,29 +102,18 @@ test('The Wire schedules by keyboard and drag across three projections', async (
             await expect(timeInput).toHaveValue('14:00');
             await dragDialog.getByText('Schedule', { exact: true }).click();
         }
-        await expect(page.getByText(/Dragged story.*staged locally/)).toBeVisible();
-        await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(0);
+        await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(0, { timeout: 90_000 });
+        await expect(page.locator('.cm-run-show__item', { hasText: 'Dragged story' })).toBeVisible();
         await expect(page.locator('.cm-run-show__item', { hasText: 'Dragged story' })).toContainText('14:00');
 
+        // Two projections (Run of show, Pipeline) over ONE data set: switching never refetches.
         const scheduleRequestsBeforeSwitch = scheduleGetCount;
-        await page.getByText('Agenda', { exact: true }).click();
-        await expect(page.locator('.cm-agenda')).toBeVisible();
-        await expect(page.locator('.cm-agenda__title', { hasText: 'Dragged story' })).toBeVisible();
         await page.getByText('Pipeline', { exact: true }).click();
         await expect(page.locator('.cm-pipeline')).toBeVisible();
         await expect(page.locator('.cm-pipeline__card', { hasText: 'Dragged story' })).toBeVisible();
+        await expect(page.locator('.cm-pipeline__card', { hasText: 'Keyboard scheduled story' })).toBeVisible();
         expect(scheduleGetCount).toBe(scheduleRequestsBeforeSwitch);
 
-        await page.getByText('Agenda', { exact: true }).click();
-        await page.setViewportSize({ width: 1000, height: 900 });
-        await expect(page.locator('.cm-agenda--narrow')).toBeVisible();
-        const runToggle = page.locator('igc-toggle-button[value="run"]');
-        await expect.poll(() => runToggle.evaluate(element =>
-            element.hasAttribute('disabled') || element.disabled === true)).toBeTruthy();
-        await runToggle.click({ force: true });
-        await expect(page.locator('.cm-agenda--narrow')).toBeVisible();
-
-        await page.setViewportSize({ width: 1440, height: 900 });
         await page.getByText('Run of show', { exact: true }).click();
         await expect(page.locator('.cm-run-show__timeline')).toBeVisible();
         await expect(page).toHaveScreenshot('wire-run-of-show.png', {
@@ -116,7 +121,7 @@ test('The Wire schedules by keyboard and drag across three projections', async (
             maxDiffPixelRatio: 0.01,
         });
 
-        const entries = await request.get('http://localhost:5005/api/v1/schedule', {
+        const entries = await request.get('http://localhost:5015/api/v1/schedule', {
             headers: bearer(accessToken),
         });
         expect(entries.ok()).toBeTruthy();
@@ -125,7 +130,7 @@ test('The Wire schedules by keyboard and drag across three projections', async (
         expect(scheduled.every(entry => 'metrics' in entry && entry.metrics === null)).toBeTruthy();
     } finally {
         if (campaignId && accessToken) {
-            await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+            await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
             });
         }
@@ -134,7 +139,7 @@ test('The Wire schedules by keyboard and drag across three projections', async (
 
 async function createReviewedArtifact(request, accessToken, campaignId, title) {
     const created = await request.post(
-        `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+        `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
             headers: bearer(accessToken),
             data: {
                 kind: 'social-x',
@@ -150,7 +155,7 @@ async function createReviewedArtifact(request, accessToken, campaignId, title) {
 
     for (const status of ['InReview', 'Queued']) {
         const changed = await request.patch(
-            `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts/${artifact.id}/status`, {
+            `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts/${artifact.id}/status`, {
                 headers: { ...bearer(accessToken), 'If-Match': `"${artifact.version}"` },
                 data: { status },
             });

@@ -45,6 +45,7 @@ public sealed class ExportEndpointTests(CastmillApiFactory factory)
             .Content.ReadFromJsonAsync<ArtifactResponse>())!;
 
         var variantId = Guid.NewGuid();
+        var slotId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         await using (var scope = app.Services.CreateAsyncScope())
         {
@@ -53,7 +54,7 @@ public sealed class ExportEndpointTests(CastmillApiFactory factory)
                 .SingleAsync(item => item.Id == artifact.Id);
             var slot = new ImageSlot
             {
-                Id = Guid.NewGuid(),
+                Id = slotId,
                 TenantId = owner.TenantId,
                 CampaignId = campaign.Id,
                 ArtifactId = artifact.Id,
@@ -89,6 +90,13 @@ public sealed class ExportEndpointTests(CastmillApiFactory factory)
 
         store.Blobs["campaigns/export/placed.webp"] = [1, 2, 3];
         store.Blobs["campaigns/export/take.webp"] = [4, 5, 6];
+
+        var download = await client.GetAsync(
+            $"/api/v1/campaigns/{campaign.Id}/image-slots/{slotId}/variants/{variantId}/download");
+        download.EnsureSuccessStatusCode();
+        Assert.Equal("image/webp", download.Content.Headers.ContentType?.MediaType);
+        Assert.Equal($"castmill-{variantId:N}.webp", download.Content.Headers.ContentDisposition?.FileName);
+        Assert.Equal([4, 5, 6], await download.Content.ReadAsByteArrayAsync());
 
         var response = await client.GetAsync($"/api/v1/campaigns/{campaign.Id}/export");
         response.EnsureSuccessStatusCode();

@@ -44,7 +44,9 @@ public sealed class ImagePromptBuilder(
             BrandLook: brand.ImageStyleBlock,
             Audience: campaign.AudiencePersona,
             ReferenceKinds: [.. (references ?? []).Select(r => r.Kind)],
-            TextMayBeRendered: textMayBeRendered);
+            TextMayBeRendered: textMayBeRendered,
+            HeadlineWillBeComposited: !string.IsNullOrWhiteSpace(slot.HeadlineText)
+                || (ImagePromptRules.IsTextFirst(slot.Kind) && !textMayBeRendered));
         var hash = Hash(request, owner);
 
         if (slot.VisualBrief is { Length: > 0 } cached && string.Equals(slot.VisualBriefInputHash, hash, StringComparison.Ordinal))

@@ -47,6 +47,11 @@ public sealed class MediaUploadTests(CastmillApiFactory factory)
         Assert.Equal(afterFirst.UploadedBytes, resumed!.UploadedBytes);
         Assert.Equal(afterFirst.NextBlockIndex, resumed.NextBlockIndex);
 
+        var latest = await client.GetFromJsonAsync<MediaUploadResponse>(
+            $"/api/v1/campaigns/{campaignId}/media-uploads/latest");
+        Assert.Equal(upload.Id, latest!.Id);
+        Assert.Equal(afterFirst.UploadedBytes, latest.UploadedBytes);
+
         var retry = await PutBlockAsync(client, campaignId, upload.Id, 0, first);
         retry.EnsureSuccessStatusCode();
         var afterRetry = (await retry.Content.ReadFromJsonAsync<MediaUploadResponse>())!;

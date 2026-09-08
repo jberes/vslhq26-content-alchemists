@@ -56,13 +56,21 @@ internal static class BlogEditor
     /// article followed by an optional "Editorial notes" section; a model that returns a fenced
     /// block or a lead-in sentence is still read correctly rather than publishing its wrapper.
     /// </summary>
-    public static (string Markdown, IReadOnlyList<string> Notes) Parse(string reply)
+    public static (string Markdown, IReadOnlyList<string> Notes) Parse(string reply) =>
+        StripNotes(Unfence(reply.Trim()));
+
+    /// <summary>
+    /// The guard every blog body passes before it is persisted (ADR-077): a trailing section
+    /// addressed to the editor — whatever the model called it — is cut out of the article and
+    /// returned as notes. A reader must never see "the supplied evidence is a screen recording".
+    /// </summary>
+    public static (string Markdown, IReadOnlyList<string> Notes) StripNotes(string markdown)
     {
-        var text = Unfence(reply.Trim());
+        var text = markdown.Trim();
         var index = FindNotesHeading(text);
         if (index < 0)
         {
-            return (text.Trim(), []);
+            return (text, []);
         }
 
         var article = text[..index].Trim();
@@ -76,13 +84,17 @@ internal static class BlogEditor
         return (article, notes);
     }
 
+    // A heading of any level, or a bold stand-alone line, naming the notes the brief asks for —
+    // or any of the names models reach for instead.
+    private static readonly System.Text.RegularExpressions.Regex NotesHeading = new(
+        @"^\s*(?:#{1,6}\s*|\*\*)\s*(?:editorial notes?|editor['’]?s? notes?|notes? (?:to|for) the editor|publication blockers?|evidence gaps?|reviewer notes?|notes? for review)\s*:?\s*(?:\*\*)?\s*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static int FindNotesHeading(string text)
     {
         foreach (var line in EnumerateLines(text))
         {
-            var trimmed = line.Text.TrimStart('#', ' ').Trim().TrimEnd(':');
-            if (trimmed.Equals("Editorial notes", StringComparison.OrdinalIgnoreCase)
-                && line.Text.TrimStart().StartsWith('#'))
+            if (NotesHeading.IsMatch(line.Text.TrimEnd('\r')))
             {
                 return line.Start;
             }

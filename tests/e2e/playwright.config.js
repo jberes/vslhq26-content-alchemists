@@ -9,9 +9,11 @@ export default defineConfig({
     workers: 1,
     reporter: [['list']],
     use: {
-        baseURL: 'http://localhost:5084',
+        baseURL: 'http://localhost:5094',
         browserName: 'chromium',
         actionTimeout: 30_000,
+        // A hung page load must fail in a minute, not sit until the 12-minute test timeout.
+        navigationTimeout: 60_000,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
         launchOptions: {
@@ -23,18 +25,25 @@ export default defineConfig({
     },
     webServer: [
         {
-            command: 'dotnet run --project src/Castmill.Api --no-build --launch-profile https',
+            command: 'dotnet run --project src/Castmill.Api --no-build --no-launch-profile -- --urls http://localhost:5015',
             cwd: '../..',
-            env: { ...process.env, RateLimits__AuthPerMinute: '1000' },
-            url: 'http://localhost:5005/health/db',
-            reuseExistingServer: true,
+            env: {
+                ...process.env,
+                ASPNETCORE_ENVIRONMENT: 'Development',
+                AZURE_TOKEN_CREDENTIALS: 'AzureCliCredential',
+                RateLimits__AuthPerMinute: '1000',
+                Cors__AllowedOrigins__0: 'http://localhost:5094',
+            },
+            url: 'http://localhost:5015/health/db',
+            reuseExistingServer: false,
             timeout: 120_000,
         },
         {
-            command: 'dotnet run --project src/Castmill.Web --no-build -- --ApiBaseAddress=http://localhost:5005',
+            command: 'dotnet run --project src/Castmill.Web --no-build --no-launch-profile -- --urls http://localhost:5094 --ApiBaseAddress=http://localhost:5015',
             cwd: '../..',
-            url: 'http://localhost:5084',
-            reuseExistingServer: true,
+            env: { ...process.env, ASPNETCORE_ENVIRONMENT: 'Development' },
+            url: 'http://localhost:5094',
+            reuseExistingServer: false,
             timeout: 120_000,
         },
     ],

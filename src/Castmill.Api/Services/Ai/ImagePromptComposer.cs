@@ -117,6 +117,40 @@ public static class ImagePromptComposer
         _ => "Create a supporting image for the piece described below.",
     };
 
+    /// <summary>
+    /// The same prompt with the reference note rewritten for <paramref name="remaining"/> (the
+    /// face references removed) and an explicit no-people instruction (ADR-076). Azure's safety
+    /// system refuses edits that carry a photograph of a real person; dropping the face and
+    /// re-rendering returns a take instead of nothing.
+    /// </summary>
+    public static string WithoutFaceReferences(string prompt, IReadOnlyList<ImageReference> remaining)
+    {
+        var lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
+        var start = lines.FindIndex(l => ReferenceNoteHeader.IsMatch(l));
+        if (start >= 0)
+        {
+            var end = start + 1;
+            while (end < lines.Count && (lines[end].StartsWith("- Image ", StringComparison.Ordinal)
+                || lines[end].StartsWith("Any person shown must be", StringComparison.Ordinal)))
+            {
+                end++;
+            }
+            lines.RemoveRange(start, end - start);
+            var note = new StringBuilder();
+            AppendReferenceNote(note, remaining);
+            var noteLines = note.ToString().TrimEnd('\n').Split('\n');
+            if (noteLines is not [""])
+            {
+                lines.InsertRange(start, noteLines);
+            }
+        }
+        var rebuilt = string.Join('\n', lines).TrimEnd();
+        return rebuilt + "\nDo not show any person or face: the presenter reference was withdrawn.";
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex ReferenceNoteHeader =
+        new(@"^\d+ reference images? (is|are) attached, in this order", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static void AppendReferenceNote(StringBuilder text, IReadOnlyList<ImageReference>? references)
     {
         if (references is not { Count: > 0 })

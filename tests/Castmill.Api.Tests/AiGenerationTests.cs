@@ -22,10 +22,12 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class AiGenerationTests(CastmillApiFactory factory)
 {
-    private WebApplicationFactory<Program> WithFakeModel(bool malformedYoutubeTaxonomy = false) =>
+    private WebApplicationFactory<Program> WithFakeModel(
+        bool malformedYoutubeTaxonomy = false,
+        bool invalidYoutubeAudit = false) =>
         factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
             services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
-                _ => new FakeFoundryFactory(malformedYoutubeTaxonomy)))));
+                _ => new FakeFoundryFactory(malformedYoutubeTaxonomy, invalidYoutubeAudit)))));
 
     private static async Task<(HttpClient Client, Guid CampaignId, Guid TranscriptId)> SetUpAsync(WebApplicationFactory<Program> app)
     {
@@ -265,6 +267,26 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task Youtube_retries_an_audit_that_fails_deterministic_validation_once()
+    {
+        await using var app = WithFakeModel(invalidYoutubeAudit: true);
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        generate.EnsureSuccessStatusCode();
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+
+        Assert.True(result!.Success, result.Error);
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        Assert.Equal(3, package.RootElement.GetProperty("content")
+            .GetProperty("chapters").GetArrayLength());
+    }
+
+    [Fact]
     public async Task Youtube_title_regeneration_merges_a_new_source_citation_into_the_package()
     {
         await using var app = factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
@@ -495,7 +517,9 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
     // ---- Fakes ---------------------------------------------------------------
 
-    internal sealed class FakeFoundryFactory(bool malformedYoutubeTaxonomy = false) : IFoundryClientFactory
+    internal sealed class FakeFoundryFactory(
+        bool malformedYoutubeTaxonomy = false,
+        bool invalidYoutubeAudit = false) : IFoundryClientFactory
     {
         public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
             Task.FromResult<FoundryCredentials?>(new FoundryCredentials("https://fake.local", "fake", "config"));
@@ -507,7 +531,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
                 new FoundryCredentials("https://fake.local", "fake", "config"), "fake-deployment"));
 
         public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-            Task.FromResult<IChatClient>(new FakeChatClient(malformedYoutubeTaxonomy));
+            Task.FromResult<IChatClient>(new FakeChatClient(malformedYoutubeTaxonomy, invalidYoutubeAudit));
     }
 
     private sealed class PromptEvidenceFoundryFactory : IFoundryClientFactory
@@ -707,7 +731,9 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     }
 
     /// <summary>Returns schema-valid canned JSON keyed off distinctive prompt text.</summary>
-    internal sealed class FakeChatClient(bool malformedYoutubeTaxonomy = false) : IChatClient
+    internal sealed class FakeChatClient(
+        bool malformedYoutubeTaxonomy = false,
+        bool invalidYoutubeAudit = false) : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -771,6 +797,11 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             if (prompt.Contains("\"titleOptions\"", StringComparison.Ordinal))
             {
                 var package = JsonNode.Parse("""{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Leads with the measured result."},{"slot":"B","title":"The Deployment Workflow Behind Faster Shipping","angle":"curiosity","score":84,"rationale":"Opens a useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Delivery Workflow","angle":"problem-solution","score":82,"rationale":"Names the pain directly."}],"description":"Deployment automation cut delivery time in half, and this grounded workflow shows the exact product and dashboard proof.\n\nLearn how the team shipped the product and used its dashboard.\n\nChapters:\n0:00 Deployment automation result\n0:08 Delivery dashboard proof\n0:16 Faster shipping workflow\n\n{{LINKS}}\n#devops #automation","chapters":[{"startSeconds":0,"title":"Deployment automation result"},{"startSeconds":8,"title":"Delivery dashboard proof"},{"startSeconds":16,"title":"Faster shipping workflow"}],"tags":["deployment automation","devops dashboard","shipping workflow","delivery time","product launch","faster deploys","release process","automation tool"],"suggestedPinnedComment":"The source says deployment time was cut in half after the launch—where would this workflow remove the most delay for your team?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1","S2","S3"]}""")!.AsObject();
+                if (invalidYoutubeAudit
+                    && prompt.Contains("Audit and correct this YouTube package", StringComparison.Ordinal))
+                {
+                    package["chapters"] = new JsonArray(package["chapters"]!.AsArray()[0]!.DeepClone());
+                }
                 if (malformedYoutubeTaxonomy)
                 {
                     var options = package["titleOptions"]!.AsArray();

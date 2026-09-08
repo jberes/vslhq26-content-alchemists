@@ -363,9 +363,9 @@ public sealed class AiOrchestrator(
                 {{draftJson.GetRawText()}}
                 """, brief, evidence, brand, "youtube"), ct);
 
-            var json = Generators.NormalizeYoutubeTitleOptions(
+            var auditedJson = Generators.NormalizeYoutubeTitleOptions(
                 CitationMarkers.Strip(ParseModelJson(audited)));
-            json = await SubstituteLinksAsync(userId, json, ct);
+            var json = await SubstituteLinksAsync(userId, auditedJson, ct);
             if (!evidence.TryNormalizeCitations(json, out json, out var citationError))
             {
                 return Fail("youtube", citationError!, stopwatch);
@@ -373,7 +373,36 @@ public sealed class AiOrchestrator(
             var validation = Generators.ValidateYoutube(json, evidence);
             if (!validation.Passed)
             {
-                return Fail("youtube", validation.FatalError!, stopwatch);
+                var repaired = await CallModelAsync(userId, "chat-audit", "youtube-audit-repair", BuildPrompt(
+                    $$"""
+                    Repair this YouTube package after deterministic validation rejected it.
+                    Return the COMPLETE corrected JSON package in exactly the same schema — no
+                    notes, wrapper, or omitted fields.
+
+                    Validation error: {{validation.FatalError}}
+
+                    Preserve grounded claims and citations. Correct the stated error and recheck:
+                    exactly three A/B/C title options with distinct supported angles; at least
+                    three ascending keyworded chapters beginning at 0:00; a substantive pinned
+                    comment ending in a question; and the complete description, tags, audit, and
+                    citations fields.
+
+                    Rejected package:
+                    {{auditedJson.GetRawText()}}
+                    """, brief, evidence, brand, "youtube"), ct);
+
+                json = Generators.NormalizeYoutubeTitleOptions(
+                    CitationMarkers.Strip(ParseModelJson(repaired)));
+                json = await SubstituteLinksAsync(userId, json, ct);
+                if (!evidence.TryNormalizeCitations(json, out json, out citationError))
+                {
+                    return Fail("youtube", citationError!, stopwatch);
+                }
+                validation = Generators.ValidateYoutube(json, evidence);
+                if (!validation.Passed)
+                {
+                    return Fail("youtube", validation.FatalError!, stopwatch);
+                }
             }
             var artifactId = await PersistAsync(
                 campaign, "youtube", json, validation, evidence, ct,
@@ -569,6 +598,14 @@ public sealed class AiOrchestrator(
                 }
             }
 
+            // Whatever stage wrote it, a section addressed to the editor never ships (ADR-077).
+            var (publishable, strayNotes) = BlogEditor.StripNotes(draftJson.GetProperty("markdown").GetString()!);
+            if (strayNotes.Count > 0)
+            {
+                draftJson = ArtifactContentJson.WithMarkdown(draftJson, publishable);
+                warnings.AddRange(strayNotes.Select(note => $"Editor: {note}").Where(w => !warnings.Contains(w, StringComparer.Ordinal)));
+            }
+
             foreach (var issue in BlogMarkdown.Problems(draftJson.GetProperty("markdown").GetString()!))
             {
                 warnings.Add($"Formatting: {issue}");
@@ -750,11 +787,32 @@ public sealed class AiOrchestrator(
                 """;
 
             var prompt = BuildPrompt(instructions, steering, evidence, brand, kind);
-            var response = useMcp
-                ? await CallMcpAsync(userId, $"{kind}-tech-edit", prompt, mcpServers, ct)
-                : await CallModelAsync(userId, FoundryClientFactory.TechEditAlias, $"{kind}-tech-edit", prompt, ct);
+            async Task<JsonElement> CompleteEditAsync(string requestPrompt)
+            {
+                var response = useMcp
+                    ? await CallMcpAsync(userId, $"{kind}-tech-edit", requestPrompt, mcpServers, ct)
+                    : await CallModelAsync(userId, FoundryClientFactory.TechEditAlias, $"{kind}-tech-edit", requestPrompt, ct);
+                return ParseModelJson(response);
+            }
 
-            var parsed = CitationMarkers.Strip(ParseModelJson(response));
+            JsonElement parsed;
+            try
+            {
+                parsed = await CompleteEditAsync(prompt);
+            }
+            catch (ModelJsonException) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning("Tech edit returned invalid JSON for artifact {ArtifactId}; retrying once", artifact.Id);
+                parsed = await CompleteEditAsync(prompt + """
+
+
+                    The previous attempt could not be parsed. Return only one complete valid JSON object
+                    with artifact, changes, and claims. Escape quotes, backslashes and newlines inside
+                    JSON strings. Do not use Markdown fences or commentary outside the object. Keep the
+                    original artifact schema and evidence citations; do not omit or truncate the manuscript.
+                    """);
+            }
+            parsed = CitationMarkers.Strip(parsed);
             if (!parsed.TryGetProperty("artifact", out var edited) || edited.ValueKind != JsonValueKind.Object)
             {
                 return TechEditFail(artifact, "The tech edit returned no artifact payload.", stopwatch);
@@ -766,6 +824,17 @@ public sealed class AiOrchestrator(
                     artifact,
                     $"Tech edit rejected by validation: {citationError}",
                     stopwatch);
+            }
+            if (kind == "blog" && edited.TryGetProperty("markdown", out var editedMarkdown)
+                && editedMarkdown.ValueKind == JsonValueKind.String)
+            {
+                // A note addressed to the editor never ships (ADR-077) — it rides on the run instead.
+                var (publishable, strayNotes) = BlogEditor.StripNotes(editedMarkdown.GetString()!);
+                if (strayNotes.Count > 0)
+                {
+                    edited = ArtifactContentJson.WithMarkdown(edited, publishable);
+                    attached.AddRange(strayNotes.Select(note => $"Editor: {note}"));
+                }
             }
             var validation = Validate(kind, edited, evidence);
             if (!validation.Passed)
@@ -1130,7 +1199,7 @@ public sealed class AiOrchestrator(
             using var doc = JsonDocument.Parse(trimmed);
             return doc.RootElement.Clone();
         }
-        catch (JsonException)
+        catch (JsonException parseError)
         {
             // Models sometimes wrap the object in a sentence ("Here is the updated artifact:")
             // — recoverable, so take the outermost braces and try once more. Observed on Tech
@@ -1145,10 +1214,17 @@ public sealed class AiOrchestrator(
                     using var salvaged = JsonDocument.Parse(trimmed[open..(close + 1)]);
                     return salvaged.RootElement.Clone();
                 }
-                catch (JsonException)
+                catch (JsonException salvageError)
                 {
-                    // Fall through to the readable error.
+                    parseError = salvageError;
                 }
+            }
+
+            if (open >= 0 || trimmed.StartsWith('['))
+            {
+                throw new ModelJsonException(
+                    $"The model returned invalid or incomplete JSON at line {(parseError.LineNumber ?? 0) + 1}, "
+                    + $"byte {parseError.BytePositionInLine ?? 0}. No changes were saved. Please retry the edit.");
             }
 
             // "JsonReaderException" told a producer nothing. Say what happened and show the

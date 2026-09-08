@@ -917,9 +917,9 @@ public static class ImageSlotEndpoints
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
-                    var (webp, _) = await renderer.RenderExactReportingPromptAsync(
-                        userId, work.EffectivePrompt, slot.TargetWidth, slot.TargetHeight,
-                        work.EffectiveModel, work.References, CancellationToken.None, work.AllowRenderedText);
+                    var (webp, _, safetyNote, _) = await RenderWithSafetyFallbackAsync(
+                        renderer, userId, work.EffectivePrompt, slot.TargetWidth, slot.TargetHeight,
+                        work.EffectiveModel, work.References, work.AllowRenderedText, CancellationToken.None);
                     var thumb = composer.ToThumbWebp(webp);
                     var blobPath = VariantPath(slot.CampaignId, slot.Kind, variantIndex);
                     var thumbPath = ThumbPath(slot.CampaignId, slot.Kind);
@@ -939,6 +939,7 @@ public static class ImageSlotEndpoints
                         ThumbBlobPath = thumbPath,
                         Model = work.EffectiveModel ?? "image",
                         Prompt = work.EffectivePrompt,
+                        SteeringNote = safetyNote,
                         State = "Candidate",
                         Width = slot.TargetWidth,
                         Height = slot.TargetHeight,
@@ -980,6 +981,36 @@ public static class ImageSlotEndpoints
             results.Sum(result => result.SucceededVariants),
             results.Sum(result => result.FailedVariants),
             results));
+    }
+
+    internal const string FaceDroppedNote =
+        "Rendered without the face reference: the provider's safety system declines photographs of real "
+        + "people. Product and background references were kept. To render likenesses, apply for modified "
+        + "content filters on the Azure OpenAI deployment.";
+
+    /// <summary>
+    /// One render, with the one recovery a producer would make by hand (ADR-076): when the
+    /// safety system refuses a request that carries a face reference, drop the face and render
+    /// again so a take comes back, annotated. Any other refusal propagates unchanged.
+    /// </summary>
+    internal static async Task<(byte[] Webp, string Prompt, string? Note, IReadOnlyList<ImageReference> References)> RenderWithSafetyFallbackAsync(
+        IImageRenderer renderer, Guid userId, string prompt, int width, int height, string? model,
+        IReadOnlyList<ImageReference> references, bool allowRenderedText, CancellationToken ct)
+    {
+        try
+        {
+            var (webp, sent) = await renderer.RenderExactReportingPromptAsync(
+                userId, prompt, width, height, model, references, ct, allowRenderedText);
+            return (webp, sent, null, references);
+        }
+        catch (ImageModerationException) when (references.Any(r => r.Kind == "face"))
+        {
+            var remaining = references.Where(r => r.Kind != "face").ToList();
+            var retryPrompt = ImagePromptComposer.WithoutFaceReferences(prompt, remaining);
+            var (webp, sent) = await renderer.RenderExactReportingPromptAsync(
+                userId, retryPrompt, width, height, model, remaining, ct, allowRenderedText);
+            return (webp, sent, FaceDroppedNote, remaining);
+        }
     }
 
     private sealed record PreparedImageBatchSlot(
@@ -1392,20 +1423,21 @@ public static class ImageSlotEndpoints
                 // The prompt stored on the take is the one the provider was given, rules and
                 // all (ADR-065) — a producer diagnosing a bad image needs the real text.
                 var sentPrompt = effectivePrompt;
+                var usedReferences = references ?? [];
+                string? note = null;
                 if (renderOverride is not null)
                 {
                     webp = await renderOverride(model, ct);
                 }
                 else
                 {
-                    (webp, sentPrompt) = await renderer.RenderExactReportingPromptAsync(
-                        userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
-                        references ?? [], ct, allowRenderedText);
+                    (webp, sentPrompt, note, usedReferences) = await RenderWithSafetyFallbackAsync(
+                        renderer, userId, effectivePrompt, slot.TargetWidth, slot.TargetHeight, model,
+                        usedReferences, allowRenderedText, ct);
                 }
 
                 // Art-director loop (ADR-058): judge the take against the brief; on a rejection
                 // re-render ONCE per round with the named defect, keeping the best-scoring take.
-                string? note = null;
                 if (critic is not null && criticOptions is { Enabled: true } && renderOverride is null)
                 {
                     var verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, webp, ct);
@@ -1416,7 +1448,7 @@ public static class ImageSlotEndpoints
                         rounds++;
                         var retryPrompt = $"{effectivePrompt}\nArt director's fix for the previous render: {fix}";
                         var (retry, retrySent) = await renderer.RenderExactReportingPromptAsync(
-                            userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, references ?? [], ct,
+                            userId, retryPrompt, slot.TargetWidth, slot.TargetHeight, model, usedReferences, ct,
                             allowRenderedText);
                         verdict = await critic.ReviewAsync(userId, effectivePrompt, slot.Kind, retry, ct);
                         if (!verdict.Ran || verdict.Score >= best.Score)
@@ -1426,9 +1458,10 @@ public static class ImageSlotEndpoints
                         }
                     }
                     webp = best.Webp;
-                    note = verdict.Ran
+                    var criticNote = verdict.Ran
                         ? $"{verdict.Summary}{(rounds > 0 ? $" · {rounds} re-render{(rounds == 1 ? "" : "s")}" : "")}"
                         : verdict.Summary;
+                    note = note is null ? criticNote : $"{criticNote} · {note}";
                 }
                 return (take, model, webp, null, stopwatch.ElapsedMilliseconds, note, sentPrompt);
             }

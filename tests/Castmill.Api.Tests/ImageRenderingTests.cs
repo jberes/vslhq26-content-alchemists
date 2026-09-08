@@ -17,6 +17,18 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class ImageRenderingTests(CastmillApiFactory factory)
 {
+    [Fact]
+    public async Task Render_images_route_rejects_anonymous_json_requests()
+    {
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{Guid.NewGuid()}/render-images",
+            new RenderImagesRequest(Guid.NewGuid(), null, null));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     // ---- Unit: WebP encoding + stub replacement -------------------------------
 
     [Fact]

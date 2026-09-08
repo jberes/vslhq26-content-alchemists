@@ -129,7 +129,8 @@ public sealed class AiOptions
                 Enabled = true,
                 Kind = "openai",
                 Endpoint = "https://api.openai.com/v1",
-                Model = "gpt-image-1",
+                // The newest gpt-image model; the capability table degrades parameters it rejects.
+                Model = "gpt-image-2",
                 Credential = Secrets.SecretKind.OpenAiImageKey,
             },
         };

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 const live = process.env.CASTMILL_E2E_LIVE === '1';
 
@@ -6,7 +6,7 @@ test.describe('analysis-first campaign production', () => {
     test.skip(!live,
         'Set CASTMILL_E2E_LIVE=1 to run the metered DataForSEO and answer-engine scenario.');
 
-    test('deep report gates production and renders ApexCharts plus ApexTree', async ({ page, request }) => {
+    test('deep report gates production and renders ApexCharts plus ApexTree', async ({ page, request }, testInfo) => {
         let campaignId = null;
         let brandId = null;
         let accessToken = null;
@@ -14,13 +14,15 @@ test.describe('analysis-first campaign production', () => {
         try {
             await page.goto('/sign-in');
             await expect(page.getByRole('heading', { name: 'Sign in.' })).toBeVisible();
+            await expect(page.getByLabel('Email')).not.toHaveValue('');
+            await expect(page.getByLabel('Password')).not.toHaveValue('');
 
             const email = await page.getByLabel('Email').inputValue();
             const password = await page.getByLabel('Password').inputValue();
             expect(email).not.toBe('');
             expect(password).not.toBe('');
 
-            const login = await request.post('http://localhost:5005/api/v1/auth/login', {
+            const login = await request.post('http://localhost:5015/api/v1/auth/login', {
                 data: { email, password },
             });
             expect(login.ok()).toBeTruthy();
@@ -29,7 +31,7 @@ test.describe('analysis-first campaign production', () => {
 
             const brandName = `SEO E2E Brand ${Date.now()}`;
             const brandVoice = 'Direct, technical, evidence-led, and practical';
-            const brand = await request.post('http://localhost:5005/api/v1/brands', {
+            const brand = await request.post('http://localhost:5015/api/v1/brands', {
                 headers: bearer(accessToken),
                 data: { name: brandName, styleCard: { voice: brandVoice } },
             });
@@ -42,7 +44,7 @@ test.describe('analysis-first campaign production', () => {
 
             const runName = `SEO E2E ${Date.now()}`;
             await page.getByLabel('Campaign name').fill(runName);
-            await page.getByLabel('Paste a transcript').fill(
+            await page.getByLabel('Paste source text').fill(
                 'This briefing explains how engineering leaders evaluate embedded analytics, '
                 + 'compare build versus buy, improve application performance, and create accessible '
                 + 'data experiences. It includes deployment guidance, governance, security, and '
@@ -52,9 +54,11 @@ test.describe('analysis-first campaign production', () => {
                 response.url().endsWith('/api/v1/campaigns')
                 && response.request().method() === 'POST'
                 && response.status() === 201);
-            await page.getByRole('button', { name: 'Transcribe pasted text' }).click();
+            await page.getByRole('button', { name: 'Use pasted text' }).click();
             campaignId = (await (await campaignCreated).json()).id;
 
+            await expect(page.getByRole('heading', { name: 'Choose the campaign intent.' })).toBeVisible();
+            await page.getByRole('radio', { name: /^Repurpose / }).click();
             await expect(page.getByRole('heading', { name: 'Set the research context.' }))
                 .toBeVisible({ timeout: 180_000 });
             const audience = page.getByLabel('AI-generated audience for the analysis');
@@ -68,7 +72,7 @@ test.describe('analysis-first campaign production', () => {
 
             const transcriptId = await resolveTranscriptId(request, accessToken, campaignId);
             const blocked = await request.post(
-                `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/generate/newsletter`, {
+                `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/generate/newsletter`, {
                     headers: bearer(accessToken),
                     data: { transcriptArtifactId: transcriptId },
                 });
@@ -126,7 +130,7 @@ test.describe('analysis-first campaign production', () => {
             // report snapshot instead of paying for another DataForSEO crawl.
             const targets = report.research.keywords.slice(0, 4);
             const changedTargets = await request.put(
-                `http://localhost:5005/api/v1/campaigns/${campaignId}/seo-targets`, {
+                `http://localhost:5015/api/v1/campaigns/${campaignId}/seo-targets`, {
                     headers: bearer(accessToken),
                     data: { primaryKeyword: targets[1].term, keywords: targets, questions: report.research.questions },
                 });
@@ -134,13 +138,13 @@ test.describe('analysis-first campaign production', () => {
             let storedReport = await readArtifact(request, accessToken, campaignId, report.reportArtifactId);
             expect(JSON.parse(storedReport.contentJson).anglesStale).toBe(true);
             const rebuiltAngles = await request.post(
-                `http://localhost:5005/api/v1/seo/reports/${report.reportArtifactId}/angles/regenerate`, {
+                `http://localhost:5015/api/v1/seo/reports/${report.reportArtifactId}/angles/regenerate`, {
                     headers: bearer(accessToken), data: {}, timeout: 180_000,
                 });
             expect(rebuiltAngles.ok()).toBeTruthy();
 
             const blogDraft = await request.post(
-                `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/generate/blog`, {
+                `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/generate/blog`, {
                     headers: bearer(accessToken), timeout: 180_000,
                     data: { transcriptArtifactId: transcriptId,
                         brief: 'Use the strongest approved angle.', replaceArtifactId: placeholder.id },
@@ -150,20 +154,40 @@ test.describe('analysis-first campaign production', () => {
             expect(blogId).toBe(placeholder.id);
 
             const ownedSocial = await request.post(
-                `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/generate/social-x`, {
+                `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/generate/social-x`, {
                     headers: bearer(accessToken), timeout: 180_000,
                     data: { transcriptArtifactId: transcriptId, parentArtifactId: blogId },
                 });
             expect(ownedSocial.ok()).toBeTruthy();
+            const socialResult = await ownedSocial.json();
+            const socialArtifact = await readArtifact(
+                request, accessToken, campaignId, socialResult.artifactId);
+            expect(socialArtifact.parentArtifactId).toBe(blogId);
 
             const youtube = await request.post(
-                `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/generate/youtube`, {
+                `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/generate/youtube`, {
                     headers: bearer(accessToken), timeout: 240_000,
                     data: { transcriptArtifactId: transcriptId },
                 });
             expect(youtube.ok()).toBeTruthy();
             const youtubeResult = await youtube.json();
-            expect(youtubeResult.success).toBe(true);
+            if (!youtubeResult.success) {
+                const logResponse = await request.get('http://localhost:5015/api/v1/ai/log', {
+                    headers: bearer(accessToken),
+                });
+                if (logResponse.ok()) {
+                    const diagnostics = (await logResponse.json())
+                        .filter(entry => entry.kind?.startsWith('youtube-'))
+                        .map(({ kind, modelAlias, responseExcerpt, success, durationMs }) => ({
+                            kind, modelAlias, responseExcerpt, success, durationMs,
+                        }));
+                    await testInfo.attach('youtube-generation-diagnostics', {
+                        body: JSON.stringify(diagnostics, null, 2),
+                        contentType: 'application/json',
+                    });
+                }
+            }
+            expect(youtubeResult.success, youtubeResult.error).toBe(true);
             const youtubeArtifact = await readArtifact(
                 request, accessToken, campaignId, youtubeResult.artifactId);
             const youtubePackage = JSON.parse(youtubeArtifact.contentJson).content;
@@ -172,7 +196,7 @@ test.describe('analysis-first campaign production', () => {
             expect(youtubePackage.audit.hookWithin125).toBe(true);
 
             const generated = await request.post(
-                `http://localhost:5005/api/v1/ai/campaigns/${campaignId}/generate/newsletter`, {
+                `http://localhost:5015/api/v1/ai/campaigns/${campaignId}/generate/newsletter`, {
                     headers: bearer(accessToken),
                     data: { transcriptArtifactId: transcriptId },
                     timeout: 180_000,
@@ -180,7 +204,7 @@ test.describe('analysis-first campaign production', () => {
             expect(generated.ok()).toBeTruthy();
 
             const renamed = `${runName} ready`;
-            const lifecycle = await request.put(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+            const lifecycle = await request.put(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
                 data: { name: renamed, brief: 'Audience: engineering leaders', brandId,
                     status: 'Ready', contentType: 'Webinar' },
@@ -194,21 +218,21 @@ test.describe('analysis-first campaign production', () => {
             await expect(page.getByText(renamed, { exact: true }).first()).toBeVisible();
             await expect(page.getByRole('button', { name: 'Ready', exact: true })).toBeVisible();
             await expect(page.getByText('Real search data informing this content')).toBeVisible();
-            const pillarGroup = page.locator('.cm-tree__group').first();
-            await expect(pillarGroup.locator('.cm-focus__list-item').filter({ hasText: 'X post' }))
-                .toHaveCount(1);
+            const socialGroup = page.getByRole('region', { name: 'Social (1)' });
+            await expect(socialGroup.getByRole('button', { name: /X post Draft$/ }))
+                .toBeVisible();
 
             await page.goto(`/campaigns/${campaignId}/seo`);
             await expect(page.locator('.apexcharts-svg').first()).toBeVisible();
             await expect(page.locator('svg[aria-label="Campaign content hierarchy"]')).toBeVisible();
         } finally {
             if (campaignId && accessToken) {
-                await request.delete(`http://localhost:5005/api/v1/campaigns/${campaignId}`, {
+                await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                     headers: bearer(accessToken),
                 });
             }
             if (brandId && accessToken) {
-                await request.delete(`http://localhost:5005/api/v1/brands/${brandId}`, {
+                await request.delete(`http://localhost:5015/api/v1/brands/${brandId}`, {
                     headers: bearer(accessToken),
                 });
             }
@@ -223,7 +247,7 @@ async function resolveTranscriptId(request, accessToken, campaignId) {
 
 async function listArtifacts(request, accessToken, campaignId) {
     const response = await request.get(
-        `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts`, {
+        `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts`, {
             headers: bearer(accessToken),
         });
     expect(response.ok()).toBeTruthy();
@@ -232,7 +256,7 @@ async function listArtifacts(request, accessToken, campaignId) {
 
 async function readArtifact(request, accessToken, campaignId, artifactId) {
     const response = await request.get(
-        `http://localhost:5005/api/v1/campaigns/${campaignId}/artifacts/${artifactId}`, {
+        `http://localhost:5015/api/v1/campaigns/${campaignId}/artifacts/${artifactId}`, {
             headers: bearer(accessToken),
         });
     expect(response.ok()).toBeTruthy();
@@ -245,20 +269,20 @@ function bearer(accessToken) {
 
 async function cleanupPriorE2eRows(request, accessToken) {
     const headers = bearer(accessToken);
-    const campaigns = await request.get('http://localhost:5005/api/v1/campaigns', { headers });
+    const campaigns = await request.get('http://localhost:5015/api/v1/campaigns', { headers });
     if (campaigns.ok()) {
         for (const campaign of await campaigns.json()) {
             if (campaign.name?.startsWith('SEO E2E ')) {
-                await request.delete(`http://localhost:5005/api/v1/campaigns/${campaign.id}`, { headers });
+                await request.delete(`http://localhost:5015/api/v1/campaigns/${campaign.id}`, { headers });
             }
         }
     }
 
-    const brands = await request.get('http://localhost:5005/api/v1/brands', { headers });
+    const brands = await request.get('http://localhost:5015/api/v1/brands', { headers });
     if (brands.ok()) {
         for (const brand of await brands.json()) {
             if (brand.name?.startsWith('SEO E2E Brand ')) {
-                await request.delete(`http://localhost:5005/api/v1/brands/${brand.id}`, { headers });
+                await request.delete(`http://localhost:5015/api/v1/brands/${brand.id}`, { headers });
             }
         }
     }
