@@ -148,7 +148,7 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
     public const string InputFidelity = "input_fidelity";
     /// <summary>Render quality tier; the gpt-image family accepts "high" (ADR-075).</summary>
     public const string Quality = "quality";
-    /// <summary>Arbitrary sizes such as 1536x864 rather than the three fixed frames (gpt-image-2).</summary>
+    /// <summary>Arbitrary sizes such as 1536x864 rather than the three fixed frames (gpt-image-2.5).</summary>
     public const string FlexibleSize = "size";
 
     private readonly ConcurrentDictionary<string, bool> _unsupported = new(StringComparer.OrdinalIgnoreCase);
@@ -186,8 +186,9 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
     {
         InputFidelity => model.Contains("gpt-image-1", StringComparison.OrdinalIgnoreCase),
         Quality => model.Contains("gpt-image", StringComparison.OrdinalIgnoreCase),
-        // Only gpt-image-2 is known to paint arbitrary frames; a rejection is remembered and
-        // the render falls back to the fixed frame, so a wrong guess costs one retry.
+        // The gpt-image-2 line (which the 2.5 pair continues) is what paints arbitrary
+        // frames; a rejection is remembered and the render falls back to the fixed frame,
+        // so a wrong guess costs one retry.
         FlexibleSize => model.Contains("gpt-image-2", StringComparison.OrdinalIgnoreCase),
         _ => true,
     };

@@ -105,8 +105,8 @@ public sealed class AiOptions
     }
 
     /// <summary>
-    /// The alternates that ship with the product (ADR-015 addendum, ADR-026): Nano Banana
-    /// and OpenAI's gpt-image are named, first-class choices in the studio's model picker
+    /// The alternates that ship with the product (ADR-015 addendum, ADR-026, ADR-078): Nano
+    /// Banana and the OpenAI gpt-image-2.5 pair are named, first-class choices in the picker
     /// rather than something to discover by hand-editing config. They are still inert until
     /// a key is stored — the credential is the gate, not the flag — and config may override
     /// any field or set Enabled=false to remove one entirely.
@@ -124,13 +124,24 @@ public sealed class AiOptions
                 Model = "gemini-2.5-flash-image",
                 Credential = Secrets.SecretKind.NanoBananaKey,
             },
-            ["gpt-image"] = new()
+            // The gpt-image-2.5 pair (ADR-078). Two entries rather than one provider with a
+            // model field, because the picker offers one choice per provider: a model that is
+            // not its own entry cannot be selected. gpt-image-2 is deliberately absent — it is
+            // superseded by these two and no longer offered.
+            ["gpt-image-sunburst"] = new()
             {
                 Enabled = true,
                 Kind = "openai",
                 Endpoint = "https://api.openai.com/v1",
-                // The newest gpt-image model; the capability table degrades parameters it rejects.
-                Model = "gpt-image-2",
+                Model = "gpt-image-2.5-sunburst",
+                Credential = Secrets.SecretKind.OpenAiImageKey,
+            },
+            ["gpt-image-flare"] = new()
+            {
+                Enabled = true,
+                Kind = "openai",
+                Endpoint = "https://api.openai.com/v1",
+                Model = "gpt-image-2.5-flare",
                 Credential = Secrets.SecretKind.OpenAiImageKey,
             },
         };

@@ -72,6 +72,17 @@ if (generateRuntimeKeys)
 {
     settings["Jwt__SigningKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
     settings["Castmill__EncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+    // A fresh encryption key is correct for a NEW environment and destructive for one that
+    // shares a database with an existing host: every secret already stored is encrypted under
+    // the other host's key and reads as "re-enter" here. Silence is what made that look like
+    // data loss rather than a key mismatch (ADR-079), so say it out loud.
+    Console.Error.WriteLine(
+        "WARNING: a new Castmill__EncryptionKey was generated. Any secret already stored in "
+        + "the target database was written under a DIFFERENT key and will read as RE-ENTER on "
+        + "this deployment. To keep those rows readable, add the key that wrote them to "
+        + "Castmill__PreviousEncryptionKeys__0 (read-only fallback; writes always use the "
+        + "active key). See docs/KEY-ROTATION.md.");
 }
 
 var appSettings = settings

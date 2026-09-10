@@ -10,6 +10,13 @@ public sealed record ImageModelChoice(
 
 public static class ImageModelCatalog
 {
+    /// <summary>
+    /// The generator a workspace gets when it has never chosen one (ADR-078). Only a
+    /// preference: <see cref="Resolve"/> falls through to any ready choice when no OpenAI
+    /// key is stored, so the default cannot leave a workspace with nothing to render on.
+    /// </summary>
+    public const string DefaultModel = "gpt-image-sunburst";
+
     public static IReadOnlyList<ImageModelChoice> Choices(AiStatusResponse? status)
     {
         if (status is null)
@@ -58,6 +65,8 @@ public static class ImageModelCatalog
         IReadOnlyList<ImageModelChoice> choices, string? requested) =>
         choices.FirstOrDefault(choice => string.Equals(
             choice.Value, requested, StringComparison.OrdinalIgnoreCase))
+        ?? choices.FirstOrDefault(choice => choice.Ready && string.Equals(
+            choice.Value, DefaultModel, StringComparison.OrdinalIgnoreCase))
         ?? choices.FirstOrDefault(choice => choice.Ready)
         ?? (choices.Count > 0 ? choices[0] : null);
 
@@ -69,7 +78,8 @@ public static class ImageModelCatalog
     private static string? ProviderDetail(string name) => name switch
     {
         "nano-banana" => "Google Gemini · own key",
-        "gpt-image" => "OpenAI direct · own key",
+        "gpt-image-sunburst" => "OpenAI direct · own key · default",
+        "gpt-image-flare" => "OpenAI direct · own key",
         _ => "own key",
     };
 }

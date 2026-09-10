@@ -35,7 +35,7 @@ public sealed class SettingsUnreadableSecretTests : CastmillUiTestContext
         Assert.Equal("RE-ENTER", nano.QuerySelector(".cm-badge")!.TextContent.Trim());
         Assert.Contains("encryption key changed", nano.QuerySelector(".cm-settings__reenter")!.TextContent, StringComparison.Ordinal);
 
-        var openAi = cards.Single(c => c.TextContent.Contains("gpt-image key", StringComparison.Ordinal));
+        var openAi = cards.Single(c => c.TextContent.Contains("gpt-image 2.5 key", StringComparison.Ordinal));
         Assert.Equal("STORED", openAi.QuerySelector(".cm-badge")!.TextContent.Trim());
         Assert.Null(openAi.QuerySelector(".cm-settings__reenter"));
 

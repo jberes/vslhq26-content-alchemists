@@ -453,9 +453,14 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         Assert.False(nano.Ready);
         Assert.Contains("NanoBananaKey", nano.Reason!, StringComparison.Ordinal);
 
-        var gpt = Assert.Single(status.ImageProviders, p => p.Name == "gpt-image");
-        Assert.False(gpt.Ready);
-        Assert.Contains("OpenAiImageKey", gpt.Reason!, StringComparison.Ordinal);
+        var sunburst = Assert.Single(status.ImageProviders, p => p.Name == "gpt-image-sunburst");
+        Assert.False(sunburst.Ready);
+        Assert.Contains("OpenAiImageKey", sunburst.Reason!, StringComparison.Ordinal);
+        Assert.Equal("gpt-image-2.5-sunburst", sunburst.Model);
+
+        var flare = Assert.Single(status.ImageProviders, p => p.Name == "gpt-image-flare");
+        Assert.False(flare.Ready);
+        Assert.Equal("gpt-image-2.5-flare", flare.Model);
     }
 
     [Fact]

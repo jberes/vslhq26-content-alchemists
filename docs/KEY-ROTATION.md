@@ -12,16 +12,39 @@ All keys live outside the repo (dev: `appsettings.Development.json`, gitignored;
 
 ## Castmill:EncryptionKey (AES-256-GCM, exactly 32 bytes)
 
-Encrypted `UserSetting` rows (Foundry credentials, broker token) are only readable with the key that wrote them. Rotation therefore re-encrypts:
+An encrypted `UserSetting` row is readable only with the key that wrote it. Since ADR-079 the
+app reads through a **fallback list**, so rotation no longer destroys anything:
+
+- `Castmill:EncryptionKey` — the active key. **Every write uses this**, always.
+- `Castmill:PreviousEncryptionKeys` — an array of retired keys, tried in order on read only.
+
+### Rotating
 
 1. Generate the new key: `openssl rand -base64 32`.
-2. **Before swapping**, re-enter each stored secret so it's written under the new key:
-   - Deploy/config the new key, restart.
-   - Old rows now fail decryption (`CryptographicException`) — expected.
-   - Re-set each secret: `PUT /api/v1/settings/secrets/{FoundryEndpoint|FoundryKey|BrokerToken}`.
-3. Alternatively (zero-downtime, when it matters): add a one-off re-encryption migration that decrypts with the old key and encrypts with the new one, then swap.
+2. Move the current value into `Castmill:PreviousEncryptionKeys` and put the new one in
+   `Castmill:EncryptionKey`.
+3. Restart. Existing rows still open via the fallback; anything written from now on uses the
+   new key. Re-enter a secret (or write it once) to migrate that row.
+4. Drop the retired key from the list once every row has been rewritten under the new one.
 
-**Losing this key loses the stored secrets** (by design — that's the security property). Recovery is re-entering them, never recovering them.
+A read deliberately does **not** re-encrypt under the active key: where several hosts share one
+database, that would repair the reading host and break the writing one, and the two would take
+turns invalidating each other's rows.
+
+### Several hosts, one database
+
+The local API and the App Service hold **independent** keys — `tools/Castmill.AzureConfig
+--generate-runtime-keys` mints a fresh one per export — while both read the same Azure SQL
+database. A secret entered through one host is therefore unreadable on the other unless each
+lists the other's key under `Castmill:PreviousEncryptionKeys`. Symptom when they don't: every
+stored secret shows **RE-ENTER** at once, and the log reports
+`AuthenticationTagMismatchException` — intact ciphertext, wrong key. The boot log and that
+error both name the active key's fingerprint (first 12 hex of SHA-256), which is safe to
+share and is the fastest way to tell two hosts apart.
+
+**Losing every key that wrote a row loses that secret** — that is the security property. But a
+rotation with the old key still listed loses nothing, and a key mismatch between hosts is now
+a config fix rather than a re-entry.
 
 ## Foundry API key / broker token / SEO / Speech keys
 

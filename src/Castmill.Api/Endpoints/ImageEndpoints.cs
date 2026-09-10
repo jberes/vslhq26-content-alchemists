@@ -14,7 +14,8 @@ public sealed record RenderImagesRequest(
     [property: Required] Guid ImagePromptsArtifactId,
     /// <summary>Blog artifact whose ![stub:slot]() markers get replaced. Optional — omit to only publish images.</summary>
     Guid? BlogArtifactId,
-    /// <summary>Model alias to render with; defaults to "image" (gpt-image-2), "image-alt" is the MAI deployment.</summary>
+    /// <summary>Model alias to render with; defaults to the Foundry "image" alias, "image-alt" is the MAI deployment.
+    /// A provider name ("gpt-image-sunburst", "gpt-image-flare", "nano-banana") selects that provider instead.</summary>
     string? ModelAlias);
 
 public sealed record RenderedImage(string Slot, string Url);

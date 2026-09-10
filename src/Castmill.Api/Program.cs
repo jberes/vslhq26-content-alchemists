@@ -54,7 +54,8 @@ if (builder.Environment.IsProduction())
 }
 
 // Secret-custody guard: constructing the cipher validates Castmill:EncryptionKey
-// (present, base64, exactly 32 bytes) — a bad key stops the process here.
+// (present, base64, exactly 32 bytes) — a bad key stops the process here. Any
+// Castmill:PreviousEncryptionKeys entries are validated at the same time (ADR-079).
 var secretCipher = new SecretCipher(builder.Configuration);
 
 builder.Services.Configure<JwtOptions>(jwtSection);

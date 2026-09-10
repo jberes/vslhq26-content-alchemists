@@ -505,10 +505,10 @@ public sealed class ImageProviderTests
         Assert.True(status.SupportsReferenceImages);
     }
 
-    /// <summary>The two shipped alternates are selectable out of the box, but inert until a
+    /// <summary>The shipped alternates are selectable out of the box, but inert until a
     /// key is stored: the credential is the gate, not a config flag.</summary>
     [Fact]
-    public void Nano_banana_and_gpt_image_ship_as_named_providers_with_their_own_credential()
+    public void Nano_banana_and_the_gpt_image_pair_ship_as_named_providers_with_their_own_credential()
     {
         var merged = AiOptions.MergeImageProviders(new Dictionary<string, AiOptions.ImageProviderOptions>());
 
@@ -517,10 +517,29 @@ public sealed class ImageProviderTests
         Assert.Equal("gemini", nano.Kind);
         Assert.Equal(SecretKind.NanoBananaKey, nano.Credential);
 
-        var gpt = merged["gpt-image"];
-        Assert.True(gpt.Enabled);
-        Assert.Equal("openai", gpt.Kind);
-        Assert.Equal(SecretKind.OpenAiImageKey, gpt.Credential);
+        var sunburst = merged["gpt-image-sunburst"];
+        Assert.True(sunburst.Enabled);
+        Assert.Equal("openai", sunburst.Kind);
+        Assert.Equal("gpt-image-2.5-sunburst", sunburst.Model);
+        Assert.Equal(SecretKind.OpenAiImageKey, sunburst.Credential);
+
+        var flare = merged["gpt-image-flare"];
+        Assert.True(flare.Enabled);
+        Assert.Equal("openai", flare.Kind);
+        Assert.Equal("gpt-image-2.5-flare", flare.Model);
+        Assert.Equal(SecretKind.OpenAiImageKey, flare.Credential);
+    }
+
+    /// <summary>ADR-078: gpt-image-2 is superseded by the 2.5 pair and is no longer a
+    /// selectable provider — a workspace cannot land back on it by accident.</summary>
+    [Fact]
+    public void Gpt_image_2_is_no_longer_a_shipped_provider()
+    {
+        var merged = AiOptions.MergeImageProviders(new Dictionary<string, AiOptions.ImageProviderOptions>());
+
+        Assert.False(merged.ContainsKey("gpt-image"));
+        Assert.DoesNotContain(merged.Values, provider =>
+            string.Equals(provider.Model, "gpt-image-2", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Config overrides one field without blanking the rest — pinning a model must
@@ -549,10 +568,11 @@ public sealed class ImageProviderTests
     {
         var merged = AiOptions.MergeImageProviders(new Dictionary<string, AiOptions.ImageProviderOptions>
         {
-            ["gpt-image"] = new() { Enabled = false },
+            ["gpt-image-flare"] = new() { Enabled = false },
         });
 
-        Assert.False(merged["gpt-image"].Enabled);
+        Assert.False(merged["gpt-image-flare"].Enabled);
+        Assert.True(merged["gpt-image-sunburst"].Enabled);
         Assert.True(merged["nano-banana"].Enabled);
     }
 

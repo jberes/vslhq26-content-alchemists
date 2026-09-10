@@ -601,8 +601,8 @@ public static class ImageSlotEndpoints
             : await promptBuilder.BuildAsync(userId, slot, campaign, owner, brand, placeholders, allowText, ct);
 
         // The frame is the PROVIDER's: MAI paints the slot's exact size, Gemini a native 16:9
-        // frame, gpt-image-2 its native 16:9, older gpt-image one of three fixed sizes — so the
-        // crop, and the rules text that describes it, differ per model (ADR-055).
+        // frame, the gpt-image-2.5 pair its native 16:9, older gpt-image one of three fixed
+        // sizes — so the crop, and the rules text that describes it, differ per model (ADR-055).
         var frame = await renderer.FrameForAsync(userId, slot.TargetWidth, slot.TargetHeight, modelAlias, ct);
         if (prompt.Length > 0)
         {
