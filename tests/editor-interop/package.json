@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "castmill-editor-interop": "*",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "dependencies": {
     "jsdom": "27.0.0"
