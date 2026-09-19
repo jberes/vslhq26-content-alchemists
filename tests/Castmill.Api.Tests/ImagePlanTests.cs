@@ -3,9 +3,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Castmill.Api.Endpoints;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Images;
+using Castmill.Core;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -21,6 +23,42 @@ namespace Castmill.Api.Tests;
 [Collection("api")]
 public sealed class ImagePlanTests(CastmillApiFactory factory)
 {
+    [Fact]
+    public void Youtube_legacy_placeholders_collapse_to_one_output_slot_not_six_variants()
+    {
+        var campaignId = Guid.NewGuid();
+        var youtubeId = Guid.NewGuid();
+        var activeId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var youtubeSlots = Enumerable.Range(1, 6).Select(index => new ImageSlot
+        {
+            Id = index == 3 ? activeId : Guid.NewGuid(),
+            TenantId = Guid.NewGuid(), CampaignId = campaignId, ArtifactId = youtubeId,
+            Kind = $"content-image-{index}", TargetWidth = 1280, TargetHeight = 720,
+            State = "Empty", CreatedAt = now.AddMinutes(index), UpdatedAt = now.AddMinutes(index),
+        }).ToList();
+        var blog = new ImageSlot
+        {
+            Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), CampaignId = campaignId,
+            ArtifactId = Guid.NewGuid(), Kind = "blog-header", TargetWidth = 1600,
+            TargetHeight = 840, State = "Empty", CreatedAt = now, UpdatedAt = now,
+        };
+
+        var collapsed = ImageSlotEndpoints.CollapseYoutubeOutputSlots(
+            [.. youtubeSlots, blog], new HashSet<Guid> { youtubeId },
+            new HashSet<Guid> { activeId });
+
+        Assert.Equal(2, collapsed.Count);
+        Assert.Contains(collapsed, slot => slot.Id == activeId);
+        Assert.Contains(collapsed, slot => slot.Id == blog.Id);
+
+        youtubeSlots[4].Kind = "youtube-thumbnail";
+        collapsed = ImageSlotEndpoints.CollapseYoutubeOutputSlots(
+            youtubeSlots, new HashSet<Guid> { youtubeId }, new HashSet<Guid> { activeId });
+        Assert.Single(collapsed);
+        Assert.Equal("youtube-thumbnail", collapsed[0].Kind);
+    }
+
     // ---- Unit: crop geometry + compositing ------------------------------------
 
     private static byte[] SolidPng(int width, int height, SKColor color)

@@ -8144,7 +8144,12 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-reference-filmstrip-frame img { inline-size: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; margin-block-end: .25rem; }
 .cm-reference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .85rem; margin-block: 1rem; }
 .cm-reference-frame { min-inline-size: 0; border: 1px solid var(--cm-rule); border-radius: 10px; overflow: hidden; background: var(--cm-surface-sunken); }
-.cm-reference-frame > img { inline-size: 100%; aspect-ratio: 16 / 9; object-fit: contain; display: block; background: var(--cm-surface-inverse); }
+.cm-reference-frame-preview { position: relative; display: block; inline-size: 100%; padding: 0; border: 0; background: var(--cm-surface-inverse); color: inherit; cursor: zoom-in; }
+.cm-reference-frame-preview img { inline-size: 100%; aspect-ratio: 16 / 9; object-fit: contain; display: block; }
+.cm-reference-frame-preview:hover .cm-reference-frame-zoom,
+.cm-reference-frame-preview:focus-visible .cm-reference-frame-zoom { opacity: 1; transform: translateY(0); }
+.cm-reference-frame-preview:focus-visible { outline: 3px solid var(--cm-accent); outline-offset: -3px; }
+.cm-reference-frame-zoom { position: absolute; inset-inline-end: .5rem; inset-block-end: .5rem; padding: .3rem .5rem; border-radius: 999px; background: color-mix(in srgb, var(--cm-surface-inverse) 78%, transparent); color: var(--cm-on-inverse); font-size: var(--cm-text-meta); font-weight: 700; opacity: 0; transform: translateY(3px); transition: opacity 120ms ease, transform 120ms ease; pointer-events: none; }
 .cm-reference-frame-copy, .cm-reference-frame-actions { padding: .65rem; }
 .cm-reference-frame-copy { display: grid; gap: .35rem; }
 .cm-reference-frame-actions { justify-content: flex-start; padding-block-start: 0; }
@@ -8153,3 +8158,11 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-reference-source-meta { justify-content: flex-start; }
 .cm-reference-crop-panel .cm-field { inline-size: 8rem; }
 .cm-reference-crop-panel .cm-field:has(select), .cm-reference-crop-panel .cm-field:has(input[type="text"]) { inline-size: 12rem; }
+.cm-reference-lightbox-backdrop { padding: clamp(.5rem, 2vw, 1.5rem); }
+.cm-reference-lightbox { inline-size: min(96rem, 100%); max-block-size: calc(100vh - clamp(1rem, 4vw, 3rem)); display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--cm-rule-strong); border-radius: var(--cm-radius-lg); background: var(--cm-surface-raised); box-shadow: var(--cm-shadow-lg); }
+.cm-reference-lightbox__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; border-block-end: 1px solid var(--cm-rule); }
+.cm-reference-lightbox__head h2 { margin: .15rem 0 0; font-size: var(--cm-text-h4); }
+.cm-reference-lightbox__head p { margin: .2rem 0 0; }
+.cm-reference-lightbox__canvas { position: relative; min-block-size: 0; margin: 0; display: grid; place-items: center; overflow: auto; background: var(--cm-surface-inverse); }
+.cm-reference-lightbox__image { display: block; inline-size: auto; block-size: auto; max-inline-size: 100%; max-block-size: calc(100vh - 8rem); object-fit: contain; }
+.cm-reference-lightbox__loading { position: absolute; inset-inline-start: 50%; inset-block-end: 1rem; translate: -50% 0; padding: .45rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--cm-surface-inverse) 78%, transparent); color: var(--cm-on-inverse); font-size: var(--cm-text-meta); white-space: nowrap; }

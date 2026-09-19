@@ -90,7 +90,7 @@ public sealed class ImagePromptBuilder(
         ImageSlot slot, Campaign campaign, Artifact? owner, BrandContext brand,
         IReadOnlyList<ImageReference>? references, bool textMayBeRendered) =>
         new(
-            slot.Kind, slot.TargetWidth, slot.TargetHeight,
+            EffectiveSlotKind(slot, owner), slot.TargetWidth, slot.TargetHeight,
             Subject: owner?.Title ?? campaign.Name,
             ContentDigest: ImagePromptComposer.ContentDigest(owner?.ContentJson),
             CampaignBrief: campaign.Brief,
@@ -102,6 +102,13 @@ public sealed class ImagePromptBuilder(
             HeadlineWillBeComposited: !string.IsNullOrWhiteSpace(slot.HeadlineText)
                 || (ImagePromptRules.IsTextFirst(slot.Kind) && !textMayBeRendered),
             BrandContentTemplate: TemplateFor(slot, owner, brand));
+
+    /// <summary>Legacy YouTube rows were named content-image-N. Their owning artifact is
+    /// authoritative: they still receive thumbnail title, layout and brand-template rules.</summary>
+    internal static string EffectiveSlotKind(ImageSlot slot, Artifact? owner) =>
+        owner?.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase) == true
+            ? "youtube-thumbnail"
+            : slot.Kind;
 
     internal static string? TemplateFor(ImageSlot slot, Artifact? owner, BrandContext brand)
     {

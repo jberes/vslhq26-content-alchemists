@@ -178,6 +178,36 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
         Assert.Empty(view.FindAll(".cm-studio__card--add"));
     }
 
+    [Fact]
+    public async Task Six_legacy_youtube_placeholders_render_and_batch_as_one_thumbnail_slot()
+    {
+        var legacy = Enumerable.Range(1, 6).Select(index => new ImageSlotResponse(
+            Guid.Parse($"91111111-1111-1111-1111-{(800000000000L + index):000000000000}"),
+            CampaignId, $"content-image-{index}", 1280, 720, null, null, null, null,
+            true, "Empty", null, null, DateTimeOffset.UtcNow.AddMinutes(index),
+            ArtifactId: YoutubeId)).ToList();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
+            new CampaignPreview(Campaign(), [Youtube()], legacy, 0, legacy.Count));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{legacy[0].Id}/variants",
+            new List<ImageVariantResponse>());
+        Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo($"campaigns/{CampaignId}/images?artifact={YoutubeId}");
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count == 1,
+            TimeSpan.FromSeconds(5));
+
+        Assert.Equal("0/1", view.Find(".cm-studio__fill").TextContent.Trim());
+        Assert.Contains("YouTube thumbnail", view.Find(".cm-studio__card-name").TextContent,
+            StringComparison.Ordinal);
+        Assert.Contains("1 eligible", view.Find(".cm-studio__batch-estimate").TextContent,
+            StringComparison.Ordinal);
+        Assert.Contains("1 missing", view.Find(".cm-studio__batch-estimate").TextContent,
+            StringComparison.Ordinal);
+        Assert.Empty(view.FindAll(".cm-studio__card--add"));
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private static ImageSlotResponse EmptySlot() => new(

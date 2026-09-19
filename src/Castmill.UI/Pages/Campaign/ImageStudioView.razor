@@ -223,7 +223,7 @@
                                         <a class="cm-meta cm-studio__back" href="@FocusPathFor(backOwner.Id)"
                                            title="Back to this item in Focus mode">← Back to “@backOwner.Title”</a>
                                     }
-                                    <h2>@ArtifactDisplay.SlotLabel(slot2.Kind)</h2>
+                                    <h2>@SlotDisplayLabel(slot2)</h2>
                                     <p class="cm-meta">
                                         Published at @slot2.TargetWidth×@slot2.TargetHeight.
                                         @if (_promptPreview is { } sizePreview && (sizePreview.CropPercentHorizontal > 0 || sizePreview.CropPercentVertical > 0))
@@ -610,7 +610,7 @@
                                                 @onclick="() => OpenVariant(variant)">
                                             <img src="@variant.ThumbUrl" width="@variant.Width" height="@variant.Height"
                                                  loading="lazy" decoding="async"
-                                                 alt="Take for @ArtifactDisplay.SlotLabel(slot2.Kind)" />
+                                                 alt="Take for @SlotDisplayLabel(slot2)" />
                                             @if (variant.IsLocked)
                                             {
                                                 <span class="cm-gallery__lock" aria-label="Locked take"
@@ -645,7 +645,7 @@
                                 <div class="cm-studio__placed">
                                     <span class="cm-kicker">Placed</span>
                                     <img src="@(published + "?v=" + slot2.UpdatedAt.ToUnixTimeSeconds())"
-                                         alt="Placed @ArtifactDisplay.SlotLabel(slot2.Kind)" />
+                                         alt="Placed @SlotDisplayLabel(slot2)" />
                                     <div class="cm-studio__row">
                                         <button type="button" class="cm-button cm-button--quiet" @onclick="ClearAsync">
                                             Remove from slot
@@ -1776,8 +1776,27 @@
         .ThenBy(a => ArtifactDisplay.KindOrder(a.Kind))
         .ThenBy(a => a.CreatedAt);
 
-    private IEnumerable<ImageSlotResponse> SlotsFor(Guid artifactId) =>
-        Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId);
+    private IEnumerable<ImageSlotResponse> SlotsFor(Guid artifactId)
+    {
+        var slots = Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId).ToList();
+        var owner = Campaign.Artifacts.FirstOrDefault(a => a.Id == artifactId);
+        if (!string.Equals(owner?.Kind, "youtube", StringComparison.OrdinalIgnoreCase)
+            || slots.Count <= 1)
+        {
+            return slots;
+        }
+
+        // Old builds created content-image-1..N as separate YouTube output slots. Those are
+        // not variants; a YouTube package has one thumbnail slot and its takes live inside
+        // that slot's gallery. Prefer the canonical row, then the row the producer is using.
+        var output = slots.FirstOrDefault(s =>
+                s.Kind.Equals("youtube-thumbnail", StringComparison.OrdinalIgnoreCase))
+            ?? slots.FirstOrDefault(s => s.Id == _selectedId)
+            ?? slots.FirstOrDefault(s => StudioRun.IsActiveFor(s.Id) || IsBatchRendering(s.Id))
+            ?? slots.FirstOrDefault(s => s.State == "Filled")
+            ?? slots[0];
+        return [output];
+    }
 
     private IEnumerable<ImageSlotResponse> LegacySlots => RequestedArtifact is null
         ? Campaign.ImageSlots.Where(s => s.ArtifactId is null)
@@ -1912,9 +1931,10 @@
         public int TotalEvents => MissingVariants + SkippedSlots;
     }
 
-    private BatchPlan CurrentBatchPlan => PlanFor(RequestedArtifact is { } artifactId
-        ? SlotsFor(artifactId)
-        : Campaign.ImageSlots);
+    private IEnumerable<ImageSlotResponse> VisiblePlanSlots =>
+        ImageContentItems.SelectMany(item => SlotsFor(item.Id)).Concat(LegacySlots);
+
+    private BatchPlan CurrentBatchPlan => PlanFor(VisiblePlanSlots);
 
     private BatchPlan PlanFor(IEnumerable<ImageSlotResponse> slots)
     {
@@ -1961,7 +1981,7 @@
     /// </summary>
     private async Task DeleteSlotImageryAsync(ImageSlotResponse slot)
     {
-        var label = ArtifactDisplay.SlotLabel(slot.Kind);
+        var label = SlotDisplayLabel(slot);
         if (!await Confirm.ConfirmAsync(new ConfirmRequest(
             $"Delete the {label} image?",
             "This permanently deletes the placed image and every generated take for this slot. "
@@ -3084,7 +3104,7 @@
                     <span class="cm-ai-dot"></span>
                 </span>
             }
-            <span class="cm-studio__card-name">@ArtifactDisplay.SlotLabel(slot.Kind)</span>
+            <span class="cm-studio__card-name">@SlotDisplayLabel(slot)</span>
             <span class="cm-studio__card-foot">
                 @if (rendering)
                 {
@@ -3111,7 +3131,7 @@
         {
             <button type="button" class="cm-studio__tile-delete"
                     title="Delete this image permanently"
-                    aria-label="Delete the @ArtifactDisplay.SlotLabel(slot.Kind) image permanently"
+                    aria-label="Delete the @SlotDisplayLabel(slot) image permanently"
                     disabled="@(_deletingSlot == slot.Id)"
                     @onclick="() => DeleteSlotImageryAsync(slot)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -3126,6 +3146,13 @@
     private bool IsBatchRendering(Guid slotId) => StudioRun.IsBatchRunning
         && StudioRun.BatchProgress?.Items.Any(item => item.SlotId == slotId
             && string.Equals(item.Outcome, "Generating", StringComparison.OrdinalIgnoreCase)) == true;
+
+    private string SlotDisplayLabel(ImageSlotResponse slot) =>
+        slot.ArtifactId is { } ownerId
+        && Campaign.Artifacts.Any(artifact => artifact.Id == ownerId
+            && artifact.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase))
+            ? "YouTube thumbnail"
+            : ArtifactDisplay.SlotLabel(slot.Kind);
 
     /// <summary>Tile width scaled from the slot's real published width, clamped to stay
     /// usable — a 1600-wide header reads visibly wider than a 1280-wide thumbnail. The floor

@@ -59,6 +59,67 @@ public sealed class VideoReferenceImagesTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task Clicking_an_extracted_frame_opens_a_full_resolution_lightbox()
+    {
+        var view = Render<VideoReferenceImages>(parameters => parameters
+            .Add(item => item.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll("video").Count == 1, TimeSpan.FromSeconds(5));
+        await view.FindAll("button").Single(button => button.TextContent.Trim() == "Analyze video").ClickAsync();
+        await view.WaitForStateAsync(() => view.FindAll(".cm-reference-frame-preview").Count == 5);
+
+        await view.FindAll(".cm-reference-frame-preview")[0].ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Single(view.FindAll(".cm-reference-lightbox"));
+            Assert.StartsWith("data:image/png;base64,", view.Find(".cm-reference-lightbox__image").GetAttribute("src"));
+            Assert.Contains("Frame 1", view.Find(".cm-reference-lightbox").TextContent, StringComparison.Ordinal);
+        });
+        Assert.Single(Media.RenderedFrames);
+
+        await view.Find("button[aria-label='Close large image']").ClickAsync();
+        Assert.Empty(view.FindAll(".cm-reference-lightbox"));
+    }
+
+    [Fact]
+    public async Task Clicking_a_saved_reference_opens_the_original_asset_not_the_thumbnail()
+    {
+        var setId = Guid.Parse("99777777-7777-7777-7777-777777777777");
+        var imageId = Guid.Parse("99888888-8888-8888-8888-888888888888");
+        var savedAssetId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var savedImage = new VideoReferenceImageResponse(
+            imageId, setId, SourceId, savedAssetId, savedAssetId, 15_000, 450,
+            new VideoReferenceCropDto(0, 0, 1920, 1080, "none"), "automatic",
+            "1234567890abcdef", 94, "Clear UI state", "Accessible data grid", 0,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        Http.OnGetQuery($"api/v1/campaigns/{CampaignId}/reference-sets?videoAssetId={SourceId}",
+            new List<VideoReferenceSetResponse>
+            {
+                new(setId, BrandId, CampaignId, SourceId, "Saved set", null,
+                    "ui-demonstration", 60_000, 1920, 1080, 30, DateTimeOffset.UtcNow, [savedImage]),
+            });
+        Http.OnPost("api/v1/blob/assets/thumbs", new List<AssetThumb>
+        {
+            new(savedAssetId, "https://assets.example/frame-thumb.jpg", true),
+        });
+        Http.OnGet($"api/v1/blob/assets/{savedAssetId}/read-sas",
+            new ReadSas("https://assets.example/frame-full.png"));
+
+        var view = Render<VideoReferenceImages>(parameters => parameters
+            .Add(item => item.CampaignId, CampaignId));
+        await view.WaitForStateAsync(() => view.FindAll(".cm-reference-frame-preview").Count == 1,
+            TimeSpan.FromSeconds(5));
+
+        await view.Find(".cm-reference-frame-preview").ClickAsync();
+
+        await view.WaitForAssertionAsync(() => Assert.Equal(
+            "https://assets.example/frame-full.png",
+            view.Find(".cm-reference-lightbox__image").GetAttribute("src")));
+        Assert.Contains("Accessible data grid", view.Find(".cm-reference-lightbox").TextContent,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Manual_keyboard_capture_adds_the_exact_current_frame()
     {
         var view = Render<VideoReferenceImages>(parameters => parameters

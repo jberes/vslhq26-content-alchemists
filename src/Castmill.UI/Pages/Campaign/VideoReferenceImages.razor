@@ -181,7 +181,12 @@
                             var frame = _candidates[index];
                             var position = index;
                             <article class="cm-reference-frame">
-                                <img src="@DataUrl(frame.PreviewJpeg)" alt="Video frame at @Clock(frame.TimestampSeconds)" />
+                                <button type="button" class="cm-reference-frame-preview"
+                                        aria-label="Open @frame.Label large"
+                                        @onclick="() => OpenCandidatePreviewAsync(frame)">
+                                    <img src="@DataUrl(frame.PreviewJpeg)" alt="Video frame at @Clock(frame.TimestampSeconds)" />
+                                    <span class="cm-reference-frame-zoom" aria-hidden="true">Open large</span>
+                                </button>
                                 <div class="cm-reference-frame-copy">
                                     <input class="cm-input" aria-label="Frame label" @bind="frame.Label" maxlength="200" />
                                     <span class="cm-meta cm-mono">@Clock(frame.TimestampSeconds) · score @frame.QualityScore.ToString("0", CultureInfo.InvariantCulture)</span>
@@ -224,7 +229,15 @@
                         @foreach (var image in set.Images)
                         {
                             <article class="cm-reference-frame">
-                                @if (_thumbs.TryGetValue(image.DerivedAssetId, out var thumb)) { <img src="@thumb" alt="@(image.Label ?? "Saved video frame")" /> }
+                                @if (_thumbs.TryGetValue(image.DerivedAssetId, out var thumb))
+                                {
+                                    <button type="button" class="cm-reference-frame-preview"
+                                            aria-label="Open @(image.Label ?? "saved video frame") large"
+                                            @onclick="() => OpenSavedPreviewAsync(image)">
+                                        <img src="@thumb" alt="@(image.Label ?? "Saved video frame")" />
+                                        <span class="cm-reference-frame-zoom" aria-hidden="true">Open large</span>
+                                    </button>
+                                }
                                 <div class="cm-reference-frame-copy"><strong>@image.Label</strong><span class="cm-meta cm-mono">@Clock(image.SourceTimestampMs / 1000d) · @image.Crop.Method crop</span></div>
                                 <div class="cm-reference-frame-actions">
                                     @if (image.DerivedAssetId != image.SourceFrameAssetId)
@@ -245,6 +258,30 @@
     }
 </div>
 
+@if (_largePreview is { } preview)
+{
+    <div class="cm-modal cm-reference-lightbox-backdrop" role="presentation" @onclick="CloseLargePreview">
+        <section class="cm-reference-lightbox" role="dialog" aria-modal="true" aria-label="Large reference image preview"
+                 @onclick:stopPropagation @onkeydown="HandleLargePreviewKey">
+            <header class="cm-reference-lightbox__head">
+                <div>
+                    <span class="cm-kicker">Reference image</span>
+                    <h2>@preview.Label</h2>
+                    <p class="cm-meta cm-mono">@preview.Detail</p>
+                </div>
+                <button type="button" class="cm-dialog-close" aria-label="Close large image" @onclick="CloseLargePreview">×</button>
+            </header>
+            <figure class="cm-reference-lightbox__canvas">
+                <img class="cm-reference-lightbox__image" src="@preview.Source" alt="@preview.Label" />
+                @if (_previewLoading)
+                {
+                    <figcaption class="cm-reference-lightbox__loading" role="status">Loading full-resolution frame…</figcaption>
+                }
+            </figure>
+        </section>
+    </div>
+}
+
 @code {
     [Parameter] public Guid CampaignId { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "sourceId")] public Guid? SourceId { get; set; }
@@ -260,8 +297,9 @@
     private List<VideoReferenceSetResponse> _saved = [];
     private List<ReferenceCropPresetResponse> _presets = [];
     private readonly Dictionary<Guid, string> _thumbs = [];
-    private bool _loading = true, _busy, _useAi;
+    private bool _loading = true, _busy, _useAi, _previewLoading;
     private string? _error, _progress;
+    private LargePreview? _largePreview;
     private string _mode = "auto", _diversity = "balanced", _goal = "ui-demonstration";
     private string _setName = "Video reference frames", _purpose = string.Empty, _presetName = string.Empty;
     private int _quantity = 5, _cropX, _cropY, _cropWidth = 1, _cropHeight = 1;
@@ -595,11 +633,66 @@
     private void UseAutoMode() => _mode = "auto";
     private async Task UseManualModeAsync() { _mode = "manual"; await LoadFilmstripAsync(); }
     private void Step(int direction) { if (_metadata is not null) _manualTime = Math.Clamp(_manualTime + direction / Math.Max(.001, _metadata.FrameRate), 0, _metadata.DurationSeconds); }
-    private async Task HandleKeyAsync(KeyboardEventArgs args) { if (_mode != "manual") return; if (args.Key == "ArrowLeft") Step(-1); else if (args.Key == "ArrowRight") Step(1); else if (args.Key.Equals("c", StringComparison.OrdinalIgnoreCase)) await CaptureAsync(); }
+    private async Task HandleKeyAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape" && _largePreview is not null) { CloseLargePreview(); return; }
+        if (_mode != "manual") return;
+        if (args.Key == "ArrowLeft") Step(-1);
+        else if (args.Key == "ArrowRight") Step(1);
+        else if (args.Key.Equals("c", StringComparison.OrdinalIgnoreCase)) await CaptureAsync();
+    }
+
+    private async Task OpenCandidatePreviewAsync(FrameDraft frame)
+    {
+        _largePreview = new LargePreview(
+            DataUrl(frame.PreviewJpeg), frame.Label, $"{Clock(frame.TimestampSeconds)} · frame {frame.FrameNumber:N0}");
+        if (_media is null || _metadata is null) return;
+
+        _previewLoading = true;
+        try
+        {
+            var bytes = await Media.RenderVideoFrameAsync(_media, frame.TimestampSeconds, CurrentCrop());
+            if (_largePreview is not null)
+                _largePreview = _largePreview with { Source = PngDataUrl(bytes) };
+        }
+        catch (Exception ex)
+        {
+            Notifier.ShowError($"The full-resolution frame could not be opened: {ex.Message}");
+        }
+        finally { _previewLoading = false; }
+    }
+
+    private async Task OpenSavedPreviewAsync(VideoReferenceImageResponse image)
+    {
+        var label = string.IsNullOrWhiteSpace(image.Label) ? "Saved video frame" : image.Label;
+        var fallback = _thumbs.GetValueOrDefault(image.DerivedAssetId) ?? string.Empty;
+        _largePreview = new LargePreview(
+            fallback, label, $"{Clock(image.SourceTimestampMs / 1000d)} · {image.Crop.Method} crop");
+        _previewLoading = true;
+        try
+        {
+            var full = await Brands.MintReadSasAsync(image.DerivedAssetId);
+            if (_largePreview is not null)
+                _largePreview = _largePreview with { Source = full.ReadUrl };
+        }
+        catch (Exception ex)
+        {
+            Notifier.ShowError($"The full-size reference image could not be opened: {ex.Message}");
+        }
+        finally { _previewLoading = false; }
+    }
+
+    private void HandleLargePreviewKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") CloseLargePreview();
+    }
+
+    private void CloseLargePreview() { _largePreview = null; _previewLoading = false; }
     private long FrameNumber(double seconds) => (long)Math.Round(seconds * (_metadata?.FrameRate ?? 1));
     private void Move(int index, int direction) { var target = index + direction; if (target < 0 || target >= _candidates.Count) return; (_candidates[index], _candidates[target]) = (_candidates[target], _candidates[index]); }
     private void Remove(FrameDraft frame) => _candidates.Remove(frame);
     private static string DataUrl(byte[] jpeg) => $"data:image/jpeg;base64,{Convert.ToBase64String(jpeg)}";
+    private static string PngDataUrl(byte[] png) => $"data:image/png;base64,{Convert.ToBase64String(png)}";
     private static string Clock(double seconds) => TimeSpan.FromSeconds(seconds).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
     private static string SafeStem(string name) => string.Concat(Path.GetFileNameWithoutExtension(name).Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-'));
     private static string VideoContentType(string name) => Path.GetExtension(name).ToLowerInvariant() switch
@@ -619,4 +712,6 @@
         public string? Warning { get; } = frame.Warning; public string? AiSummary { get; set; } = frame.AiSummary;
         public string Label { get; set; } = label; public string SelectionMethod { get; set; } = "automatic";
     }
+
+    private sealed record LargePreview(string Source, string Label, string Detail);
 }

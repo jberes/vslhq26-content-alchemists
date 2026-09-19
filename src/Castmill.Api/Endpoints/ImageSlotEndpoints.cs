@@ -443,6 +443,17 @@ public static class ImageSlotEndpoints
             return Results.NotFound();
         }
 
+        // A YouTube package has one thumbnail output. More creative alternatives are
+        // variants/takes on that slot, never additional content-image placeholders.
+        if (artifact.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase)
+            && await db.ImageSlots.AnyAsync(
+                slot => slot.CampaignId == campaignId && slot.ArtifactId == artifact.Id, ct))
+        {
+            return Results.Problem(
+                "This YouTube package already has its thumbnail slot. Generate another variant on that slot instead.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         var sequence = await db.ImageSlots.CountAsync(
             s => s.CampaignId == campaignId && s.ArtifactId == artifact.Id
                 && s.Kind.StartsWith("content-image-"), ct) + 1;
@@ -456,11 +467,14 @@ public static class ImageSlotEndpoints
             TenantId = tenant.TenantId!.Value,
             CampaignId = campaignId,
             ArtifactId = artifact.Id,
-            Kind = $"content-image-{sequence}",
+            Kind = artifact.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase)
+                ? "youtube-thumbnail"
+                : $"content-image-{sequence}",
             TargetWidth = request.TargetWidth ?? defaultWidth,
             TargetHeight = request.TargetHeight ?? defaultHeight,
             Prompt = string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt.Trim(),
             PromptMode = request.PromptMode,
+            SafeArea = artifact.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase),
             State = "Empty",
             CreatedAt = now,
             UpdatedAt = now,
@@ -520,7 +534,7 @@ public static class ImageSlotEndpoints
         var resolvedReferences = await references.ResolveAsync(campaign, slot, ct);
         var userId = AuthEndpoints.GetUserId(principal);
         var allowText = ImagePromptRules.AllowsRenderedText(
-            slot.Kind, slot.HeadlineText,
+            ImagePromptBuilder.EffectiveSlotKind(slot, owner), slot.HeadlineText,
             await renderer.RendersTextAsync(userId, request.ModelAlias ?? slot.ModelAlias, ct));
         var effectivePrompt = await promptBuilder.BuildAsync(
             userId, slot, campaign, owner, brand, resolvedReferences, allowText, ct);
@@ -605,7 +619,8 @@ public static class ImageSlotEndpoints
         var userId = AuthEndpoints.GetUserId(principal);
         var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
         var allowText = ImagePromptRules.AllowsRenderedText(
-            slot.Kind, slot.HeadlineText, await renderer.RendersTextAsync(userId, modelAlias, ct));
+            ImagePromptBuilder.EffectiveSlotKind(slot, owner), slot.HeadlineText,
+            await renderer.RendersTextAsync(userId, modelAlias, ct));
 
         promptBuilder.SetBrief(
             slot, campaign, owner, brand, placeholders, allowText, request.VisualBrief);
@@ -655,7 +670,8 @@ public static class ImageSlotEndpoints
         var userId = AuthEndpoints.GetUserId(principal);
         var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
         var allowText = ImagePromptRules.AllowsRenderedText(
-            slot.Kind, slot.HeadlineText, await renderer.RendersTextAsync(userId, modelAlias, ct));
+            ImagePromptBuilder.EffectiveSlotKind(slot, owner), slot.HeadlineText,
+            await renderer.RendersTextAsync(userId, modelAlias, ct));
         var prompt = slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt)
             ? string.Empty
             : await promptBuilder.BuildAsync(userId, slot, campaign, owner, brand, placeholders, allowText, ct);
@@ -759,6 +775,19 @@ public static class ImageSlotEndpoints
             .Select(run => run.SlotId!.Value)
             .ToListAsync(requestCt);
         var rendering = renderingSlotIds.ToHashSet();
+
+        // A regression in the generic "Add image" flow allowed content-image-1..N rows to
+        // accumulate under a YouTube artifact. They are duplicate output placeholders, not
+        // variants. Batch generation must match the studio: one YouTube output slot, with
+        // every take/variant stored under that slot.
+        var ownerIds = slots.Where(slot => slot.ArtifactId is not null)
+            .Select(slot => slot.ArtifactId!.Value).Distinct().ToList();
+        var youtubeOwnerIds = (await db.Artifacts
+            .Where(artifact => ownerIds.Contains(artifact.Id) && artifact.Kind == "youtube")
+            .Select(artifact => artifact.Id)
+            .ToListAsync(requestCt)).ToHashSet();
+        slots = CollapseYoutubeOutputSlots(slots, youtubeOwnerIds, rendering);
+
         var activeTakeCounts = await db.ImageVariants
             .Where(variant => variant.CampaignId == campaignId && variant.State != "Discarded")
             .GroupBy(variant => variant.SlotId)
@@ -840,7 +869,7 @@ public static class ImageSlotEndpoints
                 var owner = slot.ArtifactId is { } ownerId
                     && owners.TryGetValue(ownerId, out var artifact) ? artifact : null;
                 var allowText = ImagePromptRules.AllowsRenderedText(
-                    slot.Kind, slot.HeadlineText,
+                    ImagePromptBuilder.EffectiveSlotKind(slot, owner), slot.HeadlineText,
                     await renderer.RendersTextAsync(userId, effectiveModel, requestCt));
                 var effectivePrompt = await promptBuilder.BuildAsync(
                     userId, slot, campaign, owner, brand, resolvedReferences, allowText, requestCt);
@@ -1044,6 +1073,39 @@ public static class ImageSlotEndpoints
             results.Sum(result => result.SucceededVariants),
             results.Sum(result => result.FailedVariants),
             results));
+    }
+
+    /// <summary>
+    /// Returns at most one output slot for each YouTube artifact. The canonical slot wins;
+    /// legacy campaigns without one retain the actively rendering, filled, or oldest row.
+    /// No rows or variants are deleted—duplicates are simply excluded from output planning.
+    /// </summary>
+    internal static List<ImageSlot> CollapseYoutubeOutputSlots(
+        IReadOnlyList<ImageSlot> slots,
+        IReadOnlySet<Guid> youtubeOwnerIds,
+        IReadOnlySet<Guid>? renderingSlotIds = null)
+    {
+        if (youtubeOwnerIds.Count == 0)
+        {
+            return [.. slots];
+        }
+
+        var keepers = new HashSet<Guid>();
+        foreach (var ownerId in youtubeOwnerIds)
+        {
+            var owned = slots.Where(slot => slot.ArtifactId == ownerId).ToList();
+            if (owned.Count == 0) continue;
+            var keeper = owned.FirstOrDefault(slot =>
+                    slot.Kind.Equals("youtube-thumbnail", StringComparison.OrdinalIgnoreCase))
+                ?? owned.FirstOrDefault(slot => renderingSlotIds?.Contains(slot.Id) == true)
+                ?? owned.FirstOrDefault(slot => slot.State == "Filled")
+                ?? owned.OrderBy(slot => slot.CreatedAt).ThenBy(slot => slot.Id).First();
+            keepers.Add(keeper.Id);
+        }
+
+        return [.. slots.Where(slot => slot.ArtifactId is not { } ownerId
+            || !youtubeOwnerIds.Contains(ownerId)
+            || keepers.Contains(slot.Id))];
     }
 
     internal const string FaceDroppedNote =
