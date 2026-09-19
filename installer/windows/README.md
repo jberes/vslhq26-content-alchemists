@@ -11,8 +11,8 @@ bundled, so target machines need neither installed. The only external dependency
 **WebView2 runtime**, which ships with Windows 11 and current Windows 10.
 
 `CastmillApiBaseAddress` is compiled in (see `src/Castmill.Desktop/Castmill.Desktop.csproj`),
-so the installed client is permanently pointed at whichever API that build targeted —
-by default the production App Service.
+and Release builds are locked to the production App Service. Passing a different endpoint
+causes the build to fail instead of producing a misdirected installer.
 
 ## Prerequisites (build machine)
 

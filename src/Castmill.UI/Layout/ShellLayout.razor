@@ -67,9 +67,8 @@ else
                 @if (Shell.IsDevelopment)
                 {
                     <a class="cm-meta" href="dev/style-guide">Style guide</a>
-                    @* Which API this client is talking to. The desktop shell defaults to
-                       production unless built with -p:CastmillApiBaseAddress, so a Debug
-                       build can silently exercise the live database — say so in the chrome. *@
+                    @* Which API this development client is talking to. Debug is overridable,
+                       so keep the endpoint visible; Release is locked to production at build. *@
                     <span class="cm-chip cm-mono cm-shell__api" title="API base address: @Api.BaseAddress">
                         API · @(Api.BaseAddress?.IsLoopback == true ? "local" : "REMOTE") · @Api.BaseAddress?.Authority
                     </span>

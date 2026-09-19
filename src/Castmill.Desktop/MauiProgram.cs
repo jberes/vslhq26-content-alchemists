@@ -11,8 +11,8 @@ public static class MauiProgram
 {
     /// <summary>
     /// Where the API lives. The desktop shell has no origin of its own, so this is a real
-    /// configuration value rather than a relative path. MSBuild defaults every configuration
-    /// to production; local API work opts in with -p:CastmillApiBaseAddress=https://localhost:7105/.
+    /// configuration value rather than a relative path. Release is build-locked to the Azure
+    /// production API; Debug defaults to the local HTTPS API and may be overridden for dev.
     /// </summary>
     private static readonly Uri ApiBaseAddress = new(
         typeof(MauiProgram).Assembly

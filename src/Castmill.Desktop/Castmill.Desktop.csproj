@@ -19,12 +19,13 @@
         <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
         <ApplicationVersion>1</ApplicationVersion>
 
-        <!-- Desktop builds are thin clients of the deployed API. Release targets production;
-             Debug targets the local API (https profile, :7105) so a dev bundle can never
-             exercise the live database by accident (backlog 2026-09-05). Override either
-             with -p:CastmillApiBaseAddress=https://.../ . -->
+        <!-- Desktop builds are thin clients of the deployed API. Release is a distribution
+             boundary: every DMG/MSI must target this one App Service, and the validation
+             target below rejects even a command-line override. Debug targets the local API
+             by default and remains overridable for development environments. -->
+        <CastmillProductionApiBaseAddress>https://azappdzrs2vrhk6ote.azurewebsites.net/</CastmillProductionApiBaseAddress>
         <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == '' And '$(Configuration)' == 'Debug'">https://localhost:7105/</CastmillApiBaseAddress>
-        <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == ''">https://azappdzrs2vrhk6ote.azurewebsites.net/</CastmillApiBaseAddress>
+        <CastmillApiBaseAddress Condition="'$(CastmillApiBaseAddress)' == ''">$(CastmillProductionApiBaseAddress)</CastmillApiBaseAddress>
 
         <!-- Unpackaged on Windows until Phase F9 does MSIX packaging (E10.4). -->
         <WindowsPackageType>None</WindowsPackageType>
@@ -40,6 +41,14 @@
             <_Parameter2>$(CastmillApiBaseAddress)</_Parameter2>
         </AssemblyAttribute>
     </ItemGroup>
+
+    <!-- MSBuild command-line properties are global and cannot be overwritten reliably from
+         inside a project. Fail closed instead: a Release payload can never be produced with
+         a localhost, staging, typo, or attacker-controlled API embedded in it. -->
+    <Target Name="ValidateReleaseApiBaseAddress" BeforeTargets="PrepareForBuild">
+        <Error Condition="'$(Configuration)' == 'Release' And '$(CastmillApiBaseAddress)' != '$(CastmillProductionApiBaseAddress)'"
+               Text="Release desktop builds must target $(CastmillProductionApiBaseAddress). CastmillApiBaseAddress cannot be overridden for a distributable build." />
+    </Target>
 
     <ItemGroup>
         <!-- Ink background, matching the rect in appicon.svg. -->

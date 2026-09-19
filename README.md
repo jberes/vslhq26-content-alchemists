@@ -85,11 +85,13 @@ ditto \
 open /Applications/Castmill.app
 ```
 
-Release defaults to the current Castmill App Service. To build for another API environment:
+Release builds are locked to the current Castmill App Service. A Release build fails if
+`CastmillApiBaseAddress` is overridden, so every DMG points to production. Alternate API
+environments are supported only by Debug builds:
 
 ```bash
 dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj \
-  -f net10.0-maccatalyst -c Release -r maccatalyst-arm64 \
+  -f net10.0-maccatalyst -c Debug -r maccatalyst-arm64 \
   -p:CastmillApiBaseAddress=https://example.azurewebsites.net/
 ```
 
