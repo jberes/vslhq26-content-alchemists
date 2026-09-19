@@ -76,6 +76,9 @@
                                         @onclick="GeneratePendingAsync">
                                     @(StudioRun.IsBatchRunning ? "Generating pending images" : "Generate all pending")
                                 </button>
+                                <a class="cm-button cm-button--quiet" href="campaigns/@CampaignId/references">
+                                    Extract from video
+                                </a>
                             </div>
                             <p class="cm-meta cm-studio__batch-estimate">
                                 @batchPlan.EligibleSlots eligible · @batchPlan.MissingVariants missing
@@ -174,13 +177,18 @@
                                     {
                                         @SheetCard(slot)
                                     }
-                                    @* Add lives where it lands: a ghost tile at the end of the
-                                       content piece's own row, not an orphaned button. *@
-                                    <button type="button" class="cm-studio__card cm-studio__card--add"
-                                            disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
-                                        <span class="cm-studio__card-plus" aria-hidden="true">+</span>
-                                        <span>@(_addingFor == item.Id ? "Adding…" : "Add image")</span>
-                                    </button>
+                                    @* YouTube has one output image: its thumbnail. Additional
+                                       screenshots belong in References, not as more output cards. *@
+                                    @if (!item.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        @* Add lives where it lands: a ghost tile at the end of the
+                                           content piece's own row, not an orphaned button. *@
+                                        <button type="button" class="cm-studio__card cm-studio__card--add"
+                                                disabled="@(_addingFor == item.Id)" @onclick="() => AddImageAsync(item.Id)">
+                                            <span class="cm-studio__card-plus" aria-hidden="true">+</span>
+                                            <span>@(_addingFor == item.Id ? "Adding…" : "Add image")</span>
+                                        </button>
+                                    }
                                 </div>
                             </section>
                         }
@@ -294,11 +302,15 @@
                                 <span class="cm-kicker">@(IsAutoPrompt ? "Visual brief (AI-written)" : "Prompt")</span>
                                 @if (IsAutoPrompt)
                                 {
-                                    @* No disabled empty textarea: in Auto mode the brief IS the
-                                       prompt, and it must be readable right here (ADR-F68). *@
-                                    @if (_promptPreview is { } brief)
+                                    @* Auto's generated brief is still the producer's working prompt:
+                                       it must be directly editable, not rendered as read-only text. *@
+                                    @if (_promptPreview is not null)
                                     {
-                                        <pre class="cm-studio__preview-text cm-studio__brief">@brief.Prompt</pre>
+                                        <textarea class="cm-studio__prompt cm-studio__brief"
+                                                  aria-label="Visual brief"
+                                                  maxlength="8000"
+                                                  @bind="_autoBrief" @bind:event="oninput"
+                                                  @onblur="SaveAutoBriefAsync"></textarea>
                                     }
                                     else
                                     {
@@ -307,7 +319,11 @@
                                             @(_promptPreviewError ?? "Writing the visual brief from this item's content, the campaign and the brand style…")
                                         </p>
                                     }
-                                    <p class="cm-meta">An art-director pass writes this brief — one hook, a focal point, the layout, the brand palette as used — and it is kept until the inputs change. Rewrite it to try a different take, or switch to Manual to write your own.</p>
+                                    <p class="cm-meta">An art-director pass writes this brief — one hook, a focal point, the layout, the brand palette as used — and it is kept until the inputs change. Edit it directly; changes save when you leave the field. Rewrite it to ask the AI for a different take.</p>
+                                    @if (_savingBrief)
+                                    {
+                                        <span class="cm-meta" role="status">Saving brief…</span>
+                                    }
                                     <button type="button" class="cm-button cm-button--quiet cm-button--compact"
                                             disabled="@(_promptPreviewLoading || _rewritingBrief)" @onclick="RewriteBriefAsync"
                                             title="Forget this brief and write a new one from the same inputs">
@@ -321,17 +337,17 @@
                                     <textarea class="cm-studio__prompt" @bind="_prompt" @bind:event="oninput"
                                               @onblur="SavePromptAsync"
                                               placeholder="Describe the image. The generator adds the slot's exact dimensions."></textarea>
-                                }
-                                else if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
-                                {
-                                    <p class="cm-meta">
-                                        No prompt yet — write one, or let the AI draft a prompt for
-                                        every slot from the transcript's strongest moments.
-                                    </p>
-                                    <button type="button" class="cm-button cm-button--quiet" disabled="@_seeding"
-                                            @onclick="SeedPromptsAsync">
-                                        @(_seeding ? "Writing prompts from the source… (~30s)" : "Seed all prompts from the source")
-                                    </button>
+                                    @if (string.IsNullOrWhiteSpace(_prompt) && Campaign.TranscriptArtifactId is not null)
+                                    {
+                                        <p class="cm-meta">
+                                            No prompt yet — write one, or let the AI draft a prompt for
+                                            every slot from the transcript's strongest moments.
+                                        </p>
+                                        <button type="button" class="cm-button cm-button--quiet" disabled="@_seeding"
+                                                @onclick="SeedPromptsAsync">
+                                            @(_seeding ? "Writing prompts from the source… (~30s)" : "Seed all prompts from the source")
+                                        </button>
+                                    }
                                 }
                                 <details class="cm-studio__preview" open="@_promptPreviewOpen" @ontoggle="OnPreviewToggle">
                                     <summary>
@@ -393,13 +409,13 @@
                                             </button>
                                         }
                                         <button type="button" class="cm-button cm-button--quiet"
-                                                disabled="@(!ReferenceKit.Any())" @onclick="OpenKitPicker">
+                                                @onclick="OpenKitPicker">
                                             @(_picked.Count == 0 ? "Choose references…" : "Change…")
                                         </button>
                                     </div>
                                     @if (!ReferenceKit.Any())
                                     {
-                                        <p class="cm-meta">Nothing in @Campaign.Brand.Name's kit yet — add faces and backgrounds on the Brands page.</p>
+                                        <p class="cm-meta">Nothing selectable in @Campaign.Brand.Name's kit yet — open the dialog to upload a screenshot or other reference.</p>
                                     }
                                 </div>
                             }
@@ -1265,7 +1281,7 @@
             </header>
             <div class="cm-kitpicker__body">
                 <nav class="cm-kitpicker__list" aria-label="Kit assets by type">
-                    @foreach (var group in ReferenceKit)
+                    @foreach (var group in BrandKit)
                     {
                         <span class="cm-kicker">@KindLabel(group.Key)</span>
                         <ul>
@@ -1304,13 +1320,20 @@
                         }
                         <strong>@(previewAsset.Label ?? previewAsset.FileName)</strong>
                         <span class="cm-meta">@KindLabel(previewKind)</span>
-                        <button type="button" class="cm-button"
-                                @onclick="() => TogglePickAsync(previewKind, previewAsset)">
-                            @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
-                        </button>
-                        @if (!previewOn && _picked.ContainsKey(previewKind))
+                        @if (previewKind == "product")
                         {
-                            <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
+                            <p class="cm-meta">Product screenshots attach automatically for product fidelity (up to three per generation).</p>
+                        }
+                        else
+                        {
+                            <button type="button" class="cm-button"
+                                    @onclick="() => TogglePickAsync(previewKind, previewAsset)">
+                                @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
+                            </button>
+                            @if (!previewOn && _picked.ContainsKey(previewKind))
+                            {
+                                <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
+                            }
                         }
                     }
                     else
@@ -1320,6 +1343,37 @@
                 </section>
             </div>
             <footer class="cm-kitpicker__actions">
+                <div class="cm-kitpicker__upload">
+                    <strong>Add a new reference</strong>
+                    <p class="cm-meta">Upload a screenshot or image here. It is saved to @kitBrand.Name's asset library and can be reused by every campaign for this brand.</p>
+                    <div class="cm-studio__upload">
+                        <select class="cm-input" @bind="_uploadKind" aria-label="Reference type">
+                            <option value="product">Product screenshot</option>
+                            <option value="face">Face</option>
+                            <option value="background">Background</option>
+                            <option value="logo">Logo</option>
+                            <option value="other">Other</option>
+                        </select>
+                        <input class="cm-input" placeholder="Describe this reference"
+                               aria-label="Reference description"
+                               @bind="_uploadLabel" @bind:event="oninput" />
+                        <InputFile class="cm-kit__file" OnChange="UploadKitAssetAsync" accept="image/*"
+                                   aria-label="Upload a reference image"
+                                   aria-describedby="cm-reference-upload-hint"
+                                   disabled="@(_uploading || string.IsNullOrWhiteSpace(_uploadLabel))" />
+                        <span id="cm-reference-upload-hint" class="cm-meta cm-kit__hint">
+                            @(_uploading
+                                ? "Uploading and saving to the brand…"
+                                : string.IsNullOrWhiteSpace(_uploadLabel)
+                                    ? "Add a short description, then choose an image (up to 20 MB)."
+                                    : "Ready — choose a screenshot or image (up to 20 MB).")
+                        </span>
+                    </div>
+                    @if (_uploadError is { } referenceUploadError)
+                    {
+                        <p class="cm-form__error" role="alert">@referenceUploadError</p>
+                    }
+                </div>
                 <button type="button" class="cm-button" @onclick="CloseKitPicker">Done</button>
             </footer>
         </div>
@@ -1365,6 +1419,10 @@
     private Guid? _selectedId;
     private string _prompt = string.Empty;
     private string? _savedPrompt;
+    private string _autoBrief = string.Empty;
+    private string? _savedAutoBrief;
+    private bool _savingBrief;
+    private readonly SemaphoreSlim _briefSaveGate = new(1, 1);
     private string _promptMode = "Auto";
     private bool _changingPromptMode;
     private string? _activeConceptName;
@@ -1418,7 +1476,7 @@
     private List<BrandAssetResponse> _brandAssets = [];
     private Guid? _facesLoadedFor;
 
-    private string _uploadKind = "face";
+    private string _uploadKind = "product";
     private string _uploadLabel = string.Empty;
     private bool _uploading;
     private string? _uploadError;
@@ -1474,6 +1532,7 @@
         {
             await Images.PatchAsync(CampaignId, slot.Id,
                 referenceAssetIds: [.. _picked.Values.Select(a => a.Id)]);
+            _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
         }
         catch (ApiException ex)
         {
@@ -1600,10 +1659,35 @@
             await stream.CopyToAsync(buffer);
             await BrandsApi.UploadAssetContentAsync(asset.Id, buffer.ToArray(), file.ContentType);
 
-            await BrandsApi.LinkAssetAsync(brand.Id, asset.Id, _uploadKind, _uploadLabel.Trim());
+            var linked = await BrandsApi.LinkAssetAsync(
+                brand.Id, asset.Id, _uploadKind, _uploadLabel.Trim());
             _uploadLabel = string.Empty;
-            await LoadBrandFacesAsync();
-            Notifier.ShowSuccess($"Added to {brand.Name}'s kit.");
+            _brandAssets.Add(linked);
+            try
+            {
+                foreach (var thumb in await BrandsApi.MintThumbsAsync([asset.Id]))
+                {
+                    _kitPreviews[thumb.AssetId] = thumb.ReadUrl;
+                }
+            }
+            catch (ApiException)
+            {
+                // The labelled reference remains usable when a thumbnail cannot be minted.
+            }
+
+            _kitPreviewAsset = linked;
+            if (_kitPickerOpen && !linked.Kind.Equals("product", StringComparison.OrdinalIgnoreCase))
+            {
+                // An upload made from the chooser is for this card, so select it immediately.
+                await TogglePickAsync(linked.Kind.ToLowerInvariant(), linked);
+            }
+            else if (_kitPickerOpen)
+            {
+                _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
+            }
+            Notifier.ShowSuccess(linked.Kind.Equals("product", StringComparison.OrdinalIgnoreCase)
+                ? $"Added to {brand.Name}'s library. Product screenshots attach automatically."
+                : $"Added to {brand.Name}'s library and selected for this card.");
         }
         catch (ApiException ex)
         {
@@ -1684,6 +1768,9 @@
     // first, then kind, then age — the three views must present content in one order.
     private IEnumerable<ArtifactPreviewResponse> ImageContentItems => Campaign.Artifacts
         .Where(a => ArtifactKinds.IsDistributionContent(a.Kind))
+        // Focus links carry ?artifact=. Honor it: opening the YouTube item's Image Focus
+        // must not show every blog/social image card in the campaign beside its thumbnail.
+        .Where(a => RequestedArtifact is null || a.Id == RequestedArtifact)
         .OrderBy(a => Array.IndexOf(ArtifactDisplay.LaneOrder, ArtifactDisplay.Lane(a.Kind))
             is var lane && lane >= 0 ? lane : ArtifactDisplay.LaneOrder.Length)
         .ThenBy(a => ArtifactDisplay.KindOrder(a.Kind))
@@ -1692,8 +1779,9 @@
     private IEnumerable<ImageSlotResponse> SlotsFor(Guid artifactId) =>
         Campaign.ImageSlots.Where(s => s.ArtifactId == artifactId);
 
-    private IEnumerable<ImageSlotResponse> LegacySlots =>
-        Campaign.ImageSlots.Where(s => s.ArtifactId is null);
+    private IEnumerable<ImageSlotResponse> LegacySlots => RequestedArtifact is null
+        ? Campaign.ImageSlots.Where(s => s.ArtifactId is null)
+        : [];
 
     private ImageSlotResponse? Selected =>
         Campaign.ImageSlots.FirstOrDefault(s => s.Id == _selectedId);
@@ -1824,7 +1912,9 @@
         public int TotalEvents => MissingVariants + SkippedSlots;
     }
 
-    private BatchPlan CurrentBatchPlan => PlanFor(Campaign.ImageSlots);
+    private BatchPlan CurrentBatchPlan => PlanFor(RequestedArtifact is { } artifactId
+        ? SlotsFor(artifactId)
+        : Campaign.ImageSlots);
 
     private BatchPlan PlanFor(IEnumerable<ImageSlotResponse> slots)
     {
@@ -2754,6 +2844,8 @@
         _selectedId = slot.Id;
         _prompt = slot.Prompt ?? string.Empty;
         _savedPrompt = slot.Prompt;
+        _autoBrief = string.Empty;
+        _savedAutoBrief = null;
         _promptMode = slot.PromptMode;
         _showDiscarded = false;
         _activeConceptName = null;
@@ -2821,6 +2913,13 @@
             {
                 _promptPreview = preview;
                 _promptPreviewError = null;
+                if (IsAutoPrompt
+                    && ((_savedAutoBrief is null && _autoBrief.Length == 0)
+                        || string.Equals(_autoBrief, _savedAutoBrief, StringComparison.Ordinal)))
+                {
+                    _autoBrief = preview.VisualBrief ?? preview.Prompt;
+                    _savedAutoBrief = _autoBrief;
+                }
             }
         }
         catch (Exception ex) when (ex is ApiException or HttpRequestException)
@@ -2851,6 +2950,8 @@
         try
         {
             await Images.RewriteBriefAsync(CampaignId, slotId);
+            _autoBrief = string.Empty;
+            _savedAutoBrief = null;
             _promptPreview = null;
             _promptPreviewOpen = true;
             await LoadPromptPreviewAsync();
@@ -3180,12 +3281,19 @@
             return;
         }
 
+        if (IsAutoPrompt)
+        {
+            await SaveAutoBriefAsync();
+        }
+
         var previous = _promptMode;
         _promptMode = mode;
         _changingPromptMode = true;
         try
         {
             await Images.PatchAsync(CampaignId, slot.Id, promptMode: mode);
+            _autoBrief = string.Empty;
+            _savedAutoBrief = null;
             _ = LoadPromptPreviewAsync();
         }
         catch (ApiException ex)
@@ -3265,7 +3373,12 @@
 
     private async Task SavePromptAsync()
     {
-        if (Selected is not { } slot || IsAutoPrompt
+        if (IsAutoPrompt)
+        {
+            await SaveAutoBriefAsync();
+            return;
+        }
+        if (Selected is not { } slot
             || string.Equals(_prompt, _savedPrompt, StringComparison.Ordinal))
         {
             return;
@@ -3281,12 +3394,70 @@
         }
     }
 
-    private bool ConstraintSelected(string chip) => ContainsConstraint(_prompt, chip);
+    private async Task SaveAutoBriefAsync()
+    {
+        if (Selected is not { } slot || !IsAutoPrompt
+            || string.Equals(_autoBrief, _savedAutoBrief, StringComparison.Ordinal)
+            || (string.IsNullOrWhiteSpace(_autoBrief) && _savedAutoBrief is null))
+        {
+            return;
+        }
+
+        await _briefSaveGate.WaitAsync();
+        try
+        {
+            if (Selected?.Id != slot.Id || !IsAutoPrompt
+                || string.Equals(_autoBrief, _savedAutoBrief, StringComparison.Ordinal))
+            {
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(_autoBrief))
+            {
+                _autoBrief = _savedAutoBrief ?? string.Empty;
+                Notifier.ShowError("The visual brief cannot be empty.");
+                return;
+            }
+
+            _savingBrief = true;
+            var previous = _savedAutoBrief;
+            var edited = _autoBrief.Trim();
+            await Images.SaveBriefAsync(CampaignId, slot.Id, edited, EffectiveAlias);
+            _autoBrief = edited;
+            _savedAutoBrief = edited;
+            if (_promptPreview is { } preview)
+            {
+                var exactPrompt = previous is not null
+                    && preview.Prompt.StartsWith(previous, StringComparison.Ordinal)
+                        ? edited + preview.Prompt[previous.Length..]
+                        : preview.Prompt;
+                _promptPreview = preview with { Prompt = exactPrompt, VisualBrief = edited };
+            }
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _savingBrief = false;
+            _briefSaveGate.Release();
+        }
+    }
+
+    private bool ConstraintSelected(string chip) =>
+        ContainsConstraint(IsAutoPrompt ? _autoBrief : _prompt, chip);
 
     private async Task ToggleConstraintChipAsync(string chip)
     {
         if (Selected is not { } slot)
         {
+            return;
+        }
+
+        if (IsAutoPrompt)
+        {
+            _autoBrief = ToggleConstraint(_autoBrief, chip);
+            await SaveAutoBriefAsync();
             return;
         }
 
@@ -3422,7 +3593,7 @@
         await SavePromptAsync();
         _handledBatchRun = null;
         _revealedBatchSuccesses = 0;
-        StudioRun.StartBatch(CampaignId, _batchTakeTarget);
+        StudioRun.StartBatch(CampaignId, _batchTakeTarget, RequestedArtifact);
     }
 
     private static string BatchEventOutcome(RunItem item) => item.Outcome switch

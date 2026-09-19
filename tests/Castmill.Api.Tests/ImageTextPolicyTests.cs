@@ -49,24 +49,46 @@ public sealed class ImageTextPolicyTests
             BrandLook: "Palette: navy #0B1F3A, cyan #19D3F5.",
             Audience: "Front-end developers",
             ReferenceKinds: ["background", "face"],
-            TextMayBeRendered: true);
+            TextMayBeRendered: true,
+            BrandContentTemplate: "Titles must name the demonstrated feature and concrete payoff.");
 
         var prompt = VisualBriefWriter.BuildPrompt(request);
 
         Assert.Contains("1280×720", prompt, StringComparison.Ordinal);
-        Assert.Contains("Text in the image: ALLOWED", prompt, StringComparison.Ordinal);
+        Assert.Contains("Text in the image: REQUIRED", prompt, StringComparison.Ordinal);
         Assert.Contains("quotation marks", prompt, StringComparison.Ordinal);
         Assert.Contains("Attached references, in order: background, face", prompt, StringComparison.Ordinal);
         Assert.Contains("Audience: Front-end developers", prompt, StringComparison.Ordinal);
         Assert.Contains("Subject: React Grid accessibility that speaks", prompt, StringComparison.Ordinal);
         Assert.Contains("Producer's direction (honour it): Dark, cinematic, one bold headline.", prompt, StringComparison.Ordinal);
         Assert.Contains("navy #0B1F3A", prompt, StringComparison.Ordinal);
+        Assert.Contains("specific to the actual subject, feature, problem or payoff", prompt, StringComparison.Ordinal);
+        Assert.Contains("AUTHORITATIVE BRAND CONTENT TEMPLATE", prompt, StringComparison.Ordinal);
+        Assert.Contains("Titles must name the demonstrated feature", prompt, StringComparison.Ordinal);
+        Assert.Contains("generic phrases are forbidden", prompt, StringComparison.Ordinal);
         Assert.Contains("ONE hook", prompt, StringComparison.Ordinal);
         Assert.Contains("Output ONLY the final image-generation prompt", prompt, StringComparison.Ordinal);
 
         var noText = VisualBriefWriter.BuildPrompt(request with { TextMayBeRendered = false, ReferenceKinds = [] });
         Assert.Contains("Text in the image: NOT allowed", noText, StringComparison.Ordinal);
         Assert.DoesNotContain("Attached references", noText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_youtube_thumbnail_receives_the_brands_authoritative_youtube_template()
+    {
+        const string template = "Use a topic-specific title with a concrete, transcript-supported payoff.";
+        var brand = new BrandContext(
+            null, null,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["youtube"] = template },
+            null);
+
+        var selected = ImagePromptBuilder.TemplateFor(
+            new Castmill.Core.ImageSlot { Kind = "youtube-thumbnail", State = "Empty" },
+            new Castmill.Core.Artifact { Kind = "youtube", Title = "Grid accessibility", ContentJson = "{}" },
+            brand);
+
+        Assert.Equal(template, selected);
     }
 
     [Fact]

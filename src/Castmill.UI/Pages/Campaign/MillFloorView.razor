@@ -35,6 +35,13 @@
             <header class="cm-source__head">
                 <span class="cm-kicker">Source master</span>
                 <span class="cm-meta">@(SelectedSource?.Label ?? "no source")</span>
+                @if (IsVideo(SelectedSource))
+                {
+                    <a class="cm-button cm-button--quiet"
+                       href="campaigns/@CampaignId/references?sourceId=@SelectedSource!.Id">
+                        Extract reference images
+                    </a>
+                }
                 @if (SelectedCurrentEvidence is not null)
                 {
                     <span class="cm-source__tools">
@@ -65,8 +72,7 @@
                 </div>
             }
 
-            @if (SelectedSource?.Id == Campaign.TranscriptSourceAssetId
-                && Campaign.Transcript is { Segments.Count: > 0 } transcript)
+            @if (SelectedSource?.Modality == SourceModalities.Media)
             {
                 @* The source recording (ADR-057): played from the local file on the desktop, from
                    the cloud copy anywhere, and otherwise an honest state with the actions that
@@ -90,15 +96,10 @@
                         <span class="cm-meta">
                             @(_mediaStatus ?? (SelectedSource?.LocalPath is { Length: > 0 }
                                 ? (Media.CanPlayLocalFiles ? "Recording not found at its last location." : "Recording lives on the machine that transcribed it.")
-                                : "No recording is linked to this transcript."))
+                                : "No recording is linked to this source."))
                         </span>
                     </div>
                 }
-                <div class="cm-source__scrub cm-mono cm-meta">
-                    <span>@Clock(_mediaTime)</span>
-                    <span class="cm-source__scrub-bar"><span class="cm-source__scrub-fill" style="inline-size:@(ScrubPercent(transcript))%"></span></span>
-                    <span>@Clock(transcript.Segments[^1].EndSeconds)</span>
-                </div>
                 <div class="cm-source__media-actions">
                     @if (Media.CanPlayLocalFiles)
                     {
@@ -123,26 +124,35 @@
                     }
                 </div>
 
-                <SourceTranscript Transcript="transcript" Highlighted="_highlighted" SegmentClicked="SeekToSegmentAsync" />
-
-                @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
+                @if (SelectedSource?.Id == Campaign.TranscriptSourceAssetId
+                    && Campaign.Transcript is { Segments.Count: > 0 } transcript)
                 {
-                    <aside class="cm-source__quotes">
-                        <span class="cm-kicker">Cited by "@ArtifactTitle(pinned)"</span>
-                        <ul>
-                            @foreach (var id in PinnedCitations)
-                            {
-                                var segment = transcript.Segments.FirstOrDefault(s => s.Id == id);
-                                if (segment is not null)
+                    <div class="cm-source__scrub cm-mono cm-meta">
+                        <span>@Clock(_mediaTime)</span>
+                        <span class="cm-source__scrub-bar"><span class="cm-source__scrub-fill" style="inline-size:@(ScrubPercent(transcript))%"></span></span>
+                        <span>@Clock(transcript.Segments[^1].EndSeconds)</span>
+                    </div>
+                    <SourceTranscript Transcript="transcript" Highlighted="_highlighted" SegmentClicked="SeekToSegmentAsync" />
+
+                    @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
+                    {
+                        <aside class="cm-source__quotes">
+                            <span class="cm-kicker">Cited by "@ArtifactTitle(pinned)"</span>
+                            <ul>
+                                @foreach (var id in PinnedCitations)
                                 {
-                                    <li>
-                                        <span class="cm-mono cm-meta">@segment.Id · @Clock(segment.StartSeconds)</span>
-                                        <blockquote>@segment.Text</blockquote>
-                                    </li>
+                                    var segment = transcript.Segments.FirstOrDefault(s => s.Id == id);
+                                    if (segment is not null)
+                                    {
+                                        <li>
+                                            <span class="cm-mono cm-meta">@segment.Id · @Clock(segment.StartSeconds)</span>
+                                            <blockquote>@segment.Text</blockquote>
+                                        </li>
+                                    }
                                 }
-                            }
-                        </ul>
-                    </aside>
+                            </ul>
+                        </aside>
+                    }
                 }
             }
             else if (SelectedApprovedEvidence is { } sourceEvidence && SelectedSource is { } selectedSource)

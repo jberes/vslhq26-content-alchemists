@@ -137,6 +137,65 @@ public static class Ffmpeg
         }, ct);
     }
 
+    /// <summary>
+    /// Runs ffmpeg/ffprobe and returns stdout bytes. Frame extraction uses pipes so proxy
+    /// samples never touch disk, which keeps a 30-candidate analysis fast and leaves no
+    /// sensitive screenshots in the temp folder.
+    /// </summary>
+    public static Task<(int ExitCode, byte[] StdOut, string StdErr)> RunCaptureAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        CancellationToken ct,
+        bool allowNonZeroExit = false)
+    {
+        return Task.Run(async () =>
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = executable,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            foreach (var argument in arguments)
+            {
+                psi.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(psi)
+                ?? throw new InvalidOperationException($"{Path.GetFileName(executable)} failed to start.");
+            await using var output = new MemoryStream();
+            var stdout = process.StandardOutput.BaseStream.CopyToAsync(output, ct);
+            var stderr = process.StandardError.ReadToEndAsync(ct);
+            await Task.WhenAll(process.WaitForExitAsync(ct), stdout);
+            var errorText = await stderr;
+            if (process.ExitCode != 0 && !allowNonZeroExit)
+            {
+                throw new InvalidOperationException(
+                    $"{Path.GetFileName(executable)} exited with {process.ExitCode}: "
+                    + errorText[^Math.Min(500, errorText.Length)..]);
+            }
+            return (process.ExitCode, output.ToArray(), errorText);
+        }, ct);
+    }
+
+    public static string RequireProbe()
+    {
+        var ffmpeg = Require();
+        var directory = Path.GetDirectoryName(ffmpeg) ?? string.Empty;
+        var name = OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe";
+        var sibling = Path.Combine(directory, name);
+        if (File.Exists(sibling))
+        {
+            return sibling;
+        }
+        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        return paths.Select(path => Path.Combine(path, name)).FirstOrDefault(File.Exists)
+            ?? throw new InvalidOperationException(
+                "ffprobe was not found beside ffmpeg or on PATH. Install the complete ffmpeg package.");
+    }
+
     private static TimeSpan ParseClock(Match match)
     {
         var hours = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);

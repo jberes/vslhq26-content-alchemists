@@ -3,6 +3,9 @@ using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Microsoft.AspNetCore.Components.Forms;
+using System.Net;
+using System.Reflection;
 
 namespace Castmill.UI.Tests;
 
@@ -117,6 +120,48 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
         Assert.NotEmpty(view.FindAll(".cm-studio__drawer"));
     }
 
+    [Fact]
+    public async Task An_empty_brand_can_open_the_dialog_upload_a_screenshot_and_reuse_it_from_the_library()
+    {
+        var libraryAssetId = Guid.Parse("a1111111-1111-1111-1111-777777777777");
+        var brandLinkId = Guid.Parse("a1111111-1111-1111-1111-888888888888");
+        Http.OnGet($"api/v1/brands/{BrandId}/assets", new List<BrandAssetResponse>());
+        Http.OnPost("api/v1/assets", new AssetResponse(
+            libraryAssetId, "new-grid.png", "image/png", 4,
+            $"assets/{libraryAssetId}/new-grid.png", DateTimeOffset.UtcNow));
+        Http.OnStatus(HttpMethod.Post, $"api/v1/blob/assets/{libraryAssetId}/content", HttpStatusCode.NoContent);
+        Http.OnPost($"api/v1/brands/{BrandId}/assets",
+            new BrandAssetResponse(brandLinkId, BrandId, libraryAssetId, "product", "current grid screen",
+                "new-grid.png", "image/png", DateTimeOffset.UtcNow));
+        Http.OnPost("api/v1/blob/assets/thumbs", new List<AssetThumb>
+        {
+            new(libraryAssetId, "https://sas.example/new-grid-thumb.png", true),
+        });
+
+        var view = await OpenDrawerAsync();
+        var choose = ChooseButton(view);
+        Assert.False(choose.HasAttribute("disabled"));
+        await choose.ClickAsync();
+
+        var dialog = view.Find(".cm-kitpicker");
+        var file = dialog.QuerySelector("input[aria-label='Upload a reference image']")!;
+        Assert.True(file.HasAttribute("disabled"));
+        dialog.QuerySelector("input[aria-label='Reference description']")!.Input("current grid screen");
+        Assert.False(view.Find(".cm-kitpicker input[aria-label='Upload a reference image']").HasAttribute("disabled"));
+
+        await InvokePrivateAsync(view, "UploadKitAssetAsync",
+            new InputFileChangeEventArgs([new TestBrowserFile("new-grid.png", "image/png", [1, 2, 3, 4])]));
+
+        await view.WaitForAssertionAsync(() =>
+            Assert.Contains("current grid screen", view.Find(".cm-kitpicker").TextContent, StringComparison.Ordinal));
+        Assert.Contains("attach automatically", view.Find(".cm-kitpicker__preview").TextContent, StringComparison.Ordinal);
+        Assert.Contains(Http.Bodies, request => request.Method == HttpMethod.Post && request.Path == "api/v1/assets");
+        Assert.Contains(Http.Bodies, request => request.Method == HttpMethod.Post
+            && request.Path.EndsWith($"blob/assets/{libraryAssetId}/content", StringComparison.Ordinal));
+        Assert.Contains(Http.Bodies, request => request.Method == HttpMethod.Post
+            && request.Path.EndsWith($"brands/{BrandId}/assets", StringComparison.Ordinal));
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     /// <summary>
@@ -183,4 +228,33 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
     private static CampaignResponse Campaign() =>
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);
+
+    private static async Task InvokePrivateAsync(
+        IRenderedComponent<ImageStudioView> view, string methodName, params object[] args)
+    {
+        await view.InvokeAsync(async () =>
+        {
+            var method = typeof(ImageStudioView).GetMethod(
+                methodName, BindingFlags.NonPublic | BindingFlags.Instance)!;
+            await (Task)method.Invoke(view.Instance, args)!;
+        });
+    }
+
+    private sealed class TestBrowserFile(
+        string name,
+        string contentType,
+        byte[] bytes) : IBrowserFile
+    {
+        public string Name => name;
+        public DateTimeOffset LastModified => DateTimeOffset.UtcNow;
+        public long Size => bytes.LongLength;
+        public string ContentType => contentType;
+
+        public Stream OpenReadStream(
+            long maxAllowedSize = 512_000,
+            CancellationToken cancellationToken = default) =>
+            bytes.LongLength > maxAllowedSize
+                ? throw new IOException("File exceeds max size.")
+                : new MemoryStream(bytes, writable: false);
+    }
 }

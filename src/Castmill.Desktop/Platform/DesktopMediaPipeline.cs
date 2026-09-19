@@ -1,6 +1,7 @@
 using Castmill.Core.Ai;
 using Castmill.Media;
 using Castmill.UI.Platform;
+using System.Globalization;
 
 namespace Castmill.Desktop.Platform;
 
@@ -156,4 +157,59 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline, IDisposable
             engineProgress,
             ct);
     }
+
+    public async Task<VideoReferenceMetadata> ProbeVideoAsync(
+        PickedMedia media, CancellationToken ct = default)
+    {
+        var metadata = await VideoReferenceExtractor.ProbeAsync(media.Path, ct);
+        return ToUi(metadata);
+    }
+
+    public async Task<VideoReferenceAnalysisResult> AnalyzeVideoAsync(
+        PickedMedia media,
+        int quantity,
+        string diversity,
+        IProgress<PipelineProgress> progress,
+        CancellationToken ct = default)
+    {
+        var engineProgress = new Progress<MediaProgress>(item =>
+            progress.Report(new PipelineProgress(item.Stage, item.Percent, item.Detail)));
+        var analysis = await VideoReferenceExtractor.AnalyzeAsync(
+            media.Path, quantity, diversity, engineProgress, ct);
+        return new VideoReferenceAnalysisResult(
+            ToUi(analysis.Metadata),
+            analysis.Frames.Select(ToUi).ToList(),
+            ToUi(analysis.SuggestedCrop),
+            analysis.CropConfidence,
+            analysis.UsedSceneChanges);
+    }
+
+    public async Task<VideoReferenceCandidate> CaptureVideoFrameAsync(
+        PickedMedia media,
+        double timestampSeconds,
+        VideoReferenceMetadata metadata,
+        CancellationToken ct = default) =>
+        ToUi(await VideoReferenceExtractor.CaptureAsync(
+            media.Path, timestampSeconds,
+            new VideoMetadata(metadata.DurationSeconds, metadata.Width, metadata.Height,
+                metadata.FrameRate, metadata.Rotation), ct));
+
+    public Task<byte[]> RenderVideoFrameAsync(
+        PickedMedia media,
+        double timestampSeconds,
+        VideoReferenceCrop crop,
+        CancellationToken ct = default) =>
+        VideoReferenceExtractor.RenderPngAsync(media.Path, timestampSeconds,
+            new PixelCrop(crop.X, crop.Y, crop.Width, crop.Height, crop.Method, crop.Confidence), ct);
+
+    private static VideoReferenceMetadata ToUi(VideoMetadata item) =>
+        new(item.DurationSeconds, item.Width, item.Height, item.FrameRate, item.Rotation);
+
+    private static VideoReferenceCrop ToUi(PixelCrop item) =>
+        new(item.X, item.Y, item.Width, item.Height, item.Method, item.Confidence);
+
+    private static VideoReferenceCandidate ToUi(ExtractedFrame item) =>
+        new(item.Id, item.TimestampSeconds, item.FrameNumber, item.PreviewJpeg,
+            item.PerceptualHash.ToString("x16", CultureInfo.InvariantCulture),
+            item.QualityScore, item.Warning, item.AiSummary);
 }

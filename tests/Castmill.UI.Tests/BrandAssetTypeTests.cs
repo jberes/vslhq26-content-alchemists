@@ -57,4 +57,31 @@ public sealed class BrandAssetTypeTests : CastmillUiTestContext
         Assert.Equal("face", view.Find("select[aria-label='Type for Studio wall']").GetAttribute("value"));
         Assert.Equal("face", view.Find("select[aria-label='Type for Host portrait']").GetAttribute("value"));
     }
+
+    [Fact]
+    public async Task Clicking_an_asset_opens_the_original_in_a_full_size_viewer()
+    {
+        var view = Render<BrandEditor>(parameters => parameters.Add(page => page.BrandId, BrandId));
+        await view.WaitForStateAsync(
+            () => view.FindAll("[role=tab]").Count == 6, TimeSpan.FromSeconds(5));
+
+        await view.FindAll("[role=tab]")[2].ClickAsync();
+        await view.Find("button[aria-label='View Studio wall full size']").ClickAsync();
+
+        var dialog = view.Find("[role=dialog][aria-labelledby='cm-brand-asset-viewer-title']");
+        Assert.Contains("Studio wall", dialog.TextContent, StringComparison.Ordinal);
+        Assert.Equal("https://public.example/wall.png", dialog.QuerySelector("img")!.GetAttribute("src"));
+        Assert.Equal("https://public.example/wall.png", dialog.QuerySelector("a")!.GetAttribute("href"));
+        Assert.Contains(Http.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.RequestUri!.AbsolutePath.EndsWith(
+                $"/blob/assets/{AssetId}/read-sas", StringComparison.Ordinal));
+
+        await dialog.QuerySelector("button[aria-pressed='false']")!.ClickAsync();
+        Assert.NotNull(view.Find(".cm-brand-asset-viewer__stage--actual"));
+        Assert.Equal("Fit to window", view.Find("button[aria-pressed='true']").TextContent.Trim());
+
+        await dialog.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+        Assert.Empty(view.FindAll(".cm-brand-asset-viewer"));
+    }
 }

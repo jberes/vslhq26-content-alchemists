@@ -39,6 +39,17 @@ public sealed record SourceMediaLinkRequest(
     [property: MaxLength(80)] string? ContentHash = null,
     Guid? MediaAssetId = null);
 
+/// <summary>
+/// Registers a local recording as a campaign source before it has a transcript. The desktop
+/// keeps the file path local; a later explicit upload may attach a private cloud Asset.
+/// </summary>
+public sealed record MediaSourceAttachRequest(
+    [property: Required, MaxLength(300)] string Label,
+    [property: Required, MaxLength(2000)] string LocalPath,
+    [property: Required, MaxLength(80)] string ContentHash,
+    [property: Required, MaxLength(200)] string ContentType,
+    [property: Range(0, long.MaxValue)] long SizeBytes);
+
 public sealed record EvidenceBlockResponse(
     Guid SourceAssetId,
     string StableId,

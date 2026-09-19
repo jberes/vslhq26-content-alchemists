@@ -333,12 +333,22 @@
                                     {
                                         @* decoding=async keeps a large decode off the UI thread —
                                            a grid of faces otherwise stalls the first paint. *@
-                                        <img src="@url" alt="@(asset.Label ?? asset.FileName)"
-                                             loading="lazy" decoding="async" />
+                                        <button type="button" class="cm-asset-card__preview"
+                                                aria-label="View @(asset.Label ?? asset.FileName) full size"
+                                                title="View full size"
+                                                @onclick="() => OpenAssetViewerAsync(asset)">
+                                            <img src="@url" alt="@(asset.Label ?? asset.FileName)"
+                                                 loading="lazy" decoding="async" />
+                                        </button>
                                     }
                                     else
                                     {
-                                        <span class="cm-asset-card__blank" aria-hidden="true"></span>
+                                        <button type="button" class="cm-asset-card__preview"
+                                                aria-label="View @(asset.Label ?? asset.FileName) full size"
+                                                title="View full size"
+                                                @onclick="() => OpenAssetViewerAsync(asset)">
+                                            <span class="cm-asset-card__blank" aria-hidden="true"></span>
+                                        </button>
                                     }
                                     <button type="button" class="cm-tree__delete cm-asset-card__delete"
                                             aria-label="Remove @(asset.Label ?? asset.FileName) from the kit"
@@ -665,6 +675,58 @@
     }
 </div></div>
 
+@if (_viewingAsset is { } viewingAsset)
+{
+    @* Grid tiles intentionally use small derivatives. This dialog mints the original only
+       when requested, so its image is genuinely full-resolution without making Brand load
+       every multi-megabyte source file up front. *@
+    <div class="cm-modal cm-brand-asset-viewer" role="presentation" @onclick="CloseAssetViewer">
+        <section class="cm-brand-asset-viewer__panel" role="dialog" aria-modal="true"
+                 aria-labelledby="cm-brand-asset-viewer-title" tabindex="-1"
+                 @ref="_assetViewerPanel"
+                 @onclick:stopPropagation
+                 @onkeydown="OnAssetViewerKey">
+            <header class="cm-brand-asset-viewer__head">
+                <div>
+                    <h2 id="cm-brand-asset-viewer-title">@(viewingAsset.Label ?? viewingAsset.FileName)</h2>
+                    <p class="cm-meta">@viewingAsset.FileName · @KindLabel(viewingAsset.Kind)</p>
+                </div>
+                <button type="button" class="cm-dialog-close" aria-label="Close full-size view"
+                        title="Close (Esc)" @onclick="CloseAssetViewer">✕</button>
+            </header>
+
+            @if (_viewingAssetLoading)
+            {
+                <div class="cm-brand-asset-viewer__state" role="status">Loading the original…</div>
+            }
+            else if (_viewingAssetError is { } viewerError)
+            {
+                <div class="cm-brand-asset-viewer__state">
+                    <p class="cm-form__error" role="alert">@viewerError</p>
+                    <button type="button" class="cm-button cm-button--quiet"
+                            @onclick="() => OpenAssetViewerAsync(viewingAsset)">Try again</button>
+                </div>
+            }
+            else if (_viewingAssetUrl is { } originalUrl)
+            {
+                <div class="cm-brand-asset-viewer__stage @(_viewingActualSize ? "cm-brand-asset-viewer__stage--actual" : null)">
+                    <img src="@originalUrl" alt="@(viewingAsset.Label ?? viewingAsset.FileName)" />
+                </div>
+                <footer class="cm-brand-asset-viewer__actions">
+                    <button type="button" class="cm-button cm-button--quiet"
+                            aria-pressed="@(_viewingActualSize ? "true" : "false")"
+                            @onclick="() => _viewingActualSize = !_viewingActualSize">
+                        @(_viewingActualSize ? "Fit to window" : "Actual size")
+                    </button>
+                    <a class="cm-button" href="@originalUrl" target="_blank" rel="noopener noreferrer">
+                        Open original
+                    </a>
+                </footer>
+            }
+        </section>
+    </div>
+}
+
 @code {
 
     /// <summary>
@@ -964,6 +1026,13 @@
     private readonly List<BrandAssetResponse> _assets = [];
     private readonly List<BrandTemplateResponse> _templates = [];
     private readonly Dictionary<Guid, string> _assetPreviews = [];
+    private BrandAssetResponse? _viewingAsset;
+    private string? _viewingAssetUrl;
+    private string? _viewingAssetError;
+    private bool _viewingAssetLoading;
+    private bool _viewingActualSize;
+    private bool _assetViewerNeedsFocus;
+    private ElementReference _assetViewerPanel;
 
     private bool _loaded;
     private bool _isOwner;
@@ -1345,6 +1414,75 @@
         {
             // Storage unconfigured, or the derivative pass is unavailable: leave the cards
             // blank rather than firing N per-asset requests that would fail the same way.
+        }
+    }
+
+    private async Task OpenAssetViewerAsync(BrandAssetResponse asset)
+    {
+        _viewingAsset = asset;
+        _viewingAssetUrl = null;
+        _viewingAssetError = null;
+        _viewingAssetLoading = true;
+        _viewingActualSize = false;
+        _assetViewerNeedsFocus = true;
+        StateHasChanged();
+
+        try
+        {
+            _viewingAssetUrl = (await Brands.MintReadSasAsync(asset.AssetId)).ReadUrl;
+        }
+        catch (ApiException ex)
+        {
+            _viewingAssetError = $"Couldn't open the original — {ex.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            _viewingAssetError = "Couldn't reach the Castmill API to open the original.";
+        }
+        finally
+        {
+            _viewingAssetLoading = false;
+        }
+    }
+
+    private void CloseAssetViewer()
+    {
+        _viewingAsset = null;
+        _viewingAssetUrl = null;
+        _viewingAssetError = null;
+        _viewingAssetLoading = false;
+        _viewingActualSize = false;
+    }
+
+    private void OnAssetViewerKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            CloseAssetViewer();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_assetViewerNeedsFocus)
+        {
+            return;
+        }
+
+        _assetViewerNeedsFocus = false;
+        if (_assetViewerPanel.Context is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _assetViewerPanel.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+            // Focus is only an accessibility courtesy. A closing/disposed WebView must not
+            // turn an otherwise useful image preview into a page-level failure.
         }
     }
 

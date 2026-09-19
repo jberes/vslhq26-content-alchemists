@@ -447,6 +447,12 @@ public sealed class TestMediaPipeline : IMediaPipeline
     /// <summary>Every clip export this session, in order — the batch's evidence.</summary>
     public List<ClipExportOptions> Exports { get; } = [];
 
+    public VideoReferenceMetadata ReferenceMetadata { get; set; } = new(60, 1920, 1080, 30);
+
+    public VideoReferenceAnalysisResult? ReferenceAnalysis { get; set; }
+
+    public List<(double Timestamp, VideoReferenceCrop Crop)> RenderedFrames { get; } = [];
+
     public void EnableLocalProcessing(string fileName = "webinar.mp4")
     {
         _local = true;
@@ -474,6 +480,48 @@ public sealed class TestMediaPipeline : IMediaPipeline
         Exports.Add(options);
         progress.Report(new PipelineProgress("re-encoding clip", 100));
         return Task.FromResult($"/tmp/Castmill clips/webinar/{options.OutputName ?? "clip"}.mp4");
+    }
+
+    public Task<string?> OpenLocalMediaAsync(string path) =>
+        Task.FromResult<string?>($"https://local.test/{Uri.EscapeDataString(Path.GetFileName(path))}");
+
+    public Task<string?> FingerprintAsync(string path) => Task.FromResult<string?>("test-video-hash");
+
+    public Task<Stream?> OpenReadAsync(string path) => Task.FromResult<Stream?>(_local
+        ? new MemoryStream(new byte[checked((int)(LastPicked?.SizeBytes ?? 0))], writable: false)
+        : null);
+
+    public Task<VideoReferenceMetadata> ProbeVideoAsync(
+        PickedMedia media, CancellationToken ct = default) => Task.FromResult(ReferenceMetadata);
+
+    public Task<VideoReferenceAnalysisResult> AnalyzeVideoAsync(
+        PickedMedia media, int quantity, string diversity,
+        IProgress<PipelineProgress> progress, CancellationToken ct = default)
+    {
+        progress.Report(new PipelineProgress("ready", 100, $"{quantity} reference frames"));
+        return Task.FromResult(ReferenceAnalysis ?? new VideoReferenceAnalysisResult(
+            ReferenceMetadata,
+            Enumerable.Range(1, quantity).Select(index => new VideoReferenceCandidate(
+                $"f-{index}", index * 5, index * 150, [0xff, 0xd8, 0xff, 0xd9],
+                index.ToString("x16", System.Globalization.CultureInfo.InvariantCulture), 90 - index)).ToList(),
+            new VideoReferenceCrop(0, 80, ReferenceMetadata.Width,
+                ReferenceMetadata.Height - 80, "automatic", .82),
+            "high", true));
+    }
+
+    public Task<VideoReferenceCandidate> CaptureVideoFrameAsync(
+        PickedMedia media, double timestampSeconds, VideoReferenceMetadata metadata,
+        CancellationToken ct = default) => Task.FromResult(new VideoReferenceCandidate(
+            $"f-{timestampSeconds:0.###}", timestampSeconds,
+            (long)Math.Round(timestampSeconds * metadata.FrameRate), [0xff, 0xd8, 0xff, 0xd9],
+            "1234567890abcdef", 91));
+
+    public Task<byte[]> RenderVideoFrameAsync(
+        PickedMedia media, double timestampSeconds, VideoReferenceCrop crop,
+        CancellationToken ct = default)
+    {
+        RenderedFrames.Add((timestampSeconds, crop));
+        return Task.FromResult(new byte[] { 137, 80, 78, 71, 1, 2, 3, 4 });
     }
 }
 

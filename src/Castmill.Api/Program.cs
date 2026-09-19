@@ -117,6 +117,7 @@ builder.Services.AddScoped<IAnthropicMcpClient, AnthropicMcpClient>();
 // Agents (ADR-058): claim verifier and image critic. The SEO agent is registered with the SEO services.
 builder.Services.AddScoped<Castmill.Api.Services.Ai.Agents.ITechEditVerifier, Castmill.Api.Services.Ai.Agents.TechEditVerificationAgent>();
 builder.Services.AddScoped<Castmill.Api.Services.Ai.Agents.IImageCritic, Castmill.Api.Services.Ai.Agents.ImageCriticAgent>();
+builder.Services.AddScoped<IVideoReferenceAiService, VideoReferenceAiService>();
 builder.Services.AddScoped<IAiOrchestrator, AiOrchestrator>();
 builder.Services.AddScoped<IBrandContextService, BrandContextService>();
 builder.Services.AddScoped<IContentDependencyService, ContentDependencyService>();
@@ -549,6 +550,7 @@ app.MapImageEndpoints();
 app.MapImageSlotEndpoints();
 app.MapMediaEndpoints();
 app.MapMediaUploadEndpoints();
+app.MapVideoReferenceEndpoints();
 app.MapPublishEndpoints();
 app.MapExportEndpoints();
 app.MapGitPublishEndpoints();

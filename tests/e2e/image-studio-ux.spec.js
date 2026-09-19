@@ -218,6 +218,37 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         });
         expect(fallback).toEqual({ copied: true, selectedText: 'WebView fallback' });
 
+        // Safari/WebKit can expose navigator.clipboard but reject its promise. The synchronous
+        // selection path must therefore run first, while the button's activation is still live.
+        const webkitOrder = await page.evaluate(async () => {
+            const calls = [];
+            const originalClipboard = navigator.clipboard;
+            const originalExecCommand = document.execCommand;
+            Object.defineProperty(navigator, 'clipboard', {
+                value: {
+                    writeText: async () => {
+                        calls.push('async');
+                        throw new DOMException('Not allowed', 'NotAllowedError');
+                    },
+                },
+                configurable: true,
+            });
+            document.execCommand = command => {
+                calls.push('selection');
+                return command === 'copy';
+            };
+            try {
+                const clipboard = await import('/_content/Castmill.UI/js/castmill-clipboard.js');
+                return { copied: await clipboard.copyText('Safari copy'), calls };
+            } finally {
+                document.execCommand = originalExecCommand;
+                Object.defineProperty(navigator, 'clipboard', {
+                    value: originalClipboard, configurable: true,
+                });
+            }
+        });
+        expect(webkitOrder).toEqual({ copied: true, calls: ['selection', 'async'] });
+
         await page.goto(`/brands/${brandId}`);
         await page.getByRole('tab', { name: 'Asset kit' }).click();
         const typeSwitcher = page.getByLabel('Type for Studio wall');

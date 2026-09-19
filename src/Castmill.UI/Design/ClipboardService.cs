@@ -15,7 +15,9 @@ public interface IClipboardService
 
 public sealed class ClipboardService(IJSRuntime js) : IClipboardService, IAsyncDisposable
 {
-    private const string ModulePath = "./_content/Castmill.UI/js/castmill-clipboard.js";
+    // Version the module URL so Safari does not keep an older clipboard implementation across
+    // deployments. The desktop shell overrides this service with its native implementation.
+    private const string ModulePath = "./_content/Castmill.UI/js/castmill-clipboard.js?v=2";
     private IJSObjectReference? _module;
 
     public async Task<bool> CopyTextAsync(string text)

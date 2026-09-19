@@ -60,6 +60,32 @@ public sealed class MillFloorMediaTests : CastmillUiTestContext
         Assert.Contains("webinar.mp4", view.Find(".cm-source__path").TextContent, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task An_attached_video_without_a_transcript_still_appears_on_the_mill_floor()
+    {
+        var video = TranscriptSource(localPath: null, mediaAssetId: AssetId, contentType: "video/mp4")
+            with
+            {
+                LegacyArtifactId = null,
+                Kind = "video",
+                Label = "React-Data-Grid-Accessibility.mp4",
+            };
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [], [], 0, 0, Sources: [video]));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/sources/{video.Id}/evidence",
+            new EvidenceRevisionResponse(video, 1, video.CurrentEvidenceRevisionId, false, []));
+        Http.OnGet($"api/v1/blob/assets/{AssetId}/read-sas",
+            new ReadSas("https://sas.example/React-Data-Grid-Accessibility.mp4?sig=1"));
+
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("https://sas.example/React-Data-Grid-Accessibility.mp4?sig=1",
+                view.Find("video.cm-source__media").GetAttribute("src")));
+        Assert.Contains("React-Data-Grid-Accessibility.mp4", view.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("No approved evidence on this campaign", view.Markup, StringComparison.Ordinal);
+    }
+
     private void StubPreview(SourceAssetResponse source) =>
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
             Campaign(),

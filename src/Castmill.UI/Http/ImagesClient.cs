@@ -47,6 +47,15 @@ public sealed class ImagesClient(ApiClient api)
     public Task RewriteBriefAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
         api.PostAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}/brief/rewrite", new { }, ct: ct);
 
+    /// <summary>Saves producer edits to the generated Auto brief without changing prompt mode.</summary>
+    public Task SaveBriefAsync(
+        Guid campaignId, Guid slotId, string visualBrief, string? modelAlias = null,
+        CancellationToken ct = default) =>
+        api.PutAsync(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/brief"
+            + (string.IsNullOrWhiteSpace(modelAlias) ? string.Empty : $"?model={Uri.EscapeDataString(modelAlias)}"),
+            new ImageVisualBriefUpdateRequest(visualBrief), ct);
+
     /// <summary>Generates N variants against the slot's model. Live call — costs money.
     /// The result carries persisted variants + a run id pollable at <c>runs/{id}</c>.</summary>
     public Task<VariantBatchResponse> GenerateAsync(

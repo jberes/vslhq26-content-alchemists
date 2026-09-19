@@ -40,6 +40,29 @@ public sealed record ClipExportOptions(
 public sealed record ClipPublishCopy(
     string? Title, string? Description, IReadOnlyList<string>? Hashtags, string? Hook);
 
+public sealed record VideoReferenceMetadata(
+    double DurationSeconds, int Width, int Height, double FrameRate, int Rotation = 0);
+
+public sealed record VideoReferenceCrop(
+    int X, int Y, int Width, int Height, string Method = "manual", double Confidence = 1);
+
+public sealed record VideoReferenceCandidate(
+    string Id,
+    double TimestampSeconds,
+    long FrameNumber,
+    byte[] PreviewJpeg,
+    string PerceptualHash,
+    double QualityScore,
+    string? Warning = null,
+    string? AiSummary = null);
+
+public sealed record VideoReferenceAnalysisResult(
+    VideoReferenceMetadata Metadata,
+    IReadOnlyList<VideoReferenceCandidate> Frames,
+    VideoReferenceCrop SuggestedCrop,
+    string CropConfidence,
+    bool UsedSceneChanges);
+
 /// <summary>
 /// The media seam between the shells (Roadmap §2.2). Desktop implements it with the local
 /// engine (ffmpeg + Whisper); web implements it as capability-flagged OFF with a stated
@@ -88,4 +111,25 @@ public interface IMediaPipeline
 
     /// <summary>Opens a local file for upload; null when the shell cannot read local paths.</summary>
     Task<Stream?> OpenReadAsync(string path) => Task.FromResult<Stream?>(null);
+
+    // ---- Video reference images ----------------------------------------------------
+
+    Task<VideoReferenceMetadata> ProbeVideoAsync(
+        PickedMedia media, CancellationToken ct = default) =>
+        throw new NotSupportedException(UnavailableReason ?? "Video extraction is unavailable in this shell.");
+
+    Task<VideoReferenceAnalysisResult> AnalyzeVideoAsync(
+        PickedMedia media, int quantity, string diversity,
+        IProgress<PipelineProgress> progress, CancellationToken ct = default) =>
+        throw new NotSupportedException(UnavailableReason ?? "Video extraction is unavailable in this shell.");
+
+    Task<VideoReferenceCandidate> CaptureVideoFrameAsync(
+        PickedMedia media, double timestampSeconds, VideoReferenceMetadata metadata,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(UnavailableReason ?? "Video extraction is unavailable in this shell.");
+
+    Task<byte[]> RenderVideoFrameAsync(
+        PickedMedia media, double timestampSeconds, VideoReferenceCrop crop,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(UnavailableReason ?? "Video extraction is unavailable in this shell.");
 }

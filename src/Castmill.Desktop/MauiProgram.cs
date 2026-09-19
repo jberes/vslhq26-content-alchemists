@@ -47,6 +47,9 @@ public static class MauiProgram
         builder.Services.AddScoped<IExternalBrowserLauncher, DesktopExternalBrowserLauncher>();
         builder.Services.AddSingleton<IMediaPipeline, DesktopMediaPipeline>();
         builder.Services.AddScoped<IFileDownloader, DesktopFileDownloader>();
+        // Clipboard writes must leave WKWebView on macOS. The shared browser service cannot
+        // recover after navigator.clipboard rejects because its user-activation token is gone.
+        builder.Services.AddScoped<IClipboardService, DesktopClipboardService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

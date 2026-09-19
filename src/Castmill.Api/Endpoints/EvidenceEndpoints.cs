@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Castmill.Api.Data;
 using Castmill.Api.Services.Evidence;
+using Castmill.Api.Tenancy;
 using Castmill.Core;
 using Castmill.Core.Resources;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +27,9 @@ public static class EvidenceEndpoints
         group.MapPost("/import/artifact", ImportArtifactAsync)
             .Validate<ArtifactSourceImportRequest>()
             .RequireRateLimiting("writes");
+        group.MapPost("/media", AttachMediaSourceAsync)
+            .Validate<MediaSourceAttachRequest>()
+            .RequireRateLimiting("writes");
         group.MapGet("/{sourceAssetId:guid}/evidence", GetEvidenceAsync);
         group.MapPatch("/{sourceAssetId:guid}/evidence/{stableId}", ReviseEvidenceAsync)
             .Validate<EvidenceBlockRevisionRequest>()
@@ -35,6 +41,76 @@ public static class EvidenceEndpoints
             .Validate<SourceMediaLinkRequest>().RequireRateLimiting("writes");
 
         return routes;
+    }
+
+    /// <summary>
+    /// A video chosen in the desktop reference workflow is a real campaign source even when
+    /// it has not been transcribed. Register it immediately so the Mill Floor can show it and
+    /// the reference set has a stable source id.
+    /// </summary>
+    private static async Task<IResult> AttachMediaSourceAsync(
+        Guid campaignId,
+        MediaSourceAttachRequest request,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        if (!request.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+            && !request.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Problem("The attached source must be audio or video.", statusCode: 400);
+        }
+        if (!await db.Campaigns.AnyAsync(campaign => campaign.Id == campaignId, ct))
+        {
+            return Results.NotFound();
+        }
+
+        var hash = request.ContentHash.Trim();
+        var existing = await db.SourceAssets.SingleOrDefaultAsync(source =>
+            source.CampaignId == campaignId
+            && source.Modality == SourceModalities.Media
+            && source.ContentHash == hash, ct);
+        if (existing is not null)
+        {
+            existing.LocalPath = request.LocalPath.Trim();
+            existing.Label = request.Label.Trim();
+            existing.ContentType = request.ContentType.Trim().ToLowerInvariant();
+            existing.SizeBytes = request.SizeBytes;
+            existing.UpdatedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(ToSourceResponse(existing));
+        }
+
+        var now = clock.GetUtcNow();
+        var revisionId = Guid.NewGuid();
+        var snapshotHash = Convert.ToHexStringLower(SHA256.HashData(
+            Encoding.UTF8.GetBytes($"{hash}\n{request.SizeBytes}\n{request.Label.Trim()}")));
+        var source = new SourceAsset
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.TenantId!.Value,
+            CampaignId = campaignId,
+            Kind = request.ContentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+                ? SourceKinds.Video
+                : SourceKinds.Transcript,
+            Modality = SourceModalities.Media,
+            Label = request.Label.Trim(),
+            ContentType = request.ContentType.Trim().ToLowerInvariant(),
+            SizeBytes = request.SizeBytes,
+            LocalPath = request.LocalPath.Trim(),
+            ContentHash = hash,
+            SnapshotIdentity = $"sha256:{snapshotHash}",
+            SnapshotHash = snapshotHash,
+            CurrentEvidenceRevision = 1,
+            CurrentEvidenceRevisionId = revisionId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.SourceAssets.Add(source);
+        await db.SaveChangesAsync(ct);
+        return Results.Created(
+            $"/api/v1/campaigns/{campaignId}/sources/{source.Id}", ToSourceResponse(source));
     }
 
     private static Task<IResult> ImportWebPageAsync(

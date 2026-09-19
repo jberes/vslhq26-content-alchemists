@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Blob;
 using Castmill.Api.Services.Images;
+using Castmill.Core;
 using Castmill.Core.Ai;
 using Castmill.Core.Auth;
 using Castmill.Core.Resources;
@@ -173,6 +174,43 @@ public sealed class PlanEndpointsTests(CastmillApiFactory factory)
         var afterClear = (await cleared.Content.ReadFromJsonAsync<SourceAssetResponse>())!;
         Assert.Null(afterClear.LocalPath);
         Assert.Null(afterClear.ContentHash);
+    }
+
+    [Fact]
+    public async Task A_video_attached_without_transcription_becomes_a_mill_floor_source()
+    {
+        await using var app = WithFakeModel(Draft);
+        var client = await AuthedClientAsync(app, "attached-video");
+        var campaign = (await (await client.PostAsJsonAsync(
+            "/api/v1/campaigns", new CampaignCreateRequest("Video references", null)))
+            .Content.ReadFromJsonAsync<CampaignResponse>())!;
+        var request = new MediaSourceAttachRequest(
+            "React-Data-Grid-Accessibility.mp4",
+            "/Users/jasonberes/Camtasia/React-Data-Grid-Accessibility/React-Data-Grid-Accessibility.mp4",
+            "size-and-head-tail-fingerprint", "video/mp4", 42_000_000);
+
+        var attached = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/sources/media", request);
+
+        Assert.Equal(HttpStatusCode.Created, attached.StatusCode);
+        var source = (await attached.Content.ReadFromJsonAsync<SourceAssetResponse>())!;
+        Assert.Equal(SourceKinds.Video, source.Kind);
+        Assert.Equal(SourceModalities.Media, source.Modality);
+        Assert.Equal(request.LocalPath, source.LocalPath);
+        Assert.Equal(request.ContentHash, source.ContentHash);
+        var listed = (await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaign.Id}/sources"))!;
+        Assert.Equal(source.Id, Assert.Single(listed).Id);
+
+        // Choosing the same recording again re-links the existing source instead of adding
+        // a duplicate video card to the Mill Floor.
+        var reattached = await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaign.Id}/sources/media",
+            request with { LocalPath = "/Volumes/Media/React-Data-Grid-Accessibility.mp4" });
+        Assert.Equal(HttpStatusCode.OK, reattached.StatusCode);
+        listed = (await client.GetFromJsonAsync<List<SourceAssetResponse>>(
+            $"/api/v1/campaigns/{campaign.Id}/sources"))!;
+        Assert.Equal("/Volumes/Media/React-Data-Grid-Accessibility.mp4", Assert.Single(listed).LocalPath);
     }
 
     // ---- Brand knowledge (ADR-056) --------------------------------------------------------

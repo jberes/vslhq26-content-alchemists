@@ -4,6 +4,15 @@ namespace Castmill.UI.Http;
 
 public sealed class EvidenceClient(ApiClient api)
 {
+    public Task<SourceAssetResponse> AttachMediaSourceAsync(
+        Guid campaignId, string label, string localPath, string contentHash,
+        string contentType, long sizeBytes, CancellationToken ct = default) =>
+        api.PostAsync<MediaSourceAttachRequest, SourceAssetResponse>(
+            $"api/v1/campaigns/{campaignId}/sources/media",
+            new MediaSourceAttachRequest(label, localPath, contentHash, contentType, sizeBytes),
+            anonymous: false,
+            ct);
+
     /// <summary>Media link (ADR-057): local path + fingerprint and/or the cloud copy's asset id. Null leaves a field, empty clears it.</summary>
     public Task<SourceAssetResponse> SetMediaLinkAsync(
         Guid campaignId, Guid sourceAssetId, string? localPath = null, string? contentHash = null,

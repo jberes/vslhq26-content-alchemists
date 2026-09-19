@@ -3,6 +3,7 @@ using Castmill.Core;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Castmill.UI.Tests;
 
@@ -19,6 +20,8 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
     private static readonly Guid FilledSlotId = Guid.Parse("91111111-1111-1111-1111-333333333333");
     private static readonly Guid BlogId = Guid.Parse("91111111-1111-1111-1111-444444444444");
     private static readonly Guid NewSlotId = Guid.Parse("91111111-1111-1111-1111-555555555555");
+    private static readonly Guid YoutubeId = Guid.Parse("91111111-1111-1111-1111-666666666666");
+    private static readonly Guid YoutubeSlotId = Guid.Parse("91111111-1111-1111-1111-777777777777");
 
     public ImageStudioSheetTests()
     {
@@ -152,6 +155,29 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
         Assert.Contains(BlogId.ToString(), body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task A_youtube_focus_link_shows_only_its_single_thumbnail_box()
+    {
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
+            new CampaignPreview(Campaign(), [Blog(), Youtube()],
+                [EmptySlot(), FilledSlot(), YoutubeSlot()], 1, 3));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{YoutubeSlotId}/variants",
+            new List<ImageVariantResponse>());
+        Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo($"campaigns/{CampaignId}/images?artifact={YoutubeId}");
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__group").Count == 1, TimeSpan.FromSeconds(5));
+
+        var group = view.Find(".cm-studio__group");
+        Assert.Contains("YouTube package", group.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Accessibility that actually works", group.TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Enterprise grid performance", view.Markup, StringComparison.Ordinal);
+        Assert.Single(view.FindAll(".cm-studio__card:not(.cm-studio__card--add)"));
+        Assert.Empty(view.FindAll(".cm-studio__card--add"));
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private static ImageSlotResponse EmptySlot() => new(
@@ -170,9 +196,18 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
         null, null, null, null, true,
         "Empty", null, null, DateTimeOffset.UtcNow, ArtifactId: BlogId);
 
+    private static ImageSlotResponse YoutubeSlot() => new(
+        YoutubeSlotId, CampaignId, "youtube-thumbnail", 1280, 720,
+        null, null, null, "ACCESS FOR ALL", true,
+        "Empty", null, null, DateTimeOffset.UtcNow, ArtifactId: YoutubeId);
+
     private static ArtifactPreviewResponse Blog() =>
         new(BlogId, CampaignId, "blog", "Enterprise grid performance", ArtifactStatus.Draft, 1,
             DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow);
+
+    private static ArtifactPreviewResponse Youtube() =>
+        new(YoutubeId, CampaignId, "youtube", "Accessibility that actually works",
+            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
     private static CampaignResponse Campaign() =>
         new(CampaignId, Guid.NewGuid(), "Webinar campaign", null,

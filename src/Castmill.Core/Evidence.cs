@@ -59,6 +59,7 @@ public sealed class EvidenceBlock : ITenantScoped
 public static class SourceKinds
 {
     public const string Transcript = "transcript";
+    public const string Video = "video";
     public const string WebPage = "webpage";
     public const string Document = "document";
     public const string CastmillArtifact = "castmill-artifact";

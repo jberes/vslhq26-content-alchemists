@@ -1,20 +1,29 @@
-// Clipboard access differs between a normal browser and the MAUI embedded WebView. Prefer the
-// asynchronous API, then fall back to the long-supported selection command. The fallback must
-// remain synchronous with the click's user activation, which is why it lives entirely in JS.
+// Clipboard access differs between browsers and embedded WebViews. The selection copy MUST run
+// before any awaited Clipboard API call: Safari/WebKit can reject navigator.clipboard and revoke
+// the click's user activation before the promise settles, making a later execCommand fallback
+// impossible. If the synchronous path is unavailable, invoke the async API while activation is
+// still live.
 
 export async function copyText(value) {
     const text = String(value ?? '');
+    // Do this first for WebKit, but do not trust execCommand's return value as proof: Chromium
+    // can report true without changing the OS clipboard. Invoke the modern API immediately
+    // afterwards, still in the original click turn.
+    const selectionCopied = copyTextSelection(text);
 
     if (globalThis.navigator?.clipboard?.writeText) {
         try {
             await globalThis.navigator.clipboard.writeText(text);
             return true;
         } catch {
-            // Permission policy, an insecure WebView origin, or an OS clipboard restriction can
-            // reject this even though the API exists. Continue to the selection fallback.
+            return selectionCopied;
         }
     }
 
+    return selectionCopied;
+}
+
+function copyTextSelection(text) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -23,6 +32,12 @@ export async function copyText(value) {
     textarea.style.inset = '0 auto auto -10000px';
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
+
+    const selection = globalThis.getSelection?.();
+    const previousRanges = selection
+        ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange())
+        : [];
+    const active = document.activeElement;
 
     try {
         textarea.focus({ preventScroll: true });
@@ -33,12 +48,18 @@ export async function copyText(value) {
         return false;
     } finally {
         textarea.remove();
+        selection?.removeAllRanges();
+        previousRanges.forEach(range => selection?.addRange(range));
+        if (active instanceof HTMLElement) {
+            active.focus({ preventScroll: true });
+        }
     }
 }
 
 export async function copyFormatted(textValue, htmlValue) {
     const text = String(textValue ?? '');
     const html = String(htmlValue ?? '');
+    const selectionCopied = copyFormattedSelection(html);
 
     if (globalThis.navigator?.clipboard?.write && globalThis.ClipboardItem) {
         try {
@@ -49,11 +70,14 @@ export async function copyFormatted(textValue, htmlValue) {
             await globalThis.navigator.clipboard.write([item]);
             return true;
         } catch {
-            // Mac Catalyst's embedded WebView may expose ClipboardItem but reject write().
-            // Continue to the synchronous selection path while the click activation is live.
+            return selectionCopied;
         }
     }
 
+    return selectionCopied;
+}
+
+function copyFormattedSelection(html) {
     const container = document.createElement('div');
     container.innerHTML = html;
     container.contentEditable = 'true';

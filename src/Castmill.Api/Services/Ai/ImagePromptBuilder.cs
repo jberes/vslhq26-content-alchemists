@@ -17,6 +17,12 @@ public interface IImagePromptBuilder
         Guid userId, ImageSlot slot, Campaign campaign, Artifact? owner, BrandContext brand,
         IReadOnlyList<ImageReference>? references, bool textMayBeRendered, CancellationToken ct);
 
+    /// <summary>Stores a producer-edited Auto brief against the same input fingerprint used
+    /// by generated briefs, so it remains authoritative until those inputs really change.</summary>
+    void SetBrief(
+        ImageSlot slot, Campaign campaign, Artifact? owner, BrandContext brand,
+        IReadOnlyList<ImageReference>? references, bool textMayBeRendered, string brief);
+
     /// <summary>Forget the cached brief so the next build writes a fresh one.</summary>
     void Invalidate(ImageSlot slot);
 }
@@ -35,18 +41,7 @@ public sealed class ImagePromptBuilder(
             return ImagePromptComposer.Compose(slot, campaign, owner, brand, null, references);
         }
 
-        var request = new VisualBriefRequest(
-            slot.Kind, slot.TargetWidth, slot.TargetHeight,
-            Subject: owner?.Title ?? campaign.Name,
-            ContentDigest: ImagePromptComposer.ContentDigest(owner?.ContentJson),
-            CampaignBrief: campaign.Brief,
-            CreativeDirection: slot.Prompt,
-            BrandLook: brand.ImageStyleBlock,
-            Audience: campaign.AudiencePersona,
-            ReferenceKinds: [.. (references ?? []).Select(r => r.Kind)],
-            TextMayBeRendered: textMayBeRendered,
-            HeadlineWillBeComposited: !string.IsNullOrWhiteSpace(slot.HeadlineText)
-                || (ImagePromptRules.IsTextFirst(slot.Kind) && !textMayBeRendered));
+        var request = Request(slot, campaign, owner, brand, references, textMayBeRendered);
         var hash = Hash(request, owner);
 
         if (slot.VisualBrief is { Length: > 0 } cached && string.Equals(slot.VisualBriefInputHash, hash, StringComparison.Ordinal))
@@ -58,7 +53,9 @@ public sealed class ImagePromptBuilder(
         if (brief is null)
         {
             logger.LogWarning("No visual brief for slot {SlotId}; composing deterministically", slot.Id);
-            return ImagePromptComposer.Compose(slot, campaign, owner, brand, null, references);
+            // Cache the deterministic fallback as the raw brief too. That keeps it editable
+            // and lets the normal FromBrief path add reference roles exactly once.
+            brief = ImagePromptComposer.Compose(slot, campaign, owner, brand, null, references: null);
         }
 
         slot.VisualBrief = brief;
@@ -74,10 +71,46 @@ public sealed class ImagePromptBuilder(
         return ImagePromptComposer.FromBrief(brief, references);
     }
 
+    public void SetBrief(
+        ImageSlot slot, Campaign campaign, Artifact? owner, BrandContext brand,
+        IReadOnlyList<ImageReference>? references, bool textMayBeRendered, string brief)
+    {
+        var request = Request(slot, campaign, owner, brand, references, textMayBeRendered);
+        slot.VisualBrief = brief.Trim();
+        slot.VisualBriefInputHash = Hash(request, owner);
+    }
+
     public void Invalidate(ImageSlot slot)
     {
         slot.VisualBrief = null;
         slot.VisualBriefInputHash = null;
+    }
+
+    private static VisualBriefRequest Request(
+        ImageSlot slot, Campaign campaign, Artifact? owner, BrandContext brand,
+        IReadOnlyList<ImageReference>? references, bool textMayBeRendered) =>
+        new(
+            slot.Kind, slot.TargetWidth, slot.TargetHeight,
+            Subject: owner?.Title ?? campaign.Name,
+            ContentDigest: ImagePromptComposer.ContentDigest(owner?.ContentJson),
+            CampaignBrief: campaign.Brief,
+            CreativeDirection: slot.Prompt,
+            BrandLook: brand.ImageStyleBlock,
+            Audience: campaign.AudiencePersona,
+            ReferenceKinds: [.. (references ?? []).Select(r => r.Kind)],
+            TextMayBeRendered: textMayBeRendered,
+            HeadlineWillBeComposited: !string.IsNullOrWhiteSpace(slot.HeadlineText)
+                || (ImagePromptRules.IsTextFirst(slot.Kind) && !textMayBeRendered),
+            BrandContentTemplate: TemplateFor(slot, owner, brand));
+
+    internal static string? TemplateFor(ImageSlot slot, Artifact? owner, BrandContext brand)
+    {
+        var kind = slot.Kind.Equals("youtube-thumbnail", StringComparison.OrdinalIgnoreCase)
+            ? "youtube"
+            : owner?.Kind;
+        return kind is not null && brand.TemplateSteeringByKind.TryGetValue(kind, out var template)
+            ? template
+            : null;
     }
 
     /// <summary>Everything the brief was written from. The owner's version stands in for its content.</summary>
@@ -85,7 +118,9 @@ public sealed class ImagePromptBuilder(
     {
         var text = string.Join('\u001f',
             r.SlotKind, r.TargetWidth, r.TargetHeight, r.Subject, owner?.Version, owner?.UpdatedAt.UtcTicks,
-            r.CampaignBrief, r.CreativeDirection, r.BrandLook, r.Audience, string.Join(',', r.ReferenceKinds), r.TextMayBeRendered);
+            r.CampaignBrief, r.CreativeDirection, r.BrandLook, r.Audience,
+            string.Join(',', r.ReferenceKinds), r.TextMayBeRendered, r.HeadlineWillBeComposited,
+            r.BrandContentTemplate);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..32];
     }
 }

@@ -440,6 +440,75 @@ public sealed class BrandAsset : ITenantScoped
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>A reviewed group of stills extracted from one campaign video.</summary>
+public sealed class ReferenceSet : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid VideoAssetId { get; set; }
+    public required string Name { get; set; }
+    public string? Purpose { get; set; }
+    public required string SelectionGoal { get; set; }
+    public long DurationMs { get; set; }
+    public int SourceWidth { get; set; }
+    public int SourceHeight { get; set; }
+    public double FrameRate { get; set; }
+    public Guid CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
+/// One exact decoded video frame plus its non-generative crop derivative. The source PNG is
+/// retained so Full frame can be restored even when the original recording later disappears.
+/// </summary>
+public sealed class ReferenceImage : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid ReferenceSetId { get; set; }
+    public Guid BrandId { get; set; }
+    public Guid CampaignId { get; set; }
+    public Guid VideoAssetId { get; set; }
+    public Guid SourceFrameAssetId { get; set; }
+    public Guid DerivedAssetId { get; set; }
+    public long SourceTimestampMs { get; set; }
+    public long? SourceFrameNumber { get; set; }
+    public int CropX { get; set; }
+    public int CropY { get; set; }
+    public int CropWidth { get; set; }
+    public int CropHeight { get; set; }
+    public required string CropMethod { get; set; }
+    public required string SelectionMethod { get; set; }
+    public string? PerceptualHash { get; set; }
+    public double? QualityScore { get; set; }
+    public string? AiSummary { get; set; }
+    public string? Label { get; set; }
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>A crop that can be reused for a brand's recurring recording setup.</summary>
+public sealed class ReferenceCropPreset : ITenantScoped
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid BrandId { get; set; }
+    public required string Name { get; set; }
+    public int SourceWidth { get; set; }
+    public int SourceHeight { get; set; }
+    public int CropX { get; set; }
+    public int CropY { get; set; }
+    public int CropWidth { get; set; }
+    public int CropHeight { get; set; }
+    public required string Kind { get; set; }
+    public Guid CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 /// <summary>
 /// Per-brand primary content brief for one generator kind — "our YouTube strategy", "our
 /// newsletter format". It takes precedence over generic writing guidance on every run for

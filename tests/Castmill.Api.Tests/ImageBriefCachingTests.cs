@@ -35,6 +35,7 @@ public sealed class ImageBriefCachingTests(CastmillApiFactory factory)
         Assert.Equal(1, writer.Calls);
         Assert.StartsWith("BRIEF #1", first.Prompt, StringComparison.Ordinal);
         Assert.StartsWith("BRIEF #1", second.Prompt, StringComparison.Ordinal);
+        Assert.StartsWith("BRIEF #1", first.VisualBrief, StringComparison.Ordinal);
         Assert.Equal("Auto", first.PromptMode);
         // The writer was told what it is briefing for.
         var request = Assert.Single(writer.Requests);
@@ -46,11 +47,21 @@ public sealed class ImageBriefCachingTests(CastmillApiFactory factory)
         Assert.Contains("Render ONLY the text the brief", first.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Do not render any new text", first.Prompt, StringComparison.Ordinal);
 
+        const string edited = "Producer-edited brief: one warm focal subject, no visual clutter.";
+        var save = await client.PutAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/brief",
+            new ImageVisualBriefUpdateRequest(edited));
+        Assert.Equal(HttpStatusCode.NoContent, save.StatusCode);
+        var editedPreview = await PreviewAsync(client, campaignId, slotId);
+        Assert.Equal(1, writer.Calls);
+        Assert.Equal(edited, editedPreview.VisualBrief);
+        Assert.StartsWith(edited, editedPreview.Prompt, StringComparison.Ordinal);
+
         var generate = await client.PostAsJsonAsync(
             $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate", new { variants = 1 });
         generate.EnsureSuccessStatusCode();
         Assert.Equal(1, writer.Calls);
-        Assert.StartsWith("BRIEF #1", Assert.Single(renderer.Prompts), StringComparison.Ordinal);
+        Assert.StartsWith(edited, Assert.Single(renderer.Prompts), StringComparison.Ordinal);
         Assert.True(renderer.AllowedText.Single());
 
         var rewrite = await client.PostAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/brief/rewrite", null);

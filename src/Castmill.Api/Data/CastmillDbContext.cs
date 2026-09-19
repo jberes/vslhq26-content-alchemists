@@ -37,6 +37,9 @@ public sealed class CastmillDbContext(
     public DbSet<MediaUpload> MediaUploads => Set<MediaUpload>();
     public DbSet<BrandProfile> BrandProfiles => Set<BrandProfile>();
     public DbSet<BrandAsset> BrandAssets => Set<BrandAsset>();
+    public DbSet<ReferenceSet> ReferenceSets => Set<ReferenceSet>();
+    public DbSet<ReferenceImage> ReferenceImages => Set<ReferenceImage>();
+    public DbSet<ReferenceCropPreset> ReferenceCropPresets => Set<ReferenceCropPreset>();
     public DbSet<BrandTemplate> BrandTemplates => Set<BrandTemplate>();
     public DbSet<BrandKnowledgeSource> BrandKnowledgeSources => Set<BrandKnowledgeSource>();
     public DbSet<BrandSkill> BrandSkills => Set<BrandSkill>();
@@ -421,6 +424,41 @@ public sealed class CastmillDbContext(
             e.HasQueryFilter(a => a.TenantId == _tenantProvider.TenantId);
         });
 
+        builder.Entity<ReferenceSet>(e =>
+        {
+            e.Property(item => item.Name).HasMaxLength(200);
+            e.Property(item => item.Purpose).HasMaxLength(500);
+            e.Property(item => item.SelectionGoal).HasMaxLength(30);
+            e.HasIndex(item => new { item.TenantId, item.CampaignId, item.VideoAssetId });
+            e.HasOne<Campaign>().WithMany().HasForeignKey(item => item.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(item => item.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == item.CampaignId));
+        });
+
+        builder.Entity<ReferenceImage>(e =>
+        {
+            e.Property(item => item.CropMethod).HasMaxLength(20);
+            e.Property(item => item.SelectionMethod).HasMaxLength(30);
+            e.Property(item => item.PerceptualHash).HasMaxLength(32);
+            e.Property(item => item.AiSummary).HasMaxLength(1000);
+            e.Property(item => item.Label).HasMaxLength(200);
+            e.HasIndex(item => new { item.TenantId, item.ReferenceSetId, item.SortOrder });
+            e.HasIndex(item => new { item.TenantId, item.CampaignId, item.VideoAssetId });
+            e.HasOne<ReferenceSet>().WithMany().HasForeignKey(item => item.ReferenceSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasQueryFilter(item => item.TenantId == _tenantProvider.TenantId
+                || Campaigns.Any(campaign => campaign.Id == item.CampaignId));
+        });
+
+        builder.Entity<ReferenceCropPreset>(e =>
+        {
+            e.Property(item => item.Name).HasMaxLength(120);
+            e.Property(item => item.Kind).HasMaxLength(30);
+            e.HasIndex(item => new { item.TenantId, item.BrandId, item.Name }).IsUnique();
+            e.HasQueryFilter(item => item.TenantId == _tenantProvider.TenantId);
+        });
+
         builder.Entity<BrandTemplate>(e =>
         {
             e.Property(t => t.Kind).HasMaxLength(50);
@@ -547,6 +585,8 @@ public sealed class CastmillDbContext(
                     GenerationRun entity => entity.CampaignId,
                     ImageVariant entity => entity.CampaignId,
                     MediaUpload entity => entity.CampaignId,
+                    ReferenceSet entity => entity.CampaignId,
+                    ReferenceImage entity => entity.CampaignId,
                     _ => (Guid?)null,
                 },
             })

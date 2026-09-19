@@ -245,6 +245,11 @@ public sealed record ImageSlotPatchRequest(
     /// <summary>Clears a card override so it inherits the workspace image-model default.</summary>
     bool? UseDefaultModel = null);
 
+/// <summary>Producer-edited Auto-mode visual brief. It remains cached until one of the
+/// inputs used to create the brief changes, just like an AI-written brief.</summary>
+public sealed record ImageVisualBriefUpdateRequest(
+    [property: Required, MinLength(1), MaxLength(8000)] string VisualBrief);
+
 /// <summary>Adds an image card to a specific content artifact. The server chooses a
 /// platform-correct shape from the artifact kind unless explicit dimensions are supplied.</summary>
 public sealed record ImageSlotCreateRequest(
@@ -286,7 +291,9 @@ public sealed record ImagePromptPreviewResponse(
     /// <summary>Percent of each cropped edge lost to the crop (0 when the frame already matches).</summary>
     double CropPercentHorizontal,
     double CropPercentVertical,
-    bool ReferencesAttach);
+    bool ReferencesAttach,
+    /// <summary>The editable Auto-mode brief before reference guidance and frame rules are appended.</summary>
+    string? VisualBrief = null);
 
 /// <summary>A persisted take for a slot. State: Candidate | Kept | Discarded.</summary>
 public sealed record ImageVariantResponse(

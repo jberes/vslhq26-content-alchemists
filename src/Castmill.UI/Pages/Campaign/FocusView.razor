@@ -1882,7 +1882,11 @@
                 return [];
             }
 
-            var slots = Campaign.ImageSlots.Where(slot => slot.ArtifactId == artifactId).ToList();
+            // Keep this rail about the open content item. A YouTube package owns exactly
+            // one output image (youtube-thumbnail); uploaded/extracted screenshots are
+            // references and must not appear as extra output-image boxes here.
+            var slots = Campaign.ImageSlots.Where(slot => slot.ArtifactId == artifactId
+                && SlotMatchesArtifact(slot.Kind, _artifact.Kind)).ToList();
             var legacyChosen = Campaign.ImageSlots
                 .Where(slot => slot.ArtifactId is null
                     && SlotMatchesArtifact(slot.Kind, _artifact.Kind)

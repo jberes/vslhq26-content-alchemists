@@ -94,6 +94,7 @@ public static class CastmillUiServices
         services.AddScoped<PublishClient>();
         services.AddScoped<EvidenceClient>();
         services.AddScoped<MediaUploadClient>();
+        services.AddScoped<VideoReferencesClient>();
 
         // The dependency graph is genuinely circular: the token provider refreshes through
         // AuthClient, which resolves an HttpClient whose handler needs the token provider.

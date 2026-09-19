@@ -33,6 +33,8 @@ public static class ImageSlotEndpoints
         group.MapPatch("/{slotId:guid}", PatchAsync).Validate<ImageSlotPatchRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/generate", GenerateAsync).Validate<GenerateVariantsRequest>().RequireRateLimiting("ai");
         group.MapGet("/{slotId:guid}/prompt-preview", PromptPreviewAsync);
+        group.MapPut("/{slotId:guid}/brief", UpdateBriefAsync)
+            .Validate<ImageVisualBriefUpdateRequest>().RequireRateLimiting("writes");
         group.MapPost("/{slotId:guid}/brief/rewrite", RewriteBriefAsync).RequireRateLimiting("writes");
         group.MapPut("/{slotId:guid}/overlay", SetOverlayAsync).Validate<OverlaySpec>().RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}/overlay", ClearOverlayAsync).RequireRateLimiting("writes");
@@ -554,6 +556,64 @@ public static class ImageSlotEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>Saves a producer's edits to the generated Auto brief without changing the
+    /// slot to Manual mode or treating the edited text as new creative-direction input.</summary>
+    private static async Task<IResult> UpdateBriefAsync(
+        Guid campaignId,
+        Guid slotId,
+        string? model,
+        ImageVisualBriefUpdateRequest request,
+        ClaimsPrincipal principal,
+        IImageReferenceResolver references,
+        IImagePromptBuilder promptBuilder,
+        IBrandContextService brands,
+        IImageRenderer renderer,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+        if (!string.Equals(slot.PromptMode, "Auto", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["VisualBrief"] = ["Only an Auto-mode visual brief can be edited here."],
+            });
+        }
+        if (string.IsNullOrWhiteSpace(request.VisualBrief))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["VisualBrief"] = ["The visual brief cannot be empty."],
+            });
+        }
+
+        var campaign = await db.Campaigns.SingleAsync(c => c.Id == campaignId, ct);
+        var brand = await brands.ResolveAsync(campaign, ct);
+        var owner = slot.ArtifactId is { } artifactId
+            ? await db.Artifacts.SingleOrDefaultAsync(
+                a => a.Id == artifactId && a.CampaignId == campaignId, ct)
+            : null;
+        var referenceKinds = await references.ResolveKindsAsync(campaign, slot, ct);
+        var placeholders = referenceKinds
+            .Select(kind => new ImageReference(Guid.Empty, kind, "image/png", [], kind))
+            .ToList();
+        var userId = AuthEndpoints.GetUserId(principal);
+        var modelAlias = string.IsNullOrWhiteSpace(model) ? slot.ModelAlias : model.Trim();
+        var allowText = ImagePromptRules.AllowsRenderedText(
+            slot.Kind, slot.HeadlineText, await renderer.RendersTextAsync(userId, modelAlias, ct));
+
+        promptBuilder.SetBrief(
+            slot, campaign, owner, brand, placeholders, allowText, request.VisualBrief);
+        slot.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
     /// <summary>
     /// What a generate call would send RIGHT NOW (ADR-054), including the house composition
     /// rules the renderer appends, so the studio can show the whole text instead of a
@@ -599,6 +659,9 @@ public static class ImageSlotEndpoints
         var prompt = slot.PromptMode == "Manual" && string.IsNullOrWhiteSpace(slot.Prompt)
             ? string.Empty
             : await promptBuilder.BuildAsync(userId, slot, campaign, owner, brand, placeholders, allowText, ct);
+        var editableBrief = string.Equals(slot.PromptMode, "Auto", StringComparison.OrdinalIgnoreCase)
+            ? slot.VisualBrief
+            : null;
 
         // The frame is the PROVIDER's: MAI paints the slot's exact size, Gemini a native 16:9
         // frame, the gpt-image-2.5 pair its native 16:9, older gpt-image one of three fixed
@@ -621,7 +684,7 @@ public static class ImageSlotEndpoints
         return Results.Ok(new ImagePromptPreviewResponse(
             prompt, slot.PromptMode, slot.TargetWidth, slot.TargetHeight,
             frame.Width, frame.Height,
-            Math.Round(horizontal, 1), Math.Round(vertical, 1), referencesAttach));
+            Math.Round(horizontal, 1), Math.Round(vertical, 1), referencesAttach, editableBrief));
     }
 
     private static async Task<IResult> GeneratePendingAsync(

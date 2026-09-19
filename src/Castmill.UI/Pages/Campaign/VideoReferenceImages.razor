@@ -1,0 +1,622 @@
+@page "/campaigns/{CampaignId:guid}/references"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Web
+@using Castmill.Core
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.Platform
+@inject CampaignsClient Campaigns
+@inject EvidenceClient Evidence
+@inject BrandsClient Brands
+@inject VideoReferencesClient References
+@inject MediaUploadClient MediaUploads
+@inject IMediaPipeline Media
+@inject INotifier Notifier
+
+<PageTitle>Video references — Castmill</PageTitle>
+
+<div class="cm-page cm-reference-page" tabindex="0" @onkeydown="HandleKeyAsync">
+    <header class="cm-reference-hero">
+        <div>
+            <span class="cm-kicker">Video reference images</span>
+            <h1>Extract exact frames. Keep the source pixels.</h1>
+            <p class="cm-meta">Capture manually or let Castmill select strong, distinct frames. AI may rank and suggest crops; it never generates or alters pixels.</p>
+        </div>
+        <a class="cm-button cm-button--quiet" href="campaigns/@CampaignId/images">Back to Image Studio</a>
+    </header>
+
+    @if (_loading)
+    {
+        <p class="cm-meta" role="status">Loading campaign and saved reference sets…</p>
+    }
+    else if (_error is not null)
+    {
+        <p class="cm-form__error" role="alert">@_error</p>
+    }
+    else
+    {
+        <section class="cm-reference-source" aria-labelledby="reference-source-heading">
+            <div class="cm-reference-section-head">
+                <div>
+                    <span class="cm-kicker">1 · Source</span>
+                    <h2 id="reference-source-heading">Choose the campaign video</h2>
+                </div>
+                @if (Media.CanProcessLocally)
+                {
+                    <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="PickVideoAsync">Choose video file…</button>
+                }
+            </div>
+
+            @if (_sources.Count > 0)
+            {
+                <label class="cm-field">
+                    <span>Campaign source</span>
+                    <select class="cm-input" value="@(_source?.Id.ToString() ?? string.Empty)" @onchange="SourceChangedAsync" disabled="@_busy">
+                        @foreach (var source in _sources)
+                        {
+                            <option value="@source.Id">@source.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+
+            @if (!Media.CanProcessLocally)
+            {
+                <p class="cm-callout">Frame extraction runs locally in the Mac desktop app. @Media.UnavailableReason</p>
+            }
+            else if (_media is null)
+            {
+                <div class="cm-reference-drop">
+                    <strong>Locate the original video to begin.</strong>
+                    <span class="cm-meta">The file stays local until you explicitly save selected frames.</span>
+                    <button type="button" class="cm-button" @onclick="PickVideoAsync">Choose video file…</button>
+                </div>
+            }
+            else
+            {
+                @if (_videoUrl is not null)
+                {
+                    <video class="cm-reference-video" controls preload="metadata" src="@_videoUrl" aria-label="Video frame source"></video>
+                }
+                <div class="cm-reference-source-meta cm-meta">
+                    <span class="cm-mono">@_media.FileName</span>
+                    @if (_metadata is not null)
+                    {
+                        <span>@_metadata.Width × @_metadata.Height</span>
+                        <span>@Clock(_metadata.DurationSeconds)</span>
+                        <span>@_metadata.FrameRate.ToString("0.###", CultureInfo.InvariantCulture) fps</span>
+                    }
+                </div>
+            }
+        </section>
+
+        @if (_media is not null && _metadata is not null)
+        {
+            <section class="cm-reference-workspace" aria-labelledby="reference-select-heading">
+                <div class="cm-reference-section-head">
+                    <div>
+                        <span class="cm-kicker">2 · Select</span>
+                        <h2 id="reference-select-heading">Build the contact sheet</h2>
+                    </div>
+                    <div class="cm-reference-tabs" role="tablist" aria-label="Frame selection method">
+                        <button type="button" role="tab" aria-selected="@(_mode == "auto")" class="cm-button cm-button--quiet" @onclick="UseAutoMode">Auto select</button>
+                        <button type="button" role="tab" aria-selected="@(_mode == "manual")" class="cm-button cm-button--quiet" @onclick="UseManualModeAsync">Manual capture</button>
+                    </div>
+                </div>
+
+                @if (_mode == "auto")
+                {
+                    <div class="cm-reference-controls">
+                        <label class="cm-field"><span>Frames</span><select class="cm-input" @bind="_quantity"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="20">20</option></select></label>
+                        <label class="cm-field"><span>Diversity</span><select class="cm-input" @bind="_diversity"><option value="even">Even</option><option value="balanced">Balanced</option><option value="key">Key moments</option></select></label>
+                        <label class="cm-field"><span>Selection goal</span><select class="cm-input" @bind="_goal"><option value="product">Product</option><option value="ui-demonstration">UI demo</option><option value="people">People</option><option value="key-moments">Key moments</option></select></label>
+                        <label class="cm-check"><input type="checkbox" @bind="_useAi" /> Use AI to rank and suggest crop</label>
+                        <button type="button" class="cm-button" disabled="@_busy" @onclick="AnalyzeAsync">@(_busy ? _progress ?? "Analyzing…" : "Analyze video")</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="cm-reference-manual">
+                        <input type="range" min="0" max="@_metadata.DurationSeconds" step="@(1 / Math.Max(.001, _metadata.FrameRate))" @bind="_manualTime" aria-label="Video position" />
+                        <div class="cm-reference-manual-actions">
+                            <button type="button" class="cm-button cm-button--quiet" @onclick="() => Step(-1)">← Previous frame</button>
+                            <span class="cm-mono">@Clock(_manualTime) · frame @FrameNumber(_manualTime)</span>
+                            <button type="button" class="cm-button cm-button--quiet" @onclick="() => Step(1)">Next frame →</button>
+                            <button type="button" class="cm-button" disabled="@_busy" @onclick="CaptureAsync">Capture frame</button>
+                            <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="LoadFilmstripAsync">Refresh filmstrip</button>
+                        </div>
+                        <p class="cm-meta">Keyboard: ←/→ steps one frame · C captures the current frame.</p>
+                        @if (_filmstrip.Count > 0)
+                        {
+                            <div class="cm-reference-filmstrip" aria-label="Frames around current timestamp">
+                                @foreach (var nearby in _filmstrip)
+                                {
+                                    <button type="button" class="cm-reference-filmstrip-frame" title="Use @Clock(nearby.TimestampSeconds)"
+                                            @onclick="() => _manualTime = nearby.TimestampSeconds">
+                                        <img src="@DataUrl(nearby.PreviewJpeg)" alt="Nearby frame at @Clock(nearby.TimestampSeconds)" />
+                                        <span class="cm-mono">@Clock(nearby.TimestampSeconds)</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                        @if (_candidates.Count > 0)
+                        {
+                            <div class="cm-reference-markers" aria-label="Selected frame markers">
+                                @foreach (var selected in _candidates)
+                                {
+                                    <button type="button" class="cm-chip" @onclick="() => _manualTime = selected.TimestampSeconds">✓ @Clock(selected.TimestampSeconds)</button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_candidates.Count > 0)
+                {
+                    <div class="cm-reference-crop-panel">
+                        <div>
+                            <span class="cm-kicker">Crop once · apply to all</span>
+                            <p class="cm-meta">Suggested from stable margins and browser chrome. Change any value; the original full frame is always retained.</p>
+                        </div>
+                        <label class="cm-field"><span>X</span><input class="cm-input" type="number" min="0" max="@(_metadata.Width - 1)" @bind="_cropX" /></label>
+                        <label class="cm-field"><span>Y</span><input class="cm-input" type="number" min="0" max="@(_metadata.Height - 1)" @bind="_cropY" /></label>
+                        <label class="cm-field"><span>Width</span><input class="cm-input" type="number" min="1" max="@_metadata.Width" @bind="_cropWidth" /></label>
+                        <label class="cm-field"><span>Height</span><input class="cm-input" type="number" min="1" max="@_metadata.Height" @bind="_cropHeight" /></label>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="UseFullFrame">Full frame</button>
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@(_suggestedCrop is null)" @onclick="UseSuggestedCrop">Auto remove chrome</button>
+                        <button type="button" class="cm-button cm-button--quiet" @onclick="UseCustomCrop">Set crop once</button>
+                        @if (_presets.Count > 0)
+                        {
+                            <label class="cm-field"><span>Saved preset</span><select class="cm-input" @onchange="ApplyPreset"><option value="">Choose…</option>@foreach (var preset in _presets){<option value="@preset.Id">@preset.Name</option>}</select></label>
+                        }
+                        <label class="cm-field"><span>Preset name</span><input class="cm-input" @bind="_presetName" maxlength="120" /></label>
+                        <button type="button" class="cm-button cm-button--quiet" disabled="@(string.IsNullOrWhiteSpace(_presetName) || _busy)" @onclick="SavePresetAsync">Save crop preset</button>
+                        <span class="cm-chip cm-mono">@_cropMethod · @_cropConfidence</span>
+                    </div>
+
+                    <div class="cm-reference-grid" aria-label="Selected video frames">
+                        @for (var index = 0; index < _candidates.Count; index++)
+                        {
+                            var frame = _candidates[index];
+                            var position = index;
+                            <article class="cm-reference-frame">
+                                <img src="@DataUrl(frame.PreviewJpeg)" alt="Video frame at @Clock(frame.TimestampSeconds)" />
+                                <div class="cm-reference-frame-copy">
+                                    <input class="cm-input" aria-label="Frame label" @bind="frame.Label" maxlength="200" />
+                                    <span class="cm-meta cm-mono">@Clock(frame.TimestampSeconds) · score @frame.QualityScore.ToString("0", CultureInfo.InvariantCulture)</span>
+                                    @if (!string.IsNullOrWhiteSpace(frame.Warning)) { <span class="cm-form__warning">@frame.Warning</span> }
+                                    @if (!string.IsNullOrWhiteSpace(frame.AiSummary)) { <span class="cm-meta">@frame.AiSummary</span> }
+                                </div>
+                                <div class="cm-reference-frame-actions">
+                                    <button type="button" class="cm-button cm-button--quiet" disabled="@(position == 0)" @onclick="() => Move(position, -1)" aria-label="Move frame earlier">↑</button>
+                                    <button type="button" class="cm-button cm-button--quiet" disabled="@(position == _candidates.Count - 1)" @onclick="() => Move(position, 1)" aria-label="Move frame later">↓</button>
+                                    @if (_mode == "manual")
+                                    {
+                                        <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="() => ReplaceAsync(position)">Replace at scrubber</button>
+                                    }
+                                    <button type="button" class="cm-button cm-button--quiet" @onclick="() => Remove(frame)" aria-label="Remove frame">Remove</button>
+                                </div>
+                            </article>
+                        }
+                    </div>
+
+                    <section class="cm-reference-save">
+                        <label class="cm-field"><span>Reference set name</span><input class="cm-input" @bind="_setName" maxlength="200" /></label>
+                        <label class="cm-field"><span>Purpose (optional)</span><input class="cm-input" @bind="_purpose" maxlength="500" /></label>
+                        <button type="button" class="cm-button" disabled="@(_busy || string.IsNullOrWhiteSpace(_setName))" @onclick="SaveAsync">@(_busy ? _progress ?? "Saving…" : $"Save {_candidates.Count} reference images")</button>
+                    </section>
+                }
+            </section>
+        }
+
+        <section class="cm-reference-saved" aria-labelledby="reference-saved-heading">
+            <div class="cm-reference-section-head"><div><span class="cm-kicker">3 · Library</span><h2 id="reference-saved-heading">Saved reference sets</h2></div></div>
+            @if (_saved.Count == 0)
+            {
+                <p class="cm-meta">No video reference images have been saved for this campaign yet.</p>
+            }
+            @foreach (var set in _saved)
+            {
+                <article class="cm-reference-set">
+                    <header><div><strong>@set.Name</strong><p class="cm-meta">@set.Images.Count frames · @set.SelectionGoal · @set.CreatedAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)</p></div></header>
+                    <div class="cm-reference-grid">
+                        @foreach (var image in set.Images)
+                        {
+                            <article class="cm-reference-frame">
+                                @if (_thumbs.TryGetValue(image.DerivedAssetId, out var thumb)) { <img src="@thumb" alt="@(image.Label ?? "Saved video frame")" /> }
+                                <div class="cm-reference-frame-copy"><strong>@image.Label</strong><span class="cm-meta cm-mono">@Clock(image.SourceTimestampMs / 1000d) · @image.Crop.Method crop</span></div>
+                                <div class="cm-reference-frame-actions">
+                                    @if (image.DerivedAssetId != image.SourceFrameAssetId)
+                                    {
+                                        <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="() => RestoreFullAsync(image)">Restore full</button>
+                                    }
+                                    @if (_media is not null && _source?.Id == set.VideoAssetId)
+                                    {
+                                        <button type="button" class="cm-button cm-button--quiet" disabled="@_busy" @onclick="() => ReviseCropAsync(image)">Apply current crop</button>
+                                    }
+                                </div>
+                            </article>
+                        }
+                    </div>
+                </article>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid CampaignId { get; set; }
+    [Parameter, SupplyParameterFromQuery(Name = "sourceId")] public Guid? SourceId { get; set; }
+
+    private CampaignPreview? _preview;
+    private readonly List<SourceAssetResponse> _sources = [];
+    private SourceAssetResponse? _source;
+    private PickedMedia? _media;
+    private VideoReferenceMetadata? _metadata;
+    private string? _videoUrl;
+    private readonly List<FrameDraft> _candidates = [];
+    private readonly List<VideoReferenceCandidate> _filmstrip = [];
+    private List<VideoReferenceSetResponse> _saved = [];
+    private List<ReferenceCropPresetResponse> _presets = [];
+    private readonly Dictionary<Guid, string> _thumbs = [];
+    private bool _loading = true, _busy, _useAi;
+    private string? _error, _progress;
+    private string _mode = "auto", _diversity = "balanced", _goal = "ui-demonstration";
+    private string _setName = "Video reference frames", _purpose = string.Empty, _presetName = string.Empty;
+    private int _quantity = 5, _cropX, _cropY, _cropWidth = 1, _cropHeight = 1;
+    private double _manualTime;
+    private string _cropMethod = "none", _cropConfidence = "full frame";
+    private VideoReferenceCrop? _suggestedCrop;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _preview = await Campaigns.GetPreviewAsync(CampaignId);
+            _sources.Clear();
+            _sources.AddRange((_preview.Sources ?? []).Where(IsVideo));
+            _source = _sources.FirstOrDefault(item => item.Id == SourceId) ?? _sources.FirstOrDefault();
+            await LoadSavedAsync();
+            if (_source?.LocalPath is { Length: > 0 } localPath && Media.CanProcessLocally)
+                await SetMediaAsync(new PickedMedia(localPath, Path.GetFileName(localPath), _source.SizeBytes ?? 0), persist: false);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private static bool IsVideo(SourceAssetResponse source) =>
+        source.Modality.Equals(SourceModalities.Media, StringComparison.OrdinalIgnoreCase)
+        && (source.ContentType?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
+            || source.ContentTypeHint?.StartsWith("video/", StringComparison.OrdinalIgnoreCase) == true
+            || new[] { ".mp4", ".mov", ".m4v", ".webm", ".mkv" }.Contains(Path.GetExtension(source.LocalPath ?? source.Label), StringComparer.OrdinalIgnoreCase));
+
+    private async Task SourceChangedAsync(ChangeEventArgs args)
+    {
+        if (!Guid.TryParse(args.Value?.ToString(), out var id)) return;
+        _source = _sources.First(item => item.Id == id); SourceId = id;
+        _media = null; _metadata = null; _videoUrl = null; _candidates.Clear();
+        await LoadSavedAsync();
+        if (_source.LocalPath is { Length: > 0 } path)
+            await SetMediaAsync(new PickedMedia(path, Path.GetFileName(path), _source.SizeBytes ?? 0), persist: false);
+    }
+
+    private async Task PickVideoAsync()
+    {
+        var picked = await Media.PickMediaAsync();
+        if (picked is null) return;
+        await SetMediaAsync(picked, persist: true);
+    }
+
+    private async Task SetMediaAsync(PickedMedia picked, bool persist)
+    {
+        _busy = true; _progress = "Reading video metadata…";
+        try
+        {
+            var metadata = await Media.ProbeVideoAsync(picked);
+            _media = picked; _metadata = metadata;
+            _cropX = 0; _cropY = 0; _cropWidth = metadata.Width; _cropHeight = metadata.Height;
+            _cropMethod = "none"; _cropConfidence = "full frame";
+            _videoUrl = await Media.OpenLocalMediaAsync(picked.Path);
+            if (persist)
+            {
+                var fingerprint = await Media.FingerprintAsync(picked.Path);
+                if (_source is null)
+                {
+                    if (string.IsNullOrWhiteSpace(fingerprint))
+                        throw new InvalidOperationException("The video could not be fingerprinted for attachment.");
+                    _source = await Evidence.AttachMediaSourceAsync(
+                        CampaignId, picked.FileName, picked.Path, fingerprint,
+                        VideoContentType(picked.FileName), picked.SizeBytes);
+                    _sources.Add(_source);
+                    SourceId = _source.Id;
+                    await LoadSavedAsync();
+                }
+                else
+                {
+                    _source = await Evidence.SetMediaLinkAsync(
+                        CampaignId, _source.Id, picked.Path, fingerprint);
+                }
+            }
+            if (_preview?.Campaign.BrandId is { } brandId)
+                _presets = await References.ListPresetsAsync(brandId);
+        }
+        catch (Exception ex) { Notifier.ShowError($"That video could not be opened: {ex.Message}"); }
+        finally { _busy = false; _progress = null; }
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        if (_media is null || _metadata is null) return;
+        _busy = true; _progress = "Sampling video…";
+        try
+        {
+            var progress = new Progress<PipelineProgress>(item => { _progress = item.Detail ?? item.Stage; InvokeAsync(StateHasChanged); });
+            var result = await Media.AnalyzeVideoAsync(_media, _quantity, _diversity, progress);
+            _metadata = result.Metadata; _candidates.Clear();
+            _candidates.AddRange(result.Frames.Select((frame, index) => new FrameDraft(frame, $"Frame {index + 1}")));
+            _suggestedCrop = result.SuggestedCrop;
+            SetCrop(result.SuggestedCrop, result.CropConfidence);
+            if (_useAi) await ApplyAiAsync();
+        }
+        catch (Exception ex) { Notifier.ShowError($"Video analysis failed: {ex.Message}"); }
+        finally { _busy = false; _progress = null; }
+    }
+
+    private async Task ApplyAiAsync()
+    {
+        if (_metadata is null) return;
+        _progress = "Ranking candidates with AI…";
+        var response = await References.AnalyzeAsync(CampaignId, new VideoReferenceAiRequest(
+            _goal, _quantity, _metadata.Width, _metadata.Height,
+            _candidates.Select(item => new VideoReferenceAiCandidate(item.Id, item.TimestampSeconds,
+                Convert.ToBase64String(item.PreviewJpeg), item.QualityScore)).ToList()));
+        if (!response.Ran)
+        {
+            Notifier.ShowWarning(response.Detail ?? "AI ranking was unavailable; deterministic selections were kept.");
+            return;
+        }
+        var ranks = response.Rankings.ToDictionary(item => item.Id);
+        foreach (var frame in _candidates)
+            if (ranks.TryGetValue(frame.Id, out var rank)) { frame.AiSummary = rank.Reason; frame.SelectionMethod = "ai-ranked"; }
+        _candidates.Sort((a, b) => (ranks.GetValueOrDefault(a.Id)?.Rank ?? int.MaxValue).CompareTo(ranks.GetValueOrDefault(b.Id)?.Rank ?? int.MaxValue));
+        if (response.SuggestedCrop is { } crop && response.CropConfidence is "high" or "medium")
+            SetCrop(new VideoReferenceCrop(crop.X, crop.Y, crop.Width, crop.Height, "automatic", crop.Confidence), $"AI {response.CropConfidence}");
+    }
+
+    private async Task CaptureAsync()
+    {
+        if (_media is null || _metadata is null) return;
+        _busy = true;
+        try
+        {
+            var frame = await Media.CaptureVideoFrameAsync(_media, _manualTime, _metadata);
+            if (_candidates.Any(item => Math.Abs(item.TimestampSeconds - frame.TimestampSeconds) < .5 / Math.Max(1, _metadata.FrameRate)))
+            { Notifier.ShowWarning("That exact frame is already selected."); return; }
+            _candidates.Add(new FrameDraft(frame, $"Frame {_candidates.Count + 1}") { SelectionMethod = "manual" });
+        }
+        catch (Exception ex) { Notifier.ShowError($"Frame capture failed: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private async Task ReplaceAsync(int index)
+    {
+        if (_media is null || _metadata is null || index < 0 || index >= _candidates.Count) return;
+        _busy = true;
+        try
+        {
+            var frame = await Media.CaptureVideoFrameAsync(_media, _manualTime, _metadata);
+            if (_candidates.Where((_, candidateIndex) => candidateIndex != index)
+                .Any(item => Math.Abs(item.TimestampSeconds - frame.TimestampSeconds) < .5 / Math.Max(1, _metadata.FrameRate)))
+            { Notifier.ShowWarning("That exact frame is already selected."); return; }
+            _candidates[index] = new FrameDraft(frame, _candidates[index].Label) { SelectionMethod = "manual" };
+        }
+        catch (Exception ex) { Notifier.ShowError($"Frame replacement failed: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadFilmstripAsync()
+    {
+        if (_media is null || _metadata is null) return;
+        _busy = true;
+        try
+        {
+            _filmstrip.Clear();
+            var spacing = Math.Max(1, Math.Min(5, _metadata.DurationSeconds / 60));
+            foreach (var offset in new[] { -2d, -1d, 0d, 1d, 2d })
+            {
+                var timestamp = Math.Clamp(_manualTime + offset * spacing, 0, Math.Max(0, _metadata.DurationSeconds - .001));
+                _filmstrip.Add(await Media.CaptureVideoFrameAsync(_media, timestamp, _metadata));
+            }
+        }
+        catch (Exception ex) { Notifier.ShowError($"The nearby filmstrip could not be loaded: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_media is null || _metadata is null || _source is null || _preview?.Campaign.BrandId is not { } brandId) return;
+        _busy = true;
+        try
+        {
+            await EnsureCloudVideoAsync();
+            var crop = CurrentCrop();
+            var requests = new List<VideoReferenceImageCreateRequest>();
+            for (var index = 0; index < _candidates.Count; index++)
+            {
+                _progress = $"Saving frame {index + 1} of {_candidates.Count}…"; StateHasChanged();
+                var frame = _candidates[index];
+                var full = new VideoReferenceCrop(0, 0, _metadata.Width, _metadata.Height, "none");
+                var sourceBytes = await Media.RenderVideoFrameAsync(_media, frame.TimestampSeconds, full);
+                var sourceAsset = await UploadPngAsync($"{SafeStem(_media.FileName)}-{frame.FrameNumber}-source.png", sourceBytes);
+                var derivedAsset = sourceAsset;
+                if (!IsFullCrop(crop))
+                {
+                    var derivedBytes = await Media.RenderVideoFrameAsync(_media, frame.TimestampSeconds, crop);
+                    derivedAsset = await UploadPngAsync($"{SafeStem(_media.FileName)}-{frame.FrameNumber}-reference.png", derivedBytes);
+                }
+                requests.Add(new VideoReferenceImageCreateRequest(sourceAsset.Id, derivedAsset.Id,
+                    (long)Math.Round(frame.TimestampSeconds * 1000), frame.FrameNumber,
+                    new VideoReferenceCropDto(crop.X, crop.Y, crop.Width, crop.Height, crop.Method, crop.Confidence),
+                    frame.SelectionMethod, frame.PerceptualHash, frame.QualityScore,
+                    frame.AiSummary, frame.Label, index));
+            }
+            await References.CreateAsync(CampaignId, new VideoReferenceSetCreateRequest(
+                _source.Id, brandId, _setName.Trim(), string.IsNullOrWhiteSpace(_purpose) ? null : _purpose.Trim(),
+                _goal, (long)Math.Round(_metadata.DurationSeconds * 1000), _metadata.Width, _metadata.Height,
+                _metadata.FrameRate, requests));
+            Notifier.ShowSuccess($"Saved {_candidates.Count} lossless video reference images to the Brand library.");
+            _candidates.Clear(); await LoadSavedAsync();
+        }
+        catch (Exception ex) { Notifier.ShowError($"References could not be saved: {ex.Message}"); }
+        finally { _busy = false; _progress = null; }
+    }
+
+    /// <summary>
+    /// The picker deliberately keeps the recording local while the producer is reviewing
+    /// frames. Saving is the explicit commitment point: copy the source to private storage
+    /// once so the browser-hosted Mill Floor and other machines can play the attached video.
+    /// </summary>
+    private async Task EnsureCloudVideoAsync()
+    {
+        if (_media is null || _source is null || _source.MediaAssetId is not null) return;
+        await using var stream = await Media.OpenReadAsync(_media.Path)
+            ?? throw new InvalidOperationException("The selected video is no longer available at its local path.");
+        _progress = "Attaching source video…";
+        var upload = await MediaUploads.CreateAsync(
+            CampaignId, _media.FileName, VideoContentType(_media.FileName), stream.Length);
+        var buffer = new byte[upload.BlockSize];
+        while (upload.UploadedBytes < upload.TotalBytes)
+        {
+            var wanted = (int)Math.Min(upload.BlockSize, upload.TotalBytes - upload.UploadedBytes);
+            var read = 0;
+            while (read < wanted)
+            {
+                var count = await stream.ReadAsync(buffer.AsMemory(read, wanted - read));
+                if (count == 0) break;
+                read += count;
+            }
+            if (read == 0)
+                throw new EndOfStreamException("The selected video ended before its recorded file size.");
+            upload = await MediaUploads.PutBlockAsync(
+                CampaignId, upload.Id, upload.NextBlockIndex, buffer[..read]);
+            _progress = $"Attaching source video… {Math.Round(upload.Percent)}%";
+            StateHasChanged();
+        }
+        upload = await MediaUploads.CommitAsync(CampaignId, upload.Id);
+        _source = await Evidence.SetMediaLinkAsync(
+            CampaignId, _source.Id, mediaAssetId: upload.AssetId);
+    }
+
+    private async Task<AssetResponse> UploadPngAsync(string name, byte[] bytes)
+    {
+        var asset = await Brands.CreateLibraryAssetAsync(name, "image/png", bytes.LongLength);
+        await Brands.UploadAssetContentAsync(asset.Id, bytes, "image/png");
+        return asset;
+    }
+
+    private async Task ReviseCropAsync(VideoReferenceImageResponse image)
+    {
+        if (_media is null || _metadata is null) return;
+        _busy = true;
+        try
+        {
+            var crop = CurrentCrop();
+            Guid derivedId;
+            if (IsFullCrop(crop)) derivedId = image.SourceFrameAssetId;
+            else
+            {
+                var bytes = await Media.RenderVideoFrameAsync(_media, image.SourceTimestampMs / 1000d, crop);
+                derivedId = (await UploadPngAsync($"revised-{image.Id:N}.png", bytes)).Id;
+            }
+            await References.UpdateAsync(CampaignId, image.Id, new VideoReferenceImageUpdateRequest(
+                derivedId, new VideoReferenceCropDto(crop.X, crop.Y, crop.Width, crop.Height, crop.Method, crop.Confidence), image.Label));
+            Notifier.ShowSuccess("Saved the revised crop; the source frame remains intact."); await LoadSavedAsync();
+        }
+        catch (Exception ex) { Notifier.ShowError($"Crop could not be revised: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private async Task RestoreFullAsync(VideoReferenceImageResponse image)
+    {
+        _busy = true;
+        try { await References.RestoreFullAsync(CampaignId, image.Id); Notifier.ShowSuccess("Restored the original full frame."); await LoadSavedAsync(); }
+        catch (Exception ex) { Notifier.ShowError($"The full frame could not be restored: {ex.Message}"); }
+        finally { _busy = false; }
+    }
+
+    private async Task LoadSavedAsync()
+    {
+        _saved = await References.ListAsync(CampaignId, _source?.Id);
+        var ids = _saved.SelectMany(item => item.Images).Select(item => item.DerivedAssetId).Distinct().ToList();
+        _thumbs.Clear();
+        if (ids.Count > 0)
+            foreach (var thumb in await Brands.MintThumbsAsync(ids)) _thumbs[thumb.AssetId] = thumb.ReadUrl;
+    }
+
+    private async Task SavePresetAsync()
+    {
+        if (_metadata is null || _preview?.Campaign.BrandId is not { } brandId) return;
+        try
+        {
+            var crop = CurrentCrop();
+            await References.SavePresetAsync(brandId, new ReferenceCropPresetRequest(_presetName.Trim(),
+                _metadata.Width, _metadata.Height, new VideoReferenceCropDto(crop.X, crop.Y, crop.Width, crop.Height, crop.Method, crop.Confidence), "video-frame"));
+            _presets = await References.ListPresetsAsync(brandId); _presetName = string.Empty;
+            Notifier.ShowSuccess("Saved the crop preset to this Brand.");
+        }
+        catch (Exception ex) { Notifier.ShowError($"Crop preset could not be saved: {ex.Message}"); }
+    }
+
+    private void ApplyPreset(ChangeEventArgs args)
+    {
+        if (_metadata is null || !Guid.TryParse(args.Value?.ToString(), out var id)) return;
+        var preset = _presets.First(item => item.Id == id);
+        var sx = _metadata.Width / (double)preset.SourceWidth; var sy = _metadata.Height / (double)preset.SourceHeight;
+        SetCrop(new VideoReferenceCrop((int)Math.Round(preset.Crop.X * sx), (int)Math.Round(preset.Crop.Y * sy),
+            (int)Math.Round(preset.Crop.Width * sx), (int)Math.Round(preset.Crop.Height * sy), "manual"), "saved preset");
+    }
+
+    private void SetCrop(VideoReferenceCrop crop, string confidence)
+    { _cropX = crop.X; _cropY = crop.Y; _cropWidth = crop.Width; _cropHeight = crop.Height; _cropMethod = crop.Method; _cropConfidence = confidence; }
+    private VideoReferenceCrop CurrentCrop()
+    {
+        var metadata = _metadata!;
+        var x = Math.Clamp(_cropX, 0, metadata.Width - 1); var y = Math.Clamp(_cropY, 0, metadata.Height - 1);
+        var width = Math.Clamp(_cropWidth, 1, metadata.Width - x); var height = Math.Clamp(_cropHeight, 1, metadata.Height - y);
+        var full = x == 0 && y == 0 && width == metadata.Width && height == metadata.Height;
+        return new VideoReferenceCrop(x, y, width, height, full ? "none" : (_cropMethod == "automatic" ? "automatic" : "manual"), full ? 1 : .9);
+    }
+    private bool IsFullCrop(VideoReferenceCrop crop) => _metadata is not null && crop.X == 0 && crop.Y == 0 && crop.Width == _metadata.Width && crop.Height == _metadata.Height;
+    private void UseFullFrame() { if (_metadata is not null) SetCrop(new(0, 0, _metadata.Width, _metadata.Height, "none"), "full frame"); }
+    private void UseSuggestedCrop() { if (_suggestedCrop is not null) SetCrop(_suggestedCrop, "automatic suggestion"); }
+    private void UseCustomCrop() { _cropMethod = "manual"; _cropConfidence = "confirmed by user"; }
+    private void UseAutoMode() => _mode = "auto";
+    private async Task UseManualModeAsync() { _mode = "manual"; await LoadFilmstripAsync(); }
+    private void Step(int direction) { if (_metadata is not null) _manualTime = Math.Clamp(_manualTime + direction / Math.Max(.001, _metadata.FrameRate), 0, _metadata.DurationSeconds); }
+    private async Task HandleKeyAsync(KeyboardEventArgs args) { if (_mode != "manual") return; if (args.Key == "ArrowLeft") Step(-1); else if (args.Key == "ArrowRight") Step(1); else if (args.Key.Equals("c", StringComparison.OrdinalIgnoreCase)) await CaptureAsync(); }
+    private long FrameNumber(double seconds) => (long)Math.Round(seconds * (_metadata?.FrameRate ?? 1));
+    private void Move(int index, int direction) { var target = index + direction; if (target < 0 || target >= _candidates.Count) return; (_candidates[index], _candidates[target]) = (_candidates[target], _candidates[index]); }
+    private void Remove(FrameDraft frame) => _candidates.Remove(frame);
+    private static string DataUrl(byte[] jpeg) => $"data:image/jpeg;base64,{Convert.ToBase64String(jpeg)}";
+    private static string Clock(double seconds) => TimeSpan.FromSeconds(seconds).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+    private static string SafeStem(string name) => string.Concat(Path.GetFileNameWithoutExtension(name).Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-'));
+    private static string VideoContentType(string name) => Path.GetExtension(name).ToLowerInvariant() switch
+    {
+        ".mov" => "video/quicktime",
+        ".webm" => "video/webm",
+        ".mkv" => "video/x-matroska",
+        ".m4v" => "video/x-m4v",
+        _ => "video/mp4",
+    };
+
+    private sealed class FrameDraft(VideoReferenceCandidate frame, string label)
+    {
+        public string Id { get; } = frame.Id; public double TimestampSeconds { get; } = frame.TimestampSeconds;
+        public long FrameNumber { get; } = frame.FrameNumber; public byte[] PreviewJpeg { get; } = frame.PreviewJpeg;
+        public string PerceptualHash { get; } = frame.PerceptualHash; public double QualityScore { get; } = frame.QualityScore;
+        public string? Warning { get; } = frame.Warning; public string? AiSummary { get; set; } = frame.AiSummary;
+        public string Label { get; set; } = label; public string SelectionMethod { get; set; } = "automatic";
+    }
+}

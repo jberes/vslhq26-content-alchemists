@@ -8,9 +8,9 @@ using Castmill.UI.Pages.Campaign;
 namespace Castmill.UI.Tests;
 
 /// <summary>
-/// ADR-F68/F69: in Auto mode the studio shows the written brief where the prompt would be —
-/// a disabled empty textarea read as "there was no prompt" — with a way to rewrite it, and
-/// the drawer links straight back to the content item the image belongs to.
+/// ADR-F68/F69: in Auto mode the studio shows the written brief where the prompt would be,
+/// lets the producer edit and save it directly, offers an explicit AI rewrite, and links
+/// straight back to the content item the image belongs to.
 /// </summary>
 public sealed class ImageStudioBriefTests : CastmillUiTestContext
 {
@@ -28,21 +28,36 @@ public sealed class ImageStudioBriefTests : CastmillUiTestContext
             [new ImageProviderReadiness("foundry", true, null)]));
         Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants", new List<ImageVariantResponse>());
         Http.OnStatus(HttpMethod.Post, $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/brief/rewrite", HttpStatusCode.NoContent);
+        Http.OnStatus(HttpMethod.Put, $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/brief", HttpStatusCode.NoContent);
     }
 
     [Fact]
-    public async Task Auto_mode_shows_the_written_brief_in_place_of_the_prompt_and_can_rewrite_it()
+    public async Task Auto_mode_shows_an_editable_written_brief_that_saves_and_can_be_rewritten()
     {
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(Campaign(), [Owner()], [Slot("Auto")], 0, 6));
         Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/prompt-preview",
-            new ImagePromptPreviewResponse(Brief, "Auto", 1280, 720, 1536, 864, 0, 0, false));
+            new ImagePromptPreviewResponse(Brief, "Auto", 1280, 720, 1536, 864, 0, 0, false, Brief));
 
         var view = await OpenSlotAsync();
 
         await view.WaitForAssertionAsync(() =>
-            Assert.Contains("Dark navy studio backdrop", view.Find(".cm-studio__drawer .cm-studio__brief").TextContent, StringComparison.Ordinal));
-        Assert.Empty(view.FindAll(".cm-studio__drawer textarea.cm-studio__prompt"));
+            Assert.Equal(Brief, view.Find(".cm-studio__drawer textarea.cm-studio__brief").GetAttribute("value")));
+        var brief = view.Find(".cm-studio__drawer textarea.cm-studio__brief");
+        Assert.DoesNotContain("readonly", brief.Attributes.Select(attribute => attribute.Name));
+        Assert.DoesNotContain("disabled", brief.Attributes.Select(attribute => attribute.Name));
         Assert.Contains("Visual brief (AI-written)", view.Find(".cm-studio__drawer").TextContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("Campaign.TranscriptArtifactId", view.Find(".cm-studio__drawer").TextContent,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(view.FindAll(".cm-studio__drawer button"),
+            button => button.TextContent.Contains("Seed all prompts", StringComparison.Ordinal));
+
+        const string edited = "Producer-edited focal point with a warmer, simpler composition.";
+        await brief.InputAsync(edited);
+        await brief.TriggerEventAsync("onblur", new Microsoft.AspNetCore.Components.Web.FocusEventArgs());
+        await view.WaitForAssertionAsync(() => Assert.Contains(Http.Bodies, body =>
+            body.Method == HttpMethod.Put
+            && body.Path.EndsWith("/brief", StringComparison.Ordinal)
+            && body.Body.Contains(edited, StringComparison.Ordinal)));
 
         await view.FindAll(".cm-studio__drawer button")
             .Single(b => b.TextContent.Trim() == "Rewrite brief").ClickAsync();
@@ -70,7 +85,7 @@ public sealed class ImageStudioBriefTests : CastmillUiTestContext
     {
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(Campaign(), [Owner()], [Slot("Auto")], 0, 6));
         Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/prompt-preview",
-            new ImagePromptPreviewResponse(Brief, "Auto", 1280, 720, 1536, 864, 0, 0, false));
+            new ImagePromptPreviewResponse(Brief, "Auto", 1280, 720, 1536, 864, 0, 0, false, Brief));
 
         var view = await OpenSlotAsync();
 

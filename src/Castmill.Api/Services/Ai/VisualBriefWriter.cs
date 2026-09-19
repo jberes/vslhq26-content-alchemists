@@ -21,7 +21,10 @@ public sealed record VisualBriefRequest(
     bool TextMayBeRendered,
     /// <summary>Castmill will composite a headline on this image after generation, so the brief
     /// must reserve calm space for it. False for supporting figures, which fill the frame.</summary>
-    bool HeadlineWillBeComposited = false);
+    bool HeadlineWillBeComposited = false,
+    /// <summary>The brand's authoritative content template for the owning artifact. Thumbnail
+    /// title and visual directions in it must survive into image generation too.</summary>
+    string? BrandContentTemplate = null);
 
 public interface IVisualBriefWriter
 {
@@ -135,8 +138,12 @@ public sealed class VisualBriefWriter(
             .Append(" · aspect ").AppendLine(ImageAspect.Describe(r.TargetWidth, r.TargetHeight));
         text.AppendLine(AssetGuidance(r.SlotKind));
         text.Append("- Text in the image: ").AppendLine(r.TextMayBeRendered
-            ? "ALLOWED. Choose a short headline of at most six words in two or three lines and give it in quotation marks, "
-              + "plus at most one small label. Big, high contrast, readable at 320 pixels wide."
+            ? r.SlotKind == "youtube-thumbnail"
+                ? "REQUIRED. Give ONE exact title in quotation marks, at most six words over two or three lines. "
+                  + "It must be compelling, concrete and specific to the actual subject, feature, problem or payoff in the content brief — never a generic label or vague hype. "
+                  + "Make it the dominant high-contrast element, fully readable at 320 pixels wide. Add no other invented text."
+                : "ALLOWED. Choose a short headline of at most six words in two or three lines and give it in quotation marks, "
+                  + "plus at most one small label. Big, high contrast, readable at 320 pixels wide."
             : r.HeadlineWillBeComposited
                 ? "NOT allowed. No NEW letters, words, numbers or logos; Castmill composites the headline afterwards. "
                   + "Leave one calm, clear area where that headline will sit, and fill the rest of the frame."
@@ -175,6 +182,13 @@ public sealed class VisualBriefWriter(
             text.AppendLine("Brand look:");
             text.AppendLine(r.BrandLook.Trim());
         }
+        if (!string.IsNullOrWhiteSpace(r.BrandContentTemplate))
+        {
+            text.AppendLine();
+            text.AppendLine("AUTHORITATIVE BRAND CONTENT TEMPLATE");
+            text.AppendLine("Apply every relevant thumbnail and title requirement below. It overrides conflicting generic advice:");
+            text.AppendLine(r.BrandContentTemplate.Trim());
+        }
         return text.ToString();
     }
 
@@ -192,7 +206,8 @@ public sealed class VisualBriefWriter(
         "youtube-thumbnail" =>
             "- This is judged at 320 pixels wide against other thumbnails: one immediately recognisable hook, "
             + "strong contrast, a single focal subject, one simplified supporting element at most. Keep the "
-            + "bottom-right corner clear for the duration badge.",
+            + "bottom-right corner clear for the duration badge. The title and focal visual must express the "
+            + "same specific promise from this video's real topic; generic phrases are forbidden.",
         "blog-header" =>
             "- Wide and atmospheric, read at full page width. Subject centre-right, calm negative space on the "
             + "left for the page title. Editorial, not clip-art.",
