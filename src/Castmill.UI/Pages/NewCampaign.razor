@@ -29,6 +29,7 @@
 @inject IMediaPipeline Media
 @inject IVoiceCaptureService Voice
 @inject INotifier Notifier
+@inject SettingsClient Settings
 @inject NavigationManager Navigation
 
 <PageTitle>Start a run — Castmill</PageTitle>
@@ -109,6 +110,7 @@
             }
             else if (_sourceStarter == SourceStarter.CloudMedia)
             {
+                @EngineSwitcher()
                 <label class="cm-field cm-dropzone">
                     <span class="cm-field__label">Upload audio or video</span>
                     <InputFile OnChange="CloudMediaSelected" accept="audio/*,video/*" />
@@ -132,9 +134,10 @@
             }
             else if (_sourceStarter == SourceStarter.LocalMedia)
             {
+                @EngineSwitcher()
                 <div class="cm-dropzone">
                     <p class="cm-dropzone__headline">Bring video or audio</p>
-                    <p class="cm-meta">MP3, MP4, MOV, M4A, WAV — transcribed on this machine.</p>
+                    <p class="cm-meta">MP3, MP4, MOV, M4A, WAV — transcribed on this machine with Whisper.</p>
                     <button type="button" class="cm-button" @onclick="PickMediaAsync">Pick files…</button>
                     @if (_pickedFiles.Count > 0)
                     {
@@ -733,17 +736,24 @@
                 new(SourceStarter.PasteText, "T", "Paste text", "Transcript, notes, draft, or source copy"),
                 new(SourceStarter.WebPage, "↗", "Import webpage", "Immutable snapshot of a public HTML page"),
                 new(SourceStarter.Document, "▤", "Upload document", "TXT, Markdown, HTML, PDF, DOCX, or PPTX"),
-                new(SourceStarter.CloudMedia, "↑", "Upload media", "Private resumable audio or video transcription"),
             };
+            // Whisper leads wherever it can run: it is the default engine (ADR-F67), it needs
+            // no upload, and it works with no Azure AI Speech deployment configured. The cloud
+            // starter follows it, and is the only media option in the browser shell.
+            if (Media.CanProcessLocally)
+            {
+                starters.Add(new StarterOption(
+                    SourceStarter.LocalMedia, "▶", "Transcribe media",
+                    "Audio or video transcribed on this machine with Whisper"));
+            }
+            starters.Add(new StarterOption(
+                SourceStarter.CloudMedia, "↑",
+                Media.CanProcessLocally ? "Upload media to the cloud" : "Upload media",
+                "Private resumable upload, transcribed by Azure AI Speech"));
             if (_voiceAvailable)
             {
                 starters.Add(new StarterOption(
                     SourceStarter.VoiceNote, "●", "Record an idea", "Focused voice note with review before upload"));
-            }
-            if (Media.CanProcessLocally)
-            {
-                starters.Add(new StarterOption(
-                    SourceStarter.LocalMedia, "▶", "Local media", "Audio or video transcribed on this machine"));
             }
             return starters;
         }
@@ -927,6 +937,76 @@
     private bool _voiceAvailable;
     private string? _voiceUnavailableReason;
     private SourceStarter _sourceStarter = SourceStarter.PasteText;
+
+    /// <summary>
+    /// The producer's saved engine preference (<c>media.transcription-engine</c>), defaulting
+    /// to Whisper. It decides which media starter a run lands on; the switcher below changes
+    /// it mid-run and persists the change, so "always Whisper" needs setting exactly once.
+    /// </summary>
+    private string _transcriptionEngine = TranscriptionEngines.Whisper;
+
+    /// <summary>
+    /// Engine choice, rendered on both media panels. It is the same decision as which starter
+    /// is active — local media IS the Whisper path — so switching engine switches starter, and
+    /// there is no way for the label and the behaviour to disagree. Hidden in the browser
+    /// shell, where Whisper cannot run and the choice would be a dead control (G3).
+    /// </summary>
+    private RenderFragment? EngineSwitcher() => !Media.CanProcessLocally ? null : builder =>
+    {
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "cm-engine-choice");
+        builder.AddAttribute(2, "role", "group");
+        builder.AddAttribute(3, "aria-label", "Transcription engine");
+
+        builder.OpenElement(4, "span");
+        builder.AddAttribute(5, "class", "cm-meta");
+        builder.AddContent(6, "Transcribe with");
+        builder.CloseElement();
+
+        AddEngineButton(builder, 10, TranscriptionEngines.Whisper, "Whisper (this machine)");
+        AddEngineButton(builder, 20, TranscriptionEngines.Azure, "Azure AI Speech (cloud)");
+
+        builder.CloseElement();
+    };
+
+    private void AddEngineButton(
+        Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder,
+        int sequence,
+        string engine,
+        string label)
+    {
+        var selected = _transcriptionEngine == engine;
+        builder.OpenElement(sequence, "button");
+        builder.AddAttribute(sequence + 1, "type", "button");
+        builder.AddAttribute(sequence + 2, "class",
+            selected ? "cm-engine-choice__option cm-engine-choice__option--on" : "cm-engine-choice__option");
+        builder.AddAttribute(sequence + 3, "aria-pressed", selected ? "true" : "false");
+        builder.AddAttribute(sequence + 4, "onclick",
+            EventCallback.Factory.Create(this, () => ChooseEngineAsync(engine)));
+        builder.AddContent(sequence + 5, label);
+        builder.CloseElement();
+    }
+
+    private async Task ChooseEngineAsync(string engine)
+    {
+        if (_transcriptionEngine == engine)
+        {
+            return;
+        }
+        _transcriptionEngine = engine;
+        _sourceStarter = engine == TranscriptionEngines.Azure
+            ? SourceStarter.CloudMedia
+            : SourceStarter.LocalMedia;
+        try
+        {
+            await Settings.SaveTranscriptionEngineAsync(engine);
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // The run continues on the chosen engine; only the preference failed to stick.
+            Notifier.ShowWarning("Couldn't save the engine preference for next time.");
+        }
+    }
     private EvidenceRevisionResponse? _importedEvidence;
     private string? _intent;
     private string _audience = string.Empty;
@@ -1406,6 +1486,21 @@
         {
         }
 
+        // Whisper unless the producer has chosen otherwise, and only where it can actually
+        // run: in the browser shell the preference is moot and the cloud path is the only one.
+        try
+        {
+            _transcriptionEngine = Media.CanProcessLocally
+                ? await Settings.GetTranscriptionEngineAsync()
+                : TranscriptionEngines.Azure;
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            _transcriptionEngine = Media.CanProcessLocally
+                ? TranscriptionEngines.Whisper
+                : TranscriptionEngines.Azure;
+        }
+
         if (ResumeCampaignId is { } campaignId)
         {
             await ResumeAsync(campaignId);
@@ -1620,6 +1715,17 @@
     private void SelectStarter(SourceStarter starter)
     {
         _sourceStarter = starter;
+        // Picking a media starter IS picking an engine — keep the switcher honest. Not
+        // persisted here: choosing a starter for one run should not silently rewrite the
+        // saved default, which only the explicit switcher changes.
+        if (starter == SourceStarter.LocalMedia)
+        {
+            _transcriptionEngine = TranscriptionEngines.Whisper;
+        }
+        else if (starter == SourceStarter.CloudMedia)
+        {
+            _transcriptionEngine = TranscriptionEngines.Azure;
+        }
         _importedEvidence = null;
         _error = null;
     }

@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Data;
 using Castmill.Api.Auth;
 using Castmill.Api.Data;
+using Castmill.Api.Services.Blob;
 using Castmill.Api.Tenancy;
 using Castmill.Api.Services.Brands;
 using Castmill.Api.Services.Evidence;
@@ -967,8 +968,23 @@ public static class CampaignEndpoints
         }
     }
 
+    /// <summary>
+    /// Deletes a campaign and its whole trail: every child row AND the stored bytes behind it
+    /// (rendered takes, uploaded source media, extracted reference frames). Irreversible, and
+    /// the client says so before calling.
+    ///
+    /// <para>Children have no FK cascade (typed-JSON rows, ADR-003), so every table is deleted
+    /// explicitly and a new campaign-scoped entity MUST be added here — an orphan row keeps a
+    /// private blob alive with nothing left pointing at it.</para>
+    /// </summary>
     private static async Task<IResult> DeleteAsync(
-        Guid id, ITenantProvider tenant, CastmillDbContext db, CancellationToken ct)
+        Guid id,
+        ITenantProvider tenant,
+        CastmillDbContext db,
+        IBlobSasService blobs,
+        IPublicContentStore publicStore,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
     {
         var campaign = await FindOwnedCampaignAsync(id, tenant, db, ct);
         if (campaign is null)
@@ -976,7 +992,21 @@ public static class CampaignEndpoints
             return Results.NotFound();
         }
 
-        // Children have no FK cascade (typed-JSON rows, ADR-003) — delete explicitly.
+        // Blob paths are read BEFORE the rows go: once a row is gone there is nothing left to
+        // say which bytes belonged to it, and the blob would leak forever.
+        var variantBlobs = await db.ImageVariants
+            .Where(v => v.CampaignId == id)
+            .Select(v => new { v.BlobPath, v.ThumbBlobPath })
+            .ToListAsync(ct);
+
+        // Assets reached through this campaign's uploads and reference sets.
+        var assetIds = await db.MediaUploads.Where(u => u.CampaignId == id).Select(u => u.AssetId)
+            .Union(db.ReferenceSets.Where(s => s.CampaignId == id).Select(s => s.VideoAssetId))
+            .Union(db.ReferenceImages.Where(r => r.CampaignId == id).Select(r => r.VideoAssetId))
+            .Union(db.ReferenceImages.Where(r => r.CampaignId == id).Select(r => r.SourceFrameAssetId))
+            .Union(db.ReferenceImages.Where(r => r.CampaignId == id).Select(r => r.DerivedAssetId))
+            .ToListAsync(ct);
+
         await db.ArtifactRevisions
             .Where(r => db.Artifacts.Any(a => a.Id == r.ArtifactId && a.CampaignId == id))
             .ExecuteDeleteAsync(ct);
@@ -985,8 +1015,62 @@ public static class CampaignEndpoints
         await db.ImageSlots.Where(s => s.CampaignId == id).ExecuteDeleteAsync(ct);
         await db.ScheduleEntries.Where(s => s.CampaignId == id).ExecuteDeleteAsync(ct);
         await db.GenerationRuns.Where(r => r.CampaignId == id).ExecuteDeleteAsync(ct);
+        // Previously missed, which left the uploaded video and every extracted frame behind:
+        await db.ReferenceImages.Where(r => r.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.ReferenceSets.Where(s => s.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.MediaUploads.Where(u => u.CampaignId == id).ExecuteDeleteAsync(ct);
+        await db.CampaignCollaborators.Where(c => c.CampaignId == id).ExecuteDeleteAsync(ct);
+
+        // An asset may be shared with another campaign (a reference set built from a video
+        // uploaded elsewhere). Only assets nothing still points at are removed — this runs
+        // AFTER the deletes above, so "still referenced" means by a surviving campaign.
+        var orphanedAssets = await db.Assets
+            .Where(a => assetIds.Contains(a.Id)
+                && !db.MediaUploads.Any(u => u.AssetId == a.Id)
+                && !db.ReferenceSets.Any(s => s.VideoAssetId == a.Id)
+                && !db.ReferenceImages.Any(r => r.VideoAssetId == a.Id
+                    || r.SourceFrameAssetId == a.Id
+                    || r.DerivedAssetId == a.Id))
+            .ToListAsync(ct);
+        var assetBlobPaths = orphanedAssets.Select(a => a.BlobPath).ToList();
+        db.Assets.RemoveRange(orphanedAssets);
+
         db.Campaigns.Remove(campaign);
         await db.SaveChangesAsync(ct);
+
+        // Blobs after the rows, matching the single-take delete: repeating a delete for a
+        // missing blob is harmless, resurrecting a row because a blob call hiccupped is not.
+        // A storage failure must not fail the delete either — the rows are already gone, so
+        // the campaign IS deleted; the leftover bytes are logged for sweeping instead.
+        var logger = loggerFactory.CreateLogger(typeof(CampaignEndpoints));
+        if (publicStore.IsConfigured)
+        {
+            foreach (var variant in variantBlobs)
+            {
+                await TryDeleteAsync(() => publicStore.DeleteAsync(variant.BlobPath, ct), variant.BlobPath, logger);
+                if (!string.IsNullOrEmpty(variant.ThumbBlobPath))
+                {
+                    await TryDeleteAsync(
+                        () => publicStore.DeleteAsync(variant.ThumbBlobPath, ct), variant.ThumbBlobPath, logger);
+                }
+            }
+        }
+        foreach (var path in assetBlobPaths)
+        {
+            await TryDeleteAsync(() => blobs.DeleteAsync(path, ct), path, logger);
+        }
         return Results.NoContent();
+    }
+
+    private static async Task TryDeleteAsync(Func<Task> delete, string path, ILogger logger)
+    {
+        try
+        {
+            await delete();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Campaign delete removed the row but could not delete blob {BlobPath}.", path);
+        }
     }
 }

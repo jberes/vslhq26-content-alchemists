@@ -41,18 +41,26 @@ causes the build to fail instead of producing a misdirected installer.
       -p:WindowsAppSDKSelfContained=true \
       -o <publish-dir>
 
-    # 2. Pack the MSI.
+    # 2. Pack the MSI. PublishDir and LicenseRtf MUST be ABSOLUTE paths: wix resolves
+    #    -d values relative to the .wxs file, not the working directory. A relative path
+    #    harvests nothing and still exits 0 — you get a ~600 KB MSI that installs an empty
+    #    Program Files\Castmill, with only a WIX8601 warning to tell you. See step 3.
     wix build installer/windows/Castmill.wxs \
       -arch x64 -ext WixToolset.UI.wixext \
-      -d ProductVersion=0.1.0 \
-      -d PublishDir=<publish-dir> \
-      -d LicenseRtf=installer/windows/License.rtf \
-      -o installer/windows/out/Castmill-0.1.0-x64.msi
+      -d ProductVersion=0.1.4 \
+      -d PublishDir=<ABSOLUTE-publish-dir> \
+      -d LicenseRtf=<repo-root>\installer\windows\License.rtf \
+      -o installer/windows/out/Castmill-0.1.4-x64.msi
 
 Verify the publish is genuinely self-contained before packing — `hostfxr.dll`,
 `hostpolicy.dll` and `coreclr.dll` must all be present in the publish folder. Without
 `-p:SelfContained=true` the publish silently produces a framework-dependent build that
 fails on machines without the .NET Desktop Runtime.
+
+    # 3. Verify the MSI actually carries the payload. Both silent failure modes above
+    #    produce a well-formed MSI, so check size and file count, not the exit code.
+    #    Expect ~89 MB and the same file count as the publish folder (861 for 0.1.4).
+    ls -l installer/windows/out/Castmill-0.1.4-x64.msi   # must be ~89 MB, NOT ~600 KB
 
 ## Signing
 
@@ -60,10 +68,10 @@ The MSI is **unsigned**; SmartScreen warns recipients. To sign, use the Windows 
 signtool with an organisation code-signing certificate:
 
     signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 \
-      /f <cert.pfx> /p <password> out\Castmill-0.1.0-x64.msi
+      /f <cert.pfx> /p <password> out\Castmill-0.1.4-x64.msi
 
 ## Install / uninstall
 
-    msiexec /i Castmill-0.1.0-x64.msi              # interactive
-    msiexec /i Castmill-0.1.0-x64.msi /qn          # silent
-    msiexec /x Castmill-0.1.0-x64.msi /qn          # uninstall
+    msiexec /i Castmill-0.1.4-x64.msi              # interactive
+    msiexec /i Castmill-0.1.4-x64.msi /qn          # silent
+    msiexec /x Castmill-0.1.4-x64.msi /qn          # uninstall

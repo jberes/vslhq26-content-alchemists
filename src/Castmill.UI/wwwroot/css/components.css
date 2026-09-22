@@ -217,6 +217,15 @@
     color: var(--cm-on-surface-muted);
 }
 
+/* Strong-confirm phrase field: the producer transcribes the name before the destructive
+   action unlocks. */
+.cm-modal__phrase {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block-start: var(--cm-space-4);
+}
+
 .cm-modal__actions {
     display: flex;
     justify-content: flex-end;

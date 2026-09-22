@@ -624,6 +624,59 @@
     gap: var(--cm-space-8);
 }
 
+/* Positioning context for the delete control, which overlays the card's top-right corner.
+   The cell is a plain grid item — the card keeps its own box. */
+.cm-campaign-cell {
+    position: relative;
+}
+
+/* Hover-revealed delete. Hidden by opacity rather than display so it stays in the a11y tree
+   and can be reached by keyboard: :focus-within brings it back for tab users, who never
+   produce a hover. Coarse pointers get it permanently — there is no hover on a touch screen
+   (the control would otherwise be unreachable there). */
+.cm-campaign-card__delete {
+    position: absolute;
+    inset-block-start: var(--cm-space-3);
+    inset-inline-end: var(--cm-space-3);
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    inline-size: 32px;
+    block-size: 32px;
+    padding: 0;
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--cm-motion), background var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-campaign-cell:hover .cm-campaign-card__delete,
+.cm-campaign-cell:focus-within .cm-campaign-card__delete {
+    opacity: 1;
+}
+
+.cm-campaign-card__delete:hover:not(:disabled) {
+    background: var(--cm-danger);
+    border-color: var(--cm-danger);
+    color: var(--cm-on-accent);
+}
+
+.cm-campaign-card__delete:disabled {
+    opacity: 1;
+    cursor: default;
+}
+
+@media (hover: none) {
+    .cm-campaign-card__delete {
+        opacity: 1;
+    }
+}
+
 .cm-campaign-card {
     display: flex;
     flex-direction: column;
@@ -8166,3 +8219,39 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-reference-lightbox__canvas { position: relative; min-block-size: 0; margin: 0; display: grid; place-items: center; overflow: auto; background: var(--cm-surface-inverse); }
 .cm-reference-lightbox__image { display: block; inline-size: auto; block-size: auto; max-inline-size: 100%; max-block-size: calc(100vh - 8rem); object-fit: contain; }
 .cm-reference-lightbox__loading { position: absolute; inset-inline-start: 50%; inset-block-end: 1rem; translate: -50% 0; padding: .45rem .7rem; border-radius: 999px; background: color-mix(in srgb, var(--cm-surface-inverse) 78%, transparent); color: var(--cm-on-inverse); font-size: var(--cm-text-meta); white-space: nowrap; }
+
+/* ---- Transcription engine choice (new-run source step) ------------------------- */
+
+/* Whisper vs Azure AI Speech, shown on both media panels. A segmented pair rather than a
+   dropdown: there are exactly two, and which one is active must be readable at a glance —
+   picking the wrong engine is what sent a run to an unconfigured Azure deployment. */
+.cm-engine-choice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-engine-choice__option {
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface);
+    color: var(--cm-on-surface-muted);
+    font: inherit;
+    cursor: pointer;
+    transition: border-color var(--cm-motion), background var(--cm-motion), color var(--cm-motion);
+}
+
+.cm-engine-choice__option:hover {
+    border-color: var(--cm-accent);
+    color: var(--cm-on-surface);
+}
+
+.cm-engine-choice__option--on {
+    border-color: var(--cm-accent);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font-weight: 600;
+}

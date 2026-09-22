@@ -104,8 +104,11 @@ public sealed class N28MediaUploadTests : CastmillUiTestContext
         var view = Render<NewCampaign>();
         var starters = view.FindAll(".cm-starter").Select(item => item.TextContent).ToList();
 
-        Assert.Contains(starters, text => text.Contains("Upload media", StringComparison.Ordinal));
-        Assert.Contains(starters, text => text.Contains("Local media", StringComparison.Ordinal));
+        // Both media paths stay available on a shell that can run Whisper; they are now named
+        // by their engine ("Transcribe media" / "Upload media to the cloud") rather than by
+        // where the file lives, so the choice cannot be made by accident.
+        Assert.Contains(starters, text => text.Contains("Whisper", StringComparison.Ordinal));
+        Assert.Contains(starters, text => text.Contains("Azure AI Speech", StringComparison.Ordinal));
     }
 
     private void ArrangeBase()

@@ -92,4 +92,36 @@ public sealed class SettingsClient(ApiClient api)
     public Task SaveDefaultImageModelAsync(string modelAlias, CancellationToken ct = default) =>
         api.PutAsync($"api/v1/settings/{DefaultImageModelKey}",
             new SettingWrite(modelAlias), ct);
+
+    /// <summary>
+    /// Which engine transcribes media. Whisper runs on the producer's own machine and is the
+    /// default wherever it is available; Azure AI Speech is the cloud fallback, and the only
+    /// option in the browser shell. Absent means Whisper.
+    /// </summary>
+    public const string TranscriptionEngineKey = "media.transcription-engine";
+
+    public static string ReadTranscriptionEngine(IReadOnlyList<SettingRow> rows) =>
+        rows.FirstOrDefault(row => row.Key == TranscriptionEngineKey)?.Value
+            is { Length: > 0 } value && string.Equals(value, TranscriptionEngines.Azure, StringComparison.OrdinalIgnoreCase)
+            ? TranscriptionEngines.Azure
+            : TranscriptionEngines.Whisper;
+
+    public async Task<string> GetTranscriptionEngineAsync(CancellationToken ct = default)
+    {
+        var rows = await ListAsync(ct);
+        return ReadTranscriptionEngine(rows);
+    }
+
+    public Task SaveTranscriptionEngineAsync(string engine, CancellationToken ct = default) =>
+        api.PutAsync($"api/v1/settings/{TranscriptionEngineKey}", new SettingWrite(engine), ct);
+}
+
+/// <summary>The two transcription engines, as stored in <c>media.transcription-engine</c>.</summary>
+public static class TranscriptionEngines
+{
+    /// <summary>Whisper.net, on this machine. The default (ADR-F70).</summary>
+    public const string Whisper = "whisper";
+
+    /// <summary>Azure AI Speech, server-side. Requires uploading the media first.</summary>
+    public const string Azure = "azure";
 }

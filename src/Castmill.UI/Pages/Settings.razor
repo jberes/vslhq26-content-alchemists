@@ -24,6 +24,7 @@
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 @inject ThemeService Theme
+@inject IMediaPipeline Media
 
 <PageTitle>Settings · Castmill</PageTitle>
 
@@ -365,6 +366,38 @@
     {
         <article class="cm-settings__default-model">
             <div>
+                <span class="cm-kicker">Transcription engine</span>
+                <h2>What turns audio and video into a transcript</h2>
+                <p class="cm-meta">
+                    Whisper runs on this machine: nothing is uploaded, and it needs no Azure
+                    deployment. Azure AI Speech uploads the file first and transcribes it
+                    server-side — pick it for diarization or for very long recordings. You can
+                    also switch engine for a single run from the source step.
+                </p>
+            </div>
+            <div class="cm-settings__default-model-control">
+                <select class="cm-input" aria-label="Transcription engine"
+                        disabled="@(!Media.CanProcessLocally)" @bind="_transcriptionEngineDraft">
+                    <option value="@TranscriptionEngines.Whisper">Whisper — on this machine (default)</option>
+                    <option value="@TranscriptionEngines.Azure">Azure AI Speech — cloud</option>
+                </select>
+                <button type="button" class="cm-button"
+                        disabled="@(_savingEngine || !Media.CanProcessLocally)"
+                        @onclick="SaveTranscriptionEngineAsync">
+                    @(_savingEngine ? "Saving…" : "Save engine")
+                </button>
+            </div>
+            @if (!Media.CanProcessLocally)
+            {
+                <p class="cm-meta">
+                    This shell can't run Whisper, so media is always transcribed by Azure AI
+                    Speech. Use the desktop app to transcribe on your own machine.
+                </p>
+            }
+        </article>
+
+        <article class="cm-settings__default-model">
+            <div>
                 <span class="cm-kicker">Default image generator</span>
                 <h2>Choose once for every new image card</h2>
                 <p class="cm-meta">
@@ -433,6 +466,8 @@
     private string? _defaultImageModel;
     private string? _defaultImageModelDraft;
     private bool _savingDefaultModel;
+    private string _transcriptionEngineDraft = TranscriptionEngines.Whisper;
+    private bool _savingEngine;
     private ExternalAuthLinksResponse? _security;
     private string? _securityError;
     private string? _securityBusyProvider;
@@ -674,6 +709,11 @@
             _links.AddRange(SettingsClient.ReadLinks(settings)
                 .Select(l => new LinkRow { Label = l.Label, Url = l.Url }));
             _defaultImageModel = SettingsClient.ReadDefaultImageModel(settings);
+            // Whisper unless saved otherwise; the browser shell cannot run it and is pinned
+            // to Azure, with the control disabled and the reason stated (G3).
+            _transcriptionEngineDraft = Media.CanProcessLocally
+                ? SettingsClient.ReadTranscriptionEngine(settings)
+                : TranscriptionEngines.Azure;
             _status = await Images.GetAiStatusAsync();
             _defaultImageModelDraft = ImageModelCatalog.Resolve(
                 ImageModelCatalog.Choices(_status), _defaultImageModel)?.Value;
@@ -724,6 +764,30 @@
         finally
         {
             _busy = null;
+        }
+    }
+
+    private async Task SaveTranscriptionEngineAsync()
+    {
+        _savingEngine = true;
+        try
+        {
+            await SettingsApi.SaveTranscriptionEngineAsync(_transcriptionEngineDraft);
+            Notifier.ShowSuccess(_transcriptionEngineDraft == TranscriptionEngines.Azure
+                ? "Media will be transcribed by Azure AI Speech."
+                : "Media will be transcribed by Whisper on this machine.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't save the transcription engine - {ex.Message}");
+        }
+        catch (HttpRequestException)
+        {
+            Notifier.ShowError("Couldn't reach the Castmill API.");
+        }
+        finally
+        {
+            _savingEngine = false;
         }
     }
 

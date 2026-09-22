@@ -14,6 +14,8 @@
 @inject WorkspaceState Workspace
 @inject CampaignsClient Campaigns
 @inject NavigationManager Navigation
+@inject IConfirmService Confirm
+@inject INotifier Notifier
 
 <PageTitle>Campaigns — Castmill</PageTitle>
 
@@ -43,7 +45,17 @@
             @foreach (var campaign in Workspace.Campaigns.OrderByDescending(c => c.UpdatedAt))
             {
                 var summary = _summaries.GetValueOrDefault(campaign.Id);
-                <li>
+                <li class="cm-campaign-cell">
+                    @* The delete control is a SIBLING of the card, not a child: the card is
+                       itself a button, and a button inside a button is invalid HTML that
+                       swallows the inner click. *@
+                    <button type="button" class="cm-campaign-card__delete"
+                            title="@($"Delete {campaign.Name}")"
+                            aria-label="@($"Delete campaign {campaign.Name}")"
+                            disabled="@(_deleting == campaign.Id)"
+                            @onclick="() => DeleteAsync(campaign)">
+                        @(_deleting == campaign.Id ? "…" : "✕")
+                    </button>
                     <button type="button" class="cm-campaign-card" @onclick="() => Open(campaign)">
                         @if (summary?.HeroImageUrl is { } hero)
                         {
@@ -113,6 +125,7 @@
         string? HeroImageUrl);
 
     private readonly Dictionary<Guid, Summary> _summaries = [];
+    private Guid? _deleting;
 
     protected override void OnInitialized() => Workspace.Changed += OnChanged;
 
@@ -158,6 +171,59 @@
         Workspace.SetActive(campaign.Id);
         Navigation.NavigateTo(CampaignViews.PathFor(campaign.Id, CampaignView.MillFloor));
     }
+
+    /// <summary>
+    /// Deletes the campaign and everything made from it. The prompt names the real counts
+    /// rather than saying "all content", and requires the campaign's name to be typed: this
+    /// destroys work irreversibly, including the uploaded source media, and a card grid is
+    /// exactly where a stray click lands.
+    /// </summary>
+    private async Task DeleteAsync(CampaignResponse campaign)
+    {
+        var summary = _summaries.GetValueOrDefault(campaign.Id);
+        var trail = summary is null
+            ? "Every artifact, image and uploaded source file made from it goes too."
+            : $"{Plural(summary.Artifacts, "artifact")}, {Plural(summary.Filled, "generated image")} "
+              + "and the uploaded source media go with it.";
+
+        if (!await Confirm.ConfirmAsync(new ConfirmRequest(
+            Title: $"Delete {campaign.Name}?",
+            Message: $"{trail} This cannot be undone.",
+            AcceptLabel: "Delete campaign",
+            Destructive: true,
+            RequirePhrase: campaign.Name)))
+        {
+            return;
+        }
+
+        _deleting = campaign.Id;
+        StateHasChanged();
+        try
+        {
+            await Campaigns.DeleteAsync(campaign.Id);
+            _summaries.Remove(campaign.Id);
+            // Reloads the list and clears the active campaign if it was this one, so the rail
+            // and any open view do not keep pointing at a campaign that no longer exists.
+            Workspace.Remove(campaign.Id);
+            Notifier.ShowSuccess($"Deleted {campaign.Name}.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't delete {campaign.Name}: {ex.Message}");
+        }
+        catch (HttpRequestException)
+        {
+            Notifier.ShowError("Couldn't reach the Castmill API.");
+        }
+        finally
+        {
+            _deleting = null;
+            StateHasChanged();
+        }
+    }
+
+    private static string Plural(int count, string noun) =>
+        count == 1 ? $"1 {noun}" : $"{count} {noun}s";
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
 

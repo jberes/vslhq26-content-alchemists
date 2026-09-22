@@ -36,13 +36,41 @@ public sealed class N27StartRunTests : CastmillUiTestContext
         Assert.Contains(webStarters, text => text.Contains("Upload document", StringComparison.Ordinal));
         Assert.Contains(webStarters, text => text.Contains("Upload media", StringComparison.Ordinal));
         Assert.Contains(webStarters, text => text.Contains("Record an idea", StringComparison.Ordinal));
-        Assert.DoesNotContain(webStarters, text => text.Contains("Local media", StringComparison.Ordinal));
+        // Whisper cannot run in the browser shell, so its starter is absent entirely rather
+        // than shown disabled (G3).
+        Assert.DoesNotContain(webStarters, text => text.Contains("Whisper", StringComparison.Ordinal));
         Assert.DoesNotContain("Not available", web.Markup, StringComparison.Ordinal);
 
         Media.EnableLocalProcessing();
         var desktop = Render<NewCampaign>();
         Assert.Contains(desktop.FindAll(".cm-starter"), item =>
-            item.TextContent.Contains("Local media", StringComparison.Ordinal));
+            item.TextContent.Contains("Whisper", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Whisper is the default engine wherever it can run (ADR-F70). It used to be the second
+    /// of two media starters, behind "Upload media", so the obvious click sent the run to
+    /// Azure AI Speech — which failed outright on a deployment that had none configured, after
+    /// uploading the file. The local starter now leads, and both media panels carry an
+    /// explicit engine switch.
+    /// </summary>
+    [Fact]
+    public void The_whisper_starter_leads_the_cloud_one_on_a_shell_that_can_run_it()
+    {
+        ArrangeBase();
+        Media.EnableLocalProcessing();
+        var desktop = Render<NewCampaign>();
+
+        var starters = desktop.FindAll(".cm-starter").Select(item => item.TextContent).ToList();
+        var whisper = starters.FindIndex(text => text.Contains("Whisper", StringComparison.Ordinal));
+        var cloud = starters.FindIndex(text => text.Contains("Azure AI Speech", StringComparison.Ordinal));
+
+        Assert.True(whisper >= 0, "The Whisper starter should be offered on this shell.");
+        Assert.True(cloud >= 0, "The cloud starter should still be offered.");
+        Assert.True(whisper < cloud, "Whisper is the default engine and must be offered first.");
+
+        // Both media paths name their engine, so neither can be picked by accident.
+        Assert.Contains(starters, text => text.Contains("on this machine", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

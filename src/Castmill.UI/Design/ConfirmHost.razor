@@ -10,11 +10,20 @@
              aria-labelledby="cm-confirm-title" @onclick:stopPropagation="true">
             <h2 id="cm-confirm-title" class="cm-modal__title">@request.Title</h2>
             <p class="cm-modal__message">@request.Message</p>
+            @if (request.RequirePhrase is { } phrase)
+            {
+                <label class="cm-modal__phrase">
+                    <span class="cm-meta">Type <strong>@phrase</strong> to confirm</span>
+                    <input class="cm-input" type="text" autocomplete="off" spellcheck="false"
+                           @ref="_phraseInput" value="@_typed"
+                           @oninput="OnPhraseInput" @onkeydown="OnPhraseKeyDown" />
+                </label>
+            }
             <div class="cm-modal__actions">
                 <button type="button" class="cm-button cm-button--quiet" @onclick="Cancel">
                     @request.CancelLabel
                 </button>
-                <button type="button" @ref="_acceptButton"
+                <button type="button" @ref="_acceptButton" disabled="@(!PhraseSatisfied(request))"
                         class="@(request.Destructive ? "cm-button cm-button--danger" : "cm-button")"
                         @onclick="Accept">
                     @request.AcceptLabel
@@ -26,28 +35,70 @@
 
 @code {
     private ElementReference? _acceptButton;
+    private ElementReference? _phraseInput;
     private bool _needsFocus;
+    private string _typed = string.Empty;
 
     protected override void OnInitialized() => Confirm.Requested += OnRequested;
+
+    /// <summary>
+    /// An ordinary prompt is satisfied immediately; a strong one only once the typed text
+    /// matches the required phrase exactly. Trimmed, because a name copied from the card
+    /// carries trailing whitespace often enough that rejecting it would just read as broken;
+    /// case is NOT relaxed, since the point is deliberate transcription.
+    /// </summary>
+    private bool PhraseSatisfied(ConfirmRequest request) =>
+        request.RequirePhrase is not { } phrase
+        || string.Equals(_typed.Trim(), phrase.Trim(), StringComparison.Ordinal);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Focus the primary action when the dialog appears, so it is operable from the
-        // keyboard the moment it opens (G5).
-        if (_needsFocus && _acceptButton is { } button)
+        // keyboard the moment it opens (G5). A strong prompt focuses the phrase field
+        // instead — its accept button starts disabled, so focusing it would strand the
+        // keyboard on a dead control.
+        if (_needsFocus)
         {
-            _needsFocus = false;
-            await button.FocusAsync();
+            if (Confirm.Active?.RequirePhrase is not null && _phraseInput is { } input)
+            {
+                _needsFocus = false;
+                await input.FocusAsync();
+            }
+            else if (_acceptButton is { } button)
+            {
+                _needsFocus = false;
+                await button.FocusAsync();
+            }
         }
     }
 
-    private void Accept() => Confirm.Complete(true);
+    private void Accept()
+    {
+        // Guards the Enter path as well as the click: the button can be disabled while a
+        // keypress is already in flight.
+        if (Confirm.Active is { } request && PhraseSatisfied(request))
+        {
+            Confirm.Complete(true);
+        }
+    }
 
     private void Cancel() => Confirm.Complete(false);
+
+    private void OnPhraseInput(ChangeEventArgs args) => _typed = args.Value?.ToString() ?? string.Empty;
+
+    private void OnPhraseKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            Accept();
+        }
+    }
 
     private void OnRequested()
     {
         _needsFocus = Confirm.Active is not null;
+        // Never carry a previous answer into the next prompt.
+        _typed = string.Empty;
         InvokeAsync(StateHasChanged);
     }
 
