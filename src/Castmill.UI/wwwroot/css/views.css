@@ -1665,17 +1665,110 @@ button.cm-intent {
     font-size: var(--cm-text-kicker);
 }
 
-/* The manual-build panel: a peer of the generation controls, not a mode switch. Marked out
-   so "no model call" reads as a deliberate route rather than a fallback. */
-.cm-studio__manual {
+/* The manual entry tile reads as a ghost like Add image, but marked as its own route —
+   it builds the slot that exists rather than creating another. */
+.cm-studio__manual-tile {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    align-self: center;
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px dashed var(--cm-accent-alt);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-accent-alt-wash);
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-meta);
+    cursor: pointer;
+}
+
+.cm-studio__manual-tile:hover:not(:disabled) {
+    color: var(--cm-on-surface);
+    border-color: var(--cm-accent-strong);
+}
+
+/* ---- Manual image editor: one dialog for the whole job ---------------------------- */
+
+.cm-manual {
     display: flex;
     flex-direction: column;
-    gap: var(--cm-space-2);
-    margin-block-end: var(--cm-space-4);
-    padding: var(--cm-space-3);
-    border: 1px solid var(--cm-rule);
-    border-radius: var(--cm-radius-sm);
+    inline-size: min(96vw, 1400px);
+    block-size: min(92vh, 900px);
+    background: var(--cm-surface);
+    border-radius: var(--cm-radius-md);
+    overflow: hidden;
+}
+
+.cm-manual__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
+    padding: var(--cm-space-4);
+    border-block-end: 1px solid var(--cm-rule);
+}
+
+/* Canvas left, controls right — the shape every editor of this kind uses, so the canvas gets
+   the room and the rail stays a fixed, scannable column. */
+.cm-manual__body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+    min-block-size: 0;
+    flex: 1 1 auto;
+}
+
+.cm-manual__stage {
+    display: grid;
+    place-items: center;
+    min-inline-size: 0;
+    min-block-size: 0;
+    padding: var(--cm-space-4);
     background: var(--cm-surface-sunken);
+    overflow: auto;
+}
+
+.cm-manual__stage .cm-imgeditor {
+    inline-size: 100%;
+    max-inline-size: 100%;
+}
+
+.cm-manual__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-8);
+    text-align: center;
+    border: 1px dashed var(--cm-rule-strong);
+    border-radius: var(--cm-radius-sm);
+}
+
+.cm-manual__rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-4);
+    padding: var(--cm-space-4);
+    border-inline-start: 1px solid var(--cm-rule);
+    overflow-y: auto;
+    min-block-size: 0;
+}
+
+/* Save stays reachable without scrolling the rail to the bottom. */
+.cm-manual__save {
+    margin-block-start: auto;
+    padding-block-start: var(--cm-space-3);
+    border-block-start: 1px solid var(--cm-rule);
+}
+
+@media (max-width: 899.98px) {
+    .cm-manual__body {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .cm-manual__rail {
+        border-inline-start: 0;
+        border-block-start: 1px solid var(--cm-rule);
+    }
 }
 
 /* An image layer inside its editor box. contain, not cover: the server fits the asset the
