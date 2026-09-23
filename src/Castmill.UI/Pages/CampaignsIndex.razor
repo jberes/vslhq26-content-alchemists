@@ -20,9 +20,14 @@
 <PageTitle>Campaigns — Castmill</PageTitle>
 
 <div class="cm-page"><div class="cm-measure--dashboard">
-    <header class="cm-front__head">
-        <span class="cm-kicker">Workspace</span>
-        <h1>Campaigns</h1>
+    @* Starting a run is reachable from the page itself, not only from the rail: the rail is
+       collapsible, and a producer working with it shut had no way in from here. *@
+    <header class="cm-front__head cm-front__head--actions">
+        <div>
+            <span class="cm-kicker">Workspace</span>
+            <h1>Campaigns</h1>
+        </div>
+        <a class="cm-button" href="campaigns/new">Start a run</a>
     </header>
 
     @if (!Workspace.IsLoaded)
@@ -45,7 +50,8 @@
             @foreach (var campaign in Workspace.Campaigns.OrderByDescending(c => c.UpdatedAt))
             {
                 var summary = _summaries.GetValueOrDefault(campaign.Id);
-                <li class="cm-campaign-cell">
+                <li class="cm-campaign-cell @(_deleting == campaign.Id ? "cm-campaign-cell--deleting" : null)"
+                    aria-busy="@(_deleting == campaign.Id ? "true" : "false")">
                     @* The delete control is a SIBLING of the card, not a child: the card is
                        itself a button, and a button inside a button is invalid HTML that
                        swallows the inner click. *@
@@ -54,7 +60,14 @@
                             aria-label="@($"Delete campaign {campaign.Name}")"
                             disabled="@(_deleting == campaign.Id)"
                             @onclick="() => DeleteAsync(campaign)">
-                        @(_deleting == campaign.Id ? "…" : "✕")
+                        @if (_deleting == campaign.Id)
+                        {
+                            <span aria-hidden="true">…</span>
+                        }
+                        else
+                        {
+                            <AppIcon Name="trash" />
+                        }
                     </button>
                     <button type="button" class="cm-campaign-card" @onclick="() => Open(campaign)">
                         @if (summary?.HeroImageUrl is { } hero)
@@ -106,6 +119,22 @@
                             }
                         </span>
                     </button>
+                    @* A campaign delete cascades through artifacts, images and uploaded media,
+                       so it is slow enough that the card must say what is happening. The
+                       hover-revealed button was the only signal before, and the pointer is
+                       rarely still on the card once the confirm dialog closes. No spinner
+                       (ADR-F13): a single DELETE has no observable steps, so this is the
+                       app's pulsing-dot vocabulary with the real work named. *@
+                    @if (_deleting == campaign.Id)
+                    {
+                        <span class="cm-campaign-card__deleting" role="status">
+                            <span class="cm-loading-line">
+                                <span class="cm-ai-dot" aria-hidden="true"></span>
+                                Deleting @campaign.Name…
+                            </span>
+                            <span class="cm-meta">@DeletingDetail(summary)</span>
+                        </span>
+                    }
                 </li>
             }
         </ul>
@@ -178,6 +207,14 @@
     /// destroys work irreversibly, including the uploaded source media, and a card grid is
     /// exactly where a stray click lands.
     /// </summary>
+    /// <summary>Names what the cascade is removing, so a slow delete reads as work rather
+    /// than as a hang. Falls back to prose when the summary never loaded.</summary>
+    private static string DeletingDetail(Summary? summary) =>
+        summary is null
+            ? "Removing its artifacts, images and uploaded media."
+            : $"Removing {Plural(summary.Artifacts, "artifact")}, "
+              + $"{Plural(summary.Filled, "generated image")} and the uploaded media.";
+
     private async Task DeleteAsync(CampaignResponse campaign)
     {
         var summary = _summaries.GetValueOrDefault(campaign.Id);

@@ -158,6 +158,41 @@ public static class ArtifactDisplay
     /// <summary>Human label for an artifact kind, keyed to the generator names the API uses.</summary>
     public static string KindLabel(string kind) => Resolve(kind).Label;
 
+    /// <summary>
+    /// The label with its noun dropped — "LinkedIn post" becomes "LinkedIn". Used where the
+    /// surrounding context already says what the thing is, such as a supporting piece nested
+    /// under the post it was generated from, where repeating the noun on every row is noise.
+    /// </summary>
+    public static string ShortLabel(string kind)
+    {
+        var label = Resolve(kind).Label;
+        return label.EndsWith(" post", StringComparison.Ordinal) ? label[..^5] : label;
+    }
+
+    /// <summary>
+    /// A one- or two-character mark for a compact row. Letterforms rather than brand logos:
+    /// they stay legible at 18px in both themes, need no licensing, and cannot go stale when
+    /// a platform restyles itself.
+    /// </summary>
+    public static string KindMark(string kind) => kind switch
+    {
+        "social-x" => "X",
+        "social-linkedin" => "in",
+        "social-facebook" => "f",
+        "social-instagram" => "ig",
+        "social-threads" => "th",
+        "social-bluesky" => "bs",
+        "newsletter" => "nl",
+        "email-sequence" => "em",
+        "show-notes" => "sn",
+        "clip-suggestions" => "cl",
+        "landing-page" => "lp",
+        "campaign-summary" => "cs",
+        "blog" => "bl",
+        "youtube" => "yt",
+        _ => ShortLabel(kind) is { Length: > 0 } label ? label[..1].ToLowerInvariant() : "·",
+    };
+
     /// <summary>Which swimlane a kind belongs to on the Mill Floor (F5) and the front page.</summary>
     public static string Lane(string kind) => Resolve(kind).Lane;
 

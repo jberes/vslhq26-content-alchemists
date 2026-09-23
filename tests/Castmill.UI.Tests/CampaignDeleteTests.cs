@@ -102,6 +102,44 @@ public sealed class CampaignDeleteTests : CastmillUiTestContext
         await view.WaitForAssertionAsync(() => Assert.Empty(view.FindAll(".cm-campaign-card")));
     }
 
+    /// <summary>
+    /// The cascade is slow — artifacts, images and uploaded media — and the confirm dialog is
+    /// gone by the time it starts, so without this the page looks hung. The card has to say
+    /// which campaign is going and what is being removed while the request is in flight.
+    /// </summary>
+    [Fact]
+    public async Task The_card_reports_the_cascade_while_the_delete_is_in_flight()
+    {
+        var release = new TaskCompletionSource();
+        Http.OnAsync(HttpMethod.Delete, $"api/v1/campaigns/{Doomed}", async () =>
+        {
+            await release.Task;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        Services.AddScoped<IConfirmService>(_ => new AutoConfirm(accept: true));
+
+        var view = Render<CampaignsIndex>();
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find("button.cm-campaign-card__delete")));
+        // NOT awaited: the handler is parked on the stubbed DELETE, and the whole point of
+        // this test is what the card shows while that is still true.
+        var click = view.Find("button.cm-campaign-card__delete").ClickAsync(new());
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var busy = view.Find(".cm-campaign-card__deleting");
+            Assert.Equal("status", busy.GetAttribute("role"));
+            Assert.Contains("Deleting Reveal - LDX3 Demo", busy.TextContent, StringComparison.Ordinal);
+            // The counts come from the dashboard summary, not from prose.
+            Assert.Contains("11 artifacts", busy.TextContent, StringComparison.Ordinal);
+            Assert.Equal("true", view.Find(".cm-campaign-cell").GetAttribute("aria-busy"));
+            Assert.NotNull(view.Find(".cm-campaign-cell--deleting"));
+        });
+
+        release.SetResult();
+        await click;
+        await view.WaitForAssertionAsync(() => Assert.Empty(view.FindAll(".cm-campaign-card")));
+    }
+
     private static CampaignResponse Campaign(Guid id, string name) =>
         new(id, Guid.NewGuid(), name, null,
             DateTimeOffset.UtcNow.AddDays(-3), DateTimeOffset.UtcNow);

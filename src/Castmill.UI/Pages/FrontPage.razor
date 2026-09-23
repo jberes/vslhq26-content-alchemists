@@ -89,14 +89,15 @@
                         {
                             var scheduled = ScheduledEntryFor(item.ArtifactId);
                             <li>
-                                @* A row, not a giant click target: the actions are explicit
-                                   buttons because "what happens if I click this card" was
-                                   previously guesswork. *@
+                                @* The title is the click target; the card around it is not, so
+                                   "what happens if I click this card" is still answerable.
+                                   Anything that is not opening the artifact stays a button. *@
                                 <div class="cm-card cm-card--artifact cm-front__item">
                                     <span class="cm-card__bar @ArtifactDisplay.StatusBarModifier(item.Status)" aria-hidden="true"></span>
                                     <span class="cm-card__body">
                                         <span class="cm-kicker">@item.CampaignName · @ArtifactDisplay.KindLabel(item.Kind)</span>
-                                        <span class="cm-card__title">@item.Title</span>
+                                        <button type="button" class="cm-card__title cm-open"
+                                                @onclick="() => OpenFocus(item)">@item.Title</button>
                                         <span class="cm-meta">Updated @ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
                                     </span>
                                     @if (scheduled is not null)
@@ -113,8 +114,6 @@
                                         </span>
                                     }
                                     <span class="cm-front__item-actions">
-                                        <button type="button" class="cm-button cm-button--quiet"
-                                            @onclick="() => OpenFocus(item)">@ReviewActionLabel(item.Status)</button>
                                         <button type="button" class="cm-button cm-button--quiet"
                                                 @onclick="() => OpenCampaign(item)">Campaign</button>
                                     </span>
@@ -185,13 +184,9 @@
                             @foreach (var item in _aging)
                             {
                                 <li class="cm-row">
-                                    <span class="cm-row__label" title="@item.Title">@item.Title</span>
+                                    <button type="button" class="cm-row__label cm-open" title="@item.Title"
+                                            @onclick="() => OpenFocus(item)">@item.Title</button>
                                     <span class="cm-meta cm-row__age">@ArtifactDisplay.Ago(item.UpdatedAt, Now)</span>
-                                    <button type="button" class="cm-button cm-button--quiet cm-row__action"
-                                            aria-label="Edit @item.Title"
-                                            @onclick="() => OpenFocus(item)">
-                                        Edit
-                                    </button>
                                 </li>
                             }
                         </ul>
@@ -409,13 +404,6 @@
             _ => _reviewCounts,
         };
     }
-
-    private static string ReviewActionLabel(string status) => status switch
-    {
-        ArtifactStatus.InReview => "Review",
-        ArtifactStatus.Draft => "Edit",
-        _ => "Open",
-    };
 
     private async Task LoadWireAsync()
     {

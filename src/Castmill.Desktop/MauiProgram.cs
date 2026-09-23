@@ -46,6 +46,17 @@ public static class MauiProgram
         builder.Services.AddScoped<IAuthTokenProvider, DesktopTokenProvider>();
         builder.Services.AddScoped<IExternalBrowserLauncher, DesktopExternalBrowserLauncher>();
         builder.Services.AddSingleton<IMediaPipeline, DesktopMediaPipeline>();
+        // Live dictation uses each platform's OWN on-device recogniser rather than one shared
+        // cloud path: Apple's Speech framework on Mac, Windows' SpeechRecognizer on Windows.
+        // The desktop WebView cannot reach a microphone at all, which is why this is native.
+#if MACCATALYST
+        builder.Services.AddSingleton<ILiveTranscriptionService, AppleLiveTranscriptionService>();
+#elif WINDOWS
+        builder.Services.AddSingleton<ILiveTranscriptionService, WindowsLiveTranscriptionService>();
+#else
+        builder.Services.AddSingleton<ILiveTranscriptionService>(
+            _ => new UnsupportedLiveTranscriptionService("This build has no on-device speech recogniser."));
+#endif
         builder.Services.AddScoped<IFileDownloader, DesktopFileDownloader>();
         // Clipboard writes must leave WKWebView on macOS. The shared browser service cannot
         // recover after navigator.clipboard rejects because its user-activation token is gone.

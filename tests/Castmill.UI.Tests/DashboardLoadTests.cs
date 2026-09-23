@@ -160,7 +160,7 @@ public sealed class DashboardLoadTests : CastmillUiTestContext
             () => page.Markup.Contains("Stale October letter", StringComparison.Ordinal),
             TimeSpan.FromSeconds(5));
 
-        await page.Find("button[aria-label='Edit Stale October letter']").ClickAsync();
+        await page.Find(".cm-front__aging-list .cm-row__label").ClickAsync();
 
         Assert.EndsWith(
             $"/campaigns/{CampaignB}/focus?artifact={AgingArtifact}",

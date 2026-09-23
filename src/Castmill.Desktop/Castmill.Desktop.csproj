@@ -11,6 +11,11 @@
         <OutputType>Exe</OutputType>
         <RootNamespace>Castmill.Desktop</RootNamespace>
         <UseMaui>true</UseMaui>
+        <!-- Ahead of the installed workload manifest (10.0.20): the UIScene lifecycle that
+             macOS 26+ requires only works end to end from the sr11 band. On 10.0.20 the app
+             launches but the scene-backed window is never given the MAUI page, so the
+             WebView stays empty. See Platforms/MacCatalyst/SceneDelegate.cs. -->
+        <MauiVersion>10.0.110</MauiVersion>
         <SingleProject>true</SingleProject>
         <EnableDefaultCssItems>false</EnableDefaultCssItems>
 

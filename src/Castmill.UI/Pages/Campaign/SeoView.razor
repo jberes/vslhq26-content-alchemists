@@ -19,6 +19,7 @@
 @inject SeoClient Seo
 @inject ScoutClient Scout
 @inject Castmill.UI.Http.GenerationClient Generation
+@inject PressRunService PressRun
 @inject INotifier Notifier
 @inject IClipboardService Clipboard
 @inject NavigationManager Navigation
@@ -112,7 +113,7 @@
                 @if (_analysis is { } deepReport)
                 {
                     <DeepSeoReport Report="deepReport"
-                                   OnDraftAngle="DraftAngleAsync"
+                                   OnDraftAngle="DraftAngle"
                                    OnRegenerateAngles="RegenerateAnglesAsync"
                                    RegeneratingAngles="_regeneratingAngles" />
                     <section class="cm-deep-report__section">
@@ -275,10 +276,11 @@
                                 <li>
                                     <span class="cm-seo__angle-term">@angle.Term</span>
                                     <span class="cm-mono cm-meta">@(angle.Volume?.ToString("N0") ?? "—")/mo</span>
+                                    @* Queued like the angle cards below: the press owns the run
+                                       and the header reports it. *@
                                     <button type="button" class="cm-button cm-button--quiet"
-                                            disabled="@(_drafting == angle.Term)"
-                                            @onclick="() => DraftKeywordAngleAsync(angle.Term)">
-                                        @(_drafting == angle.Term ? "Drafting…" : "Draft as artifact")
+                                            @onclick="() => DraftKeywordAngle(angle.Term)">
+                                        Draft as artifact
                                     </button>
                                 </li>
                             }
@@ -765,7 +767,7 @@
 
     private bool _regeneratingAngles;
 
-    private Task DraftKeywordAngleAsync(string term) => DraftAngleAsync(new SeoContentAngle(
+    private void DraftKeywordAngle(string term) => DraftAngle(new SeoContentAngle(
         term, "Searchers asking about this opportunity", "blog", term,
         "Selected from the report's opportunity-ranked keyword table."));
 
@@ -823,42 +825,46 @@
         }
     }
 
-    private async Task DraftAngleAsync(SeoContentAngle angle)
+    /// <summary>
+    /// Seeding is queued, not awaited: it is a full generation run, and holding the producer
+    /// on this button for a minute or two to watch a disabled control is the wrong trade. The
+    /// press service owns the request so it survives navigation, the header names what is
+    /// printing from every view, and the board refreshes itself when the blog lands.
+    /// </summary>
+    private void DraftAngle(SeoContentAngle angle)
     {
-        if (Campaign.TranscriptArtifactId is not { } transcriptId)
+        ArgumentNullException.ThrowIfNull(angle);
+
+        // The press prints one run at a time; starting a second would cancel the first's
+        // reveal, so say so rather than silently replacing it.
+        if (PressRun.IsActiveFor(CampaignId) && PressRun.IsRunning)
         {
+            Notifier.ShowError("The press is already printing for this campaign — let it finish, then seed this angle.");
             return;
         }
 
-        _drafting = angle.Angle;
-        StateHasChanged();
+        // The transcript id is optional: generation reads the campaign's sources too, exactly
+        // as the Press Run does. Requiring a legacy transcript artifact here made the button a
+        // silent no-op on every campaign built from the source pipeline.
+        if (Campaign.TranscriptArtifactId is null && Campaign.Sources.Count == 0)
+        {
+            Notifier.ShowError(
+                "This campaign has no approved evidence yet — add a source before seeding a blog from an angle.");
+            return;
+        }
 
-        try
-        {
-            var item = await Generation.GenerateOneAsync(
-                CampaignId, "blog", transcriptId,
-                $"Use the approved angle \"{angle.Angle}\" for {angle.AudienceNeed}. "
-                + $"Target \"{angle.TargetKeyword}\". {angle.Rationale}",
-                replaceArtifactId: Campaign.Artifacts.FirstOrDefault(a => a.IsPlaceholder)?.Id);
+        PressRun.Start(
+            CampaignId,
+            Campaign.TranscriptArtifactId,
+            $"Use the approved angle \"{angle.Angle}\" for {angle.AudienceNeed}. "
+            + $"Target \"{angle.TargetKeyword}\". {angle.Rationale}",
+            ["blog"],
+            copies: 1,
+            // The SEO analysis seeds a placeholder blog per angle; drafting consumes it
+            // instead of leaving a stub on the board beside the finished piece.
+            replaceArtifactId: Campaign.Artifacts.FirstOrDefault(a => a.IsPlaceholder)?.Id);
 
-            if (item.Success)
-            {
-                Notifier.ShowSuccess($"Drafted \"{angle.Angle}\" as the pillar blog · {item.DurationMs / 1000.0:0.0}s");
-                await Campaign.LoadAsync(CampaignId, force: true);
-            }
-            else
-            {
-                Notifier.ShowError(item.Error ?? "Draft failed.");
-            }
-        }
-        catch (ApiException ex)
-        {
-            Notifier.ShowError(ex.Message);
-        }
-        finally
-        {
-            _drafting = null;
-        }
+        Notifier.ShowSuccess($"Seeding \"{angle.Angle}\" — it prints in the background; the header tracks it.");
     }
 
     private async Task CopyAsync(string text)

@@ -24,5 +24,10 @@ builder.Services.AddSingleton<IShellInfo, WebShellInfo>();
 builder.Services.AddScoped<IAuthTokenProvider, WebTokenProvider>();
 builder.Services.AddScoped<IExternalBrowserLauncher, WebExternalBrowserLauncher>();
 builder.Services.AddSingleton<IMediaPipeline, WebMediaPipeline>();
+// No on-device speech recogniser in a browser: live dictation is a desktop capability, and
+// the picker states that rather than offering a control that cannot work.
+builder.Services.AddSingleton<ILiveTranscriptionService>(
+    _ => new UnsupportedLiveTranscriptionService(
+        "Live transcription runs on the machine's own speech recogniser — use the Castmill desktop app."));
 
 await builder.Build().RunAsync();

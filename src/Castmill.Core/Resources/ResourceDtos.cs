@@ -209,6 +209,16 @@ public sealed record OverlayBox(
 public sealed record OverlaySpec(
     [property: Required, MaxLength(12)] IReadOnlyList<OverlayBox> Boxes);
 
+/// <summary>
+/// Sets a slot's base image WITHOUT a model call — the manual thumbnail path. Either a brand
+/// kit asset (a reusable template) or a one-off upload; the server fits it to the slot's exact
+/// pixels, so what lands is the same shape a generated take would have been.
+/// </summary>
+public sealed record ImageSlotBaseImageRequest(
+    Guid? BrandAssetId = null,
+    /// <summary>Base64 of a PNG/JPEG/WebP. Ignored when <see cref="BrandAssetId"/> is given.</summary>
+    [property: MaxLength(28_000_000)] string? ImageBase64 = null);
+
 /// <summary>Region edit (ADR-055): a mask over the take plus an instruction — "replace the background", "add this face".</summary>
 public sealed record ImageRegionEditRequest(
     /// <summary>PNG, base64: white = edit, black/transparent = keep. Same size as the take, or any size (it is fitted).</summary>

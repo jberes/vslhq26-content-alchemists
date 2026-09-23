@@ -13,6 +13,9 @@ namespace Castmill.UI.Tests;
 /// and the model was told two. Selections are now the source of truth and the sentence is
 /// rebuilt from them, which is only correct if rebuilding also REMOVES what is no longer
 /// selected and leaves the user's own words alone. That is what these check.
+///
+/// Selections are a multi-set: a card may carry a face AND a background AND a screenshot, up
+/// to the API's limit of five. The per-kind replacement these once asserted is gone.
 /// </summary>
 public sealed class BrandKitPickerTests
 {
@@ -21,8 +24,8 @@ public sealed class BrandKitPickerTests
     {
         var view = new ImageStudioView();
 
-        Toggle(view, "face", Asset("face", "the host, short dark hair"));
-        Toggle(view, "background", Asset("background", "the Berlin studio wall"));
+        Toggle(view, Asset("face", "the host, short dark hair"));
+        Toggle(view, Asset("background", "the Berlin studio wall"));
 
         var steering = Steering(view);
         Assert.Contains("featuring the host, short dark hair", steering, StringComparison.Ordinal);
@@ -32,19 +35,39 @@ public sealed class BrandKitPickerTests
         Assert.Equal(1, steering.Split("From the brand kit:").Length - 1);
     }
 
+    /// <summary>
+    /// Selections are a multi-set now: a second face ADDS, it does not replace. The rule this
+    /// still protects is the original one — the sentence names exactly what is selected, no
+    /// more and no less — which is why removing one below must drop it from the prompt.
+    /// </summary>
     [Fact]
-    public void Choosing_a_different_face_replaces_the_first_rather_than_naming_both()
+    public void A_second_asset_of_the_same_kind_is_added_not_swapped()
     {
         var view = new ImageStudioView();
 
-        Toggle(view, "face", Asset("face", "the host"));
-        Toggle(view, "face", Asset("face", "the guest"));
+        Toggle(view, Asset("face", "the host"));
+        Toggle(view, Asset("face", "the guest"));
 
         var steering = Steering(view);
         Assert.Contains("the guest", steering, StringComparison.Ordinal);
+        Assert.Contains("the host", steering, StringComparison.Ordinal);
+        Assert.Equal(1, steering.Split("From the brand kit:").Length - 1);
+    }
 
-        // The bug this exists for: the replaced face lingering in the prompt.
-        Assert.DoesNotContain("the host", steering, StringComparison.Ordinal);
+    [Fact]
+    public void Selection_stops_at_the_api_limit_rather_than_silently_dropping_one()
+    {
+        var view = new ImageStudioView();
+        for (var i = 0; i < 7; i++)
+        {
+            Toggle(view, Asset("other", $"reference {i}"));
+        }
+
+        var steering = Steering(view);
+        // Five is what ImageSlotEndpoints accepts; the sixth and seventh must not appear.
+        Assert.Contains("reference 4", steering, StringComparison.Ordinal);
+        Assert.DoesNotContain("reference 5", steering, StringComparison.Ordinal);
+        Assert.DoesNotContain("reference 6", steering, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -53,8 +76,8 @@ public sealed class BrandKitPickerTests
         var view = new ImageStudioView();
         var face = Asset("face", "the host");
 
-        Toggle(view, "face", face);
-        Toggle(view, "face", face);
+        Toggle(view, face);
+        Toggle(view, face);
 
         Assert.DoesNotContain("From the brand kit", Steering(view), StringComparison.Ordinal);
         Assert.DoesNotContain("the host", Steering(view), StringComparison.Ordinal);
@@ -67,9 +90,9 @@ public sealed class BrandKitPickerTests
         SetSteering(view, "warmer light, shot from slightly below");
 
         var face = Asset("face", "the host");
-        Toggle(view, "face", face);
-        Toggle(view, "background", Asset("background", "the studio wall"));
-        Toggle(view, "face", face);   // clear the face again
+        Toggle(view, face);
+        Toggle(view, Asset("background", "the studio wall"));
+        Toggle(view, face);   // remove the face again
 
         var steering = Steering(view);
         Assert.StartsWith("warmer light, shot from slightly below", steering, StringComparison.Ordinal);
@@ -81,10 +104,10 @@ public sealed class BrandKitPickerTests
         new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), kind, label,
             $"{label}.png", "image/png", DateTimeOffset.UtcNow);
 
-    private static void Toggle(ImageStudioView view, string kind, BrandAssetResponse asset) =>
+    private static void Toggle(ImageStudioView view, BrandAssetResponse asset) =>
         typeof(ImageStudioView)
             .GetMethod("TogglePick", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(view, [kind, asset]);
+            .Invoke(view, [asset]);
 
     private static string Steering(ImageStudioView view) =>
         typeof(ImageStudioView)

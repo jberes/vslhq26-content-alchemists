@@ -191,11 +191,12 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
     }
 
     /// <summary>
-    /// Editing used to need a double-click: undiscoverable, and with no keyboard or touch
-    /// equivalent at all. The card's actions are now buttons on a hover toolbar.
+    /// Editing used to need a double-click, then a pencil on a hover toolbar. It is now the
+    /// card's own click — one click on the thing you want to edit, and it still works from
+    /// the keyboard because the card is a button.
     /// </summary>
     [Fact]
-    public async Task The_edit_tool_opens_focus_on_that_artifact_in_one_click()
+    public async Task Clicking_the_card_opens_focus_on_that_artifact_in_one_click()
     {
         StubPreview(Artifact("blog", "Editable draft"));
 
@@ -205,7 +206,7 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         var artifactId = StubbedArtifacts.Single().Id;
         var navigation = Services.GetRequiredService<NavigationManager>();
 
-        await view.Find(".cm-card__tools button:not(.cm-card__tool--danger)").ClickAsync();
+        await view.Find(".cm-card--lane").ClickAsync();
 
         Assert.Contains("/focus", navigation.Uri, StringComparison.Ordinal);
         Assert.Contains($"artifact={artifactId}", navigation.Uri, StringComparison.OrdinalIgnoreCase);
@@ -221,7 +222,7 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
         await WaitForTextAsync(view, "Printed draft");
         Assert.Contains("Done — back to the board", view.Markup, StringComparison.Ordinal);
 
-        await view.Find(".cm-card__tools button:not(.cm-card__tool--danger)").ClickAsync();
+        await view.Find(".cm-card--lane").ClickAsync();
 
         Assert.False(press.IsActiveFor(CampaignId));
     }

@@ -43,6 +43,55 @@ public sealed class PlanHelpersTests
         Assert.All(lines, line => Assert.False(string.IsNullOrWhiteSpace(line)));
     }
 
+    /// <summary>
+    /// An image layer (the manual-thumbnail path): a box naming a brand asset draws that
+    /// picture instead of text, fitted inside the box and centred, so dragging a corner in
+    /// the editor scales the image rather than distorting it. The field existed on the DTO
+    /// for a long time with nothing reading it.
+    /// </summary>
+    [Fact]
+    public void An_image_layer_is_drawn_into_its_box_fitted_and_centred()
+    {
+        var composer = new ImageComposer(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ImageComposer>.Instance);
+        var layerId = Guid.NewGuid();
+        // A SQUARE layer inside a WIDE box: fitting must pillarbox it, not stretch it.
+        var spec = new OverlaySpec([
+            new OverlayBox("layer", string.Empty, 0.25, 0.25, 0.5, 0.5, LogoAssetId: layerId),
+        ]);
+
+        var result = composer.ComposeOverlay(
+            Png(1000, 1000, SKColors.DimGray),
+            spec,
+            new Dictionary<Guid, byte[]> { [layerId] = Png(200, 200, SKColors.Red) });
+
+        using var bitmap = ImageReferenceResolver.TryDecode(result.Image)!;
+        // Centre of the box is the layer.
+        var centre = bitmap.GetPixel(500, 500);
+        Assert.True(centre.Red > 200 && centre.Green < 60, $"expected the layer at the centre, got {centre}");
+        // Outside the box the base image is untouched.
+        var outside = bitmap.GetPixel(60, 60);
+        Assert.Equal(SKColors.DimGray.Red, outside.Red);
+    }
+
+    [Fact]
+    public void An_image_layer_whose_bytes_are_missing_is_skipped_rather_than_failing()
+    {
+        var composer = new ImageComposer(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ImageComposer>.Instance);
+        var spec = new OverlaySpec([
+            new OverlayBox("layer", string.Empty, 0.1, 0.1, 0.5, 0.5, LogoAssetId: Guid.NewGuid()),
+        ]);
+
+        // A deleted asset must cost the producer one picture, not the whole thumbnail.
+        var result = composer.ComposeOverlay(Png(400, 400, SKColors.DimGray), spec, layerImages: null);
+
+        using var bitmap = ImageReferenceResolver.TryDecode(result.Image)!;
+        Assert.Equal(SKColors.DimGray.Red, bitmap.GetPixel(200, 200).Red);
+    }
+
     [Fact]
     public void Mask_helpers_find_the_edit_region_and_convert_to_the_alpha_convention()
     {

@@ -4,7 +4,8 @@
     data-wire-drag="@($"q:{Item.ArtifactId}:{Item.ChannelId}")">
     <span class="cm-run-show__queue-copy">
         <span class="cm-run-show__channel">@Item.Channel</span>
-        <span class="cm-run-show__queue-title cm-wire-clamp-2">@Item.Title</span>
+        <button type="button" class="cm-run-show__queue-title cm-wire-clamp-2 cm-open"
+                @onclick="() => Edit.InvokeAsync(Item)">@Item.Title</button>
         @if (ShowNoDate)
         {
             <IgbChip class="cm-wire-queue-card__date" Outlined="true">NO DATE</IgbChip>
@@ -12,7 +13,6 @@
         <span class="cm-run-show__meta">@Item.Meta</span>
     </span>
     <span class="cm-run-show__queue-actions" aria-label="Queue item actions">
-        <WireIconButton Kind="edit" Label="Edit" OnClick="() => Edit.InvokeAsync(Item)" />
         <WireIconButton Kind="slot" Label="Slot" OnClick="() => Slot.InvokeAsync(Item)" />
     </span>
 </li>

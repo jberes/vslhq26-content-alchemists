@@ -206,10 +206,20 @@
                         }
                     </div>
 
+                    @* Progress is its own line, not the button's label: it changes on every
+                       uploaded block, and swapping it into the button made the control resize
+                       under the pointer on each tick. The button keeps one stable width. *@
                     <section class="cm-reference-save">
                         <label class="cm-field"><span>Reference set name</span><input class="cm-input" @bind="_setName" maxlength="200" /></label>
                         <label class="cm-field"><span>Purpose (optional)</span><input class="cm-input" @bind="_purpose" maxlength="500" /></label>
-                        <button type="button" class="cm-button" disabled="@(_busy || string.IsNullOrWhiteSpace(_setName))" @onclick="SaveAsync">@(_busy ? _progress ?? "Saving…" : $"Save {_candidates.Count} reference images")</button>
+                        @if (_busy && _progress is { Length: > 0 } progress)
+                        {
+                            <span class="cm-meta cm-reference-save__status" role="status">
+                                <span class="cm-ai-dot" aria-hidden="true"></span>
+                                @progress
+                            </span>
+                        }
+                        <button type="button" class="cm-button" disabled="@(_busy || string.IsNullOrWhiteSpace(_setName))" @onclick="SaveAsync">@(_busy ? "Saving…" : $"Save {_candidates.Count} reference images")</button>
                     </section>
                 }
             </section>

@@ -134,12 +134,12 @@
                     </div>
                     <SourceTranscript Transcript="transcript" Highlighted="_highlighted" SegmentClicked="SeekToSegmentAsync" />
 
-                    @if (_pinnedId is { } pinned && PinnedCitations.Count > 0)
+                    @if (ActiveId is { } traced && ActiveCitations.Count > 0)
                     {
                         <aside class="cm-source__quotes">
-                            <span class="cm-kicker">Cited by "@ArtifactTitle(pinned)"</span>
+                            <span class="cm-kicker">Cited by "@ArtifactTitle(traced)"</span>
                             <ul>
-                                @foreach (var id in PinnedCitations)
+                                @foreach (var id in ActiveCitations)
                                 {
                                     var segment = transcript.Segments.FirstOrDefault(s => s.Id == id);
                                     if (segment is not null)
@@ -382,7 +382,7 @@
                                                 <button type="button"
                                                         class="cm-card cm-card--lane @(artifact.Id == ActiveId ? "cm-card--traced" : "") @(_justPrinted.Contains(artifact.Id) ? "cm-card--printed" : "")"
                                                         data-card="@artifact.Id"
-                                                        @onclick="() => TogglePin(artifact)">
+                                                        @onclick="() => OpenFocus(artifact)">
                                                     <span class="cm-card__bar @BarClass(artifact.Status)" aria-hidden="true"></span>
                                                     <span class="cm-card__body">
                                                         <span class="cm-card__title">@artifact.Title</span>
@@ -392,18 +392,12 @@
                                                     </span>
                                                 </button>
 
-                                                @* Hover toolbar. Editing used to need a
-                                                   double-click, which is undiscoverable and has
-                                                   no keyboard or touch equivalent — a card is a
-                                                   button, so its actions are buttons too. *@
+                                                @* The card itself opens the artifact — a single
+                                                   click on the thing you want to edit — and
+                                                   hovering it traces its citations. Delete is
+                                                   the only thing left that a click cannot say. *@
                                                 <div class="cm-card__tools" role="group"
                                                      aria-label="Actions for @artifact.Title">
-                                                    <button type="button" class="cm-card__tool"
-                                                            title="Edit @ArtifactDisplay.KindLabel(artifact.Kind)"
-                                                            aria-label="Edit @artifact.Title"
-                                                            @onclick="() => OpenFocus(artifact)">
-                                                        <span aria-hidden="true">✎</span>
-                                                    </button>
                                                     <button type="button" class="cm-card__tool cm-card__tool--danger"
                                                             title="Delete @ArtifactDisplay.KindLabel(artifact.Kind)"
                                                             aria-label="Delete @artifact.Title"
@@ -521,7 +515,6 @@
 
     private ElementReference _canvas;
     private Guid? _hoverId;
-    private Guid? _pinnedId;
     private Guid? _selectedSourceId;
     private bool _overview;
     private int _geometryEpoch;
@@ -542,13 +535,12 @@
     [SupplyParameterFromQuery(Name = "revision")]
     public int? RequestedRevision { get; set; }
 
-    private Guid? ActiveId => _hoverId ?? _pinnedId;
+    /// <summary>The card being traced: hovering one is what lights the provenance overlay
+    /// and the cited-quote list. There is no sticky pin — a card's click opens it.</summary>
+    private Guid? ActiveId => _hoverId;
 
     private IReadOnlyList<string> ActiveCitations =>
         ActiveId is { } id ? CitationsOf(id) : [];
-
-    private IReadOnlyList<string> PinnedCitations =>
-        _pinnedId is { } id ? CitationsOf(id) : [];
 
     private SourceAssetResponse? SelectedSource =>
         Campaign.Sources.FirstOrDefault(source => source.Id == _selectedSourceId)
@@ -744,17 +736,7 @@
         QueueArtifactEvidence(artifact);
     }
 
-    private void Unhover() => _hoverId = null; // the pinned set, if any, takes back over
-
-    private void TogglePin(ArtifactPreviewResponse artifact)
-    {
-        _pinnedId = _pinnedId == artifact.Id ? null : artifact.Id;
-        if (_pinnedId is not null)
-        {
-            SelectFirstCitedSource(artifact);
-            QueueArtifactEvidence(artifact);
-        }
-    }
+    private void Unhover() => _hoverId = null;
 
     private void QueueArtifactEvidence(ArtifactPreviewResponse artifact) =>
         _ = InvokeAsync(() => StoreEvents.GuardedAsync(
@@ -1132,11 +1114,6 @@
         try
         {
             await Campaigns.DeleteArtifactAsync(CampaignId, artifact.Id);
-            if (_pinnedId == artifact.Id)
-            {
-                _pinnedId = null;
-            }
-
             await Campaign.LoadAsync(CampaignId, force: true);
             Notifier.ShowSuccess($"Deleted \"{artifact.Title}\".");
         }

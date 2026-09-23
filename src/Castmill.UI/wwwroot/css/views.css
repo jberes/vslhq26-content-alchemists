@@ -268,6 +268,16 @@
     margin-block-end: var(--cm-space-6);
 }
 
+/* Title on the left, the page's primary action on the right, baseline-aligned with the
+   kicker rather than the h1 so the button does not sit low. */
+.cm-front__head--actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--cm-space-4);
+    flex-wrap: wrap;
+}
+
 /* The front page fills the frame and scrolls INSIDE its columns rather than growing the
    page (G8: the page never scrolls, regions do). A campaign with fifty aging drafts must
    not push the review queue off the bottom of the window. */
@@ -567,6 +577,32 @@
     min-inline-size: 0;
 }
 
+/* A title that opens its own item on a single click. Declared BEFORE the title and label
+   rules on purpose: this is only a button reset, and the typography classes that share the
+   element have to win. The affordance is the hover/focus treatment, so a list of cards still
+   reads as text rather than as a wall of links. */
+.cm-open {
+    display: block;
+    /* No inline-size here: these buttons sit in flex rows where a forced 100% overflows the
+       row. The classes that share the element already size themselves. */
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.cm-open:hover,
+.cm-open:focus-visible {
+    color: var(--cm-accent-strong);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
 .cm-card__title {
     font-family: var(--cm-font-display);
     font-weight: var(--cm-font-display-weight);
@@ -658,6 +694,31 @@
 .cm-campaign-cell:hover .cm-campaign-card__delete,
 .cm-campaign-cell:focus-within .cm-campaign-card__delete {
     opacity: 1;
+}
+
+/* While the cascade runs the card goes inert and says so. Dimming the card rather than
+   replacing it keeps the name and counts readable, which is what makes the wait legible:
+   you can still see exactly which campaign is going and how much is attached to it. */
+.cm-campaign-cell--deleting .cm-campaign-card {
+    opacity: 0.35;
+    filter: saturate(0.4);
+    pointer-events: none;
+}
+
+.cm-campaign-card__deleting {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--cm-space-2);
+    padding-inline: var(--cm-space-4);
+    text-align: center;
+    background: color-mix(in srgb, var(--cm-surface) 70%, transparent);
+    border-radius: var(--cm-radius-md);
+    pointer-events: none;
 }
 
 .cm-campaign-card__delete:hover:not(:disabled) {
@@ -1604,6 +1665,92 @@ button.cm-intent {
     font-size: var(--cm-text-kicker);
 }
 
+/* The manual-build panel: a peer of the generation controls, not a mode switch. Marked out
+   so "no model call" reads as a deliberate route rather than a fallback. */
+.cm-studio__manual {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block-end: var(--cm-space-4);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+/* An image layer inside its editor box. contain, not cover: the server fits the asset the
+   same way, so dragging a corner here scales the picture exactly as it will composite. */
+.cm-imgeditor__layer {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+}
+
+.cm-layer-picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-2);
+    margin-block: var(--cm-space-2);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
+/* ---- Live recording (new-campaign source step) ------------------------------------ */
+
+.cm-live {
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-3);
+    margin-block-end: var(--cm-space-4);
+}
+
+.cm-live__controls {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-3);
+}
+
+/* A recording indicator, not a progress indicator: it says "listening", and the transcript
+   filling in is the real feedback (ADR-F13 — no indeterminate spinner stands in for it). */
+.cm-live__dot {
+    display: inline-block;
+    inline-size: .6em;
+    block-size: .6em;
+    border-radius: 50%;
+    background: currentColor;
+    margin-inline-end: var(--cm-space-2);
+    animation: cm-ai-pulse 1.2s ease-in-out infinite;
+}
+
+.cm-live__transcript {
+    min-block-size: 8rem;
+    max-block-size: 22rem;
+    overflow-y: auto;
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+    font-size: var(--cm-text-body);
+    line-height: var(--cm-leading-body);
+}
+
+/* The phrase still in flight. The recogniser rewrites it as it hears more, so it is marked as
+   provisional rather than letting settled text appear to change under the reader. */
+.cm-live__partial {
+    color: var(--cm-on-surface-muted);
+    font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cm-live__dot {
+        animation: none;
+    }
+}
+
 /* ---- Artifact tree (Focus rail): lane groups → items, with per-item delete ------- */
 
 .cm-tree {
@@ -1640,6 +1787,35 @@ button.cm-intent {
     font-size: var(--cm-text-meta);
 }
 
+/* A root piece and its generated children. The branch is the list item; the row inside it
+   keeps the flex/positioning the delete button anchors to, so nesting a child list under a
+   root does not disturb it. */
+.cm-tree__branch {
+    display: block;
+}
+
+.cm-tree__branch + .cm-tree__branch {
+    margin-block-start: var(--cm-space-2);
+}
+
+/* Children are indented behind a rule that traces back to their parent — the relationship is
+   carried by the line, not by a repeated label on every row. */
+.cm-tree__children {
+    list-style: none;
+    margin: 0;
+    padding-inline-start: var(--cm-space-3);
+    margin-inline-start: var(--cm-space-3);
+    border-inline-start: 1px solid var(--cm-rule);
+}
+
+.cm-tree__children .cm-focus__list-title {
+    font-size: var(--cm-text-meta);
+}
+
+.cm-focus__branch-empty {
+    margin: var(--cm-space-2) var(--cm-space-3) var(--cm-space-3);
+}
+
 .cm-tree__row {
     position: relative;
     display: flex;
@@ -1648,6 +1824,79 @@ button.cm-intent {
 
 .cm-tree__row .cm-focus__list-item {
     padding-inline: var(--cm-space-3) var(--cm-space-8);
+}
+
+/* Channel picker (Producer): one compact row per social channel, reusing the rail's
+   letterform marks so a channel reads the same everywhere it appears. */
+.cm-channel-picker {
+    list-style: none;
+    margin: 0 0 var(--cm-space-3);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+}
+
+.cm-channel-picker__item {
+    display: flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    cursor: pointer;
+    font-size: var(--cm-text-meta);
+}
+
+.cm-channel-picker__made {
+    margin-inline-start: auto;
+}
+
+/* A supporting piece is one line: mark, short kind, status. The parent row above it already
+   carries the title they share, so a child spends its space on what actually differs. */
+.cm-focus__list-item--compact {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--cm-space-2);
+    padding-block: var(--cm-space-1);
+}
+
+.cm-tree__row--compact .cm-focus__list-item {
+    padding-inline: var(--cm-space-2) var(--cm-space-6);
+}
+
+/* Letterform marks, not brand logos: legible at this size in both themes, and they cannot
+   go stale when a platform restyles itself. */
+.cm-tree__mark {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    inline-size: 1.25rem;
+    block-size: 1.25rem;
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-accent-alt-wash);
+    color: var(--cm-on-surface-muted);
+    font-size: var(--cm-text-kicker);
+    line-height: 1;
+    text-transform: lowercase;
+}
+
+.cm-tree__short {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--cm-text-meta);
+}
+
+.cm-focus__list-item--compact .cm-status {
+    flex: none;
+    font-size: var(--cm-text-kicker);
+}
+
+.cm-tree__row--compact .cm-tree__delete {
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+    inline-size: 24px;
+    block-size: 24px;
 }
 
 .cm-tree__delete {
@@ -2728,7 +2977,7 @@ button.cm-intent {
 }
 
 .cm-focus {
-    grid-template-columns: minmax(10rem, 210px) minmax(0, 1fr) 3.25rem minmax(18rem, 360px);
+    grid-template-columns: minmax(11.5rem, 242px) minmax(0, 1fr) 3.25rem minmax(18rem, 360px);
     grid-template-rows: minmax(0, 1fr);
     inline-size: 100%;
     max-inline-size: 100%;
@@ -2739,7 +2988,7 @@ button.cm-intent {
 }
 
 .cm-focus.cm-focus--producer-wide {
-    grid-template-columns: minmax(11rem, 220px) minmax(20rem, 1fr) 3.25rem clamp(24rem, 42vw, 44rem);
+    grid-template-columns: minmax(12.65rem, 253px) minmax(20rem, 1fr) 3.25rem clamp(24rem, 42vw, 44rem);
 }
 
 .cm-focus__outline {
@@ -2877,11 +3126,11 @@ button.cm-intent {
 
 @media (max-width: 1439.98px) {
     .cm-focus {
-        grid-template-columns: minmax(9rem, 180px) minmax(0, 1fr) 3rem minmax(16rem, 300px);
+        grid-template-columns: minmax(10.35rem, 207px) minmax(0, 1fr) 3rem minmax(16rem, 300px);
     }
 
     .cm-focus.cm-focus--producer-wide {
-        grid-template-columns: minmax(10rem, 180px) minmax(18rem, 1fr) 3rem clamp(22rem, 42vw, 36rem);
+        grid-template-columns: minmax(11.5rem, 207px) minmax(18rem, 1fr) 3rem clamp(22rem, 42vw, 36rem);
     }
 
 }
@@ -4432,6 +4681,20 @@ button.cm-intent {
     object-fit: cover;
 }
 
+/* Automatic references read as attached, not as a control: no hover-to-remove affordance,
+   and a marker saying where they came from. */
+.cm-studio__refchip--auto {
+    cursor: default;
+    opacity: .85;
+}
+
+.cm-studio__refchip-auto {
+    font-size: var(--cm-text-kicker);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--cm-on-surface-muted);
+}
+
 .cm-studio__refchip-x {
     color: var(--cm-on-surface-muted);
 }
@@ -4535,6 +4798,23 @@ button.cm-intent {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* The chosen column of the two-list picker. Same row treatment as the available list so
+   moving an item between them does not change how it reads. */
+.cm-kitpicker__chosen {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    inline-size: 100%;
+}
+
+.cm-kitpicker__group {
+    display: block;
+    margin-block: var(--cm-space-2) var(--cm-space-1);
 }
 
 .cm-kitpicker__tick {
@@ -8175,8 +8455,19 @@ body.cm-wire-dragging [data-wire-drag] {
 /* Video reference extraction: source → deterministic selection → reusable Brand assets. */
 .cm-reference-page { overflow: auto; padding: clamp(1rem, 2vw, 2rem); display: grid; gap: 1.5rem; }
 .cm-reference-hero, .cm-reference-section-head, .cm-reference-source-meta,
-.cm-reference-manual-actions, .cm-reference-frame-actions, .cm-reference-save {
+.cm-reference-manual-actions, .cm-reference-frame-actions {
   display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap;
+}
+/* The save row mixes label-over-input fields with a bare button. Centring floated the button
+   between the label and the input; aligning to the END puts it on the inputs' baseline, which
+   is what .cm-reference-controls above already does. */
+.cm-reference-save {
+  display: flex; align-items: end; justify-content: space-between; gap: .75rem; flex-wrap: wrap;
+  border-block-start: 1px solid var(--cm-rule); padding-block-start: 1rem;
+}
+.cm-reference-save__status {
+  display: inline-flex; align-items: center; gap: var(--cm-space-2);
+  margin-inline-start: auto; padding-block-end: var(--cm-space-2);
 }
 .cm-reference-hero h1, .cm-reference-section-head h2 { margin: .2rem 0; }
 .cm-reference-source, .cm-reference-workspace, .cm-reference-saved, .cm-reference-set {
@@ -8206,7 +8497,6 @@ body.cm-wire-dragging [data-wire-drag] {
 .cm-reference-frame-copy, .cm-reference-frame-actions { padding: .65rem; }
 .cm-reference-frame-copy { display: grid; gap: .35rem; }
 .cm-reference-frame-actions { justify-content: flex-start; padding-block-start: 0; }
-.cm-reference-save { border-block-start: 1px solid var(--cm-rule); padding-block-start: 1rem; }
 .cm-reference-set + .cm-reference-set { margin-block-start: 1rem; }
 .cm-reference-source-meta { justify-content: flex-start; }
 .cm-reference-crop-panel .cm-field { inline-size: 8rem; }

@@ -38,7 +38,14 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         CampaignId == campaignId && (IsRunning || Progress is not null);
 
     /// <param name="copies">How many of each kind to print — "3 more LinkedIn posts".</param>
-    public void Start(Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds, int copies = 1)
+    /// <param name="replaceArtifactId">
+    /// A placeholder this run prints over, for the single-kind callers that have one — the SEO
+    /// report seeds a placeholder blog per angle, and drafting that angle must consume it
+    /// rather than leave a stub beside the real thing. Honoured only for a single kind and a
+    /// single copy; the multi-kind press has nothing to replace.
+    /// </param>
+    public void Start(Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds,
+        int copies = 1, Guid? replaceArtifactId = null)
     {
         ArgumentNullException.ThrowIfNull(kinds);
 
@@ -55,7 +62,7 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         IsRunning = true;
         Changed?.Invoke();
 
-        _ = RunAsync(campaignId, transcriptArtifactId, brief, kinds, copies, _cts.Token);
+        _ = RunAsync(campaignId, transcriptArtifactId, brief, kinds, copies, replaceArtifactId, _cts.Token);
     }
 
     /// <summary>Clears the finished run once the canvas has finished revealing it.</summary>
@@ -73,12 +80,24 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     public void Dispose() => _cts?.Cancel();
 
     private async Task RunAsync(
-        Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds, int copies, CancellationToken ct)
+        Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds, int copies,
+        Guid? replaceArtifactId, CancellationToken ct)
     {
         var startedAfter = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(10);
 
-        // The long POST. Held as a task; its completion ends the loop below.
-        var generate = generation.GenerateAsync(campaignId, transcriptArtifactId, brief, kinds, copies, ct);
+        // The long POST. Held as a task; its completion ends the loop below. Replacing a
+        // placeholder needs the single-kind endpoint — the batch one has no such parameter —
+        // and it is normalised to the same shape so everything below is unaware of which ran.
+        var generate = replaceArtifactId is { } replaceId && kinds.Length == 1 && copies == 1
+            ? OneAsync(kinds[0], replaceId)
+            : generation.GenerateAsync(campaignId, transcriptArtifactId, brief, kinds, copies, ct);
+
+        async Task<RunFinished> OneAsync(string kind, Guid replaceId)
+        {
+            var item = await generation.GenerateOneAsync(
+                campaignId, kind, transcriptArtifactId, brief, replaceArtifactId: replaceId, ct: ct);
+            return new RunFinished(Guid.Empty, item.Success ? 1 : 0, item.Success ? 0 : 1, [item]);
+        }
 
         try
         {
@@ -120,7 +139,9 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
             var finished = await generate;
 
             Progress = new RunProgress(
-                finished.RunId, campaignId, "Completed",
+                // The single-kind endpoint returns no run id; the poll above already has one.
+                finished.RunId == Guid.Empty ? Progress?.Id ?? Guid.Empty : finished.RunId,
+                campaignId, "Completed",
                 finished.Results.Count, finished.Results.Count, finished.Results,
                 Progress?.StartedAt ?? DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         }

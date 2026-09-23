@@ -341,13 +341,30 @@
     <section class="cm-deep-report__section">
         <h3>SERP and zero-click answer surfaces</h3>
         <div class="cm-answer-surfaces">
+            @* Both surfaces arrive as Markdown from the SERP provider — links, bold and
+               sub-headings — so they render through the same pipeline as the answer-engine
+               panel above. Printed as text they were an unreadable wall of raw syntax. *@
             <div class="cm-report-card">
                 <span class="cm-kicker">AI Overview</span>
-                <p>@(Report.Serp.AiOverview ?? "No AI Overview was detected for this query.")</p>
+                @if (Report.Serp.AiOverview is { Length: > 0 } aiOverview)
+                {
+                    <div class="cm-aeo-markdown">@MarkdownRenderer.ToHtml(aiOverview)</div>
+                }
+                else
+                {
+                    <p class="cm-meta">No AI Overview was detected for this query.</p>
+                }
             </div>
             <div class="cm-report-card">
                 <span class="cm-kicker">Featured snippet</span>
-                <p>@(Report.Serp.FeaturedSnippet ?? "No featured snippet was detected for this query.")</p>
+                @if (Report.Serp.FeaturedSnippet is { Length: > 0 } snippet)
+                {
+                    <div class="cm-aeo-markdown">@MarkdownRenderer.ToHtml(snippet)</div>
+                }
+                else
+                {
+                    <p class="cm-meta">No featured snippet was detected for this query.</p>
+                }
             </div>
         </div>
         <div class="cm-scroll-x">
@@ -397,6 +414,9 @@
                         <p>@angle.Rationale</p>
                         @if (OnDraftAngle.HasDelegate)
                         {
+                            @* Queued, not awaited: the click hands the angle to the press and
+                               returns immediately, so the button never holds the producer. The
+                               header's run pill is what reports it, from whichever view. *@
                             <button type="button" class="cm-button cm-button--quiet"
                                     @onclick="() => OnDraftAngle.InvokeAsync(angle)">
                                 Seed blog from this angle
@@ -412,6 +432,7 @@
 @code {
     [Parameter, EditorRequired] public SeoAnalysisReportResponse Report { get; set; } = default!;
     [Parameter] public EventCallback<SeoContentAngle> OnDraftAngle { get; set; }
+
     [Parameter] public EventCallback OnRegenerateAngles { get; set; }
     [Parameter] public bool RegeneratingAngles { get; set; }
 

@@ -168,6 +168,20 @@ public sealed class ImagesClient(ApiClient api)
             anonymous: false,
             ct);
 
+    /// <summary>
+    /// Manual thumbnail: makes a kit asset or an uploaded file this slot's base image, with no
+    /// model call. The server fits it to the slot's pixels, so the overlay editor, placement
+    /// and publishing all behave as they would over a generated take.
+    /// </summary>
+    public Task<OverlaySaveResult> SetBaseImageAsync(
+        Guid campaignId, Guid slotId, Guid? brandAssetId, string? imageBase64,
+        CancellationToken ct = default) =>
+        api.PostAsync<object, OverlaySaveResult>(
+            $"api/v1/campaigns/{campaignId}/image-slots/{slotId}/base",
+            new { brandAssetId, imageBase64 },
+            anonymous: false,
+            ct);
+
     /// <summary>Clears a filled slot back to Empty. The prompt survives — it's the user's work.</summary>
     public Task DeleteAsync(Guid campaignId, Guid slotId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/campaigns/{campaignId}/image-slots/{slotId}", ct);

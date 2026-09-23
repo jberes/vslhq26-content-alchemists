@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Castmill.Api.Data;
@@ -542,6 +543,10 @@ public sealed class AiOrchestrator(
         BrandContext brand, CancellationToken ct, Guid? replaceArtifactId = null)
     {
         brief = WithContentType(campaign, brief);
+        // Every blog in a campaign was handed the SAME question list, so every blog answered
+        // the same FAQ — duplicate answer-surface content competing with itself. Each post now
+        // sees what its siblings already cover and is told to take what is left.
+        brand = await DifferentiateBlogAsync(campaign.Id, brand, replaceArtifactId, ct);
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -609,6 +614,16 @@ public sealed class AiOrchestrator(
             foreach (var issue in BlogMarkdown.Problems(draftJson.GetProperty("markdown").GetString()!))
             {
                 warnings.Add($"Formatting: {issue}");
+            }
+
+            // The title was captured from the DRAFT, but stage 2 rewrites the body including its
+            // own H1 — so the stored title drifted from what the post calls itself, and Focus
+            // showed two different titles stacked. The article's heading is the one that
+            // publishes, so it wins; everything downstream reads the title from this envelope.
+            if (BlogMarkdown.LeadingHeading(draftJson.GetProperty("markdown").GetString()!) is { Length: > 0 } heading
+                && !string.Equals(heading, title, StringComparison.Ordinal))
+            {
+                draftJson = ArtifactContentJson.WithTitle(draftJson, heading);
             }
 
             var artifactId = await PersistAsync(campaign, "blog", draftJson,
@@ -700,6 +715,9 @@ public sealed class AiOrchestrator(
         var provider = "foundry";
         var knowledgeUsed = false;
         var attached = new List<string>();
+        // Carried to the warnings the producer sees: the warnings list does not exist yet at
+        // the point the knowledge base is consulted.
+        string? knowledgeNote = null;
         try
         {
             var kind = Generators.Normalize(artifact.Kind);
@@ -719,12 +737,27 @@ public sealed class AiOrchestrator(
             if (consult)
             {
                 var query = BuildKnowledgeQuery(artifact, payload.Value, campaign, TechnicalBriefs.QuerySeed(technicalBrief));
-                var answer = await knowledge.AskAsync(userId, query, brand.Knowledge, ct);
-                if (answer is not null)
+                try
                 {
-                    knowledgeUsed = true;
-                    knowledgeBlock = $"\n{answer.ToPromptBlock()}\n";
-                    attached.Add(brand.Knowledge is { } endpoint ? $"knowledge: {endpoint.Name}" : "knowledge: workspace");
+                    var answer = await knowledge.AskAsync(userId, query, brand.Knowledge, ct);
+                    if (answer is not null)
+                    {
+                        knowledgeUsed = true;
+                        knowledgeBlock = $"\n{answer.ToPromptBlock()}\n";
+                        attached.Add(brand.Knowledge is { } endpoint ? $"knowledge: {endpoint.Name}" : "knowledge: workspace");
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    // The knowledge base ENRICHES the edit; it is not what the edit is for.
+                    // A gateway that times out used to throw past the null check into the
+                    // outer catch and cost the producer the whole Tech Edit — model call,
+                    // verification and all — which contradicts the rule that every agent is a
+                    // decorator that falls back to the one-shot path (ADR-058). It now
+                    // degrades to "no knowledge block" and says so on the run.
+                    logger.LogWarning(ex, "Knowledge base unavailable for tech edit of {ArtifactId}", artifact.Id);
+                    knowledgeNote = $"Knowledge base unavailable ({ex.GetType().Name}); "
+                        + "the tech edit ran without it.";
                 }
             }
 
@@ -829,8 +862,11 @@ public sealed class AiOrchestrator(
                 && editedMarkdown.ValueKind == JsonValueKind.String)
             {
                 // A note addressed to the editor never ships (ADR-077) — it rides on the run instead.
-                var (publishable, strayNotes) = BlogEditor.StripNotes(editedMarkdown.GetString()!);
-                if (strayNotes.Count > 0)
+                // Unwrap first: a model that nests another JSON envelope inside "markdown" passes
+                // validation (it is a non-empty string) and would otherwise be stored verbatim.
+                var (publishable, strayNotes) = BlogEditor.StripNotes(
+                    BlogEditor.Unwrap(editedMarkdown.GetString()!));
+                if (strayNotes.Count > 0 || !string.Equals(publishable, editedMarkdown.GetString(), StringComparison.Ordinal))
                 {
                     edited = ArtifactContentJson.WithMarkdown(edited, publishable);
                     attached.AddRange(strayNotes.Select(note => $"Editor: {note}"));
@@ -861,6 +897,10 @@ public sealed class AiOrchestrator(
                 }
             }
             var warnings = new List<string>(validation.Warnings);
+            if (knowledgeNote is not null)
+            {
+                warnings.Add(knowledgeNote);
+            }
             warnings.AddRange(changes.Select(c => $"Tech edit: {c}"));
             // Verification policy (ADR-056): an unverified technical claim is flagged, never
             // silently kept and never rewritten into something more confident.
@@ -1065,6 +1105,69 @@ public sealed class AiOrchestrator(
 
     private static bool TemplateGovernsBlog(BrandContext? brand) =>
         brand?.TemplateSteeringByKind.ContainsKey("blog") == true;
+
+    /// <summary>
+    /// Narrows a campaign's shared SEO targets to what THIS post should own. The campaign's
+    /// question list is a single set, so handing all of it to every blog produced the same
+    /// FAQ on each one: duplicate answer-surface content, and posts competing with each other
+    /// for the same queries instead of covering the space between them.
+    ///
+    /// Sibling coverage is read from the posts themselves — their question-shaped headings —
+    /// rather than a separate ledger, so it is correct for blogs that already exist and
+    /// cannot drift from what was actually published.
+    /// </summary>
+    private async Task<BrandContext> DifferentiateBlogAsync(
+        Guid campaignId, BrandContext brand, Guid? replaceArtifactId, CancellationToken ct)
+    {
+        var siblings = await db.Artifacts
+            .Where(artifact => artifact.CampaignId == campaignId
+                && artifact.Kind == "blog"
+                && (replaceArtifactId == null || artifact.Id != replaceArtifactId))
+            .Select(artifact => new { artifact.Title, artifact.ContentJson })
+            .ToListAsync(ct);
+        if (siblings.Count == 0)
+        {
+            return brand;
+        }
+
+        var covered = siblings
+            .SelectMany(sibling => BlogMarkdown.QuestionHeadings(sibling.ContentJson))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(40)
+            .ToList();
+        var titles = siblings
+            .Select(sibling => sibling.Title)
+            .Where(title => !string.IsNullOrWhiteSpace(title))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(20)
+            .ToList();
+
+        var block = new StringBuilder(brand.SeoTargetBlock ?? string.Empty);
+        block.AppendLine();
+        block.AppendLine("ALREADY COVERED BY THIS CAMPAIGN — DO NOT REPEAT");
+        block.AppendLine("These posts already exist for this campaign. This one must earn its own "
+            + "place: a different angle, a different reader question, different worked detail. "
+            + "Publishing the same answers again splits the campaign's own search results.");
+        foreach (var title in titles)
+        {
+            block.Append("  • ").AppendLine(title);
+        }
+
+        if (covered.Count > 0)
+        {
+            block.AppendLine("- These questions are ALREADY ANSWERED by the posts above. Do not "
+                + "answer them again and do not restate them as headings. Choose questions this "
+                + "campaign has not covered, that the approved evidence can actually answer:");
+            foreach (var question in covered)
+            {
+                block.Append("  • ").AppendLine(question);
+            }
+            block.AppendLine("- If the evidence supports no uncovered question, write NO FAQ "
+                + "section at all. A short post that adds something beats a long one that repeats.");
+        }
+
+        return brand with { SeoTargetBlock = block.ToString() };
+    }
 
     private static string BuildPrompt(
         string instructions, string? brief, GenerationEvidenceContext evidence,

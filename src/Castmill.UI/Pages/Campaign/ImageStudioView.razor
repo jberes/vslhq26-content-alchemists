@@ -262,6 +262,60 @@
                                 </section>
                             }
 
+                            @* Manual build (no model): take a kit image or a file as the base,
+                               then layer text and images over it in the overlay editor. This is
+                               the PowerPoint workflow — a template background plus placed
+                               elements — done in place instead of exported and re-uploaded. *@
+                            <section class="cm-studio__manual" aria-label="Build this image manually">
+                                <span class="cm-kicker">Build it yourself</span>
+                                <p class="cm-meta">
+                                    Start from a background you already have, then add text and image
+                                    layers over it. No model call, no generation.
+                                </p>
+                                <div class="cm-form__actions">
+                                    @* Deliberately NOT a cm-studio__chip: chips are prompt
+                                       constraints the model reads. This is an action. *@
+                                    <button type="button" class="cm-button cm-button--quiet"
+                                            disabled="@_settingBase"
+                                            @onclick="() => _basePickerOpen = !_basePickerOpen">
+                                        @(_settingBase ? "Applying…" : slot2.State == "Filled" ? "Replace background" : "Start from an image")
+                                    </button>
+                                </div>
+                                @if (_basePickerOpen && !_settingBase)
+                                {
+                                    <div class="cm-layer-picker">
+                                        <span class="cm-kicker">From the brand kit</span>
+                                        @if (_brandAssets.Count == 0)
+                                        {
+                                            <p class="cm-meta">This brand's kit has no images yet.</p>
+                                        }
+                                        else
+                                        {
+                                            <div class="cm-studio__picks">
+                                                @foreach (var asset in _brandAssets)
+                                                {
+                                                    <button type="button" class="cm-studio__pick"
+                                                            title="@(asset.Label ?? asset.FileName)"
+                                                            @onclick="() => UseBaseAssetAsync(asset)">
+                                                        @if (_kitPreviews.TryGetValue(asset.AssetId, out var basePick))
+                                                        {
+                                                            <img src="@basePick" alt="" loading="lazy" />
+                                                        }
+                                                        <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
+                                                    </button>
+                                                }
+                                            </div>
+                                        }
+                                        <span class="cm-kicker">Or upload one</span>
+                                        <InputFile OnChange="UploadBaseImageAsync" accept="image/*"
+                                                   aria-label="Upload a background image" />
+                                        <span class="cm-meta">
+                                            Fitted to @slot2.TargetWidth×@slot2.TargetHeight, the same way a generated take is.
+                                        </span>
+                                    </div>
+                                }
+                            </section>
+
                             <div>
                                 @if (IsThumbnail(slot2) && _thumbnailConcepts.Count > 0)
                                 {
@@ -390,21 +444,37 @@
                                    itself lives in a master–detail dialog behind one button. *@
                                 <div>
                                     <span class="cm-kicker">Reference images</span>
-                                    @if (ProductAssets.Count > 0)
+                                    @if (AutoAttachedProducts.Count > 0)
                                     {
-                                        <p class="cm-meta">Up to three product screenshots (@string.Join(", ", ProductAssets.Take(3).Select(a => a.Label ?? a.FileName))) attach automatically for product fidelity.</p>
+                                        <p class="cm-meta">Product screenshots attach automatically for product fidelity — every card for this brand gets these.</p>
                                     }
                                     <div class="cm-studio__refbar">
-                                        @foreach (var pick in _picked.OrderBy(p => Array.IndexOf(KitOrder, p.Key)).ToList())
+                                        @* Auto-attached products are SHOWN, not just described. They
+                                           are part of what the model receives, so a producer who
+                                           adds one has to be able to see that it took. They are not
+                                           removable here: the rule is the brand's, not this card's. *@
+                                        @foreach (var product in AutoAttachedProducts)
+                                        {
+                                            <span class="cm-studio__refchip cm-studio__refchip--auto"
+                                                  title="@(product.Label ?? product.FileName) — attached automatically because it is a product screenshot in this brand's kit">
+                                                @if (_kitPreviews.TryGetValue(product.AssetId, out var productThumb))
+                                                {
+                                                    <img src="@productThumb" alt="" loading="lazy" />
+                                                }
+                                                <span>Product · @(product.Label ?? product.FileName)</span>
+                                                <span class="cm-studio__refchip-auto">auto</span>
+                                            </span>
+                                        }
+                                        @foreach (var pick in _picked.ToList())
                                         {
                                             <button type="button" class="cm-studio__refchip"
-                                                    title="Remove @(pick.Value.Label ?? pick.Value.FileName)"
-                                                    @onclick="() => TogglePickAsync(pick.Key, pick.Value)">
-                                                @if (_kitPreviews.TryGetValue(pick.Value.AssetId, out var chipThumb))
+                                                    title="Remove @(pick.Label ?? pick.FileName)"
+                                                    @onclick="() => TogglePickAsync(pick)">
+                                                @if (_kitPreviews.TryGetValue(pick.AssetId, out var chipThumb))
                                                 {
                                                     <img src="@chipThumb" alt="" loading="lazy" />
                                                 }
-                                                <span>@KindLabel(pick.Key) · @(pick.Value.Label ?? pick.Value.FileName)</span>
+                                                <span>@KindLabel(pick.Kind.ToLowerInvariant()) · @(pick.Label ?? pick.FileName)</span>
                                                 <span class="cm-studio__refchip-x" aria-hidden="true">✕</span>
                                             </button>
                                         }
@@ -883,7 +953,20 @@
                                 <div class="cm-imgeditor__box @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null) @(_editorMode == "boxes" ? "cm-imgeditor__box--live" : null)"
                                      data-box="@box.Id" style="@BoxStyle(box)"
                                      @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
-                                    <span class="cm-imgeditor__text">@box.Text</span>
+                                    @if (box.LogoAssetId is { } layerId && _kitPreviews.TryGetValue(LayerAssetId(layerId), out var layerThumb))
+                                    {
+                                        @* object-fit: contain mirrors the server's fit exactly,
+                                           so what is dragged here is what gets composited. *@
+                                        <img class="cm-imgeditor__layer" src="@layerThumb" alt="" draggable="false" />
+                                    }
+                                    else if (box.LogoAssetId is not null)
+                                    {
+                                        <span class="cm-imgeditor__text cm-meta">Image layer</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="cm-imgeditor__text">@box.Text</span>
+                                    }
                                     @if (_editorMode == "boxes")
                                     {
                                         <span class="cm-imgeditor__handle" data-handle aria-hidden="true"></span>
@@ -977,10 +1060,41 @@
                             @foreach (var box in _overlayDraft)
                             {
                                 <button type="button" class="cm-studio__chip @(box.Id == _selectedBoxId ? "cm-studio__chip--on" : null)"
-                                        @onclick="() => _selectedBoxId = box.Id">@Truncate(box.Text, 18)</button>
+                                        @onclick="() => _selectedBoxId = box.Id">@(box.LogoAssetId is null ? Truncate(box.Text, 18) : $"▣ {Truncate(LayerLabel(box), 16)}")</button>
                             }
                             <button type="button" class="cm-studio__chip" @onclick="AddBox">+ Add text box</button>
+                            @* An image layer is the same box with a picture in it: placed and
+                               resized identically, composited by the same pass, no model call. *@
+                            <button type="button" class="cm-studio__chip" @onclick="OpenLayerPicker">+ Add image</button>
                         </div>
+                        @if (_layerPickerOpen)
+                        {
+                            <div class="cm-layer-picker">
+                                <span class="cm-kicker">Choose an image</span>
+                                @if (_brandAssets.Count == 0)
+                                {
+                                    <p class="cm-meta">This brand's kit has no images yet — add one from Choose references, then it is reusable on every card.</p>
+                                }
+                                else
+                                {
+                                    <div class="cm-studio__picks">
+                                        @foreach (var asset in _brandAssets)
+                                        {
+                                            <button type="button" class="cm-studio__pick"
+                                                    title="@(asset.Label ?? asset.FileName)"
+                                                    @onclick="() => AddLayer(asset)">
+                                                @if (_kitPreviews.TryGetValue(asset.AssetId, out var layerPick))
+                                                {
+                                                    <img src="@layerPick" alt="" loading="lazy" />
+                                                }
+                                                <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="CloseLayerPicker">Cancel</button>
+                            </div>
+                        }
                         @if (SelectedBox is { } sel)
                         {
                             <label class="cm-field">
@@ -1174,20 +1288,20 @@
                             <div class="cm-studio__kit">
                                 <span class="cm-meta">
                                     @KindLabel(group.Key)
-                                    @if (_picked.TryGetValue(group.Key, out var chosen))
+                                    @if (_picked.Where(a => a.Kind.Equals(group.Key, StringComparison.OrdinalIgnoreCase)).ToList() is { Count: > 0 } chosen)
                                     {
-                                        <span class="cm-mono"> · @(chosen.Label ?? chosen.FileName)</span>
+                                        <span class="cm-mono"> · @string.Join(", ", chosen.Select(a => a.Label ?? a.FileName))</span>
                                     }
                                 </span>
                                 <div class="cm-studio__picks">
                                     @foreach (var asset in group)
                                     {
-                                        var isOn = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
+                                        var isOn = IsPicked(asset);
                                         <button type="button"
                                                 class="cm-studio__pick @(isOn ? "cm-studio__pick--on" : null)"
                                                 aria-pressed="@(isOn ? "true" : "false")"
                                                 title="@(asset.Label ?? asset.FileName)"
-                                                @onclick="() => TogglePickAsync(group.Key, asset)">
+                                                @onclick="() => TogglePickAsync(asset)">
                                             @if (_kitPreviews.TryGetValue(asset.AssetId, out var thumb))
                                             {
                                                 <img src="@thumb" alt="" loading="lazy" />
@@ -1274,71 +1388,85 @@
             <header class="cm-kitpicker__head">
                 <div>
                     <h2>Reference images</h2>
-                    <p class="cm-meta">From @kitBrand.Name's kit — one per type. A selection is a real image input to the model, not prompt text.</p>
+                    <p class="cm-meta">From @kitBrand.Name's kit. Choose up to @MaxPickedReferences; each one is a real image input to the model, not prompt text.</p>
                 </div>
                 <button type="button" class="cm-studio__drawer-close"
                         aria-label="Close" title="Close (Esc)" @onclick="CloseKitPicker">✕</button>
             </header>
+            @* Two lists, not a single-preview picker: available on the left, the card's
+               chosen references on the right, add and remove between them. The old shape
+               allowed one asset PER KIND, so a card could never carry a face AND a
+               background AND a screenshot — which is the normal case. *@
             <div class="cm-kitpicker__body">
-                <nav class="cm-kitpicker__list" aria-label="Kit assets by type">
-                    @foreach (var group in BrandKit)
+                <nav class="cm-kitpicker__list" aria-label="Available reference images">
+                    <span class="cm-kicker">Available</span>
+                    @foreach (var group in ReferenceKit)
                     {
-                        <span class="cm-kicker">@KindLabel(group.Key)</span>
+                        <span class="cm-meta cm-kitpicker__group">@KindLabel(group.Key)</span>
                         <ul>
                             @foreach (var asset in group)
                             {
-                                var isPicked = _picked.TryGetValue(group.Key, out var sel) && sel.Id == asset.Id;
-                                var isCurrent = _kitPreviewAsset?.Id == asset.Id;
+                                var isPicked = IsPicked(asset);
                                 <li>
                                     <button type="button"
-                                            class="cm-kitpicker__item @(isCurrent ? "cm-kitpicker__item--current" : null)"
-                                            aria-current="@(isCurrent ? "true" : "false")"
-                                            @onclick="() => _kitPreviewAsset = asset">
+                                            class="cm-kitpicker__item @(isPicked ? "cm-kitpicker__item--current" : null)"
+                                            aria-pressed="@(isPicked ? "true" : "false")"
+                                            disabled="@(!isPicked && _picked.Count >= MaxPickedReferences)"
+                                            title="@(isPicked ? "Remove from this card" : "Add to this card")"
+                                            @onclick="() => TogglePickAsync(asset)">
                                         @if (_kitPreviews.TryGetValue(asset.AssetId, out var listThumb))
                                         {
                                             <img src="@listThumb" alt="" loading="lazy" />
                                         }
                                         <span class="cm-kitpicker__item-label">@(asset.Label ?? asset.FileName)</span>
-                                        @if (isPicked)
-                                        {
-                                            <span class="cm-kitpicker__tick" aria-label="Selected">✓</span>
-                                        }
+                                        <span class="cm-kitpicker__tick" aria-hidden="true">@(isPicked ? "✓" : "+")</span>
                                     </button>
                                 </li>
                             }
                         </ul>
                     }
-                </nav>
-                <section class="cm-kitpicker__preview" aria-label="Preview">
-                    @if (_kitPreviewAsset is { } previewAsset)
+                    @if (!ReferenceKit.Any())
                     {
-                        var previewKind = previewAsset.Kind.ToLowerInvariant();
-                        var previewOn = _picked.TryGetValue(previewKind, out var chosenNow) && chosenNow.Id == previewAsset.Id;
-                        @if (_kitPreviews.TryGetValue(previewAsset.AssetId, out var big))
-                        {
-                            <img src="@big" alt="@(previewAsset.Label ?? previewAsset.FileName)" />
-                        }
-                        <strong>@(previewAsset.Label ?? previewAsset.FileName)</strong>
-                        <span class="cm-meta">@KindLabel(previewKind)</span>
-                        @if (previewKind == "product")
-                        {
-                            <p class="cm-meta">Product screenshots attach automatically for product fidelity (up to three per generation).</p>
-                        }
-                        else
-                        {
-                            <button type="button" class="cm-button"
-                                    @onclick="() => TogglePickAsync(previewKind, previewAsset)">
-                                @(previewOn ? "Remove from this card" : $"Use as the {KindLabel(previewKind).ToLowerInvariant()} reference")
-                            </button>
-                            @if (!previewOn && _picked.ContainsKey(previewKind))
-                            {
-                                <p class="cm-meta">Replaces the current @KindLabel(previewKind).ToLowerInvariant() — one per type.</p>
-                            }
-                        }
+                        <p class="cm-meta">Nothing in this kit yet — upload a reference below.</p>
+                    }
+                </nav>
+                <section class="cm-kitpicker__preview" aria-label="References on this card">
+                    <span class="cm-kicker">On this card (@_picked.Count/@MaxPickedReferences)</span>
+                    @if (_picked.Count == 0)
+                    {
+                        <p class="cm-meta">Nothing chosen yet. Add a face, a background, a screenshot — whatever this card needs.</p>
                     }
                     else
                     {
-                        <p class="cm-meta">Pick an asset on the left to preview it here.</p>
+                        <ul class="cm-kitpicker__chosen">
+                            @foreach (var asset in _picked.ToList())
+                            {
+                                <li>
+                                    <button type="button" class="cm-kitpicker__item"
+                                            title="Remove from this card"
+                                            aria-label="Remove @(asset.Label ?? asset.FileName)"
+                                            @onclick="() => TogglePickAsync(asset)">
+                                        @if (_kitPreviews.TryGetValue(asset.AssetId, out var chosenThumb))
+                                        {
+                                            <img src="@chosenThumb" alt="" loading="lazy" />
+                                        }
+                                        <span class="cm-kitpicker__item-label">
+                                            @(asset.Label ?? asset.FileName)
+                                            <span class="cm-meta">@KindLabel(asset.Kind.ToLowerInvariant())</span>
+                                        </span>
+                                        <span class="cm-kitpicker__tick" aria-hidden="true">✕</span>
+                                    </button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    @if (AutoAttachedProducts.Count > 0)
+                    {
+                        <p class="cm-meta">
+                            Product screenshots also attach automatically for product fidelity
+                            (@string.Join(", ", AutoAttachedProducts.Select(a => a.Label ?? a.FileName))) —
+                            they do not use a slot above.
+                        </p>
                     }
                 </section>
             </div>
@@ -1495,8 +1623,24 @@
     private IReadOnlyList<BrandAssetResponse> ProductAssets =>
         [.. _brandAssets.Where(a => a.Kind.Equals("product", StringComparison.OrdinalIgnoreCase))];
 
-    /// <summary>At most one asset per kind — a picker, not a multi-select.</summary>
-    private readonly Dictionary<string, BrandAssetResponse> _picked = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The product screenshots the server will actually attach. It takes the OLDEST three
+    /// (ImageReferenceResolver orders by CreatedAt), so this has to match or the card would
+    /// promise references the render never sees.
+    /// </summary>
+    private IReadOnlyList<BrandAssetResponse> AutoAttachedProducts =>
+        [.. ProductAssets.OrderBy(a => a.CreatedAt).Take(3)];
+
+    /// <summary>
+    /// The explicit references for this card, in the order they were added. A multi-selection,
+    /// not one-per-kind: a card legitimately wants a face AND a background AND a screenshot.
+    /// The cap matches the API's (ImageSlotEndpoints rejects more than five).
+    /// </summary>
+    private readonly List<BrandAssetResponse> _picked = [];
+
+    private const int MaxPickedReferences = 5;
+
+    private bool IsPicked(BrandAssetResponse asset) => _picked.Any(a => a.Id == asset.Id);
 
     /// <summary>Read-SAS thumbnails, so a background is chosen by looking at it.</summary>
     private readonly Dictionary<Guid, string> _kitPreviews = [];
@@ -1512,15 +1656,21 @@
     };
 
     /// <summary>Selecting a reference changes the actual image input, not just prompt text.</summary>
-    private async Task TogglePickAsync(string kind, BrandAssetResponse asset)
+    private async Task TogglePickAsync(BrandAssetResponse asset)
     {
-        if (_picked.TryGetValue(kind, out var current) && current.Id == asset.Id)
+        if (_picked.FirstOrDefault(a => a.Id == asset.Id) is { } already)
         {
-            _picked.Remove(kind);
+            _picked.Remove(already);
         }
         else
         {
-            _picked[kind] = asset;
+            if (_picked.Count >= MaxPickedReferences)
+            {
+                Notifier.ShowError(
+                    $"A card takes at most {MaxPickedReferences} chosen references — remove one first.");
+                return;
+            }
+            _picked.Add(asset);
         }
 
         if (Selected is not { } slot)
@@ -1531,7 +1681,7 @@
         try
         {
             await Images.PatchAsync(CampaignId, slot.Id,
-                referenceAssetIds: [.. _picked.Values.Select(a => a.Id)]);
+                referenceAssetIds: [.. _picked.Select(a => a.Id)]);
             _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
         }
         catch (ApiException ex)
@@ -1542,15 +1692,15 @@
 
     // Kept as a pure selection helper for component-level tests and non-rendered callers.
     // The visible picker uses TogglePickAsync, which additionally persists real reference ids.
-    private void TogglePick(string kind, BrandAssetResponse asset)
+    private void TogglePick(BrandAssetResponse asset)
     {
-        if (_picked.TryGetValue(kind, out var current) && current.Id == asset.Id)
+        if (_picked.FirstOrDefault(a => a.Id == asset.Id) is { } already)
         {
-            _picked.Remove(kind);
+            _picked.Remove(already);
         }
-        else
+        else if (_picked.Count < MaxPickedReferences)
         {
-            _picked[kind] = asset;
+            _picked.Add(asset);
         }
         SyncPickedSteering();
     }
@@ -1573,7 +1723,9 @@
         {
             typed = typed[..at].TrimEnd();
         }
-        var parts = _picked.OrderBy(p => Array.IndexOf(KitOrder, p.Key)).Select(p => AssetPrompt(p.Value));
+        var parts = _picked
+            .OrderBy(a => Array.IndexOf(KitOrder, a.Kind.ToLowerInvariant()))
+            .Select(AssetPrompt);
         _steerNote = _picked.Count == 0
             ? typed
             : string.IsNullOrWhiteSpace(typed)
@@ -1620,9 +1772,9 @@
             _picked.Clear();
             foreach (var id in Selected?.ReferenceAssetIds ?? [])
             {
-                if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } selected)
+                if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } selected && !IsPicked(selected))
                 {
-                    _picked[selected.Kind.ToLowerInvariant()] = selected;
+                    _picked.Add(selected);
                 }
             }
         }
@@ -1679,7 +1831,7 @@
             if (_kitPickerOpen && !linked.Kind.Equals("product", StringComparison.OrdinalIgnoreCase))
             {
                 // An upload made from the chooser is for this card, so select it immediately.
-                await TogglePickAsync(linked.Kind.ToLowerInvariant(), linked);
+                await TogglePickAsync(linked);
             }
             else if (_kitPickerOpen)
             {
@@ -2353,7 +2505,7 @@
         _pickingCompare = false;
         if (Embedded)
         {
-            _ = Closed.InvokeAsync();
+            _ = StoreEvents.DetachedAsync(() => Closed.InvokeAsync());
         }
     }
 
@@ -2367,7 +2519,7 @@
                 _editorMode = "off";
                 return;
             }
-            _ = RequestCloseAsync();
+            _ = StoreEvents.DetachedAsync(RequestCloseAsync);
         }
     }
 
@@ -2480,6 +2632,109 @@
         var current = _openVariant;
         _openVariant = other;
         _compareWith = current;
+    }
+
+    /// <summary>Brand-kit assets an image layer can use — the whole kit, products included.</summary>
+    private bool _layerPickerOpen;
+
+    private bool _basePickerOpen;
+    private bool _settingBase;
+
+    private Task UseBaseAssetAsync(BrandAssetResponse asset) =>
+        ApplyBaseAsync(asset.Id, null);
+
+    /// <summary>
+    /// A one-off background. Capped well below the endpoint's limit so a 40 MB screenshot is
+    /// refused here, with a reason, rather than by a 400 after the upload.
+    /// </summary>
+    private async Task UploadBaseImageAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null)
+        {
+            return;
+        }
+        if (file.Size > 20L * 1024 * 1024)
+        {
+            Notifier.ShowError("That image is over 20 MB — export a smaller one.");
+            return;
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream(20L * 1024 * 1024);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            await ApplyBaseAsync(null, Convert.ToBase64String(memory.ToArray()));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Notifier.ShowError($"That file could not be read: {ex.Message}");
+        }
+    }
+
+    private async Task ApplyBaseAsync(Guid? brandAssetId, string? imageBase64)
+    {
+        if (Selected is not { } slot || _settingBase)
+        {
+            return;
+        }
+
+        _settingBase = true;
+        try
+        {
+            var result = await Images.SetBaseImageAsync(CampaignId, slot.Id, brandAssetId, imageBase64);
+            _basePickerOpen = false;
+            await Campaign.RefreshAsync(CampaignId);
+            // Re-select so the drawer shows the new base and the overlay editor is available.
+            if (Campaign.ImageSlots.FirstOrDefault(s => s.Id == result.Slot.Id) is { } refreshed)
+            {
+                await SelectSlotAsync(refreshed);
+            }
+            Notifier.ShowSuccess("Background set. Add text and image layers over it.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _settingBase = false;
+        }
+    }
+
+    private void OpenLayerPicker() => _layerPickerOpen = true;
+
+    private void CloseLayerPicker() => _layerPickerOpen = false;
+
+    /// <summary>
+    /// The spec stores the brand-asset LINK id (what the composer resolves); previews are
+    /// keyed by the underlying asset id, so the two are mapped here rather than in markup.
+    /// </summary>
+    private Guid LayerAssetId(Guid brandAssetId) =>
+        _brandAssets.FirstOrDefault(a => a.Id == brandAssetId)?.AssetId ?? brandAssetId;
+
+    private string LayerLabel(OverlayBox box) =>
+        box.LogoAssetId is { } id
+            ? _brandAssets.FirstOrDefault(a => a.Id == id) is { } asset
+                ? asset.Label ?? asset.FileName
+                : "Image"
+            : box.Text;
+
+    private void AddLayer(BrandAssetResponse asset)
+    {
+        var id = $"box-{Guid.NewGuid():N}"[..12];
+        // Starts as a comfortable rectangle in the upper-left quadrant; the producer drags it
+        // where it belongs. Text fields are irrelevant to an image box but the record needs
+        // them, so they stay at their defaults.
+        _overlayDraft.Add(new OverlayBox(
+            id, string.Empty,
+            0.08, 0.08 + (0.1 * Math.Min(_overlayDraft.Count, 5)),
+            0.34, 0.34,
+            LogoAssetId: asset.Id));
+        _selectedBoxId = id;
+        _overlayDirty = true;
+        _layerPickerOpen = false;
     }
 
     private void AddBox()
@@ -2879,9 +3134,9 @@
         _picked.Clear();
         foreach (var id in slot.ReferenceAssetIds ?? [])
         {
-            if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } asset)
+            if (_brandAssets.FirstOrDefault(a => a.Id == id) is { } asset && !IsPicked(asset))
             {
-                _picked[asset.Kind.ToLowerInvariant()] = asset;
+                _picked.Add(asset);
             }
         }
         _drawerNeedsFocus = true;
@@ -2896,6 +3151,13 @@
 
     /// <summary>Fire-and-forget with a re-render on completion; faults are swallowed here
     /// because each loader already reports its own failure state.</summary>
+    /// <summary>
+    /// Every caller of this is fire-and-forget, so NOTHING may escape it. The repaint used to
+    /// sit outside the guard: deleting a take while a batch was still printing raced the
+    /// component's teardown, InvokeAsync threw on a disposed component, and — unobserved on
+    /// the dispatcher — it surfaced as Blazor's global "An unhandled error has occurred" bar,
+    /// which no ErrorBoundary can catch.
+    /// </summary>
     private async Task RunInBackgroundAsync(Func<Task> work)
     {
         try
@@ -2906,7 +3168,21 @@
         {
             // Loader-owned failure state; nothing to add.
         }
-        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+        {
+            // Navigated away or torn down mid-flight: there is no view left to tell.
+        }
+        catch (Exception ex)
+        {
+            // A real render fault still has to be visible — but as a message, not by taking
+            // the whole app down.
+            Notifier.ShowError($"The studio could not repaint: {ex.Message}");
+        }
     }
 
     private bool _embeddedEmpty;
@@ -3021,13 +3297,31 @@
     /// refresh and a later campaign refresh can't snap the selection back to a stale
     /// <c>?slot=</c> deep link from before the click.
     /// </summary>
+    /// <summary>
+    /// Updates the deep link WITHOUT going through the router. NavigateTo re-runs routing and
+    /// re-renders this whole page — reloading the board, resetting scroll and re-running every
+    /// parameter sync — which is why selecting a tile looked like a full refresh when only the
+    /// properties panel should change. Focus mode's rail solves the same problem the same way.
+    /// </summary>
+    private async Task SetDeepLinkAsync(string url)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("history.replaceState", null, string.Empty, url);
+        }
+        catch (JSException)
+        {
+            // A URL that cannot be rewritten costs a deep link, not the selection.
+        }
+    }
+
     private async Task OpenSlotAsync(ImageSlotResponse slot)
     {
         RequestedArtifact = slot.ArtifactId;
         RequestedSlot = slot.Id;
         await SelectSlotAsync(slot);
-        Navigation.NavigateTo(
-            $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}", replace: true);
+        await SetDeepLinkAsync(
+            $"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}");
     }
 
     private void CloseSlot()
@@ -3038,7 +3332,7 @@
         // Strip the deep link too, or the next parameter sync would reopen the drawer.
         RequestedSlot = null;
         RequestedArtifact = null;
-        Navigation.NavigateTo(CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio), replace: true);
+        _ = SetDeepLinkAsync(CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio));
     }
 
     private void OnDrawerKey(KeyboardEventArgs e)
@@ -3053,7 +3347,7 @@
     {
         _kitPickerOpen = true;
         // Start on what is already chosen, so "Change…" lands on the thing being changed.
-        _kitPreviewAsset = _picked.Values.FirstOrDefault()
+        _kitPreviewAsset = _picked.FirstOrDefault()
             ?? ReferenceKit.FirstOrDefault()?.FirstOrDefault();
         _kitPickerNeedsFocus = true;
     }
@@ -3253,7 +3547,7 @@
             RequestedArtifact = artifactId;
             RequestedSlot = slot.Id;
             await SelectSlotAsync(slot);
-            Navigation.NavigateTo($"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}", replace: true);
+            await SetDeepLinkAsync($"{CampaignViews.PathFor(CampaignId, CampaignView.ImageStudio)}?slot={slot.Id}");
         }
         catch (ApiException ex)
         {
@@ -3321,7 +3615,7 @@
             await Images.PatchAsync(CampaignId, slot.Id, promptMode: mode);
             _autoBrief = string.Empty;
             _savedAutoBrief = null;
-            _ = LoadPromptPreviewAsync();
+            _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
         }
         catch (ApiException ex)
         {
@@ -3570,7 +3864,8 @@
                 _sessionModelOverrides[slot.Id] = _modelDraft;
             }
             _modelPickerOpen = false;
-            _ = LoadPromptPreviewAsync(); // the frame, and so the crop figures, are per model
+            // The frame, and so the crop figures, are per model.
+            _ = RunInBackgroundAsync(LoadPromptPreviewAsync);
             Notifier.ShowSuccess(UsesWorkspaceDefault
                 ? "This image now follows the workspace default model."
                 : "Image model updated for this image.");

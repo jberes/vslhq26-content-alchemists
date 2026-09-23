@@ -5,7 +5,8 @@
          data-wire-drag="@(CanDrag ? $"s:{Item.Id}" : null)">
     <span class="cm-pipeline__copy">
         <span class="cm-run-show__channel">@Item.Channel</span>
-        <span class="cm-pipeline__title cm-wire-clamp-2">@Item.Title</span>
+        <button type="button" class="cm-pipeline__title cm-wire-clamp-2 cm-open"
+                @onclick="() => Edit.InvokeAsync(Item)">@Item.Title</button>
         <span class="cm-pipeline__facts">
             <IgbChip Outlined="true">@DateChip</IgbChip>
         </span>
@@ -32,7 +33,6 @@
         }
     </span>
     <span class="cm-pipeline__actions" aria-label="Pipeline item actions">
-        <WireIconButton Kind="edit" Label="Edit" OnClick="() => Edit.InvokeAsync(Item)" />
         @if (Item.Status == WireDeliveryStatus.Error)
         {
             <WireIconButton Kind="retry" Label="Retry" OnClick="() => Retry.InvokeAsync(Item)" />

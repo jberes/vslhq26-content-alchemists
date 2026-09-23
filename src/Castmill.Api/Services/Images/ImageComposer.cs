@@ -31,7 +31,14 @@ public interface IImageComposer
     /// Renders an overlay spec (ADR-055) — positioned text boxes with bands — onto an encoded
     /// image, deterministically, so the published image is what the editor previewed.
     /// </summary>
-    CompositeResult ComposeOverlay(byte[] image, Castmill.Core.Resources.OverlaySpec spec) =>
+    /// <param name="layerImages">
+    /// Bytes for boxes that draw an IMAGE instead of text, keyed by the brand asset id the box
+    /// names. Resolved by the caller because the composer has no database or blob access.
+    /// </param>
+    CompositeResult ComposeOverlay(
+        byte[] image,
+        Castmill.Core.Resources.OverlaySpec spec,
+        IReadOnlyDictionary<Guid, byte[]>? layerImages = null) =>
         throw new NotSupportedException("Overlay composition needs the real composer.");
 }
 
@@ -164,7 +171,10 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         return new CompositeResult(encoded.ToArray(), fallback, typeface.FamilyName);
     }
 
-    public CompositeResult ComposeOverlay(byte[] image, Castmill.Core.Resources.OverlaySpec spec)
+    public CompositeResult ComposeOverlay(
+        byte[] image,
+        Castmill.Core.Resources.OverlaySpec spec,
+        IReadOnlyDictionary<Guid, byte[]>? layerImages = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         using var bitmap = ImageReferenceResolver.TryDecode(image)
@@ -176,7 +186,7 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         var (typeface, fallback) = ResolveTypeface();
         foreach (var box in spec.Boxes)
         {
-            DrawBox(canvas, box, bitmap.Width, bitmap.Height, typeface);
+            DrawBox(canvas, box, bitmap.Width, bitmap.Height, typeface, layerImages);
         }
 
         using var composed = surface.Snapshot();
@@ -190,8 +200,27 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
     /// the box height, a band sized to the text (not the box) when asked for. The same maths
     /// the editor's preview runs in CSS, so the two agree to a pixel or two.
     /// </summary>
-    private static void DrawBox(SKCanvas canvas, Castmill.Core.Resources.OverlayBox box, int width, int height, SKTypeface typeface)
+    private static void DrawBox(
+        SKCanvas canvas,
+        Castmill.Core.Resources.OverlayBox box,
+        int width,
+        int height,
+        SKTypeface typeface,
+        IReadOnlyDictionary<Guid, byte[]>? layerImages)
     {
+        // An image layer: the box is a frame the asset is fitted inside, preserving its
+        // aspect and centred, so dragging a corner scales the picture rather than distorting
+        // it. Text is ignored for such a box — it is a picture, not a caption.
+        if (box.LogoAssetId is { } assetId)
+        {
+            if (layerImages is null || !layerImages.TryGetValue(assetId, out var layerBytes))
+            {
+                return;
+            }
+            DrawImageBox(canvas, box, width, height, layerBytes);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(box.Text))
         {
             return;
@@ -465,4 +494,41 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
             ? (_typeface, false)
             : (SKTypeface.Default, true);
     }
+
+    /// <summary>
+    /// Fits an image layer inside its box: scaled to contain, centred, aspect preserved. The
+    /// editor's CSS preview uses object-fit: contain over the same rect, so the two agree.
+    /// </summary>
+    private static void DrawImageBox(
+        SKCanvas canvas, Castmill.Core.Resources.OverlayBox box, int width, int height, byte[] bytes)
+    {
+        using var layer = ImageReferenceResolver.TryDecode(bytes);
+        if (layer is null || layer.Width == 0 || layer.Height == 0)
+        {
+            // A layer that will not decode is skipped rather than failing the whole composite:
+            // the producer still gets their thumbnail, minus one picture.
+            return;
+        }
+
+        var frameLeft = (float)(box.X * width);
+        var frameTop = (float)(box.Y * height);
+        var frameWidth = (float)(box.W * width);
+        var frameHeight = (float)(box.H * height);
+        if (frameWidth <= 0 || frameHeight <= 0)
+        {
+            return;
+        }
+
+        var scale = Math.Min(frameWidth / layer.Width, frameHeight / layer.Height);
+        var drawnWidth = layer.Width * scale;
+        var drawnHeight = layer.Height * scale;
+        var target = SKRect.Create(
+            frameLeft + ((frameWidth - drawnWidth) / 2f),
+            frameTop + ((frameHeight - drawnHeight) / 2f),
+            drawnWidth,
+            drawnHeight);
+
+        canvas.DrawBitmap(layer, target, SKSamplingOptions.Default);
+    }
+
 }

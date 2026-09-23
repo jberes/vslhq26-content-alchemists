@@ -41,6 +41,9 @@ public static class ImageSlotEndpoints
         group.MapPost("/{slotId:guid}/variants/{variantId:guid}/edit", EditRegionAsync)
             .Validate<ImageRegionEditRequest>().RequireRateLimiting("ai");
         group.MapPost("/{slotId:guid}/place", PlaceAsync).Validate<PlaceVariantRequest>().RequireRateLimiting("writes");
+        // Manual base image: no model, so it is a write, not an "ai" call.
+        group.MapPost("/{slotId:guid}/base", SetBaseImageAsync)
+            .Validate<ImageSlotBaseImageRequest>().RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}", ClearAsync).RequireRateLimiting("writes");
         group.MapDelete("/{slotId:guid}/variants/{variantId:guid}", DeleteVariantAsync)
             .RequireRateLimiting("writes");
@@ -102,6 +105,7 @@ public static class ImageSlotEndpoints
         OverlaySpec request,
         IPublicContentStore publicStore,
         IImageComposer composer,
+        IBlobSasService blobs,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
@@ -118,7 +122,7 @@ public static class ImageSlotEndpoints
         bool? fontFallback = null;
         if (slot.BaseImagePath is not null)
         {
-            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct);
+            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct, db, blobs);
             if (composited is null)
             {
                 return Results.Problem(statusCode: StatusCodes.Status409Conflict,
@@ -157,9 +161,212 @@ public static class ImageSlotEndpoints
         return Results.Ok(ToResponse(slot));
     }
 
+    /// <summary>
+    /// Bytes for the boxes that draw a picture rather than text. The composer has no database
+    /// or blob access by design, so the layers are resolved here and handed to it.
+    ///
+    /// Query filters are bypassed for the same reason image references do it: a brand asset
+    /// belongs to the brand's tenant, which is not necessarily the campaign's. The lookup is
+    /// still bounded to the ids this slot's own spec names, so nothing else becomes reachable.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, byte[]>?> LoadOverlayLayersAsync(
+        OverlaySpec spec, CastmillDbContext? db, IBlobSasService? blobs, CancellationToken ct)
+    {
+        var wanted = spec.Boxes
+            .Select(box => box.LogoAssetId)
+            .OfType<Guid>()
+            .Distinct()
+            .ToList();
+        if (wanted.Count == 0 || db is null || blobs is null || !blobs.IsConfigured)
+        {
+            return null;
+        }
+
+        var assets = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(link => wanted.Contains(link.Id))
+            .Join(db.Assets.IgnoreQueryFilters(), link => link.AssetId, asset => asset.Id,
+                (link, asset) => new { link.Id, asset.BlobPath })
+            .ToListAsync(ct);
+
+        var loaded = new Dictionary<Guid, byte[]>(assets.Count);
+        foreach (var asset in assets)
+        {
+            var opened = await blobs.OpenReadAsync(asset.BlobPath, ct);
+            if (opened is null || opened.Value.Length > 50L * 1024 * 1024)
+            {
+                // A layer that cannot be read is skipped, not fatal: the producer still gets
+                // the rest of their thumbnail rather than an error where a picture should be.
+                continue;
+            }
+
+            await using var source = opened.Value.Stream;
+            using var memory = new MemoryStream();
+            await source.CopyToAsync(memory, ct);
+            loaded[asset.Id] = memory.ToArray();
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// Manual thumbnail (no model): makes an uploaded file or a brand-kit asset this slot's
+    /// base image. The bytes are fitted to the slot's exact pixels by the same composer a
+    /// generated take goes through, so everything downstream — the overlay editor, placement,
+    /// publishing — behaves identically whether the base was drawn by a model or supplied.
+    /// </summary>
+    private static async Task<IResult> SetBaseImageAsync(
+        Guid campaignId,
+        Guid slotId,
+        ImageSlotBaseImageRequest request,
+        IPublicContentStore publicStore,
+        IImageComposer composer,
+        IBlobSasService blobs,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+        if (slot is null)
+        {
+            return Results.NotFound();
+        }
+
+        byte[]? source;
+        if (request.BrandAssetId is { } brandAssetId)
+        {
+            source = await ReadBrandAssetAsync(brandAssetId, db, blobs, ct);
+            if (source is null)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["BrandAssetId"] = ["That kit image could not be read."],
+                });
+            }
+        }
+        else if (request.ImageBase64 is { Length: > 0 } encoded)
+        {
+            try
+            {
+                source = Convert.FromBase64String(encoded);
+            }
+            catch (FormatException)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["ImageBase64"] = ["The image is not valid base64."],
+                });
+            }
+        }
+        else
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["BrandAssetId"] = ["Choose a kit image or upload one."],
+            });
+        }
+
+        byte[] fitted;
+        try
+        {
+            // Same fit as a model take: resized and centre-cropped to the slot's real pixels,
+            // so a 4K screenshot and a 1280x720 export both land correctly.
+            fitted = composer.ToSlotWebp(source, slot.TargetWidth, slot.TargetHeight);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["ImageBase64"] = ["That file is not a readable image."],
+            });
+        }
+
+        var now = clock.GetUtcNow();
+        var path = VariantPath(campaignId, slot.Kind, 0);
+        var url = await publicStore.PublishAsync(path, fitted, "image/webp", ct);
+        var thumbPath = ThumbPath(campaignId, slot.Kind);
+        var thumbUrl = await publicStore.PublishAsync(
+            thumbPath, composer.ToThumbWebp(fitted), "image/webp", ct);
+
+        // Recorded as a KEPT take, not just a slot field. The overlay editor, compare, lock
+        // and delete all operate on takes, so a manual background that was only a slot column
+        // would leave the producer with a background they could not then layer anything onto.
+        db.ImageVariants.Add(new ImageVariant
+        {
+            Id = Guid.NewGuid(),
+            TenantId = slot.TenantId,
+            CampaignId = slot.CampaignId,
+            SlotId = slot.Id,
+            Url = url.ToString(),
+            BlobPath = path,
+            ThumbUrl = thumbUrl.ToString(),
+            ThumbBlobPath = thumbPath,
+            Model = "manual",
+            Prompt = request.BrandAssetId is null ? "Uploaded background" : "Brand kit background",
+            State = "Kept",
+            Width = slot.TargetWidth,
+            Height = slot.TargetHeight,
+            CreatedAt = now,
+        });
+
+        slot.BaseImagePath = path;
+        slot.BaseImageUrl = url.ToString();
+        slot.PublishedUrl = url.ToString();
+        slot.State = "Filled";
+        slot.UpdatedAt = now;
+
+        // An overlay already drafted on this slot is re-composited onto the new base rather
+        // than dropped — swapping the background is a normal edit, not a reset.
+        bool? fontFallback = null;
+        if (ParseOverlay(slot.OverlaySpecJson) is not null)
+        {
+            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct, db, blobs);
+            fontFallback = composited?.FontFallback;
+        }
+
+        await db.SaveChangesAsync(ct);
+        // Same envelope the overlay endpoints return, so the client handles one shape.
+        return Results.Ok(new { slot = ToResponse(slot), fontFallback });
+    }
+
+    /// <summary>
+    /// Bytes for one brand-kit asset. Query filters are bypassed for the reason image
+    /// references do it — a brand's tenant need not be the campaign's — and the lookup is
+    /// bounded to the single id the caller named.
+    /// </summary>
+    private static async Task<byte[]?> ReadBrandAssetAsync(
+        Guid brandAssetId, CastmillDbContext db, IBlobSasService blobs, CancellationToken ct)
+    {
+        if (!blobs.IsConfigured)
+        {
+            return null;
+        }
+
+        var blobPath = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(link => link.Id == brandAssetId)
+            .Join(db.Assets.IgnoreQueryFilters(), link => link.AssetId, asset => asset.Id,
+                (link, asset) => asset.BlobPath)
+            .SingleOrDefaultAsync(ct);
+        if (blobPath is null)
+        {
+            return null;
+        }
+
+        var opened = await blobs.OpenReadAsync(blobPath, ct);
+        if (opened is null || opened.Value.Length > 50L * 1024 * 1024)
+        {
+            return null;
+        }
+
+        await using var source = opened.Value.Stream;
+        using var memory = new MemoryStream();
+        await source.CopyToAsync(memory, ct);
+        return memory.ToArray();
+    }
+
     /// <summary>Renders the stored overlay spec onto the base image and publishes the result. Null when the base blob is gone.</summary>
     private static async Task<CompositeResult?> CompositeOverlayAsync(
-        ImageSlot slot, IPublicContentStore publicStore, IImageComposer composer, DateTimeOffset now, CancellationToken ct)
+        ImageSlot slot, IPublicContentStore publicStore, IImageComposer composer, DateTimeOffset now,
+        CancellationToken ct, CastmillDbContext? db = null, IBlobSasService? blobs = null)
     {
         var spec = ParseOverlay(slot.OverlaySpecJson);
         var baseBytes = await publicStore.ReadAsync(slot.BaseImagePath!, ct);
@@ -173,7 +380,8 @@ public static class ImageSlotEndpoints
             slot.UpdatedAt = now;
             return new CompositeResult(baseBytes, false, string.Empty);
         }
-        var result = composer.ComposeOverlay(baseBytes, spec);
+        var layerImages = await LoadOverlayLayersAsync(spec, db, blobs, ct);
+        var result = composer.ComposeOverlay(baseBytes, spec, layerImages);
         var url = await publicStore.PublishAsync(CompositePath(slot.CampaignId, slot.Kind), result.Image, "image/webp", ct);
         slot.PublishedUrl = url.ToString();
         slot.UpdatedAt = now;
@@ -1734,6 +1942,7 @@ public static class ImageSlotEndpoints
         PlaceVariantRequest request,
         IPublicContentStore publicStore,
         IImageComposer composer,
+        IBlobSasService blobs,
         CastmillDbContext db,
         TimeProvider clock,
         CancellationToken ct)
@@ -1791,7 +2000,7 @@ public static class ImageSlotEndpoints
         bool? fontFallback = null;
         if (ParseOverlay(slot.OverlaySpecJson) is not null)
         {
-            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct);
+            var composited = await CompositeOverlayAsync(slot, publicStore, composer, now, ct, db, blobs);
             if (composited is null)
             {
                 return Results.Problem(statusCode: StatusCodes.Status409Conflict,

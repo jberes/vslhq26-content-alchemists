@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Castmill.Api.Services.Ai;
@@ -18,6 +19,58 @@ internal static partial class BlogMarkdown
 
     [GeneratedRegex(@"\[[^\]]*\]\(\s*\)")]
     private static partial Regex EmptyLink { get; }
+
+    [GeneratedRegex(@"^\s*#{2,6}\s*(.+\?)\s*$", RegexOptions.Multiline)]
+    private static partial Regex QuestionHeading { get; }
+
+    [GeneratedRegex(@"^\s*#\s+(\S.*?)\s*$", RegexOptions.Multiline)]
+    private static partial Regex LeadingH1 { get; }
+
+    /// <summary>
+    /// The article's own top-level heading. The edit pass rewrites the body — heading and all —
+    /// so the title captured from the DRAFT stops matching what the post actually says. This is
+    /// what the piece calls itself once every stage has run.
+    /// </summary>
+    public static string? LeadingHeading(string markdown) =>
+        string.IsNullOrWhiteSpace(markdown)
+            ? null
+            : LeadingH1.Match(markdown) is { Success: true } match ? match.Groups[1].Value.Trim() : null;
+
+    /// <summary>
+    /// The questions a published post already answers, read from its own question-shaped
+    /// headings. Used to stop a later post in the same campaign repeating them: the campaign's
+    /// SEO targets are one shared list, so without this every blog answers the same FAQ.
+    /// Reads the stored envelope directly, so it works for posts written before this existed.
+    /// </summary>
+    public static IReadOnlyList<string> QuestionHeadings(string? contentJson)
+    {
+        if (string.IsNullOrWhiteSpace(contentJson))
+        {
+            return [];
+        }
+
+        string markdown;
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson);
+            var root = document.RootElement;
+            var content = root.TryGetProperty("content", out var nested) ? nested : root;
+            markdown = content.TryGetProperty("markdown", out var value)
+                && value.ValueKind == JsonValueKind.String
+                    ? value.GetString() ?? string.Empty
+                    : string.Empty;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+
+        return markdown.Length == 0
+            ? []
+            : [.. QuestionHeading.Matches(markdown)
+                .Select(match => match.Groups[1].Value.Trim())
+                .Where(question => question.Length > 0)];
+    }
 
     public static IReadOnlyList<string> Problems(string markdown)
     {
@@ -95,6 +148,14 @@ internal static class ArtifactContentJson
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(content.GetRawText())!.AsObject();
         node["markdown"] = markdown;
+        using var document = System.Text.Json.JsonDocument.Parse(node.ToJsonString());
+        return document.RootElement.Clone();
+    }
+
+    public static System.Text.Json.JsonElement WithTitle(System.Text.Json.JsonElement content, string title)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(content.GetRawText())!.AsObject();
+        node["title"] = title;
         using var document = System.Text.Json.JsonDocument.Parse(node.ToJsonString());
         return document.RootElement.Clone();
     }

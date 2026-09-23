@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using System.Text;
 using Castmill.Core.Ai;
 
@@ -57,7 +58,60 @@ internal static class BlogEditor
     /// block or a lead-in sentence is still read correctly rather than publishing its wrapper.
     /// </summary>
     public static (string Markdown, IReadOnlyList<string> Notes) Parse(string reply) =>
-        StripNotes(Unfence(reply.Trim()));
+        StripNotes(Unwrap(Unfence(reply.Trim())));
+
+    /// <summary>
+    /// The edit brief asks for Markdown, deliberately without a JSON envelope. A model that
+    /// answers with one anyway used to be persisted verbatim: the whole JSON document became
+    /// the value of the artifact's <c>markdown</c> field, and the producer opened Focus to a
+    /// wall of escaped prose. Validation cannot catch it — a JSON document IS a non-empty
+    /// string. So it is caught here, at the one place an edit reply becomes an article body:
+    /// a recognisable prose field is unwrapped, and an envelope with none returns empty so the
+    /// caller's floor keeps the unedited draft rather than publishing the wrapper.
+    /// </summary>
+    public static string Unwrap(string reply)
+    {
+        var text = reply.Trim();
+        if (text.Length == 0 || text[0] != '{')
+        {
+            return reply;
+        }
+
+        JsonElement root;
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return reply;
+            }
+            root = document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            // Prose that merely starts with a brace is not an envelope.
+            return reply;
+        }
+
+        var host = root.TryGetProperty("artifact", out var artifact) && artifact.ValueKind == JsonValueKind.Object
+            ? artifact
+            : root;
+
+        foreach (var name in ProseFields)
+        {
+            if (host.TryGetProperty(name, out var value)
+                && value.ValueKind == JsonValueKind.String
+                && value.GetString() is { Length: > 0 } prose)
+            {
+                return prose.Trim();
+            }
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>What models reach for when they wrap an article they were asked to return bare.</summary>
+    private static readonly string[] ProseFields = ["markdown", "article", "body", "content", "text"];
 
     /// <summary>
     /// The guard every blog body passes before it is persisted (ADR-077): a trailing section

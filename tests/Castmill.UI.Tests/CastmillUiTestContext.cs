@@ -33,6 +33,10 @@ public abstract class CastmillUiTestContext : BunitContext
         Services.AddSingleton<IMediaPipeline>(Media);
         Services.AddSingleton<IClipboardService>(Clipboard);
         Services.AddSingleton<IVoiceCaptureService>(Voice);
+        // The shells register a platform recogniser; bUnit has none, so it gets the same
+        // fallback the browser shell does. Tests that exercise live dictation override this.
+        Services.AddSingleton<ILiveTranscriptionService>(
+            _ => new UnsupportedLiveTranscriptionService("No recogniser under test."));
 
         // Replace the real HttpClient with one that answers from Http's route table, so
         // AuthState can load /me without a network.

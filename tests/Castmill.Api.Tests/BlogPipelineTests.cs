@@ -22,6 +22,58 @@ public sealed class BlogEditorTests
         Assert.Contains("CONSOLIDATE ANSWERS", BlogEditor.Brief, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The observed corruption: the edit model answered with a JSON envelope although the
+    /// brief asks for bare Markdown, and the whole document was persisted as the artifact's
+    /// body. Validation cannot see it — a JSON document is a perfectly good non-empty string —
+    /// so the parser is the only place it can be caught.
+    /// </summary>
+    [Theory]
+    [InlineData("article")]
+    [InlineData("markdown")]
+    [InlineData("body")]
+    [InlineData("content")]
+    [InlineData("text")]
+    public void A_json_envelope_is_unwrapped_to_the_article_it_hides(string field)
+    {
+        var reply = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [field] = "# Real title\n\nReal prose.",
+            ["citations"] = new[] { "evidence:abc:s01" },
+        });
+
+        var (markdown, notes) = BlogEditor.Parse(reply);
+
+        Assert.Equal("# Real title\n\nReal prose.", markdown);
+        Assert.Empty(notes);
+    }
+
+    [Fact]
+    public void A_tech_edit_envelope_nested_under_artifact_is_unwrapped_too()
+    {
+        var reply = """{"artifact":{"markdown":"# Title\n\nProse."},"changes":[]}""";
+
+        Assert.Equal("# Title\n\nProse.", BlogEditor.Parse(reply).Markdown);
+    }
+
+    /// <summary>
+    /// An envelope carrying no prose field must come back empty, which puts the caller under
+    /// its publish floor so the unedited draft is kept. Publishing the wrapper is the failure.
+    /// </summary>
+    [Fact]
+    public void An_envelope_with_no_prose_field_yields_nothing_so_the_draft_is_kept()
+    {
+        Assert.Equal(string.Empty, BlogEditor.Parse("""{"changes":[],"citations":[]}""").Markdown);
+    }
+
+    [Fact]
+    public void Prose_is_never_mistaken_for_an_envelope()
+    {
+        // Markdown that merely opens with a brace, and a fenced reply, both survive intact.
+        Assert.Equal("{not json} and more", BlogEditor.Parse("{not json} and more").Markdown);
+        Assert.Equal("# Heading\n\nBody.", BlogEditor.Parse("# Heading\n\nBody.").Markdown);
+    }
+
     [Fact]
     public void The_prompt_carries_the_draft_and_a_length_floor()
     {
@@ -94,6 +146,87 @@ public sealed class BlogEditorTests
 
         Assert.Contains("editorial notes", markdown, StringComparison.Ordinal);
         Assert.Empty(notes);
+    }
+}
+
+/// <summary>
+/// The blog's stored title is captured from the DRAFT, but the edit pass rewrites the body
+/// including its own H1. Left alone the two drift, and Focus stacks two different titles.
+/// </summary>
+public sealed class BlogTitleSyncTests
+{
+    [Fact]
+    public void The_articles_own_heading_is_what_the_post_is_called()
+    {
+        Assert.Equal("Requires Predictable Focus Transitions",
+            BlogMarkdown.LeadingHeading("# Requires Predictable Focus Transitions\n\nBody."));
+    }
+
+    [Fact]
+    public void A_subheading_is_not_the_articles_title()
+    {
+        Assert.Null(BlogMarkdown.LeadingHeading("## Only a section\n\nBody."));
+        Assert.Null(BlogMarkdown.LeadingHeading("Just prose, no heading."));
+        Assert.Null(BlogMarkdown.LeadingHeading(""));
+    }
+
+    [Fact]
+    public void Retitling_the_envelope_leaves_every_other_field_alone()
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(
+            """{"title":"Old","markdown":"# New\n\nBody.","citations":["evidence:a:s01"]}""");
+
+        var updated = ArtifactContentJson.WithTitle(document.RootElement, "New");
+
+        Assert.Equal("New", updated.GetProperty("title").GetString());
+        Assert.Equal("# New\n\nBody.", updated.GetProperty("markdown").GetString());
+        Assert.Equal("evidence:a:s01", updated.GetProperty("citations")[0].GetString());
+    }
+}
+
+/// <summary>
+/// A campaign's SEO targets are ONE shared question list, so handing all of it to every blog
+/// made every blog answer the same FAQ — duplicate answer-surface content competing with
+/// itself. Sibling coverage is read back from the posts' own question headings so it is
+/// correct for blogs written before this existed.
+/// </summary>
+public sealed class BlogQuestionCoverageTests
+{
+    [Fact]
+    public void Question_headings_are_read_from_a_stored_post()
+    {
+        var content = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            content = new
+            {
+                markdown = "# Title\n\n## Not a question\n\nBody.\n\n"
+                    + "### What is embedded analytics?\n\nAn answer.\n\n"
+                    + "## What are the four types of analytics?\n\nAnother.\n",
+            },
+        });
+
+        Assert.Equal(
+            ["What is embedded analytics?", "What are the four types of analytics?"],
+            BlogMarkdown.QuestionHeadings(content));
+    }
+
+    [Fact]
+    public void A_heading_that_is_not_a_question_is_not_coverage()
+    {
+        var content = """{"content":{"markdown":"## How it works\n\nBody."}}""";
+
+        Assert.Empty(BlogMarkdown.QuestionHeadings(content));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json at all")]
+    [InlineData("""{"content":{}}""")]
+    public void Unreadable_content_contributes_no_coverage_rather_than_throwing(string? contentJson)
+    {
+        // A malformed sibling must not take down the generation that consults it.
+        Assert.Empty(BlogMarkdown.QuestionHeadings(contentJson));
     }
 }
 

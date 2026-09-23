@@ -41,50 +41,114 @@
             }
             else
             {
-                @* A vertical projection of the Mill Floor: the SAME lane names, in the SAME
-                   order, with every editable card beneath its category. Category bands label
-                   navigation; only content rows are interactive. *@
-                <div class="cm-tree">
-                    @foreach (var group in ArtifactGroups)
-                    {
-                        <section class="cm-focus__category-group" aria-labelledby="cm-focus-category-@CategoryId(group.Key)">
-                            <header class="cm-focus__category" id="cm-focus-category-@CategoryId(group.Key)">
-                                <span class="cm-kicker">@group.Key</span>
-                                <span class="cm-tree__count cm-mono">(@group.Count())</span>
-                            </header>
-                            <ul class="cm-focus__list">
-                                @foreach (var item in group)
+                @* The campaign's real shape, not a flat list: a YouTube package and one or
+                   more blog posts are the roots, and everything generated FROM a post — its
+                   socials, its newsletter — nests under the post it came from
+                   (ParentArtifactId). Older artifacts that predate that link, and anything
+                   whose parent is gone, fall into a trailing group rather than vanishing. *@
+                var tree = FocusTree;
+
+                RenderFragment<ArtifactPreviewResponse> Row = item =>
+                    @<div class="cm-tree__row">
+                        <button type="button"
+                                class="cm-focus__list-item @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
+                                aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
+                                aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
+                                @onclick="() => SelectAsync(item.Id)">
+                            <span class="cm-focus__list-title">@item.Title</span>
+                            @if (item.Id == _loadingArtifactId)
+                            {
+                                <span class="cm-meta">Loading content…</span>
+                            }
+                            else
+                            {
+                                <span class="cm-focus__list-meta">
+                                    <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
+                                    <span class="@ArtifactDisplay.StatusModifier(item.Status)">
+                                        @ArtifactDisplay.StatusLabel(item.Status)
+                                    </span>
+                                </span>
+                            }
+                        </button>
+                        <button type="button" class="cm-tree__delete"
+                                title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
+                                aria-label="Delete @item.Title"
+                                @onclick="() => DeleteArtifactAsync(item)">
+                            <AppIcon Name="trash" />
+                        </button>
+                    </div>;
+
+                @* A supporting piece repeats its parent's title verbatim, so a child row
+                   drops it: the platform mark and the short kind are the only things that
+                   differ, and one line each keeps a post's whole set in view. The full title
+                   still reaches assistive tech and the tooltip. *@
+                RenderFragment<ArtifactPreviewResponse> ChildRow = item =>
+                    @<div class="cm-tree__row cm-tree__row--compact">
+                        <button type="button"
+                                class="cm-focus__list-item cm-focus__list-item--compact @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
+                                aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
+                                aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
+                                title="@item.Title"
+                                aria-label="@item.Title — @ArtifactDisplay.KindLabel(item.Kind), @ArtifactDisplay.StatusLabel(item.Status)"
+                                @onclick="() => SelectAsync(item.Id)">
+                            <span class="cm-tree__mark cm-mono" aria-hidden="true">@ArtifactDisplay.KindMark(item.Kind)</span>
+                            <span class="cm-tree__short">@ArtifactDisplay.ShortLabel(item.Kind)</span>
+                            @if (item.Id == _loadingArtifactId)
+                            {
+                                <span class="cm-ai-dot" aria-hidden="true"></span>
+                            }
+                            else
+                            {
+                                <span class="@ArtifactDisplay.StatusModifier(item.Status)">
+                                    @ArtifactDisplay.StatusLabel(item.Status)
+                                </span>
+                            }
+                        </button>
+                        <button type="button" class="cm-tree__delete"
+                                title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
+                                aria-label="Delete @item.Title"
+                                @onclick="() => DeleteArtifactAsync(item)">
+                            <AppIcon Name="trash" />
+                        </button>
+                    </div>;
+
+                RenderFragment<FocusBranch> Branch = branch =>
+                    @<li class="cm-tree__branch">
+                        @Row(branch.Root)
+                        @if (branch.Children.Count > 0)
+                        {
+                            <ul class="cm-tree__children">
+                                @foreach (var child in branch.Children)
                                 {
-                                    <li class="cm-tree__row">
-                                        <button type="button"
-                                            class="cm-focus__list-item @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
-                                                aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
-                                                aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
-                                                @onclick="() => SelectAsync(item.Id)">
-                                            <span class="cm-focus__list-title">@item.Title</span>
-                                            @if (item.Id == _loadingArtifactId)
-                                            {
-                                                <span class="cm-meta">Loading content…</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="cm-focus__list-meta">
-                                                    <span class="cm-meta">@ArtifactDisplay.KindLabel(item.Kind)</span>
-                                                    <span class="@ArtifactDisplay.StatusModifier(item.Status)">
-                                                        @ArtifactDisplay.StatusLabel(item.Status)
-                                                    </span>
-                                                </span>
-                                            }
-                                        </button>
-                                        <button type="button" class="cm-tree__delete"
-                                                title="Delete @ArtifactDisplay.KindLabel(item.Kind)"
-                                                aria-label="Delete @item.Title"
-                                                @onclick="() => DeleteArtifactAsync(item)">
-                                            <AppIcon Name="trash" />
-                                        </button>
-                                    </li>
+                                    <li>@ChildRow(child)</li>
                                 }
                             </ul>
+                        }
+                    </li>;
+                <div class="cm-tree">
+                    @foreach (var section in tree.Sections)
+                    {
+                        <section class="cm-focus__category-group" aria-labelledby="cm-focus-category-@CategoryId(section.Label)">
+                            <header class="cm-focus__category" id="cm-focus-category-@CategoryId(section.Label)">
+                                <span class="cm-kicker">@section.Label</span>
+                                <span class="cm-tree__count cm-mono">(@section.Branches.Count)</span>
+                            </header>
+                            @if (section.Branches.Count == 0)
+                            {
+                                @* A campaign always HAS these two, so the group is stated even
+                                   when it is empty — an absent heading reads as "not supported"
+                                   rather than "not made yet". *@
+                                <p class="cm-focus__branch-empty cm-meta">@section.EmptyLine</p>
+                            }
+                            else
+                            {
+                                <ul class="cm-focus__list">
+                                    @foreach (var branch in section.Branches)
+                                    {
+                                        @Branch(branch)
+                                    }
+                                </ul>
+                            }
                         </section>
                     }
                 </div>
@@ -125,7 +189,12 @@
             {
                 <header class="cm-focus__head">
                     <span class="cm-kicker">@ArtifactDisplay.KindLabel(_artifact.Kind)</span>
-                    <h1>@_artifact.Title</h1>
+                    @* A blog post's own first heading IS its title and gets published with it,
+                       so repeating it in the chrome above showed the same line twice. *@
+                    @if (!BodyOpensWithTitle)
+                    {
+                        <h1>@_artifact.Title</h1>
+                    }
                     <div class="cm-focus__status">
                         <span class="@(_scheduledEntry is null
                             ? ArtifactDisplay.StatusModifier(_artifact.Status)
@@ -615,10 +684,45 @@
                 {
                     <div class="cm-producer__group">
                         <span class="cm-kicker">Owned content set</span>
-                        <p class="cm-meta">Generate one post for every social channel under this blog.</p>
+                        <p class="cm-meta">Pick the channels to write for. Each post is generated under this blog.</p>
+                        @* Channels already carrying a post under THIS blog start unticked: the
+                           old button always wrote all six, so a second press silently made a
+                           duplicate of every one. *@
+                        <ul class="cm-channel-picker">
+                            @foreach (var kind in ArtifactDisplay.SocialKinds)
+                            {
+                                var made = SocialChannelsMade.Contains(kind);
+                                <li>
+                                    <label class="cm-channel-picker__item">
+                                        <input type="checkbox" disabled="@_generatingSocialSet"
+                                               checked="@_socialChannels.Contains(kind)"
+                                               @onchange="e => ToggleSocialChannel(kind, e.Value is true)" />
+                                        <span class="cm-tree__mark cm-mono" aria-hidden="true">@ArtifactDisplay.KindMark(kind)</span>
+                                        <span>@ArtifactDisplay.ShortLabel(kind)</span>
+                                        @if (made)
+                                        {
+                                            <span class="cm-meta cm-channel-picker__made">already made</span>
+                                        }
+                                    </label>
+                                </li>
+                            }
+                        </ul>
                         <button type="button" class="cm-button cm-button--quiet"
-                                disabled="@_generatingSocialSet" @onclick="GenerateSocialSetAsync">
-                            @(_generatingSocialSet ? "Generating social set…" : "Generate social set")
+                                disabled="@(_generatingSocialSet || _socialChannels.Count == 0)"
+                                @onclick="GenerateSocialSetAsync">
+                            @if (_generatingSocialSet)
+                            {
+                                <span class="cm-ai-dot" aria-hidden="true"></span>
+                                <span>Generating @_socialChannels.Count post@(_socialChannels.Count == 1 ? "" : "s")…</span>
+                            }
+                            else if (_socialChannels.Count == 0)
+                            {
+                                <span>Pick a channel</span>
+                            }
+                            else
+                            {
+                                <span>Generate @_socialChannels.Count post@(_socialChannels.Count == 1 ? "" : "s")</span>
+                            }
                         </button>
                     </div>
                     <div class="cm-producer__group">
@@ -791,7 +895,7 @@
                     <div class="cm-form__actions">
                         <button type="button" class="cm-button cm-button--quiet"
                                 disabled="@_addingImage" @onclick="AddImageAsync">
-                            @(_addingImage ? "Adding…" : "+ Add image")
+                            @(_addingImage ? "Adding…" : AddImageLabel)
                         </button>
                         @if (_artifactId is { } artifactId)
                         {
@@ -975,13 +1079,56 @@
             .ThenBy(a => ArtifactDisplay.KindOrder(a.Kind))
             .ThenBy(a => a.CreatedAt);
 
-    /// <summary>The tree's groups: lane categories in board order, kinds in registry order.</summary>
-    private IEnumerable<IGrouping<string, ArtifactPreviewResponse>> ArtifactGroups =>
-        OrderedEditable
-            .GroupBy(a => ArtifactDisplay.Lane(a.Kind))
-            .OrderBy(g => Array.IndexOf(ArtifactDisplay.LaneOrder, g.Key) is var i && i >= 0
-                ? i
-                : ArtifactDisplay.LaneOrder.Length);
+    /// <summary>A root piece and everything generated from it.</summary>
+    private sealed record FocusBranch(
+        ArtifactPreviewResponse Root, IReadOnlyList<ArtifactPreviewResponse> Children);
+
+    private sealed record FocusSection(
+        string Label, IReadOnlyList<FocusBranch> Branches, string EmptyLine);
+
+    /// <summary>
+    /// The rail's hierarchy. Roots are the two things a campaign is built around — its
+    /// YouTube package and its blog posts — and a supporting piece hangs off the root it was
+    /// generated from. "Supporting work" catches anything with no usable parent: artifacts
+    /// made before the link existed, and children whose parent has since been deleted. It is
+    /// only rendered when it has something in it, so a tidy campaign shows two groups.
+    /// </summary>
+    private (IReadOnlyList<FocusSection> Sections, int Count) FocusTree
+    {
+        get
+        {
+            var all = OrderedEditable.ToList();
+            var roots = all.Where(a => ArtifactDisplay.Lane(a.Kind) is "YouTube" or "Blog").ToList();
+            var rootIds = roots.Select(root => root.Id).ToHashSet();
+
+            var children = all
+                .Where(a => !rootIds.Contains(a.Id)
+                    && a.ParentArtifactId is { } parent && rootIds.Contains(parent))
+                .ToLookup(a => a.ParentArtifactId!.Value);
+            var nested = children.SelectMany(group => group).Select(a => a.Id).ToHashSet();
+
+            FocusBranch Branch(ArtifactPreviewResponse root) => new(root, [.. children[root.Id]]);
+
+            var sections = new List<FocusSection>
+            {
+                new("YouTube",
+                    [.. roots.Where(r => ArtifactDisplay.Lane(r.Kind) == "YouTube").Select(Branch)],
+                    "No YouTube package yet."),
+                new("Blog posts",
+                    [.. roots.Where(r => ArtifactDisplay.Lane(r.Kind) == "Blog").Select(Branch)],
+                    "No blog post yet."),
+            };
+
+            var loose = all.Where(a => !rootIds.Contains(a.Id) && !nested.Contains(a.Id)).ToList();
+            if (loose.Count > 0)
+            {
+                sections.Add(new FocusSection(
+                    "Supporting work", [.. loose.Select(a => new FocusBranch(a, []))], string.Empty));
+            }
+
+            return (sections, all.Count);
+        }
+    }
 
     private static string CategoryId(string lane) =>
         new(lane.ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray());
@@ -1175,6 +1322,7 @@
             _markdown = StructuredContent.IsStructured(artifact.Kind)
                 ? StructuredContent.ToEditorMarkdown(artifact.Kind, artifact.ContentJson)
                 : ArtifactContent.ToMarkdown(artifact.ContentJson);
+            ResetSocialChannelSelection();
             _blogMetadata = artifact.Kind == "blog"
                 ? ArtifactContent.PublishingMetadata(artifact.ContentJson)
                 : new BlogPublishingMetadata();
@@ -1433,6 +1581,40 @@
             : ArtifactContent.ToMarkdown(preview.ContentJson)
         : _markdown;
 
+    /// <summary>
+    /// True when the document opens with its own H1 — the normal shape for a blog post, where
+    /// that heading is published content rather than chrome. The header then drops its copy
+    /// instead of stacking two titles.
+    ///
+    /// Deliberately NOT a match against the artifact's title: an edit pass rewrites the body's
+    /// heading, so the two can legitimately differ, and requiring them to be equal put BOTH on
+    /// screen in exactly the case where that reads worst. Whatever the article calls itself is
+    /// the title a reader should see once.
+    /// </summary>
+    private bool BodyOpensWithTitle
+    {
+        get
+        {
+            if (_artifact is null)
+            {
+                return false;
+            }
+
+            foreach (var line in DisplayedMarkdown.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                return trimmed.StartsWith("# ", StringComparison.Ordinal) && trimmed.Length > 2;
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>Remounts the editor when switching artifact OR entering/leaving preview.</summary>
     private string EditorKey => $"{_artifactId}:{_previewRevision?.Id.ToString() ?? "live"}";
 
@@ -1625,17 +1807,60 @@
         }
     }
 
+    /// <summary>Channels the producer has ticked. Defaults to the ones this blog lacks.</summary>
+    private readonly HashSet<string> _socialChannels = [];
+
+    /// <summary>Channels that already carry a post under the open blog.</summary>
+    private HashSet<string> SocialChannelsMade =>
+        [.. Campaign.Artifacts
+            .Where(a => a.ParentArtifactId == _artifactId)
+            .Select(a => a.Kind)
+            .Where(ArtifactDisplay.SocialKinds.Contains)];
+
+    private void ToggleSocialChannel(string kind, bool selected)
+    {
+        if (selected)
+        {
+            _socialChannels.Add(kind);
+        }
+        else
+        {
+            _socialChannels.Remove(kind);
+        }
+    }
+
+    /// <summary>
+    /// Opening a blog pre-ticks the channels it has no post for. Writing the set a producer
+    /// most likely wants by default, without making a second press duplicate what is there.
+    /// </summary>
+    private void ResetSocialChannelSelection()
+    {
+        _socialChannels.Clear();
+        if (_artifact?.Kind != "blog")
+        {
+            return;
+        }
+        var made = SocialChannelsMade;
+        foreach (var kind in ArtifactDisplay.SocialKinds.Where(kind => !made.Contains(kind)))
+        {
+            _socialChannels.Add(kind);
+        }
+    }
+
     private async Task GenerateSocialSetAsync()
     {
-        if (_artifact?.Kind != "blog" || Campaign.TranscriptArtifactId is not { } transcriptId) return;
+        if (_artifact?.Kind != "blog" || _socialChannels.Count == 0) return;
         _generatingSocialSet = true;
+        var chosen = ArtifactDisplay.SocialKinds.Where(_socialChannels.Contains).ToList();
         var failures = new List<string>();
         try
         {
-            foreach (var kind in ArtifactDisplay.SocialKinds)
+            foreach (var kind in chosen)
             {
+                // Nullable transcript: generation reads the campaign's sources too, so a
+                // campaign built from the source pipeline is not silently refused.
                 var result = await Generation.GenerateOneAsync(
-                    CampaignId, kind, transcriptId,
+                    CampaignId, kind, Campaign.TranscriptArtifactId,
                     string.IsNullOrWhiteSpace(_steering)
                         ? $"Promote and reinforce the owned blog titled \"{_artifact.Title}\"."
                         : _steering,
@@ -1643,8 +1868,16 @@
                 if (!result.Success) failures.Add(ArtifactDisplay.KindLabel(kind));
             }
             await Campaign.LoadAsync(CampaignId, force: true);
-            if (failures.Count == 0) Notifier.ShowSuccess("Six-post social set added under this blog.");
-            else Notifier.ShowError($"Some posts failed: {string.Join(", ", failures)}.");
+            ResetSocialChannelSelection();
+            if (failures.Count == 0)
+            {
+                Notifier.ShowSuccess(
+                    $"{chosen.Count} post{(chosen.Count == 1 ? "" : "s")} added under this blog.");
+            }
+            else
+            {
+                Notifier.ShowError($"Some posts failed: {string.Join(", ", failures)}.");
+            }
         }
         catch (ApiException ex) { Notifier.ShowError(ex.Message); }
         finally { _generatingSocialSet = false; }
@@ -1710,6 +1943,23 @@
                 $"tech edited {_artifact.Kind} · {result.DurationMs} ms · {result.Provider}"
                 + (result.KnowledgeBaseUsed ? " · knowledge base consulted" : string.Empty)
                 + $" · {result.Changes.Count} change{(result.Changes.Count == 1 ? "" : "s")}");
+
+            // A pass that SUCCEEDED but ran degraded — its knowledge base timed out, say —
+            // was previously silent: the result's warnings were never read here, so the
+            // producer had no way to know the edit was less grounded than it looks. Changes
+            // and unverified claims have their own lines below, so only the rest is raised.
+            var degraded = result.Warnings
+                .Where(w => !w.StartsWith("Tech edit: ", StringComparison.Ordinal)
+                    && !w.StartsWith("Unverified claim: ", StringComparison.Ordinal))
+                .ToList();
+            foreach (var warning in degraded)
+            {
+                _producerLog.Add($"  ! {warning}");
+            }
+            if (degraded.Count > 0)
+            {
+                Notifier.ShowWarning(degraded[0]);
+            }
             foreach (var change in result.Changes)
             {
                 _producerLog.Add($"  · {change}");
@@ -1978,10 +2228,35 @@
         }
     }
 
+    /// <summary>
+    /// The one output slot a YouTube package owns, once it exists. The server refuses a second
+    /// (more takes are variants ON this slot), so the button must open it rather than ask for
+    /// another and report the conflict.
+    /// </summary>
+    private ImageSlotResponse? SingleOutputSlot =>
+        _artifact?.Kind.Equals("youtube", StringComparison.OrdinalIgnoreCase) == true
+            ? ArtifactImageSlots.FirstOrDefault()
+            : null;
+
+    private string AddImageLabel =>
+        SingleOutputSlot is not { } slot
+            ? "+ Add image"
+            : slot.State == "Filled" || slot.KeeperThumbUrl is not null
+                ? "Edit thumbnail"
+                : "Generate thumbnail";
+
     private async Task AddImageAsync()
     {
         if (_artifactId is not { } artifactId)
         {
+            return;
+        }
+
+        // Dead end before this: a YouTube package already carrying its thumbnail slot got a
+        // 409 telling the producer to do the thing the button was supposed to do for them.
+        if (SingleOutputSlot is { } existing)
+        {
+            EditSlotImage(existing);
             return;
         }
 
@@ -1990,7 +2265,10 @@
         {
             var slot = await Images.CreateAsync(CampaignId, artifactId);
             await Campaign.LoadAsync(CampaignId, force: true);
-            Navigation.NavigateTo(ImageStudioPath(slot.Id));
+            // Open the studio over the manuscript, exactly as editing an existing slot does.
+            // Navigating to the Image Studio tab threw away the producer's place in Focus.
+            _imageDialogSlot = slot.Id;
+            _imageDialogTake = null;
         }
         catch (ApiException ex)
         {

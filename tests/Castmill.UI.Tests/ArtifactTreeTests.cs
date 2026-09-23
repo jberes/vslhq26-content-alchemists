@@ -11,8 +11,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Castmill.UI.Tests;
 
 /// <summary>
-/// Focus mode's left rail is a vertical projection of the Mill Floor: the same lane names in
-/// the same order, with non-interactive category bands and interactive content rows.
+/// Focus mode's left rail is the campaign's hierarchy, not a flat lane list: the YouTube
+/// package and the blog posts are roots, and every supporting piece nests under the post it
+/// was generated from. Category bands stay non-interactive; content rows, at either depth,
+/// are what a producer clicks.
 /// </summary>
 public sealed class ArtifactTreeTests : CastmillUiTestContext
 {
@@ -34,17 +36,37 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         StubFullArtifact(YouTubeId, "youtube", "Launch video package", status: ArtifactStatus.Queued);
     }
 
+    /// <summary>
+    /// A rail row by the title it is FOR. Root rows print the title; a nested supporting row
+    /// prints its mark and kind and carries the title in its accessible name, so a lookup has
+    /// to accept either — which is also the guarantee that the name never went missing.
+    /// </summary>
+    private static AngleSharp.Dom.IElement RailRow(IRenderedComponent<FocusView> view, string title) =>
+        view.FindAll(".cm-focus__list-item").Single(item => Names(item, title));
+
+    private static AngleSharp.Dom.IElement RailRowContainer(IRenderedComponent<FocusView> view, string title) =>
+        view.FindAll(".cm-tree__row").First(row =>
+            row.QuerySelectorAll(".cm-focus__list-item").Any(item => Names(item, title)));
+
+    private static bool Names(AngleSharp.Dom.IElement item, string title) =>
+        item.TextContent.Contains(title, StringComparison.Ordinal)
+        || (item.GetAttribute("aria-label")?.Contains(title, StringComparison.Ordinal) ?? false);
+
+    /// <summary>
+    /// The rail is the campaign's shape: a YouTube package and the blog posts are roots, and a
+    /// supporting piece hangs off the post it was generated from rather than sitting in a flat
+    /// lane of its own. Both root groups are always named, even when empty.
+    /// </summary>
     [Fact]
-    public async Task The_rail_mirrors_mill_floor_lanes_with_clean_noninteractive_headers()
+    public async Task The_rail_roots_on_youtube_and_blogs_with_clean_noninteractive_headers()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
 
         var categories = view.FindAll(".cm-focus__category").Select(header => header.TextContent).ToList();
         Assert.Collection(categories,
             category => Assert.Contains("YouTube", category, StringComparison.Ordinal),
-            category => Assert.Contains("Blog", category, StringComparison.Ordinal),
-            category => Assert.Contains("Social", category, StringComparison.Ordinal));
+            category => Assert.Contains("Blog posts", category, StringComparison.Ordinal));
         Assert.DoesNotContain("Social set availability", view.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Legacy SEO brief", view.Markup, StringComparison.Ordinal);
         Assert.DoesNotContain("Keyword plan", view.Markup, StringComparison.Ordinal);
@@ -53,6 +75,36 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
 
         // Parenthesised, so the number reads as a category count, not part of its title.
         Assert.All(view.FindAll(".cm-tree__count"), c => Assert.Matches(@"^\(\d+\)$", c.TextContent.Trim()));
+    }
+
+    [Fact]
+    public async Task A_supporting_piece_nests_under_the_post_it_was_generated_from()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
+
+        // One branch per root, and the thread is INSIDE the blog's branch — not a sibling.
+        var branches = view.FindAll(".cm-tree__branch");
+        var blogBranch = Assert.Single(branches, branch =>
+            branch.TextContent.Contains("Launch-day blog post", StringComparison.Ordinal));
+        var children = blogBranch.QuerySelectorAll(".cm-tree__children .cm-focus__list-item");
+        var child = Assert.Single(children);
+        // A child drops the title it shares with its parent and shows the mark and kind
+        // instead; the title still reaches assistive tech through the accessible name.
+        Assert.Equal("X", child.QuerySelector(".cm-tree__short")!.TextContent.Trim());
+        Assert.Equal("X", child.QuerySelector(".cm-tree__mark")!.TextContent.Trim());
+        Assert.DoesNotContain("Launch-day blog post", child.TextContent, StringComparison.Ordinal);
+        Assert.Contains("Launch thread", child.GetAttribute("aria-label")!, StringComparison.Ordinal);
+
+        // The YouTube package is a root of its own, carrying no children here.
+        var youtubeBranch = Assert.Single(branches, branch =>
+            branch.TextContent.Contains("Launch video package", StringComparison.Ordinal));
+        Assert.Empty(youtubeBranch.QuerySelectorAll(".cm-tree__children"));
+
+        // A nested row is still a real target: selecting it opens that artifact.
+        await children[0].ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+            Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
     }
 
     [Fact]
@@ -129,14 +181,11 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     public async Task Artifact_rows_show_their_review_state_with_text_and_color_modifier()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
 
-        var blog = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch-day blog post", StringComparison.Ordinal));
-        var social = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
-        var youtube = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch video package", StringComparison.Ordinal));
+        var blog = RailRow(view, "Launch-day blog post");
+        var social = RailRow(view, "Launch thread");
+        var youtube = RailRow(view, "Launch video package");
 
         Assert.Equal("Draft", blog.QuerySelector(".cm-status")!.TextContent.Trim());
         Assert.Equal("In review", social.QuerySelector(".cm-status--review")!.TextContent.Trim());
@@ -150,9 +199,8 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     public async Task Marking_an_artifact_reviewed_updates_its_left_rail_state()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
-        await view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
+        await RailRow(view, "Launch thread")
             .ClickAsync();
         await view.WaitForAssertionAsync(() =>
             Assert.NotNull(view.FindAll("button")
@@ -168,8 +216,7 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
 
         await view.WaitForAssertionAsync(() =>
         {
-            var social = view.FindAll(".cm-focus__list-item")
-                .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+            var social = RailRow(view, "Launch thread");
             Assert.Equal("Reviewed", social.QuerySelector(".cm-status--queued")!.TextContent.Trim());
         });
     }
@@ -282,8 +329,7 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         await view.WaitForAssertionAsync(() =>
             Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
 
-        var selected = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var selected = RailRow(view, "Launch thread");
         Assert.Equal("true", selected.GetAttribute("aria-current"));
     }
 
@@ -337,16 +383,14 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     public async Task Clicking_a_content_row_changes_the_main_manuscript()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
 
-        var social = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var social = RailRow(view, "Launch thread");
         await social.ClickAsync();
 
         await view.WaitForAssertionAsync(() =>
             Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
-        Assert.Equal("true", view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+        Assert.Equal("true", RailRow(view, "Launch thread")
             .GetAttribute("aria-current"));
     }
 
@@ -365,16 +409,14 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
                 return StubHttpHandler.Json(FullArtifact(
                     SocialId, "social-x", "Launch thread", BlogId));
             });
-        var social = view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var social = RailRow(view, "Launch thread");
         var click = social.ClickAsync();
 
         await view.WaitForAssertionAsync(() =>
         {
             Assert.Contains("Loading Launch thread", view.Find(".cm-focus__loading").TextContent,
                 StringComparison.Ordinal);
-            Assert.Equal("true", view.FindAll(".cm-focus__list-item")
-                .Single(item => item.TextContent.Contains("Launch thread", StringComparison.Ordinal))
+            Assert.Equal("true", RailRow(view, "Launch thread")
                 .GetAttribute("aria-busy"));
             Assert.Equal("Launch video package", view.Find(".cm-focus__manuscript h1").TextContent);
         });
@@ -396,13 +438,12 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Services.AddScoped<IConfirmService>(_ => confirm);
 
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
 
         Http.OnStatus(HttpMethod.Delete,
             $"api/v1/campaigns/{CampaignId}/artifacts/{SocialId}", System.Net.HttpStatusCode.NoContent);
 
-        var socialRow = view.FindAll(".cm-tree__row")
-            .First(r => r.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var socialRow = RailRowContainer(view, "Launch thread");
         Assert.NotNull(socialRow.QuerySelector(".cm-tree__delete svg.cm-icon"));
         Assert.DoesNotContain("🗑", socialRow.QuerySelector(".cm-tree__delete")!.TextContent,
             StringComparison.Ordinal);
@@ -420,10 +461,9 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
         Services.AddScoped<IConfirmService>(_ => new AutoConfirm(accept: false));
 
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await WaitForTextAsync(view, "Launch thread");
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
 
-        var socialRow = view.FindAll(".cm-tree__row")
-            .First(r => r.TextContent.Contains("Launch thread", StringComparison.Ordinal));
+        var socialRow = RailRowContainer(view, "Launch thread");
         await socialRow.QuerySelector(".cm-tree__delete")!.ClickAsync();
 
         Assert.DoesNotContain(Http.Requests, r => r.Method == HttpMethod.Delete);
@@ -450,8 +490,7 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
     public async Task Copy_icon_writes_plain_text_and_formatted_html()
     {
         var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await view.FindAll(".cm-focus__list-item")
-            .Single(item => item.TextContent.Contains("Launch-day blog post", StringComparison.Ordinal))
+        await RailRow(view, "Launch-day blog post")
             .ClickAsync();
         await view.WaitForAssertionAsync(() =>
             Assert.Equal("Launch-day blog post", view.Find(".cm-focus__manuscript h1").TextContent));
@@ -476,6 +515,35 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
 
         Assert.StartsWith("https://public.example/keeper.webp",
             view.Find(".cm-plan__slot-image").GetAttribute("src"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A YouTube package owns exactly ONE thumbnail slot and the API rejects a second, so
+    /// offering "+ Add image" on one that already has its slot was a dead end: the click
+    /// returned a 409 telling the producer to do what the button was for. It now opens the
+    /// slot it has, in the studio dialog, without asking the server for another.
+    /// </summary>
+    [Fact]
+    public async Task Add_image_opens_the_youtube_slot_it_already_has_instead_of_asking_for_another()
+    {
+        var slotId = Guid.NewGuid();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(
+            Campaign(), [Artifact(YouTubeId, "youtube", "Launch video package")],
+            [Slot("youtube-thumbnail", YouTubeId, slotId: slotId)], 0, 1));
+
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-plan__slots")));
+
+        // The label says what the click will do — the slot is empty, so: generate.
+        var button = view.FindAll("button").Single(b =>
+            b.TextContent.Contains("Generate thumbnail", StringComparison.Ordinal));
+        await button.ClickAsync();
+
+        // Opens the embedded studio over the manuscript, and creates nothing.
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.FindComponent<ImageStudioView>()));
+        Assert.DoesNotContain(Http.Requests, r =>
+            r.Method == HttpMethod.Post
+            && r.RequestUri!.AbsolutePath.EndsWith("/image-slots", StringComparison.Ordinal));
     }
 
     [Fact]

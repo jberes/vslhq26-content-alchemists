@@ -92,17 +92,18 @@ public sealed class ChromeAffordanceTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Both_card_tools_render_with_accessible_names()
+    public async Task The_card_delete_tool_renders_with_an_accessible_name()
     {
         var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-card__tools").Count == 1, TimeSpan.FromSeconds(5));
 
         var tools = view.FindAll(".cm-card__tool");
-        Assert.Equal(2, tools.Count);
-        // The glyphs are aria-hidden, so the label is the only thing a screen reader gets.
+        // Opening is the card's own click and tracing is its hover, so Delete is the only
+        // action left that needs a control of its own.
+        Assert.Single(tools);
+        // The glyph is aria-hidden, so the label is the only thing a screen reader gets.
         Assert.All(tools, t => Assert.False(string.IsNullOrWhiteSpace(t.GetAttribute("aria-label"))));
-        Assert.Contains(tools, t => t.GetAttribute("aria-label")!.StartsWith("Edit", StringComparison.Ordinal));
         Assert.Contains(tools, t => t.GetAttribute("aria-label")!.StartsWith("Delete", StringComparison.Ordinal));
     }
 

@@ -92,7 +92,9 @@ internal sealed class DesktopMediaPipeline : IMediaPipeline, IDisposable
                     [DevicePlatform.WinUI] = [".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav", ".aac"],
                 }),
             }));
-        var picked = results.Where(result => result is not null).Select(result =>
+        // MAUI 10.0.110 annotates PickMultipleAsync as returning a nullable sequence
+        // (a cancelled picker yields null), so the null check has to precede the query.
+        var picked = (results ?? []).Where(result => result is not null).Select(result =>
         {
             ArgumentNullException.ThrowIfNull(result);
             var info = new FileInfo(result.FullPath);

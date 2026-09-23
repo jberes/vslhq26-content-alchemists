@@ -11,6 +11,27 @@
     <!-- Please consult https://developer.apple.com/documentation/bundleresources/information_property_list/lsapplicationcategorytype -->
     <!-- <key>LSApplicationCategoryType</key> -->
     <!-- <string>public.app-category.YOUR-CATEGORY-HERE</string> -->
+    <!-- macOS 26+/iOS 26+ UIKit traps at launch (brk 0 in
+         __UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption) unless the app
+         adopts the UIScene lifecycle. MAUI ships MauiUISceneDelegate and looks for this
+         exact configuration name; the .NET 10 project template does not yet emit it. -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>__MAUI_DEFAULT_SCENE_CONFIGURATION__</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>SceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
     <key>UIDeviceFamily</key>
     <array>
         <integer>2</integer>
@@ -41,6 +62,8 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Castmill turns what you say into a campaign transcript while you record. Recognition runs on this Mac whenever a local model is installed for your language.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Castmill records voice notes only when you press Record, then transcribes the recording into campaign evidence.</string>
 </dict>

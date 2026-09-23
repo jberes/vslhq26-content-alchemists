@@ -78,6 +78,8 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
         var items = view.FindAll(".cm-kitpicker__item");
         Assert.Equal(3, items.Count);
 
+        // Clicking an available item moves it straight onto the card — the right-hand column
+        // is the selection, not a preview of one thing.
         var guest = items.First(i => i.TextContent.Contains("the guest", StringComparison.Ordinal));
         await guest.ClickAsync();
         Assert.Contains("the guest", view.Find(".cm-kitpicker__preview").TextContent, StringComparison.Ordinal);
@@ -92,9 +94,6 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
         var wall = view.FindAll(".cm-kitpicker__item")
             .First(i => i.TextContent.Contains("Berlin studio wall", StringComparison.Ordinal));
         await wall.ClickAsync();
-        await view.FindAll(".cm-kitpicker__preview button")
-            .First(b => b.TextContent.Contains("Use as the background reference", StringComparison.Ordinal))
-            .ClickAsync();
 
         var body = Http.Bodies.Last(b =>
             b.Method == HttpMethod.Patch
@@ -103,8 +102,9 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
 
         await view.Find(".cm-kitpicker__actions button").ClickAsync(); // Done
         Assert.Empty(view.FindAll(".cm-kitpicker"));
-        var chip = view.Find(".cm-studio__refchip");
-        Assert.Contains("Background · the Berlin studio wall", chip.TextContent, StringComparison.Ordinal);
+        // Auto-attached product references share the chip class, so match on the text.
+        Assert.Contains(view.FindAll(".cm-studio__refchip"), chip =>
+            chip.TextContent.Contains("Background · the Berlin studio wall", StringComparison.Ordinal));
     }
 
     [Fact]

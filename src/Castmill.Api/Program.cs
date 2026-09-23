@@ -215,9 +215,17 @@ builder.Services.AddHttpClient("foundry-images", client => client.Timeout = Time
         options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(8);
     });
+// The resilience handler's OWN timeouts are the real ones: its defaults (10s per attempt,
+// 30s total) silently capped the 60s below, so a RAG gateway that fans out to an agent was
+// being cut off at 30 seconds. Both are stated here rather than left to the defaults.
 builder.Services.AddHttpClient(KnowledgeBaseClient.HttpClientName,
-        client => client.Timeout = TimeSpan.FromSeconds(60))
-    .AddStandardResilienceHandler();
+        client => client.Timeout = TimeSpan.FromSeconds(90))
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(75);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(2);
+    });
 // No resilience handler: a retried Tech Edit re-bills a paid generation, and a rewrite that
 // consults MCP tools can legitimately run for minutes.
 builder.Services.AddHttpClient(AnthropicMcpClient.HttpClientName,

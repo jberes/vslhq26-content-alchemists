@@ -11,6 +11,7 @@
    pasted transcripts work everywhere.
 *@
 @page "/campaigns/new"
+@implements IDisposable
 @using Castmill.Core
 @using Castmill.Core.Resources
 @using Castmill.UI.Design
@@ -28,6 +29,7 @@
 @inject PressRunService PressRun
 @inject IMediaPipeline Media
 @inject IVoiceCaptureService Voice
+@inject ILiveTranscriptionService LiveSpeech
 @inject INotifier Notifier
 @inject SettingsClient Settings
 @inject NavigationManager Navigation
@@ -85,6 +87,63 @@
                     <textarea class="cm-input cm-textarea" rows="8" @bind="_transcript" @bind:event="oninput"
                               placeholder="Paste a transcript, notes, article draft, or source material."></textarea>
                     <span class="cm-field__hint cm-meta">@_transcript.Length characters</span>
+                </label>
+            }
+            else if (_sourceStarter == SourceStarter.LiveRecording)
+            {
+                @* The transcript IS the source text: it writes straight into _transcript, the
+                   same field Paste text uses, so every downstream step is unchanged. Settled
+                   speech and the phrase still in flight are shown differently — the recogniser
+                   revises the latter, and text that visibly rewrites itself reads as a fault. *@
+                <div class="cm-live" aria-label="Live recording">
+                    <div class="cm-live__controls">
+                        @if (_liveSnapshot.IsListening)
+                        {
+                            <button type="button" class="cm-button cm-button--danger" @onclick="StopLiveAsync">
+                                <span class="cm-live__dot" aria-hidden="true"></span> Stop recording
+                            </button>
+                            <span class="cm-meta cm-mono">@TimeSpan.FromSeconds(_liveSnapshot.ElapsedSeconds).ToString(@"mm\:ss")</span>
+                        }
+                        else
+                        {
+                            <button type="button" class="cm-button" @onclick="StartLiveAsync">
+                                @(_liveSnapshot.HasText ? "Resume recording" : "Start recording")
+                            </button>
+                            @if (_liveSnapshot.HasText)
+                            {
+                                <button type="button" class="cm-button cm-button--quiet" @onclick="ResetLiveAsync">
+                                    Clear
+                                </button>
+                            }
+                        }
+                    </div>
+
+                    @if (_liveSnapshot.Message is { Length: > 0 } liveMessage)
+                    {
+                        <p class="cm-meta" role="status">@liveMessage</p>
+                    }
+
+                    <div class="cm-live__transcript" role="log" aria-live="polite" aria-label="Live transcript" data-cm-scroll>
+                        @if (!_liveSnapshot.HasText && !_liveSnapshot.IsListening)
+                        {
+                            <p class="cm-meta">Press record and start talking. Words appear here as you speak, and nothing is uploaded — this Mac does the transcribing.</p>
+                        }
+                        else
+                        {
+                            <span>@_liveSnapshot.Committed</span>
+                            @if (_liveSnapshot.Partial is { Length: > 0 } partial)
+                            {
+                                <span class="cm-live__partial"> @partial</span>
+                            }
+                        }
+                    </div>
+                </div>
+
+                <label class="cm-field">
+                    <span class="cm-field__label">Transcript</span>
+                    <textarea class="cm-input cm-textarea" rows="6" @bind="_transcript" @bind:event="oninput"
+                              placeholder="What you say lands here. You can edit it before continuing."></textarea>
+                    <span class="cm-field__hint cm-meta">@_transcript.Length characters — edit freely; this is what the campaign is built from.</span>
                 </label>
             }
             else if (_sourceStarter == SourceStarter.WebPage)
@@ -715,6 +774,7 @@
     private enum SourceStarter
     {
         PasteText,
+        LiveRecording,
         WebPage,
         Document,
         CloudMedia,
@@ -726,6 +786,69 @@
         SourceStarter Kind, string Mark, string Label, string Detail);
 
     private sealed record IntentOption(string Value, string Label, string Detail);
+
+    /// <summary>The recogniser outlives this page, so the subscription must not.</summary>
+    public void Dispose()
+    {
+        LiveSpeech.Changed -= OnLiveSpeechChanged;
+        // Leaving the microphone open after navigating away is the worst possible bug here.
+        _ = LiveSpeech.StopAsync();
+    }
+
+    private LiveTranscriptionSnapshot _liveSnapshot = new(LiveTranscriptionStates.Idle);
+
+    /// <summary>
+    /// The recogniser publishes from its own queue. Mirroring the snapshot here — and writing
+    /// the text into <c>_transcript</c> — keeps the live view and the editable field the same
+    /// thing, so the producer can correct a mishearing the moment they see it.
+    /// </summary>
+    private void OnLiveSpeechChanged() =>
+        // Guarded: this runs as fire-and-forget work on the renderer's dispatcher, where an
+        // escaping exception reaches Blazor's global error bar and no ErrorBoundary can catch
+        // it — the failure mode that once froze the campaign screen.
+        _ = InvokeAsync(() => StoreEvents.GuardedAsync(
+            () =>
+            {
+                var previous = _liveSnapshot;
+                _liveSnapshot = LiveSpeech.Snapshot;
+
+                // Only overwrite what the recogniser owns. Once the producer has edited the
+                // box, a later update must not silently throw their correction away.
+                if (_liveSnapshot.HasText
+                    && (string.IsNullOrWhiteSpace(_transcript)
+                        || string.Equals(_transcript, previous.FullText, StringComparison.Ordinal)))
+                {
+                    _transcript = _liveSnapshot.FullText;
+                }
+
+                return Task.CompletedTask;
+            },
+            Notifier, StateHasChanged, "Updating the live transcript"));
+
+    private async Task StartLiveAsync()
+    {
+        // Talking into a run that already has pasted text would merge two sources silently.
+        if (!string.IsNullOrWhiteSpace(_transcript) && !_liveSnapshot.HasText)
+        {
+            _liveSnapshot = _liveSnapshot with { Message = "Recording appends to the text already in the box." };
+        }
+        await LiveSpeech.StartAsync();
+    }
+
+    private async Task StopLiveAsync()
+    {
+        await LiveSpeech.StopAsync();
+        if (_liveSnapshot.HasText)
+        {
+            _transcript = _liveSnapshot.FullText;
+        }
+    }
+
+    private async Task ResetLiveAsync()
+    {
+        await LiveSpeech.ResetAsync();
+        _transcript = string.Empty;
+    }
 
     private IReadOnlyList<StarterOption> AvailableStarters
     {
@@ -750,6 +873,14 @@
                 SourceStarter.CloudMedia, "↑",
                 Media.CanProcessLocally ? "Upload media to the cloud" : "Upload media",
                 "Private resumable upload, transcribed by Azure AI Speech"));
+            // Live dictation sits next to the other capture options only where the machine
+            // has its own recogniser — a control that cannot listen is worse than no control.
+            if (LiveSpeech.Snapshot.IsAvailable)
+            {
+                starters.Insert(1, new StarterOption(
+                    SourceStarter.LiveRecording, "◉", "Live recording",
+                    "Speak and watch the transcript appear, transcribed on this machine"));
+            }
             if (_voiceAvailable)
             {
                 starters.Add(new StarterOption(
@@ -1474,6 +1605,9 @@
         await Voice.InitializeAsync();
         _voiceAvailable = Voice.Snapshot.State != VoiceCaptureStates.Unsupported;
         _voiceUnavailableReason = _voiceAvailable ? null : Voice.Snapshot.Message;
+        LiveSpeech.Changed += OnLiveSpeechChanged;
+        await LiveSpeech.InitializeAsync();
+        _liveSnapshot = LiveSpeech.Snapshot;
         try
         {
             _brands.AddRange(await Brands.ListAsync());
@@ -2153,21 +2287,26 @@
         _percent = 0;
         StateHasChanged();
 
-        var progress = new Progress<PipelineProgress>(p => InvokeAsync(() =>
-        {
-            _percent = (int)Math.Clamp(p.Percent ?? 0, 0, 100);
-            var line = $"{p.Stage}…{(p.Detail is null ? "" : $" {p.Detail}")}";
-            if (_log.Count == 0 || !_log[^1].StartsWith(p.Stage, StringComparison.Ordinal))
+        // Guarded for the same reason a store handler is: this is fire-and-forget work on the
+        // renderer's dispatcher, so an exception here would reach Blazor's global error bar
+        // with no ErrorBoundary able to catch it — and take the narrated log down with it.
+        var progress = new Progress<PipelineProgress>(p => InvokeAsync(() => StoreEvents.GuardedAsync(
+            () =>
             {
-                _log.Add(line);
-            }
-            else
-            {
-                _log[^1] = line;
-            }
-
-            StateHasChanged();
-        }));
+                _percent = (int)Math.Clamp(p.Percent ?? 0, 0, 100);
+                var line = $"{p.Stage}…{(p.Detail is null ? "" : $" {p.Detail}")}";
+                if (_log.Count == 0 || !_log[^1].StartsWith(p.Stage, StringComparison.Ordinal))
+                {
+                    _log.Add(line);
+                }
+                else
+                {
+                    _log[^1] = line;
+                }
+    
+                return Task.CompletedTask;
+            },
+            Notifier, StateHasChanged, "Updating transcription progress")));
 
         try
         {

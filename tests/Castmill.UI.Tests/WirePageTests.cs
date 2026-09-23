@@ -52,9 +52,11 @@ public sealed class WirePageTests : CastmillUiTestContext
         var queueCard = page.Find(".cm-run-show__queue-card");
 
         Assert.Equal(2, queueCard.Children.Length);
-        // Card actions are icon-only: the accessible name carries the verb, not a word.
-        Assert.Equal(new[] { "Edit", "Slot" }, queueCard.QuerySelectorAll(".cm-wire-icon-btn")
+        // Opening the item is a click on its title, so only the actions that are NOT
+        // "open this" remain as icon buttons.
+        Assert.Equal(new[] { "Slot" }, queueCard.QuerySelectorAll(".cm-wire-icon-btn")
             .Select(button => button.GetAttribute("aria-label")));
+        Assert.Equal("BUTTON", queueCard.QuerySelector(".cm-run-show__queue-title")!.TagName);
 
         queueCard.QuerySelector("[aria-label='Slot']")!.Click();
 
