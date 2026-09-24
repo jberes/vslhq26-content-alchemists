@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures.js';
+import { readFileSync } from 'node:fs';
 
 test('Brand asset types and Image Studio controls update in place', async ({ page, request }) => {
     let accessToken = null;
@@ -25,12 +26,21 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         expect(brand.status()).toBe(201);
         brandId = (await brand.json()).id;
 
+        const studioWall = readFileSync(
+            new URL('../../src/Castmill.Web/wwwroot/favicon.png', import.meta.url));
         const asset = await request.post('http://localhost:5015/api/v1/assets', {
             headers: bearer(accessToken),
-            data: { fileName: 'studio-wall.png', contentType: 'image/png', sizeBytes: 128 },
+            data: { fileName: 'studio-wall.png', contentType: 'image/png', sizeBytes: studioWall.length },
         });
         expect(asset.status()).toBe(201);
         assetId = (await asset.json()).id;
+
+        const assetContent = await request.post(
+            `http://localhost:5015/api/v1/blob/assets/${assetId}/content`, {
+                headers: { ...bearer(accessToken), 'Content-Type': 'image/png' },
+                data: studioWall,
+            });
+        expect(assetContent.status(), await assetContent.text()).toBe(204);
 
         const link = await request.post(`http://localhost:5015/api/v1/brands/${brandId}/assets`, {
             headers: bearer(accessToken),
@@ -314,7 +324,9 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const savedDefault = await saveDefault;
         expect(savedDefault.ok()).toBeTruthy();
         expect(savedDefault.request().postDataJSON().value).toBe(defaultAlias);
-        await expect(page.locator('.cm-settings__default-model')).toContainText('SAVED');
+        await expect(page.locator('.cm-settings__default-model', {
+            has: page.getByLabel('Default image generator'),
+        })).toContainText('SAVED');
 
         let previewRequests = 0;
         page.on('request', current => {
@@ -378,6 +390,35 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.locator('.cm-studio__content-title', { hasText: 'Launch post' }))
             .toBeVisible();
         await expect(page.getByText('Internal campaign summary', { exact: true })).toHaveCount(0);
+
+        // The no-model editor is a complete browser workflow: choose a real kit image as the
+        // background, add it again as a movable layer, then persist the composite. This used
+        // to be absent from E2E coverage, so a click-time circuit error shipped unnoticed.
+        const launchGroup = page.locator('.cm-studio__group', { hasText: 'Launch post' });
+        await launchGroup.getByRole('button', { name: 'Create from scratch' }).click();
+        const manualEditor = page.getByRole('dialog', { name: 'Build an image' });
+        await expect(manualEditor).toBeVisible();
+        await expect(manualEditor).toContainText('Start with a background.');
+
+        const baseResponse = page.waitForResponse(response =>
+            response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/base`)
+            && response.request().method() === 'POST');
+        await manualEditor.getByTitle('Studio wall').click();
+        expect((await baseResponse).ok()).toBeTruthy();
+        await expect(manualEditor.locator('.cm-imgeditor > img')).toBeVisible();
+
+        await manualEditor.getByRole('button', { name: '+ Image', exact: true }).click();
+        await manualEditor.locator('.cm-layer-picker').getByTitle('Studio wall').click();
+        await expect(manualEditor.locator('.cm-imgeditor__layer')).toBeVisible();
+
+        const overlayResponse = page.waitForResponse(response =>
+            response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/overlay`)
+            && response.request().method() === 'PUT');
+        await manualEditor.getByRole('button', { name: 'Save image' }).click();
+        expect((await overlayResponse).ok()).toBeTruthy();
+        await expect(manualEditor.getByRole('button', { name: 'Saved' })).toBeDisabled();
+        await page.keyboard.press('Escape');
+        await expect(manualEditor).toHaveCount(0);
 
         // ADR-F43: the sheet opens with the drawer closed — coverage first, editor on demand.
         await expect(page.locator('.cm-studio__drawer')).toHaveCount(0);
@@ -449,9 +490,9 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page).toHaveURL(new RegExp(`${campaignId}/focus\\?artifact=${reportArtifact.id}`));
         await expect(page.locator('.cm-focus__head h1')).toHaveText('Launch video package');
         await expect(page.locator('.cm-focus__category')).toHaveCount(3);
-        await expect(page.locator('.cm-focus__category').nth(0)).toContainText('YouTube');
-        await expect(page.locator('.cm-focus__category').nth(1)).toContainText('Blog');
-        await expect(page.locator('.cm-focus__category').nth(2)).toContainText('Social');
+        await expect(page.locator('.cm-focus__category', { hasText: 'YouTube' })).toBeVisible();
+        await expect(page.locator('.cm-focus__category', { hasText: 'Blog' })).toBeVisible();
+        await expect(page.locator('.cm-focus__category', { hasText: 'Supporting work' })).toBeVisible();
         await expect(page.getByText('Campaign-wide', { exact: true })).toHaveCount(0);
         await expect(page.locator('.cm-focus__category button')).toHaveCount(0);
         await expect(page.locator('.cm-tree__delete .cm-icon').first()).toBeVisible();

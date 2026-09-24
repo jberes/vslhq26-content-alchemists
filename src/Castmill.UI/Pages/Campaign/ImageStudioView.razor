@@ -1339,7 +1339,7 @@
 {
     <div class="cm-modal" role="presentation" @onclick="CloseManualAsync">
         <div class="cm-manual" role="dialog" aria-modal="true" aria-label="Build an image"
-             @onclick:stopPropagation @onkeydown="OnManualKey" tabindex="-1">
+             @ref="_manualPanel" @onclick:stopPropagation tabindex="-1">
             <header class="cm-manual__head">
                 <div>
                     <h2>Build @ArtifactDisplay.SlotLabel(manualSlot.Kind)</h2>
@@ -1354,7 +1354,7 @@
                     @if (manualSlot.BaseImageUrl is { Length: > 0 } manualBase)
                     {
                         <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="boxes"
-                             style="aspect-ratio: @manualSlot.TargetWidth / @manualSlot.TargetHeight;">
+                             style="@AspectStyle(manualSlot)">
                             <img class="cm-lightbox__image" src="@(manualBase + "?v=" + manualSlot.UpdatedAt.ToUnixTimeSeconds())"
                                  alt="Background" draggable="false" />
                             @foreach (var box in _overlayDraft)
@@ -2436,6 +2436,20 @@
             }
         }
 
+        if (_manualNeedsFocus)
+        {
+            _manualNeedsFocus = false;
+            if (_manualOpen)
+            {
+                await FocusSafelyAsync(_manualPanel);
+            }
+        }
+
+        // A save disables the clicked button and browsers then move focus to <body>. Keep a
+        // document-level Escape listener while this modal exists so closing it never depends
+        // on which child happens to retain focus.
+        await EnsureManualEscapeListenerAsync();
+
         // The editor island follows the lightbox: attached while a take is open, told the
         // current tool on every render, detached when the dialog closes (ADR-055).
         await EnsureEditorAttachedAsync();
@@ -2662,10 +2676,11 @@
 
     // ---- Editor (ADR-055): overlay boxes, region mask, compare, lineage ----------------
 
-    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=1";
+    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=2";
     private ElementReference _editorStage;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
+    private IJSObjectReference? _manualEscapeHandle;
     private DotNetObjectReference<ImageStudioView>? _editorSelf;
     private string _editorMode = "off";
     private List<OverlayBox> _overlayDraft = [];
@@ -2699,6 +2714,11 @@
         take.Height <= 0
             ? "--ar:1.7778;"
             : $"--ar:{((double)take.Width / take.Height).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)};";
+
+    private static string AspectStyle(ImageSlotResponse slot) =>
+        slot.TargetHeight <= 0
+            ? "--ar:1.7778;"
+            : $"--ar:{((double)slot.TargetWidth / slot.TargetHeight).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)};";
 
     /// <summary>Inline geometry from ratios; font size in container-query height units so the
     /// preview scales with the image exactly as the server scales with the slot.</summary>
@@ -2776,6 +2796,8 @@
 
     private bool _manualOpen;
     private Guid? _openingManual;
+    private ElementReference _manualPanel;
+    private bool _manualNeedsFocus;
 
     /// <summary>
     /// One click into the whole manual editor. Uses the content item's existing empty slot
@@ -2805,7 +2827,12 @@
 
             await SelectSlotAsync(slot);
             _editorMode = "boxes";
+            _overlayStatus = null;
+            _overlayDirty = false;
+            _layerPickerOpen = false;
+            SeedOverlayDraft();
             _manualOpen = true;
+            _manualNeedsFocus = true;
         }
         catch (ApiException ex)
         {
@@ -2820,17 +2847,15 @@
     private async Task CloseManualAsync()
     {
         _manualOpen = false;
+        // Create-from-scratch temporarily selects a slot so the editor can reuse the normal
+        // save APIs. Closing the dialog closes that whole job; leaving the ordinary slot
+        // drawer open underneath made Escape appear to reveal a second editor.
+        _selectedId = null;
+        _drawerNeedsFocus = false;
         _layerPickerOpen = false;
         _editorMode = "off";
+        await DetachManualEscapeListenerAsync();
         await DetachEditorAsync();
-    }
-
-    private async Task OnManualKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Escape")
-        {
-            await CloseManualAsync();
-        }
     }
 
     private bool _settingBase;
@@ -3135,11 +3160,24 @@
             await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
             return;
         }
+        // A new manual image deliberately opens without a stage until its background exists.
+        // Calling the JS module with that unconfigured ElementReference makes attach return
+        // null; invoking setMode on that null reference then tears down the whole Blazor
+        // circuit. The next render after a background is applied will have a real stage and
+        // comes back through here to attach it.
+        if (_editorStage.Context is null)
+        {
+            return;
+        }
         try
         {
             _editorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EditorModulePath);
             _editorSelf ??= DotNetObjectReference.Create(this);
-            _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference>("attach", _editorStage, _editorSelf);
+            _editorHandle = await _editorModule.InvokeAsync<IJSObjectReference?>("attach", _editorStage, _editorSelf);
+            if (_editorHandle is null)
+            {
+                return;
+            }
             await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
         }
         catch (JSException)
@@ -3162,9 +3200,57 @@
         }
     }
 
+    private async Task EnsureManualEscapeListenerAsync()
+    {
+        if (!_manualOpen)
+        {
+            await DetachManualEscapeListenerAsync();
+            return;
+        }
+        if (_manualEscapeHandle is not null)
+        {
+            return;
+        }
+        try
+        {
+            _editorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EditorModulePath);
+            _editorSelf ??= DotNetObjectReference.Create(this);
+            _manualEscapeHandle = await _editorModule.InvokeAsync<IJSObjectReference?>(
+                "listenForEscape", _editorSelf);
+        }
+        catch (JSException)
+        {
+            // bUnit/headless hosts have no document; browser hosts always do.
+        }
+        catch (InvalidOperationException)
+        {
+            // Prerender or a disposed circuit.
+        }
+    }
+
+    [JSInvokable]
+    public async Task ManualEscapeAsync()
+    {
+        await CloseManualAsync();
+        // JS-invokable methods do not receive Blazor event-callback's automatic repaint.
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DetachManualEscapeListenerAsync()
+    {
+        if (_manualEscapeHandle is null)
+        {
+            return;
+        }
+        try { await _manualEscapeHandle.InvokeVoidAsync("dispose"); } catch (JSException) { }
+        try { await _manualEscapeHandle.DisposeAsync(); } catch (JSException) { }
+        _manualEscapeHandle = null;
+    }
+
     public async ValueTask DisposeAsync()
     {
         Dispose();
+        await DetachManualEscapeListenerAsync();
         await DetachEditorAsync();
         if (_editorModule is not null)
         {
