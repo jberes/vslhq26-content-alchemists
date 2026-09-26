@@ -635,7 +635,7 @@
                                         <button @key="variant.Id" type="button"
                                                 class="@GalleryTileClass(variant)"
                                                 @onclick="() => OpenVariant(variant)">
-                                            <img src="@variant.ThumbUrl" width="@variant.Width" height="@variant.Height"
+                                            <img src="@TakeThumbUrl(variant)" width="@variant.Width" height="@variant.Height"
                                                  loading="lazy" decoding="async"
                                                  alt="Take for @SlotDisplayLabel(slot2)" />
                                             @if (variant.IsLocked)
@@ -671,9 +671,13 @@
                             {
                                 <div class="cm-studio__placed">
                                     <span class="cm-kicker">Placed</span>
-                                    <img src="@(published + "?v=" + slot2.UpdatedAt.ToUnixTimeSeconds())"
+                                    <img src="@((slot2.PublishedHiResUrl ?? published) + "?v=" + slot2.UpdatedAt.ToUnixTimeSeconds())"
                                          alt="Placed @SlotDisplayLabel(slot2)" />
                                     <div class="cm-studio__row">
+                                        @if (HasLayers(slot2))
+                                        {
+                                            <button type="button" class="cm-button" @onclick="() => OpenLayersAsync(slot2)">Edit layers</button>
+                                        }
                                         <button type="button" class="cm-button cm-button--quiet" @onclick="ClearAsync">
                                             Remove from slot
                                         </button>
@@ -847,12 +851,23 @@
                                 @onclick="() => RegenerateTakeAsync(take)">
                             <AppIcon Name="refresh" /><span class="cm-sr-only">Regenerate</span>
                         </button>
-                        <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_editorMode == "boxes" ? "cm-button--on" : null)"
-                                aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
-                                title="Text overlay — place and style text boxes on the image (composited after generation, no model call)"
-                                @onclick="ToggleOverlayEditor">
-                            <AppIcon Name="text" /><span class="cm-sr-only">Text overlay</span>
-                        </button>
+                        @if (HasLayers(Selected))
+                        {
+                            <button type="button" class="cm-button cm-button--quiet cm-button--icon"
+                                    title="Edit layers — reopen this image in the image editor"
+                                    @onclick="OpenLayersFromTakeAsync">
+                                <AppIcon Name="pencil" /><span class="cm-sr-only">Edit layers</span>
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_editorMode == "boxes" ? "cm-button--on" : null)"
+                                    aria-pressed="@(_editorMode == "boxes" ? "true" : "false")"
+                                    title="Text overlay — place and style text boxes on the image (composited after generation, no model call)"
+                                    @onclick="ToggleOverlayEditor">
+                                <AppIcon Name="text" /><span class="cm-sr-only">Text overlay</span>
+                            </button>
+                        }
                         <button type="button" class="cm-button cm-button--quiet cm-button--icon @(_editorMode == "mask" ? "cm-button--on" : null)"
                                 aria-pressed="@(_editorMode == "mask" ? "true" : "false")"
                                 title="Select region — draw a region, then tell the model what to change there"
@@ -902,8 +917,17 @@
                        measured by castmill-overlay-editor.js. Geometry lives in ratios
                        so the server composite lands where the preview showed it. *@
                     <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="@_editorMode" style="@AspectStyle(take)">
-                        <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
-                        @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null))
+                        @if (CompositeFor(take) is { } composite && _editorMode != "boxes")
+                        {
+                            @* The take under a layered image is only its background: show the
+                               server composite itself (hi-res master), never a CSS re-render. *@
+                            <img class="cm-lightbox__image" src="@composite" alt="Finished image" data-composite="true" />
+                        }
+                        else
+                        {
+                            <img class="cm-lightbox__image" src="@take.Url" alt="Full-size take" />
+                        }
+                        @if (_editorMode == "boxes" || (_editorMode == "off" && _overlayDraft.Count > 0 && Selected?.Overlay is not null && CompositeFor(take) is null))
                         {
                             @foreach (var box in _overlayDraft)
                             {
@@ -2519,6 +2543,47 @@
         {
             _ = StoreEvents.DetachedAsync(() => Closed.InvokeAsync());
         }
+    }
+
+    /// <summary>A slot built in the image editor (ADR-082 layers) is edited there, never in the legacy overlay tool.</summary>
+    private static bool HasLayers(ImageSlotResponse? slot) =>
+        slot?.Overlay?.Boxes.Any(b => b.Kind is not null) == true;
+
+    /// <summary>
+    /// The finished picture for a take, when that take is the background under the slot's
+    /// overlay: the hi-res composite master, else the published composite. Null for any other take.
+    /// </summary>
+    private string? CompositeFor(ImageVariantResponse take) =>
+        Selected is { Overlay: not null } slot
+            && string.Equals(slot.BaseImageUrl, take.Url, StringComparison.Ordinal)
+            && slot.PublishedUrl is { } published
+            && published.Contains("/composited/", StringComparison.Ordinal)
+            ? $"{slot.PublishedHiResUrl ?? published}?v={slot.UpdatedAt.ToUnixTimeSeconds()}"
+            : null;
+
+    /// <summary>The gallery shows the finished image for the background take, not the bare background.</summary>
+    private string TakeThumbUrl(ImageVariantResponse take) =>
+        Selected is { Overlay: not null } slot
+            && string.Equals(slot.BaseImageUrl, take.Url, StringComparison.Ordinal)
+            && slot.PublishedUrl is { } published
+            && published.Contains("/composited/", StringComparison.Ordinal)
+            ? $"{published}?v={slot.UpdatedAt.ToUnixTimeSeconds()}"
+            : take.ThumbUrl;
+
+    private async Task OpenLayersFromTakeAsync()
+    {
+        if (Selected is { } slot)
+        {
+            CloseVariant();
+            await OpenLayersAsync(slot);
+        }
+    }
+
+    /// <summary>Reopens THIS slot in the image editor (Create from scratch prefers an empty slot).</summary>
+    private async Task OpenLayersAsync(ImageSlotResponse slot)
+    {
+        await SelectSlotAsync(slot);
+        _manualOpen = true;
     }
 
     private void OnDialogKey(KeyboardEventArgs e)

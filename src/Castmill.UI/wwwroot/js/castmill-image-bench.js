@@ -689,12 +689,23 @@ export function attach(root, dotnet) {
     // prevented). Form fields and the on-canvas text editor keep normal selection.
     function onSelectStart(e) {
         const t = e.target instanceof Element ? e.target : e.target?.parentElement;
-        if (!t || !root.contains(t) || isTyping(t)) return;
-        if (drag || root.dataset.dragging || root.dataset.gesture
-            || t.closest('.cm-bench__tray, .cm-bench__board, .cm-bench__overlay, .cm-bench__layers, .cm-bench__stagebar')) {
+        // While the editor is open only a form field may start a selection — anywhere on the page.
+        if (t && isTyping(t)) return;
+        e.preventDefault();
+    }
+
+    // WebKit starts a text selection from mousedown (the compatibility event), not from
+    // pointerdown, so a press that begins a drag cancels mousedown's default too. Native image
+    // drags would otherwise carry a ghost picture and a selection with them.
+    function onMouseDown(e) {
+        if (e.button !== 0 || isTyping(e.target)) return;
+        if (e.target.closest?.('[data-bench-tile], [data-bench-stage], [data-bench-overlay], [data-bench-grip], [data-bench-row], [data-bench-bgdrop]')) {
             e.preventDefault();
+            clearSelection();
         }
     }
+    const onDragStart = e => { if (!isTyping(e.target)) e.preventDefault(); };
+    const onPointerRelease = e => { if (!isTyping(e.target) && !isTyping(document.activeElement)) clearSelection(); };
 
     const resizeObserver = new ResizeObserver(() => { draw(); measureText(); });
     const observeStage = () => { const s = stage(); if (s) resizeObserver.observe(s); resizeObserver.observe(root); };
@@ -716,6 +727,11 @@ export function attach(root, dotnet) {
     root.addEventListener('load', onLoad, true);
     root.addEventListener('scroll', onScroll, true);
     document.addEventListener('selectstart', onSelectStart);
+    root.addEventListener('mousedown', onMouseDown, true);
+    root.addEventListener('dragstart', onDragStart, true);
+    document.addEventListener('pointerup', onPointerRelease, true);
+    document.documentElement.dataset.benchOpen = 'true';
+    clearSelection();
     document.addEventListener('keydown', onKeyDown);
     document.fonts?.ready?.then(() => measureText());
     observeStage();
@@ -759,6 +775,10 @@ export function attach(root, dotnet) {
             root.removeEventListener('load', onLoad, true);
             root.removeEventListener('scroll', onScroll, true);
             document.removeEventListener('selectstart', onSelectStart);
+            root.removeEventListener('mousedown', onMouseDown, true);
+            root.removeEventListener('dragstart', onDragStart, true);
+            document.removeEventListener('pointerup', onPointerRelease, true);
+            delete document.documentElement.dataset.benchOpen;
             document.removeEventListener('keydown', onKeyDown);
             chrome()?.replaceChildren();
         },

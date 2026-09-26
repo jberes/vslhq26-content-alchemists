@@ -75,7 +75,30 @@ public static class ImageSlotEndpoints
             s.SourceSegmentId, s.HeadlineText, s.SafeArea, s.State, s.PublishedUrl, s.BaseImageUrl, s.UpdatedAt,
             s.HeadlineBackground, s.ArtifactId, s.PromptMode,
             [.. ImageReferenceResolver.ParseIds(s.ReferenceAssetIdsJson)],
-            Overlay: ParseOverlay(s.OverlaySpecJson));
+            Overlay: ParseOverlay(s.OverlaySpecJson),
+            PublishedHiResUrl: HiResCompositeUrl(s));
+
+    /// <summary>Scale of the hi-res master written beside every overlay composite (ADR-083).</summary>
+    internal const int HiResScale = 2;
+
+    /// <summary>The hi-res sibling of a published blob: same path, "@2x" before the extension.</summary>
+    internal static string HiResPath(string path) =>
+        path.EndsWith(".webp", StringComparison.Ordinal) ? $"{path[..^5]}@2x.webp" : $"{path}@2x";
+
+    /// <summary>Marks a composite whose 2× master was written beside it (ADR-083).</summary>
+    internal const string MasteredSuffix = "-hr.webp";
+
+    /// <summary>
+    /// The master's existence is carried by the published composite's own name, so it can never
+    /// go stale: composites saved before masters existed (or whose master failed) have no marker,
+    /// and any other change of the published image replaces the URL that carried it.
+    /// </summary>
+    internal static string? HiResCompositeUrl(ImageSlot slot) =>
+        slot.PublishedUrl is { } url && url.Contains("/composited/", StringComparison.Ordinal)
+            && url.EndsWith(MasteredSuffix, StringComparison.Ordinal)
+            && ParseOverlay(slot.OverlaySpecJson) is not null
+            ? HiResPath(url)
+            : null;
 
     internal static OverlaySpec? ParseOverlay(string? json)
     {
@@ -266,11 +289,13 @@ public static class ImageSlotEndpoints
         }
 
         byte[] fitted;
+        byte[] hiResBase;
         try
         {
             // Same fit as a model take: resized and centre-cropped to the slot's real pixels,
             // so a 4K screenshot and a 1280x720 export both land correctly.
-            fitted = composer.ToSlotWebp(source, slot.TargetWidth, slot.TargetHeight);
+            fitted = composer.ToSlotWebp(source, slot.TargetWidth, slot.TargetHeight, ImageComposer.CompositeWebpQuality);
+            hiResBase = composer.ToSlotWebp(source, slot.TargetWidth * HiResScale, slot.TargetHeight * HiResScale, ImageComposer.CompositeWebpQuality);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
@@ -283,6 +308,8 @@ public static class ImageSlotEndpoints
         var now = clock.GetUtcNow();
         var path = VariantPath(campaignId, slot.Kind, 0);
         var url = await publicStore.PublishAsync(path, fitted, "image/webp", ct);
+        // The 2× background the hi-res composite master is drawn on (ADR-083).
+        await publicStore.PublishAsync(HiResPath(path), hiResBase, "image/webp", ct);
         var thumbPath = ThumbPath(campaignId, slot.Kind);
         var thumbUrl = await publicStore.PublishAsync(
             thumbPath, composer.ToThumbWebp(fitted), "image/webp", ct);
@@ -382,7 +409,30 @@ public static class ImageSlotEndpoints
         }
         var layerImages = await LoadOverlayLayersAsync(spec, db, blobs, ct);
         var result = composer.ComposeOverlay(baseBytes, spec, layerImages);
-        var url = await publicStore.PublishAsync(CompositePath(slot.CampaignId, slot.Kind), result.Image, "image/webp", ct);
+
+        // The hi-res master: the same spec drawn at 2× from the original layer files (geometry
+        // is all ratios, so nothing moves). A background set before masters existed, or a
+        // generated take, has no 2× file and is upscaled; the layers on top stay sharp.
+        byte[]? master = null;
+        try
+        {
+            var hiResBase = await publicStore.ReadAsync(HiResPath(slot.BaseImagePath!), ct)
+                ?? composer.ToSlotWebp(baseBytes, slot.TargetWidth * HiResScale, slot.TargetHeight * HiResScale, ImageComposer.CompositeWebpQuality);
+            master = composer.ComposeOverlay(hiResBase, spec, layerImages).Image;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            // The composite still publishes; without a master it simply carries no marker and
+            // viewers use the published image.
+        }
+
+        var compositePath = CompositePath(slot.CampaignId, slot.Kind);
+        if (master is not null)
+        {
+            compositePath = compositePath[..^".webp".Length] + MasteredSuffix;
+            await publicStore.PublishAsync(HiResPath(compositePath), master, "image/webp", ct);
+        }
+        var url = await publicStore.PublishAsync(compositePath, result.Image, "image/webp", ct);
         slot.PublishedUrl = url.ToString();
         slot.UpdatedAt = now;
         return result;
@@ -608,6 +658,7 @@ public static class ImageSlotEndpoints
         Guid campaignId,
         Guid slotId,
         Guid variantId,
+        bool? original,
         IPublicContentStore publicStore,
         CastmillDbContext db,
         CancellationToken ct)
@@ -621,6 +672,25 @@ public static class ImageSlotEndpoints
         if (variant is null)
         {
             return Results.NotFound();
+        }
+
+        // The take under a layered image is only its background. What the producer sees and
+        // expects to download is the composite, so that is what this take downloads (the
+        // hi-res master when it exists); ?original=true still returns the bare background.
+        if (original != true)
+        {
+            var slot = await LoadSlotAsync(campaignId, slotId, db, ct);
+            if (slot is not null && slot.BaseImagePath == variant.BlobPath
+                && ParseOverlay(slot.OverlaySpecJson) is not null
+                && CompositeBlobPath(slot) is { } compositePath)
+            {
+                var composite = await publicStore.ReadAsync(HiResPath(compositePath), ct)
+                    ?? await publicStore.ReadAsync(compositePath, ct);
+                if (composite is not null)
+                {
+                    return Results.File(composite, "image/webp", $"castmill-{slot.Kind}-{variantId:N}.webp");
+                }
+            }
         }
 
         var bytes = await publicStore.ReadAsync(variant.BlobPath, ct);
@@ -2144,6 +2214,23 @@ public static class ImageSlotEndpoints
     /// Recovers the blob path from a variant URL and verifies it belongs to this
     /// campaign's slot — a client may not point a slot at arbitrary content.
     /// </summary>
+    /// <summary>The blob path of the slot's current overlay composite, recovered from its published URL.</summary>
+    internal static string? CompositeBlobPath(ImageSlot slot)
+    {
+        if (slot.PublishedUrl is not { } url)
+        {
+            return null;
+        }
+        var prefix = $"campaigns/{slot.CampaignId}/images/{slot.Kind}/composited/";
+        var index = url.IndexOf(prefix, StringComparison.Ordinal);
+        if (index < 0)
+        {
+            return null;
+        }
+        var path = url[index..];
+        return path.Contains('?', StringComparison.Ordinal) || path.Contains("..", StringComparison.Ordinal) ? null : path;
+    }
+
     internal static string? PathFromVariantUrl(string url, Guid campaignId, string kind)
     {
         var prefix = $"campaigns/{campaignId}/images/{kind}/variants/";

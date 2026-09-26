@@ -491,3 +491,36 @@ public sealed class OverlayLayerCompositionTests
         Assert.Contains(results, r => r.MemberNames.Contains(path));
     }
 }
+
+public sealed class HiResMasterUrlTests
+{
+    private static Castmill.Core.ImageSlot Slot(string? publishedUrl, bool withOverlay) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = Guid.NewGuid(),
+        CampaignId = Guid.NewGuid(),
+        Kind = "blog-inline",
+        TargetWidth = 1200,
+        TargetHeight = 675,
+        State = "Filled",
+        PublishedUrl = publishedUrl,
+        OverlaySpecJson = withOverlay
+            ? """{"boxes":[{"id":"h","text":"Hi","x":0.1,"y":0.1,"w":0.3,"h":0.1,"kind":"text"}]}"""
+            : null,
+    };
+
+    [Fact]
+    public void Only_a_composite_published_with_its_master_reports_one()
+    {
+        const string mastered = "https://public.example/campaigns/c/images/blog-inline/composited/abc-hr.webp";
+        const string legacy = "https://public.example/campaigns/c/images/blog-inline/composited/abc.webp";
+
+        Assert.Equal("https://public.example/campaigns/c/images/blog-inline/composited/abc-hr@2x.webp",
+            Castmill.Api.Endpoints.ImageSlotEndpoints.HiResCompositeUrl(Slot(mastered, withOverlay: true)));
+        // Saved before masters existed: no marker, so viewers fall back to the published image.
+        Assert.Null(Castmill.Api.Endpoints.ImageSlotEndpoints.HiResCompositeUrl(Slot(legacy, withOverlay: true)));
+        // Overlay cleared, or the slot published something that is not a composite.
+        Assert.Null(Castmill.Api.Endpoints.ImageSlotEndpoints.HiResCompositeUrl(Slot(mastered, withOverlay: false)));
+        Assert.Null(Castmill.Api.Endpoints.ImageSlotEndpoints.HiResCompositeUrl(Slot("https://public.example/campaigns/c/images/blog-inline/variants/0-x.webp", withOverlay: true)));
+    }
+}

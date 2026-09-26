@@ -127,6 +127,63 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
         });
     }
 
+    /// <summary>
+    /// ADR-083: a slot built in the editor has a background take underneath its layers. The
+    /// gallery and the take dialog must show the finished composite (the hi-res master), not
+    /// that bare background re-dressed with approximate CSS layers from thumbnails, and editing
+    /// goes back to the image editor on THIS slot.
+    /// </summary>
+    [Fact]
+    public async Task A_layered_slot_shows_its_composite_in_the_gallery_and_take_dialog_and_edits_in_the_editor()
+    {
+        const string background = "https://public.example/campaigns/c/images/social-card/variants/0-bg.webp";
+        const string composite = "https://public.example/campaigns/c/images/social-card/composited/abc.webp";
+        const string master = "https://public.example/campaigns/c/images/social-card/composited/abc@2x.webp";
+        var layered = EmptySlot() with
+        {
+            State = "Filled",
+            BaseImageUrl = background,
+            PublishedUrl = composite,
+            PublishedHiResUrl = master,
+            Overlay = new OverlaySpec([new OverlayBox("h", "SHIP IT", 0.1, 0.1, 0.5, 0.2, Kind: "text")]),
+        };
+        var backgroundTake = new ImageVariantResponse(Guid.NewGuid(), SlotId, background,
+            "https://public.example/campaigns/c/images/social-card/variants/thumbs/bg.webp", "manual", "Kept",
+            null, null, 1280, 720, DateTimeOffset.UtcNow);
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview(layered));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/variants", new List<ImageVariantResponse> { backgroundTake });
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count > 0, TimeSpan.FromSeconds(5));
+        await view.Find(".cm-studio__card:not(.cm-studio__card--add)").ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.StartsWith(master, view.Find(".cm-studio__placed img").GetAttribute("src"), StringComparison.Ordinal);
+            Assert.StartsWith(composite, view.Find(".cm-gallery button img").GetAttribute("src"), StringComparison.Ordinal);
+        });
+
+        await view.Find(".cm-gallery button").ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+        {
+            var shown = view.Find(".cm-lightbox__image");
+            Assert.Equal("true", shown.GetAttribute("data-composite"));
+            Assert.StartsWith(master, shown.GetAttribute("src"), StringComparison.Ordinal);
+            // No legacy CSS layers drawn over it.
+            Assert.Empty(view.FindAll(".cm-imgeditor__box"));
+            Assert.Empty(view.FindAll("button[title^='Text overlay']"));
+        });
+
+        await view.Find("button[title^='Edit layers']").ClickAsync();
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Empty(view.FindAll(".cm-lightbox"));
+            Assert.NotNull(view.Find(".cm-bench"));
+            Assert.Equal("text", view.Find(".cm-bench [data-layer-id=h]").GetAttribute("data-kind"));
+        });
+    }
+
     private static CampaignPreview Preview(ImageSlotResponse slot) =>
         new(Campaign(), [Artifact()], [slot], slot.State == "Filled" ? 1 : 0, 1,
             new BrandSummaryResponse(BrandId, "Acme"));

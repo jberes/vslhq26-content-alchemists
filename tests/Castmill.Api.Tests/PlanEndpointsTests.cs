@@ -103,6 +103,78 @@ public sealed class PlanEndpointsTests(CastmillApiFactory factory)
         Assert.False(slot.Overlay.Boxes[2].Visible);
     }
 
+    /// <summary>
+    /// ADR-083: the take under a layered image is only its background, so the product must never
+    /// show or download that as "the image". Saving writes a 2× master beside the exact-size
+    /// composite; the background take downloads the composite unless the original is asked for.
+    /// </summary>
+    [Fact]
+    public async Task A_manual_image_saves_a_hi_res_master_and_its_background_take_downloads_the_composite()
+    {
+        var store = new MemoryPublicStore();
+        await using var app = WithImageFakes(store);
+        var (client, campaignId, slotId) = await SetUpSlotAsync(app);
+
+        var background = SolidPng(1600, 900, SkiaSharp.SKColors.SeaGreen);
+        (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/base",
+            new { imageBase64 = Convert.ToBase64String(background) })).EnsureSuccessStatusCode();
+        var spec = new OverlaySpec([
+            new OverlayBox("headline", "SHIP IT", 0.1, 0.1, 0.5, 0.25, 0.12, 800, "#FFFFFF", "left",
+                new OverlayBand("#112233", 1, 0.35, 0), Kind: "text", FontFamily: "Anton"),
+        ]);
+        (await client.PutAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", spec)).EnsureSuccessStatusCode();
+
+        var slot = (await client.GetFromJsonAsync<List<ImageSlotResponse>>($"/api/v1/campaigns/{campaignId}/image-slots"))!
+            .Single(s => s.Id == slotId);
+        Assert.Contains("/composited/", slot.PublishedUrl, StringComparison.Ordinal);
+        Assert.Equal(slot.PublishedUrl!.Replace(".webp", "@2x.webp", StringComparison.Ordinal), slot.PublishedHiResUrl);
+
+        var published = await store.ReadAsync(PathOf(slot.PublishedUrl), CancellationToken.None);
+        var master = await store.ReadAsync(PathOf(slot.PublishedHiResUrl!), CancellationToken.None);
+        Assert.Equal((1280, 720), Size(published!));
+        Assert.Equal((2560, 1440), Size(master!));
+        // The master is the same picture: the band sits where the published one has it.
+        using (var big = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(master!)!)
+        {
+            var band = big.GetPixel((int)(2560 * 0.12), (int)(1440 * 0.12));
+            Assert.True(band.Red < 60 && band.Blue > band.Red, $"expected the band in the master, got {band}");
+            var backdrop = big.GetPixel(2400, 1300);
+            Assert.True(backdrop.Green > backdrop.Red, $"expected the background in the master, got {backdrop}");
+        }
+
+        var takes = (await client.GetFromJsonAsync<List<ImageVariantResponse>>(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants"))!;
+        var backgroundTake = takes.Single(t => t.Url == slot.BaseImageUrl);
+        var download = await client.GetByteArrayAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{backgroundTake.Id}/download");
+        Assert.Equal(master, download);
+        var original = await client.GetByteArrayAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/variants/{backgroundTake.Id}/download?original=true");
+        Assert.Equal((1280, 720), Size(original));
+        Assert.NotEqual(published, original);
+
+        // Clearing the layers retires the master with them.
+        var cleared = (await (await client.DeleteAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay"))
+            .Content.ReadFromJsonAsync<ImageSlotResponse>())!;
+        Assert.Null(cleared.PublishedHiResUrl);
+    }
+
+    private static string PathOf(string url) => new Uri(url).AbsolutePath.TrimStart('/');
+
+    private static (int, int) Size(byte[] bytes)
+    {
+        using var bitmap = Castmill.Api.Services.Images.ImageReferenceResolver.TryDecode(bytes)!;
+        return (bitmap.Width, bitmap.Height);
+    }
+
+    private static byte[] SolidPng(int width, int height, SkiaSharp.SKColor color)
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        bitmap.Erase(color);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        return image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100).ToArray();
+    }
+
     [Theory]
     [InlineData("preset", "Boxes[0].Effect.Preset")]
     [InlineData("too-many", "Boxes")]
@@ -362,12 +434,12 @@ public sealed class PlanEndpointsTests(CastmillApiFactory factory)
         factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
             services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(_ => new FakeFactory(respond)))));
 
-    private WebApplicationFactory<Program> WithImageFakes() =>
+    private WebApplicationFactory<Program> WithImageFakes(MemoryPublicStore? store = null) =>
         factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.Replace(ServiceDescriptor.Scoped<IImageRenderer>(_ => new SolidRenderer()));
             s.Replace(ServiceDescriptor.Scoped<IImageProviderRegistry>(_ => new ReadyRegistry()));
-            s.Replace(ServiceDescriptor.Singleton<IPublicContentStore>(new MemoryPublicStore()));
+            s.Replace(ServiceDescriptor.Singleton<IPublicContentStore>(store ?? new MemoryPublicStore()));
         }));
 
     private static async Task<HttpClient> AuthedClientAsync(WebApplicationFactory<Program> app, string tag)

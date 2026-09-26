@@ -8785,22 +8785,26 @@ body.cm-wire-dragging [data-wire-drag] {
     min-block-size: 0;
 }
 
-/* Nothing a producer drags across may turn into a browser text selection. WebKit (the
-   desktop shell) still needs the prefixed property. Inputs opt back in below. */
-.cm-bench__tray,
-.cm-bench__board,
-.cm-bench__overlay,
-.cm-bench__layers,
-.cm-bench__stagebar,
-.cm-bench[data-gesture],
-.cm-bench[data-dragging] {
+/* Nothing a producer drags across may ever turn into a browser text selection: not in the
+   editor, and not on the page behind it. The whole dialog is unselectable (WebKit — the
+   desktop shell — needs the prefixed property), the island marks the document while the
+   editor is open, and only form fields and the on-canvas text editor opt back in. */
+.cm-bench,
+.cm-bench *,
+:root[data-bench-open] body,
+:root[data-bench-open] body * {
     -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .cm-bench input,
 .cm-bench textarea,
-.cm-bench select {
+.cm-bench select,
+:root[data-bench-open] body input,
+:root[data-bench-open] body textarea,
+:root[data-bench-open] body select,
+:root[data-bench-open] body [contenteditable="true"] {
     -webkit-user-select: text;
     user-select: text;
 }

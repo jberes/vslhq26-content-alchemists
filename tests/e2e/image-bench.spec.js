@@ -99,6 +99,26 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
             return { x: b.x + b.width * fx, y: b.y + b.height * fy };
         };
 
+        // No drag anywhere in the editor may paint a browser text selection: sweep from the
+        // empty board across the stage bar, header and tray; from the canvas into the inspector;
+        // from a tile across the page. (Reported three times from the desktop shell.)
+        const sweep = async (from, to) => {
+            await page.mouse.move(from.x, from.y);
+            await page.mouse.down();
+            await page.mouse.move(to.x, to.y, { steps: 20 });
+            const during = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+            await page.mouse.up();
+            const after = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+            return during + after;
+        };
+        const boardBox = await editor.locator('.cm-bench__board').boundingBox();
+        const headBox = await editor.locator('.cm-bench__head').boundingBox();
+        const trayBox = await editor.locator('.cm-bench__tray').boundingBox();
+        const sideBox = await editor.locator('.cm-bench__side').boundingBox();
+        expect(await sweep({ x: boardBox.x + boardBox.width - 20, y: boardBox.y + 20 }, { x: trayBox.x + 10, y: headBox.y + 10 })).toBe('');
+        expect(await sweep(await at(0.5, 0.5), { x: sideBox.x + sideBox.width - 10, y: sideBox.y + sideBox.height - 10 })).toBe('');
+        expect(await sweep({ x: headBox.x + headBox.width / 2, y: headBox.y + headBox.height / 2 }, { x: boardBox.x + boardBox.width / 2, y: boardBox.y + boardBox.height - 10 })).toBe('');
+
         // 1 · Drag, not click. The first picture onto an empty canvas is the background.
         const baseSaved = page.waitForResponse(r => r.url().endsWith(`/image-slots/${slot.id}/base`) && r.request().method() === 'POST');
         await drag(page, await centre(tile('Backdrop')), await at(0.5, 0.5));
@@ -109,6 +129,8 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         await expect(page.getByText('Drag it onto the canvas', { exact: false }).first()).toBeVisible();
         await expect(layers).toHaveCount(0);
 
+        const tileStart = await centre(tile('Speaker portrait'));
+        expect(await sweep(tileStart, { x: sideBox.x + 20, y: headBox.y + 10 })).toBe('');
         await drag(page, await centre(tile('Speaker portrait')), await at(0.7, 0.5));
         await expect(layers).toHaveCount(1);
         const photo = layers.first();
@@ -274,6 +296,25 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         await expect(editor.getByRole('button', { name: 'Saved' })).toBeDisabled();
         await healthy();
 
+        // What was saved is what the editor showed: compare the editor canvas, region by region,
+        // with the server's hi-res master (no chrome, no safe-area guides, nothing selected).
+        await page.keyboard.press('Escape');
+        await editor.getByLabel('Safe areas').uncheck();
+        await page.mouse.move(5, 5);
+        await expect(editor.locator('.cm-bench__selection')).toHaveCount(0);
+        const editorShot = await editor.locator('.cm-bench__canvas').screenshot();
+        const savedSlot = (await (await request.get(`${API}/api/v1/campaigns/${campaignId}/image-slots`, { headers: bearer(token) })).json())
+            .find(s => s.id === slot.id);
+        expect(savedSlot.publishedHiResUrl).toContain('@2x.webp');
+        const masterBytes = await (await request.get(savedSlot.publishedHiResUrl)).body();
+        const fidelity = await compareImages(page, editorShot, masterBytes);
+        console.log(`editor vs saved master: mean ${fidelity.mean.toFixed(2)}, differing blocks ${(fidelity.differing * 100).toFixed(2)}%, master ${fidelity.size}`);
+        expect(fidelity.size).toEqual([slot.targetWidth * 2, slot.targetHeight * 2]);
+        // A glyph edge may land on a block boundary differently (browser vs Skia text shaping);
+        // a moved, resized or re-cropped layer changes far more than 1% of the blocks.
+        expect(fidelity.mean).toBeLessThan(8);
+        expect(fidelity.differing).toBeLessThan(0.01);
+
         const slots = await (await request.get(`${API}/api/v1/campaigns/${campaignId}/image-slots`, { headers: bearer(token) })).json();
         const stored = slots.find(s => s.id === slot.id);
         expect(stored.publishedUrl).toContain('/composited/');
@@ -297,7 +338,25 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         await page.keyboard.press('Escape');
         await page.keyboard.press('Escape');
         await expect(editor).toHaveCount(0);
-        await group.getByRole('button', { name: 'Create from scratch' }).click();
+        // Reopened from the panel, the take IS the finished image: the gallery tile and the take
+        // dialog show the composite (hi-res master), the download is that master, and editing
+        // returns to the image editor on this slot.
+        await group.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
+        await expect(page.locator('.cm-studio__placed img')).toHaveAttribute('src', /@2x\.webp/);
+        await expect(page.locator('.cm-gallery button img').first()).toHaveAttribute('src', /\/composited\//);
+        await page.locator('.cm-gallery button').first().click();
+        const shown = page.locator('.cm-lightbox__image');
+        await expect(shown).toHaveAttribute('data-composite', 'true');
+        await expect.poll(() => shown.evaluate(img => img.naturalWidth)).toBe(slot.targetWidth * 2);
+        await expect(page.locator('.cm-imgeditor__box')).toHaveCount(0);
+        const downloadEvent = page.waitForEvent('download');
+        await page.getByRole('button', { name: 'Download image' }).click();
+        const downloaded = await downloadEvent;
+        const { readFileSync } = await import('node:fs');
+        const downloadedBytes = readFileSync(await downloaded.path());
+        expect(Buffer.compare(downloadedBytes, masterBytes)).toBe(0);
+        await page.locator('.cm-lightbox').getByRole('button', { name: 'Edit layers' }).click();
+        await expect(editor).toBeVisible();
         await expect(editor.locator('[data-layer-id]')).toHaveCount(2);
         await expect(editor.locator(`[data-layer-id="${photoId}"]`)).toHaveAttribute('data-shape', 'circle');
         await healthy();
@@ -372,6 +431,33 @@ async function readPixels(page, bytes, points) {
         });
         return { size: [bitmap.width, bitmap.height], values };
     }, { base64: bytes.toString('base64'), points });
+}
+
+/**
+ * Mean absolute difference (0–255, averaged over RGB) and the share of clearly different blocks
+ * (> 60) between two images reduced to a 48-wide block grid — tolerant of anti-aliasing and
+ * glyph shaping, not of a moved or re-cropped layer.
+ */
+async function compareImages(page, a, b) {
+    return page.evaluate(async ({ a64, b64 }) => {
+        const load = async s => createImageBitmap(await (await fetch(`data:application/octet-stream;base64,${s}`)).blob());
+        const [ia, ib] = await Promise.all([load(a64), load(b64)]);
+        const w = 48, h = Math.round(48 * ib.height / ib.width);
+        const grid = img => {
+            const c = new OffscreenCanvas(w, h), g = c.getContext('2d');
+            g.imageSmoothingQuality = 'high';
+            g.drawImage(img, 0, 0, w, h);
+            return g.getImageData(0, 0, w, h).data;
+        };
+        const pa = grid(ia), pb = grid(ib);
+        let sum = 0, bad = 0;
+        for (let i = 0; i < pa.length; i += 4) {
+            const d = (Math.abs(pa[i] - pb[i]) + Math.abs(pa[i + 1] - pb[i + 1]) + Math.abs(pa[i + 2] - pb[i + 2])) / 3;
+            sum += d;
+            if (d > 60) bad++;
+        }
+        return { mean: sum / (w * h), differing: bad / (w * h), size: [ib.width, ib.height] };
+    }, { a64: a.toString('base64'), b64: b.toString('base64') });
 }
 
 function bearer(token) {

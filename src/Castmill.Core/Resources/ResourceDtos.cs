@@ -175,7 +175,14 @@ public sealed record ImageSlotResponse(
     /// <summary>Keeper id used by authenticated full-resolution download actions.</summary>
     Guid? KeeperVariantId = null,
     /// <summary>The overlay editor's spec (ADR-055); null when the slot has no overlay boxes.</summary>
-    OverlaySpec? Overlay = null);
+    OverlaySpec? Overlay = null,
+    /// <summary>
+    /// A 2× master of the overlay composite for viewing and download (ADR-083). The slot's
+    /// published image stays at its exact target size; this is the same picture at double
+    /// resolution, drawn from the original layer files, so it stays sharp on a Retina display.
+    /// Null when the slot has no overlay composite.
+    /// </summary>
+    string? PublishedHiResUrl = null);
 
 // ---- Overlay editor (ADR-055) -----------------------------------------------
 

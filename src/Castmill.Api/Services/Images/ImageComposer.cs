@@ -12,6 +12,13 @@ public interface IImageComposer
     byte[] ToSlotWebp(byte[] sourceImage, int width, int height);
 
     /// <summary>
+    /// The same fit at an explicit WebP quality. Manual backgrounds and their hi-res masters
+    /// are encoded near-losslessly because layers and text are composited over them.
+    /// </summary>
+    byte[] ToSlotWebp(byte[] sourceImage, int width, int height, int quality) =>
+        ToSlotWebp(sourceImage, width, height);
+
+    /// <summary>
     /// Draws a headline into the lower safe area of an already-encoded image and
     /// re-encodes it (ADR-013). Models mangle small text, so the headline is
     /// composited after generation — editing it never costs another render.
@@ -52,6 +59,13 @@ public sealed record CompositeResult(byte[] Image, bool FontFallback, string Typ
 public sealed partial class ImageComposer(IConfiguration configuration, ILogger<ImageComposer> logger) : IImageComposer
 {
     private const int WebpQuality = 85;
+
+    /// <summary>
+    /// Overlay composites carry type and hard graphic edges, which lossy WebP at 85 smears; they
+    /// (and the manual backgrounds under them) are encoded at 95 so the saved image keeps the
+    /// crispness the editor showed.
+    /// </summary>
+    internal const int CompositeWebpQuality = 95;
     /// <summary>Safe-area inset as a fraction of each edge — matches the design's dashed guide.</summary>
     internal const float SafeAreaFraction = 0.08f;
     /// <summary>Headline cap height as a fraction of output height (22 px at 720 p).</summary>
@@ -73,7 +87,10 @@ public sealed partial class ImageComposer(IConfiguration configuration, ILogger<
     private SKTypeface? _typeface;
     private bool _typefaceResolved;
 
-    public byte[] ToSlotWebp(byte[] sourceImage, int width, int height)
+    public byte[] ToSlotWebp(byte[] sourceImage, int width, int height) =>
+        ToSlotWebp(sourceImage, width, height, WebpQuality);
+
+    public byte[] ToSlotWebp(byte[] sourceImage, int width, int height, int quality)
     {
         // TryDecode, not Decode: Skia THROWS for bytes it cannot read, so the null-coalescing
         // guard this used to have never ran and a garbled provider response surfaced as an
@@ -83,7 +100,7 @@ public sealed partial class ImageComposer(IConfiguration configuration, ILogger<
 
         using var cropped = ContentAwareCrop(source, width, height);
         using var image = SKImage.FromBitmap(cropped);
-        using var encoded = image.Encode(SKEncodedImageFormat.Webp, WebpQuality)
+        using var encoded = image.Encode(SKEncodedImageFormat.Webp, Math.Clamp(quality, 1, 100))
             ?? throw new InvalidOperationException("WebP encoding failed.");
         return encoded.ToArray();
     }
@@ -198,7 +215,7 @@ public sealed partial class ImageComposer(IConfiguration configuration, ILogger<
         }
 
         using var composed = surface.Snapshot();
-        using var encoded = composed.Encode(SKEncodedImageFormat.Webp, WebpQuality)
+        using var encoded = composed.Encode(SKEncodedImageFormat.Webp, CompositeWebpQuality)
             ?? throw new InvalidOperationException("WebP encoding failed.");
         return new CompositeResult(encoded.ToArray(), fallback || layerFallback, typeface.FamilyName);
     }
