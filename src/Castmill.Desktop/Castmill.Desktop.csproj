@@ -18,6 +18,12 @@
         <MauiVersion>10.0.110</MauiVersion>
         <SingleProject>true</SingleProject>
         <EnableDefaultCssItems>false</EnableDefaultCssItems>
+        <!-- The newest published MacCatalyst pack (26.5) insists on exactly Xcode 26.6; the App
+             Store moved this Mac to Xcode 27.0 on 2026-09-19 and every Catalyst build has
+             failed since unless this check is off. The check is a major.minor equality, not a
+             real incompatibility: bundles built with Xcode 27 run correctly. Remove this once a
+             pack targeting Xcode 27 ships and the workload is updated. -->
+        <ValidateXcodeVersion>false</ValidateXcodeVersion>
 
         <ApplicationTitle>Castmill</ApplicationTitle>
         <ApplicationId>ai.castmill.desktop</ApplicationId>

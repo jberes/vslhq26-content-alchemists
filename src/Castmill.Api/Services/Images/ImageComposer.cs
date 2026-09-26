@@ -49,7 +49,7 @@ public interface IImageComposer
 /// </summary>
 public sealed record CompositeResult(byte[] Image, bool FontFallback, string Typeface);
 
-public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageComposer> logger) : IImageComposer
+public sealed partial class ImageComposer(IConfiguration configuration, ILogger<ImageComposer> logger) : IImageComposer
 {
     private const int WebpQuality = 85;
     /// <summary>Safe-area inset as a fraction of each edge — matches the design's dashed guide.</summary>
@@ -184,15 +184,23 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
         canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
 
         var (typeface, fallback) = ResolveTypeface();
+        var layerFallback = false;
         foreach (var box in spec.Boxes)
         {
-            DrawBox(canvas, box, bitmap.Width, bitmap.Height, typeface, layerImages);
+            if (box.Kind is null)
+            {
+                DrawBox(canvas, box, bitmap.Width, bitmap.Height, typeface, layerImages);
+            }
+            else
+            {
+                layerFallback |= DrawLayer(canvas, box, bitmap.Width, bitmap.Height, typeface, layerImages);
+            }
         }
 
         using var composed = surface.Snapshot();
         using var encoded = composed.Encode(SKEncodedImageFormat.Webp, WebpQuality)
             ?? throw new InvalidOperationException("WebP encoding failed.");
-        return new CompositeResult(encoded.ToArray(), fallback, typeface.FamilyName);
+        return new CompositeResult(encoded.ToArray(), fallback || layerFallback, typeface.FamilyName);
     }
 
     /// <summary>
@@ -542,16 +550,8 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
             // A shape is necessarily a cropped frame even when it uses the default focus.
             if (crop is not null || shape != "rectangle")
             {
-                crop ??= new Castmill.Core.Resources.OverlayImageCrop();
-                var zoom = (float)Math.Clamp(crop.Zoom, 1, 4);
-                var coverScale = Math.Max(frameWidth / layer.Width, frameHeight / layer.Height) * zoom;
-                var sourceWidth = Math.Min(layer.Width, frameWidth / coverScale);
-                var sourceHeight = Math.Min(layer.Height, frameHeight / coverScale);
-                var focusX = (float)Math.Clamp(crop.FocusX, 0, 1) * layer.Width;
-                var focusY = (float)Math.Clamp(crop.FocusY, 0, 1) * layer.Height;
-                var sourceLeft = Math.Clamp(focusX - (sourceWidth / 2f), 0, layer.Width - sourceWidth);
-                var sourceTop = Math.Clamp(focusY - (sourceHeight / 2f), 0, layer.Height - sourceHeight);
-                var source = SKRect.Create(sourceLeft, sourceTop, sourceWidth, sourceHeight);
+                var source = CoverSource(
+                    layer.Width, layer.Height, frameWidth, frameHeight, crop ?? new Castmill.Core.Resources.OverlayImageCrop());
                 canvas.DrawBitmap(layer, source, frame, SKSamplingOptions.Default);
                 return;
             }

@@ -4,13 +4,15 @@ using Castmill.Core.Ai;
 using Castmill.Core.Resources;
 using Castmill.UI.Http;
 using Castmill.UI.Pages.Campaign;
+using Castmill.UI.Pages.Campaign.Bench;
 
 namespace Castmill.UI.Tests;
 
 /// <summary>
 /// The create-from-scratch dialog is a complete workflow, not another route into the generated
-/// take lightbox. These checks exercise the clicks a producer makes: open, choose a background,
-/// add an image layer, save the composite, and close with Escape.
+/// take lightbox. These checks drive it from the studio: open, drop a background, drop an image
+/// layer (drawn from the full-resolution original), save the composite, and close with Escape.
+/// Editor behaviour in depth lives in ImageBenchTests.
 /// </summary>
 public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
 {
@@ -44,7 +46,7 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Image_layer_can_be_cropped_shaped_saved_and_deleted()
+    public async Task Create_from_scratch_opens_the_editor_sets_a_background_adds_a_layer_and_saves()
     {
         var filled = EmptySlot() with
         {
@@ -55,6 +57,7 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
         };
         Http.OnPost($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/base",
             new OverlaySaveResult(filled, null));
+        Http.OnGet($"api/v1/blob/assets/{AssetId}/read-sas", new ReadSas("https://private.example/wall-full.png"));
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
@@ -64,117 +67,37 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
         await view.Find(".cm-studio__manual-tile").ClickAsync();
         await view.WaitForAssertionAsync(() =>
         {
-            Assert.NotNull(view.Find(".cm-manual"));
+            Assert.NotNull(view.Find("[role=dialog][aria-label='Build an image']"));
             Assert.Contains("Start with a background", view.Markup, StringComparison.Ordinal);
+            // The kit arrives as draggable tiles, never as click-to-add buttons.
+            Assert.NotNull(view.Find("[data-bench-tile][data-tile-key='" + BrandAssetId + "']"));
         });
 
-        // Refresh after applying the background returns the filled slot.
+        // The refresh after the background lands returns the filled slot.
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview(filled));
-        await view.Find(".cm-manual__rail .cm-studio__pick").ClickAsync();
+        var bench = view.FindComponent<ImageBench>();
+        await bench.Instance.DropTileOnBackground(BrandAssetId.ToString());
         await view.WaitForAssertionAsync(() =>
-        {
-            var canvas = view.Find(".cm-imgeditor");
-            Assert.Contains("--ar:1.7778", canvas.GetAttribute("style"), StringComparison.Ordinal);
-        });
+            Assert.Contains("manual-base.webp", view.Find("img.cm-bench__bg").GetAttribute("src"), StringComparison.Ordinal));
 
-        await view.FindAll(".cm-manual__rail button")
-            .Single(button => button.TextContent.Trim() == "+ Image")
-            .ClickAsync();
-        await view.Find(".cm-layer-picker .cm-studio__pick").ClickAsync();
-
+        await bench.Instance.DropTile("image", BrandAssetId.ToString(), 0.5, 0.5, 1.6);
         await view.WaitForAssertionAsync(() =>
-        {
-            var layer = view.Find(".cm-imgeditor__box .cm-imgeditor__layer");
-            Assert.Contains("wall-thumb.png", layer.GetAttribute("src"), StringComparison.Ordinal);
-        });
-
-        view.Find("select[aria-label='Layer shape']").Change("circle");
-        view.Find("input[aria-label='Crop zoom']").Input("2.25");
-        view.Find("input[aria-label='Crop horizontal focus']").Input("0.8");
-        view.Find("input[aria-label='Crop vertical focus']").Input("0.3");
-        await view.WaitForAssertionAsync(() =>
-        {
-            Assert.Contains("border-radius:50%", view.Find(".cm-imgeditor__box").GetAttribute("style"), StringComparison.Ordinal);
-            Assert.Contains("cm-imgeditor__layer--cropped", view.Find(".cm-imgeditor__layer").ClassList);
-        });
+            Assert.Equal("https://private.example/wall-full.png", view.Find("img[data-layer-img]").GetAttribute("src")));
 
         var saved = filled with
         {
-            Overlay = new OverlaySpec([
-                new OverlayBox("saved-layer", "", 0.08, 0.08, 0.34, 0.34,
-                    LogoAssetId: BrandAssetId),
-            ]),
+            Overlay = new OverlaySpec([new OverlayBox("saved-layer", "", 0.3, 0.3, 0.4, 0.4, LogoAssetId: BrandAssetId, Kind: "image")]),
         };
-        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay",
-            new OverlaySaveResult(saved, false));
-        await view.Find(".cm-manual__save button").ClickAsync();
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay", new OverlaySaveResult(saved, false));
+        await view.FindAll(".cm-bench__head button").Single(b => b.TextContent.Trim() == "Save image").ClickAsync();
 
         await view.WaitForAssertionAsync(() =>
         {
             var request = Http.Bodies.Single(body =>
                 body.Method == HttpMethod.Put && body.Path.EndsWith("/overlay", StringComparison.Ordinal));
             Assert.Contains(BrandAssetId.ToString(), request.Body, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"shape\":\"circle\"", request.Body, StringComparison.Ordinal);
-            Assert.Contains("\"zoom\":2.25", request.Body, StringComparison.Ordinal);
-            Assert.Contains("\"focusX\":0.8", request.Body, StringComparison.Ordinal);
-            Assert.Contains("\"focusY\":0.3", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\"kind\":\"image\"", request.Body, StringComparison.Ordinal);
             Assert.Contains("Saved and composited", view.Markup, StringComparison.Ordinal);
-        });
-
-        Http.OnAsync(HttpMethod.Delete,
-            $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay",
-            () => Task.FromResult(StubHttpHandler.Json(filled)));
-        await view.Find("button[aria-label='Delete selected layer']").ClickAsync();
-        Assert.Empty(view.FindAll(".cm-imgeditor__layer"));
-        await view.Find(".cm-manual__save button").ClickAsync();
-
-        await view.WaitForAssertionAsync(() =>
-        {
-            Assert.Contains(Http.Requests, request => request.Method == HttpMethod.Delete
-                && request.RequestUri!.AbsolutePath.EndsWith("/overlay", StringComparison.Ordinal));
-            Assert.Contains("All layers deleted", view.Markup, StringComparison.Ordinal);
-        });
-    }
-
-    [Fact]
-    public async Task Text_layer_saves_background_colour_and_opacity()
-    {
-        var filled = EmptySlot() with
-        {
-            State = "Filled",
-            BaseImageUrl = "https://public.example/manual-base.webp",
-            PublishedUrl = "https://public.example/manual-base.webp",
-            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1),
-        };
-        Http.OnPost($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/base",
-            new OverlaySaveResult(filled, null));
-
-        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
-        await view.WaitForStateAsync(
-            () => view.FindAll(".cm-studio__manual-tile").Count == 1,
-            TimeSpan.FromSeconds(5));
-        await view.Find(".cm-studio__manual-tile").ClickAsync();
-        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview(filled));
-        await view.Find(".cm-manual__rail .cm-studio__pick").ClickAsync();
-
-        await view.FindAll(".cm-manual__rail button")
-            .Single(button => button.TextContent.Trim() == "+ Text")
-            .ClickAsync();
-        view.Find("input[aria-label='Text background']").Change(true);
-        view.Find("input[aria-label='Background colour']").Change("#336699");
-        view.Find("input[aria-label='Background opacity']").Input("0.35");
-
-        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay",
-            new OverlaySaveResult(filled, false));
-        await view.Find(".cm-manual__save button").ClickAsync();
-
-        await view.WaitForAssertionAsync(() =>
-        {
-            var request = Http.Bodies.Single(body =>
-                body.Method == HttpMethod.Put && body.Path.EndsWith("/overlay", StringComparison.Ordinal));
-            Assert.Contains("\"color\":\"#336699\"", request.Body, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("\"opacity\":0.35", request.Body, StringComparison.Ordinal);
-            Assert.Contains("--cm-imgeditor-band:#33669959", view.Find(".cm-imgeditor__box").GetAttribute("style"), StringComparison.OrdinalIgnoreCase);
         });
     }
 
@@ -194,11 +117,12 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
         Assert.Empty(view.FindAll(".cm-studio__card--add"));
 
         await view.Find(".cm-studio__manual-tile").ClickAsync();
-        await view.InvokeAsync(view.Instance.ManualEscapeAsync);
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-bench")));
+        await view.FindComponent<ImageBench>().Instance.Command("escape");
 
         await view.WaitForAssertionAsync(() =>
         {
-            Assert.Empty(view.FindAll(".cm-manual"));
+            Assert.Empty(view.FindAll(".cm-bench"));
             Assert.Empty(view.FindAll(".cm-studio__drawer"));
         });
     }

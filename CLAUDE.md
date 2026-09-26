@@ -12,6 +12,7 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
   - **Fluid layout, no fixed page canvas** (ADR-F10). The design handoff's 1440 × 880 is a drawing convention; its pixel values are ratios. Only the provenance overlay measures pixels at runtime.
   - Rail = workspace scope; the four campaign views are header tabs (ADR-F11). No indeterminate spinners anywhere (ADR-F13).
   - Design reference: [docs/design_handoff_castmill_mill_floor/](docs/design_handoff_castmill_mill_floor/README.md) — recreate as Razor components; the prototype's imperative DOM writes are a prototype shortcut, not a pattern.
+  - Manual image editor (ADR-F72 / ADR-082): layers are `OverlayBox` with `Kind` set; array order is z-order. `BenchLayers` (preview CSS) and `ImageComposer.Layers` (Skia) are ONE contract — change a number in both, with `BenchLayersTests` and `OverlayLayerCompositionTests`. Layers come from the tray by drag only; image layers draw the original, never the thumbnail.
 
 ## Generated images (non-negotiable)
 - **Rendered text is never clipped.** Providers emit only a fixed size set, so every render

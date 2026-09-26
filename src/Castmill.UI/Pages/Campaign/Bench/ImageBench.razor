@@ -1,0 +1,1287 @@
+@* The manual image editor (ADR-F72): build an image from a background and layers, no model
+   call. Tray on the left (drag, never click, to add), the canvas in the middle, inspector and
+   Layers on the right. castmill-image-bench.js owns pointer, keyboard and drag-and-drop and
+   reports ratios; this component owns the draft, undo, z-order and saving. Array order of
+   the layers IS the z-order (back first), the same order the composer paints in. *@
+@using Castmill.Core.Resources
+@using Castmill.UI.Design
+@using Castmill.UI.Http
+@using Castmill.UI.Layout
+@using Castmill.UI.State
+@using Microsoft.AspNetCore.Components.Forms
+@implements IAsyncDisposable
+@inject ImagesClient Images
+@inject BrandsClient BrandsApi
+@inject INotifier Notifier
+@inject IConfirmService Confirm
+@inject IJSRuntime JS
+
+<div class="cm-modal cm-bench-modal" role="presentation">
+    <div class="cm-bench" role="dialog" aria-modal="true" aria-label="Build an image" tabindex="-1"
+         @ref="_root">
+        <header class="cm-bench__head">
+            <div class="cm-bench__title">
+                <h2>Build @ArtifactDisplay.SlotLabel(CurrentSlot.Kind)</h2>
+                <p class="cm-meta cm-mono">@CurrentSlot.TargetWidth×@CurrentSlot.TargetHeight · manual · no model call</p>
+            </div>
+            <div class="cm-bench__head-actions">
+                <button type="button" class="cm-button cm-button--quiet cm-button--icon" title="Undo (⌘Z)" disabled="@(!CanUndo)"
+                        @onclick="Undo"><AppIcon Name="undo" /><span class="cm-sr-only">Undo</span></button>
+                <button type="button" class="cm-button cm-button--quiet cm-button--icon" title="Redo (⇧⌘Z)" disabled="@(!CanRedo)"
+                        @onclick="Redo"><AppIcon Name="redo" /><span class="cm-sr-only">Redo</span></button>
+                @if (_status is { } status)
+                {
+                    <span class="cm-meta cm-bench__status-text" role="status">@status</span>
+                }
+                <button type="button" class="cm-button" disabled="@(_saving || !Dirty || !HasBackground)" @onclick="SaveAsync">
+                    @(_saving ? "Saving…" : Dirty ? "Save image" : "Saved")
+                </button>
+                <button type="button" class="cm-studio__drawer-close" aria-label="Close" title="Close (Esc)"
+                        @onclick="RequestCloseAsync">✕</button>
+            </div>
+        </header>
+
+        <div class="cm-bench__body">
+            <aside class="cm-bench__tray" aria-label="Things you can drag onto the canvas">
+                <section class="cm-bench__traygroup">
+                    <div class="cm-bench__group-head"><span class="cm-kicker">Brand kit</span><span class="cm-meta">drag →</span></div>
+                    @if (KitImages.Count == 0)
+                    {
+                        <p class="cm-meta">@(BrandId is null ? "This campaign has no brand, so there is no kit. Drop an image file onto the canvas to use it as the background." : "The brand kit has no images yet. Add one below.")</p>
+                    }
+                    <div class="cm-bench__tiles">
+                        @foreach (var asset in KitImages)
+                        {
+                            var label = asset.Label ?? asset.FileName;
+                            <div class="cm-bench__tile" data-bench-tile data-tile-kind="image" data-tile-key="@asset.Id" data-tile-label="@label"
+                                 role="button" tabindex="0" title="@label" aria-label="@($"Drag {label} onto the canvas")">
+                                <span class="cm-bench__tile-thumb">
+                                    @if (KitPreviews.TryGetValue(asset.AssetId, out var thumb))
+                                    {
+                                        <img src="@thumb" alt="" draggable="false" loading="lazy" />
+                                    }
+                                </span>
+                                <span class="cm-bench__tile-label">@label</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+                <section class="cm-bench__traygroup">
+                    <span class="cm-kicker">Text</span>
+                    <div class="cm-bench__tiles">
+                        @foreach (var preset in BenchLayers.TextPresets)
+                        {
+                            <div class="cm-bench__tile cm-bench__tile--text" data-bench-tile data-tile-kind="text" data-tile-key="@preset.Key"
+                                 data-tile-label="@preset.Name" data-tile-w="@BenchLayers.Num(preset.WidthPx * CurrentSlot.TargetHeight / 720d / CurrentSlot.TargetWidth)"
+                                 data-tile-h="@BenchLayers.Num(preset.HeightPx / 720d)"
+                                 role="button" tabindex="0" title="@preset.Name" aria-label="@($"Drag {preset.Name} onto the canvas")">
+                                <span class="cm-bench__tile-thumb">
+                                    <span class="cm-bench__tile-sample" style="@($"font-family:\"{preset.Font}\",var(--cm-font-body);font-weight:{preset.Weight};")">@preset.Sample</span>
+                                </span>
+                                <span class="cm-bench__tile-label">@preset.Name</span>
+                            </div>
+                        }
+                    </div>
+                </section>
+                @if (BrandId is not null)
+                {
+                    <label class="cm-bench__upload">
+                        <InputFile OnChange="UploadToKitAsync" accept="image/*" disabled="@_uploading" aria-label="Add an image to the brand kit" />
+                        <strong>@(_uploading ? "Uploading…" : "Add your own image")</strong>
+                        <span class="cm-meta">Choose a file, or drop one straight onto the canvas. It joins the brand kit at full resolution.</span>
+                    </label>
+                }
+                <details class="cm-bench__help">
+                    <summary>Keys &amp; gestures</summary>
+                    <ul class="cm-meta">
+                        <li>Drag a tile onto the canvas to add it.</li>
+                        <li>Press and drag a layer to select and move it; <kbd>⇧</kbd> turns snapping off.</li>
+                        <li>Corners keep a picture's proportions (<kbd>⇧</kbd> frees them); <kbd>⌥</kbd> resizes from the centre.</li>
+                        <li>Double-click or <kbd>Enter</kbd>: crop a picture, type into text. Scroll to zoom while cropping.</li>
+                        <li><kbd>Delete</kbd> removes the layer · arrows nudge 1 px, <kbd>⇧</kbd> 10 px.</li>
+                        <li><kbd>⌘]</kbd> / <kbd>⌘[</kbd> forward / backward, add <kbd>⇧</kbd> for front / back.</li>
+                        <li><kbd>⌘</kbd>-click selects the layer underneath · <kbd>Tab</kbd> cycles layers · <kbd>Esc</kbd> steps out.</li>
+                        <li><kbd>⌘Z</kbd> undo · <kbd>⇧⌘Z</kbd> redo · <kbd>⌘D</kbd> duplicate.</li>
+                    </ul>
+                </details>
+            </aside>
+
+            <section class="cm-bench__main" aria-label="Canvas">
+                <div class="cm-bench__stagebar">
+                    <div class="cm-bench__seg" role="group" aria-label="Canvas zoom">
+                        <button type="button" aria-pressed="@(_actualSize ? "false" : "true")" @onclick="() => _actualSize = false">Fit</button>
+                        <button type="button" aria-pressed="@(_actualSize ? "true" : "false")" @onclick="() => _actualSize = true">100%</button>
+                    </div>
+                    <label class="cm-bench__check"><input type="checkbox" checked="@_showSafe" @onchange="e => _showSafe = e.Value is true" /> Safe areas</label>
+                    <span class="cm-bench__grow"></span>
+                    <span class="cm-bench__mode cm-mono" data-mode="@_mode">@ModeLabel</span>
+                </div>
+                <div class="cm-bench__board">
+                    <div class="cm-bench__stage" data-bench-stage data-has-bg="@(HasBackground ? "true" : "false")"
+                         data-actual="@(_actualSize ? "true" : null)" style="@StageStyle">
+                        <div class="cm-bench__canvas">
+                            @if (HasBackground)
+                            {
+                                <img class="cm-bench__bg" src="@BackgroundUrl" alt="Background" draggable="false" />
+                            }
+                            else
+                            {
+                                <div class="cm-bench__nobg">
+                                    <strong>Start with a background.</strong>
+                                    <span>Drag a kit image here, or drop an image file.</span>
+                                    <label class="cm-button cm-button--quiet cm-bench__nobg-upload">
+                                        <InputFile OnChange="UploadBackgroundAsync" accept="image/*" disabled="@_settingBase" aria-label="Upload a background image" />
+                                        @(_settingBase ? "Applying…" : "Choose a file")
+                                    </label>
+                                </div>
+                            }
+                            @for (var i = 0; i < _layers.Count; i++)
+                            {
+                                var layer = _layers[i];
+                                var editing = _mode == "text" && layer.Id == _selectedId;
+                                <div class="cm-bench__layer" data-layer-id="@layer.Id" data-kind="@(BenchLayers.IsImage(layer) ? "image" : "text")"
+                                     data-shape="@layer.Shape" data-locked="@(layer.Locked ? "true" : "false")" data-visible="@(layer.Visible ? "true" : "false")"
+                                     data-x="@BenchLayers.Exact(layer.X)" data-y="@BenchLayers.Exact(layer.Y)" data-w="@BenchLayers.Exact(layer.W)" data-h="@BenchLayers.Exact(layer.H)"
+                                     data-zoom="@BenchLayers.Exact((layer.Crop ?? DefaultCrop).Zoom)" data-fx="@BenchLayers.Exact((layer.Crop ?? DefaultCrop).FocusX)" data-fy="@BenchLayers.Exact((layer.Crop ?? DefaultCrop).FocusY)"
+                                     title="@LayerLabel(layer)"
+                                     style="@BenchLayers.LayerStyle(layer, suppressEffect: _mode == "crop" && layer.Id == _selectedId)">
+                                    <div class="cm-bench__frame" style="@BenchLayers.FrameStyle(layer)">
+                                        @if (layer.LogoAssetId is { } linkId)
+                                        {
+                                            @if (LayerSource(linkId) is { } src)
+                                            {
+                                                <img data-layer-img data-asset="@linkId" src="@src" alt="" draggable="false"
+                                                     style="@BenchLayers.ImageStyle(layer, CurrentSlot.TargetWidth, CurrentSlot.TargetHeight, NaturalOf(linkId))" />
+                                            }
+                                            else
+                                            {
+                                                <span class="cm-bench__missing">Image not in this brand's kit</span>
+                                            }
+                                        }
+                                        else if (editing)
+                                        {
+                                            <textarea class="cm-bench__textedit" data-bench-textedit data-text-box maxlength="160" aria-label="Edit text on the canvas"
+                                                      style="@BenchLayers.TextStyle(layer)" value="@layer.Text"
+                                                      @oninput="e => EditText(layer.Id, e.Value?.ToString())"
+                                                      @onblur="FinishTextEdit"></textarea>
+                                        }
+                                        else
+                                        {
+                                            <div class="cm-bench__text" data-text-box style="@BenchLayers.TextStyle(layer)"><span data-words>@layer.Text</span></div>
+                                        }
+                                        <span class="cm-bench__edges" style="@BenchLayers.EdgeStyle(layer)"></span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                        @if (_showSafe && HasBackground)
+                        {
+                            <div class="cm-bench__safe" aria-hidden="true">
+                                <span class="cm-bench__safe-margin"></span>
+                                @if (CurrentSlot.Kind == "youtube-thumbnail")
+                                {
+                                    <span class="cm-bench__safe-timestamp cm-mono">08:42</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+
+            <aside class="cm-bench__side">
+                <ImageBenchInspector Layer="SelectedLayer" SlotWidth="CurrentSlot.TargetWidth" SlotHeight="CurrentSlot.TargetHeight"
+                                     ZIndex="SelectedIndex" LayerCount="_layers.Count" CropMode="@(_mode == "crop")"
+                                     Natural="@(SelectedLayer?.LogoAssetId is { } natId ? NaturalOf(natId) : null)"
+                                     OnChange="OnInspectorChange" OnCommand="CommandAsync" OnShape="SetShape" />
+
+                <section class="cm-bench__layers" aria-label="Layers">
+                    <div class="cm-bench__layers-head">
+                        <span class="cm-kicker">Layers · front at top</span>
+                        <span class="cm-bench__grow"></span>
+                        <button type="button" class="cm-bench__iconbtn" title="Bring to front (⇧⌘])" aria-label="Bring to front" disabled="@(SelectedLayer is null || IsFront)" @onclick='() => CommandAsync("front")'><AppIcon Name="bring-front" /></button>
+                        <button type="button" class="cm-bench__iconbtn" title="Bring forward (⌘])" aria-label="Bring forward" disabled="@(SelectedLayer is null || IsFront)" @onclick='() => CommandAsync("forward")'><AppIcon Name="arrow-up" /></button>
+                        <button type="button" class="cm-bench__iconbtn" title="Send backward (⌘[)" aria-label="Send backward" disabled="@(SelectedLayer is null || IsBack)" @onclick='() => CommandAsync("backward")'><AppIcon Name="arrow-down" /></button>
+                        <button type="button" class="cm-bench__iconbtn" title="Send to back (⇧⌘[)" aria-label="Send to back" disabled="@(SelectedLayer is null || IsBack)" @onclick='() => CommandAsync("back")'><AppIcon Name="send-back" /></button>
+                    </div>
+                    <ol class="cm-bench__rows" data-bench-layers>
+                        @for (var i = _layers.Count - 1; i >= 0; i--)
+                        {
+                            var row = _layers[i];
+                            var rowLabel = LayerLabel(row);
+                            <li class="cm-bench__row @(row.Id == _selectedId ? "cm-bench__row--on" : null) @(row.Visible ? null : "cm-bench__row--hidden")"
+                                data-bench-row="@row.Id" @onclick="() => Select(row.Id)">
+                                <span class="cm-bench__grip" data-bench-grip title="Drag to reorder" aria-hidden="true"><AppIcon Name="grip" /></span>
+                                @if (row.LogoAssetId is { } rowAsset && RowThumb(rowAsset) is { } rowThumb)
+                                {
+                                    <img class="cm-bench__row-thumb @(row.Shape == "circle" ? "cm-bench__row-thumb--round" : null)" src="@rowThumb" alt="" draggable="false" />
+                                }
+                                else
+                                {
+                                    <span class="cm-bench__row-thumb cm-bench__row-thumb--text" aria-hidden="true">T</span>
+                                }
+                                <span class="cm-bench__row-name">@rowLabel<small class="cm-mono">@RowDetail(row)</small></span>
+                                <span class="cm-bench__row-actions">
+                                    <button type="button" aria-label="@((row.Visible ? "Hide " : "Show ") + rowLabel)" title="@(row.Visible ? "Hide" : "Show")"
+                                            @onclick:stopPropagation="true" @onclick="() => ToggleVisible(row.Id)"><AppIcon Name="@(row.Visible ? "eye" : "eye-off")" /></button>
+                                    <button type="button" aria-label="@((row.Locked ? "Unlock " : "Lock ") + rowLabel)" title="@(row.Locked ? "Unlock" : "Lock")"
+                                            @onclick:stopPropagation="true" @onclick="() => ToggleLocked(row.Id)"><AppIcon Name="@(row.Locked ? "lock" : "unlock")" /></button>
+                                    <button type="button" class="cm-bench__row-delete" aria-label="@("Delete " + rowLabel)" title="Delete"
+                                            @onclick:stopPropagation="true" @onclick="() => Delete(row.Id)"><AppIcon Name="trash" /></button>
+                                </span>
+                            </li>
+                        }
+                    </ol>
+                    <div class="cm-bench__bgrow" data-bench-bgdrop>
+                        @if (HasBackground)
+                        {
+                            <img class="cm-bench__row-thumb" src="@BackgroundUrl" alt="" draggable="false" />
+                        }
+                        else
+                        {
+                            <span class="cm-bench__row-thumb" aria-hidden="true"></span>
+                        }
+                        <span class="cm-bench__row-name">Background<small>@(_settingBase ? "Applying…" : "Drop a kit image or file here to replace")</small></span>
+                        <label class="cm-bench__iconbtn cm-bench__bg-upload" title="Replace the background with a file">
+                            <InputFile OnChange="UploadBackgroundAsync" accept="image/*" disabled="@_settingBase" aria-label="Replace the background with a file" />
+                            <AppIcon Name="refresh" />
+                        </label>
+                    </div>
+                </section>
+            </aside>
+        </div>
+
+        @* The canvas instruments live ABOVE the whole body, not inside the scrolling board: a
+           crop's ghosted picture and the toolbar may reach past the canvas edge and must stay on
+           top of the tray and the inspector instead of being clipped under them. The island keeps
+           this layer exactly over the stage (it has no style of its own for Razor to overwrite). *@
+        <div class="cm-bench__overlay" data-bench-overlay>
+            <div class="cm-bench__chrome" data-bench-chrome aria-hidden="true"></div>
+            @if (SelectedLayer is { Visible: true } sel && _mode != "text")
+            {
+                <div class="cm-bench__toolbar @(_mode == "crop" ? "cm-bench__toolbar--crop" : null)" data-bench-ui
+                     role="toolbar" aria-label="@(_mode == "crop" ? "Crop" : "Layer actions")" style="@ToolbarStyle(sel)">
+                    @if (_mode == "crop")
+                    {
+                        <span class="cm-bench__toolbar-label cm-mono">Zoom</span>
+                        <input type="range" min="1" max="4" step="0.01" aria-label="Crop zoom" value="@BenchLayers.Num((sel.Crop ?? DefaultCrop).Zoom)"
+                               @oninput="e => CropZoomAsync(e.Value)" />
+                        <span class="cm-bench__toolbar-label cm-mono">@((sel.Crop ?? DefaultCrop).Zoom.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))×</span>
+                        <span class="cm-bench__toolbar-sep"></span>
+                        <button type="button" @onclick='() => CommandAsync("cropReset")'>Reset crop</button>
+                        <button type="button" @onclick='() => CommandAsync("cropDone")'><AppIcon Name="check" /> Done</button>
+                    }
+                    else
+                    {
+                        @if (BenchLayers.IsImage(sel))
+                        {
+                            <button type="button" title="Crop (Enter or double-click)" disabled="@sel.Locked" @onclick='() => CommandAsync("crop")'><AppIcon Name="crop" /> Crop</button>
+                        }
+                        else
+                        {
+                            <button type="button" title="Edit text (Enter or double-click)" disabled="@sel.Locked" @onclick='() => CommandAsync("editText")'><AppIcon Name="text" /> Edit</button>
+                        }
+                        <span class="cm-bench__toolbar-sep"></span>
+                        <button type="button" title="Bring to front (⇧⌘])" aria-label="Bring to front" disabled="@IsFront" @onclick='() => CommandAsync("front")'><AppIcon Name="bring-front" /></button>
+                        <button type="button" title="Bring forward (⌘])" aria-label="Bring forward" disabled="@IsFront" @onclick='() => CommandAsync("forward")'><AppIcon Name="arrow-up" /></button>
+                        <button type="button" title="Send backward (⌘[)" aria-label="Send backward" disabled="@IsBack" @onclick='() => CommandAsync("backward")'><AppIcon Name="arrow-down" /></button>
+                        <button type="button" title="Send to back (⇧⌘[)" aria-label="Send to back" disabled="@IsBack" @onclick='() => CommandAsync("back")'><AppIcon Name="send-back" /></button>
+                        <span class="cm-bench__toolbar-sep"></span>
+                        <button type="button" title="Duplicate (⌘D)" aria-label="Duplicate" @onclick='() => CommandAsync("duplicate")'><AppIcon Name="copy" /></button>
+                        <button type="button" class="cm-bench__toolbar-danger" title="Delete (Delete key)" aria-label="Delete layer" @onclick='() => CommandAsync("delete")'><AppIcon Name="trash" /></button>
+                    }
+                </div>
+            }
+        </div>
+
+        <footer class="cm-bench__statusbar cm-mono">
+            @if (SelectedLayer is { } picked)
+            {
+                <span>Selection <b>@Math.Round(picked.W * CurrentSlot.TargetWidth)×@Math.Round(picked.H * CurrentSlot.TargetHeight)</b> at <b>@Math.Round(picked.X * CurrentSlot.TargetWidth), @Math.Round(picked.Y * CurrentSlot.TargetHeight)</b></span>
+            }
+            else
+            {
+                <span>Selection <b>none</b></span>
+            }
+            <span>Layers <b>@_layers.Count</b> of @OverlaySpec.MaxBoxes</span>
+            <span>@(Dirty ? "Unsaved changes" : "All changes saved")</span>
+        </footer>
+    </div>
+</div>
+
+@code {
+    private const string ModulePath = "./_content/Castmill.UI/js/castmill-image-bench.js?v=5";
+    private static readonly OverlayImageCrop DefaultCrop = new();
+
+    [Parameter, EditorRequired] public Guid CampaignId { get; set; }
+    [Parameter, EditorRequired] public ImageSlotResponse Slot { get; set; } = default!;
+    [Parameter] public Guid? BrandId { get; set; }
+    [Parameter] public IReadOnlyList<BrandAssetResponse> BrandAssets { get; set; } = [];
+    /// <summary>Small cached previews keyed by the underlying ASSET id — for tiles and rows only.</summary>
+    [Parameter] public IReadOnlyDictionary<Guid, string> KitPreviews { get; set; } = new Dictionary<Guid, string>();
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>The slot changed server-side (background set, overlay saved): the host refreshes its copy.</summary>
+    [Parameter] public EventCallback<ImageSlotResponse> OnSlotChanged { get; set; }
+    /// <summary>A file joined the brand kit from inside the editor; the host adds it to its kit list.</summary>
+    [Parameter] public EventCallback<(BrandAssetResponse Asset, string? ThumbUrl)> OnKitAssetAdded { get; set; }
+
+    private ElementReference _root;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _handle;
+    private DotNetObjectReference<ImageBench>? _self;
+    private bool _focusText;
+    private bool _focusRoot = true;
+
+    private Guid? _seededFor;
+    private ImageSlotResponse? _latestSlot;
+    private List<OverlayBox> _layers = [];
+    private OverlayBox[] _saved = [];
+    private readonly List<OverlayBox[]> _history = [];
+    private int _historyAt;
+    private string? _selectedId;
+    private string _mode = "select";
+
+    private readonly Dictionary<Guid, (int Width, int Height)> _natural = [];
+    private readonly Dictionary<Guid, string> _fullUrls = [];
+    private readonly HashSet<Guid> _minting = [];
+    private readonly Dictionary<Guid, string> _addedThumbs = [];
+    private readonly HashSet<string> _fitOnMeasure = new(StringComparer.Ordinal);
+    private readonly List<BrandAssetResponse> _addedAssets = [];
+
+    private bool _saving;
+    private bool _settingBase;
+    private bool _uploading;
+    private string? _status;
+    private bool _showSafe = true;
+    private bool _actualSize;
+    private (string Id, DateTimeOffset At)? _lastNudge;
+
+    private ImageSlotResponse CurrentSlot =>
+        _latestSlot is { } latest && latest.Id == Slot.Id && latest.UpdatedAt > Slot.UpdatedAt ? latest : Slot;
+
+    private bool HasBackground => !string.IsNullOrWhiteSpace(CurrentSlot.BaseImageUrl);
+
+    private string BackgroundUrl =>
+        $"{CurrentSlot.BaseImageUrl}?v={CurrentSlot.UpdatedAt.ToUnixTimeSeconds()}";
+
+    private IReadOnlyList<BrandAssetResponse> AllAssets =>
+        _addedAssets.Count == 0 ? BrandAssets : [.. BrandAssets, .. _addedAssets.Where(a => BrandAssets.All(b => b.Id != a.Id))];
+
+    private List<BrandAssetResponse> KitImages =>
+        [.. AllAssets.Where(a => a.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))];
+
+    private OverlayBox? SelectedLayer => _layers.FirstOrDefault(l => l.Id == _selectedId);
+    private int SelectedIndex => _layers.FindIndex(l => l.Id == _selectedId);
+    private bool IsFront => SelectedIndex == _layers.Count - 1;
+    private bool IsBack => SelectedIndex <= 0;
+    private bool Dirty => !_layers.SequenceEqual(_saved);
+    private bool CanUndo => _historyAt > 0;
+    private bool CanRedo => _historyAt < _history.Count - 1;
+
+    private string ModeLabel => _mode switch
+    {
+        "crop" => "CROP · drag the photo, pull the brackets, scroll to zoom",
+        "text" => "TYPING · Esc to finish",
+        _ => "SELECT",
+    };
+
+    private string StageStyle =>
+        $"--cm-bench-ar:{BenchLayers.Num((double)CurrentSlot.TargetWidth / Math.Max(1, CurrentSlot.TargetHeight))};--cm-bench-w:{CurrentSlot.TargetWidth}px;";
+
+    protected override void OnParametersSet()
+    {
+        if (_seededFor != Slot.Id)
+        {
+            _seededFor = Slot.Id;
+            var boxes = Slot.Overlay?.Boxes ?? [];
+            _fitOnMeasure.Clear();
+            foreach (var box in boxes.Where(BenchLayers.NeedsFitOnMeasure))
+            {
+                _fitOnMeasure.Add(box.Id);
+            }
+            _layers = [.. boxes.Select(BenchLayers.Upgrade)];
+            _saved = [.. _layers];
+            _history.Clear();
+            _history.Add([.. _layers]);
+            _historyAt = 0;
+            _selectedId = null;
+            _mode = "select";
+        }
+        foreach (var id in _layers.Select(l => l.LogoAssetId).OfType<Guid>().Distinct())
+        {
+            EnsureFullResolution(id);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_handle is null)
+        {
+            try
+            {
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+                _self ??= DotNetObjectReference.Create(this);
+                _handle = await _module.InvokeAsync<IJSObjectReference?>("attach", _root, _self);
+            }
+            catch (Exception ex) when (IsInteropTeardown(ex))
+            {
+                _handle = null;
+            }
+        }
+        if (_handle is null)
+        {
+            return;
+        }
+        try
+        {
+            await _handle.InvokeVoidAsync("sync", new
+            {
+                selectedId = _selectedId,
+                mode = _mode,
+                slotWidth = CurrentSlot.TargetWidth,
+                slotHeight = CurrentSlot.TargetHeight,
+            });
+            if (_focusText)
+            {
+                _focusText = false;
+                await _handle.InvokeVoidAsync("focusTextEditor");
+            }
+            else if (_focusRoot)
+            {
+                _focusRoot = false;
+                await _handle.InvokeVoidAsync("focusRoot");
+            }
+        }
+        catch (Exception ex) when (IsInteropTeardown(ex))
+        {
+            _handle = null;
+        }
+    }
+
+    // ---- history ---------------------------------------------------------------------
+
+    private void Commit()
+    {
+        var snapshot = _layers.ToArray();
+        if (_history.Count > 0 && _history[_historyAt].SequenceEqual(snapshot))
+        {
+            return;
+        }
+        if (_historyAt < _history.Count - 1)
+        {
+            _history.RemoveRange(_historyAt + 1, _history.Count - _historyAt - 1);
+        }
+        _history.Add(snapshot);
+        if (_history.Count > 100)
+        {
+            _history.RemoveAt(0);
+        }
+        _historyAt = _history.Count - 1;
+        _status = null;
+    }
+
+    /// <summary>A measurement (text grew, a picture's aspect arrived) amends the current step instead of adding one.</summary>
+    private void Amend()
+    {
+        if (_history.Count > 0)
+        {
+            _history[_historyAt] = [.. _layers];
+        }
+    }
+
+    private void Undo()
+    {
+        if (!CanUndo)
+        {
+            return;
+        }
+        _historyAt--;
+        Restore();
+    }
+
+    private void Redo()
+    {
+        if (!CanRedo)
+        {
+            return;
+        }
+        _historyAt++;
+        Restore();
+    }
+
+    private void Restore()
+    {
+        _layers = [.. _history[_historyAt]];
+        if (SelectedLayer is null)
+        {
+            _selectedId = null;
+        }
+        _mode = "select";
+        _status = null;
+    }
+
+    // ---- layer operations ------------------------------------------------------------
+
+    private void Replace(OverlayBox updated)
+    {
+        var index = _layers.FindIndex(l => l.Id == updated.Id);
+        if (index >= 0)
+        {
+            _layers[index] = updated;
+        }
+    }
+
+    private void Select(string? id)
+    {
+        if (id == _selectedId)
+        {
+            return;
+        }
+        if (_mode == "text")
+        {
+            FinishTextEdit();
+        }
+        _mode = "select";
+        _selectedId = id is not null && _layers.Any(l => l.Id == id) ? id : null;
+    }
+
+    private void Add(OverlayBox layer)
+    {
+        if (_layers.Count >= OverlaySpec.MaxBoxes)
+        {
+            Notifier.ShowWarning($"An image can hold {OverlaySpec.MaxBoxes} layers. Delete one to add another.");
+            return;
+        }
+        _layers.Add(layer);
+        _selectedId = layer.Id;
+        _mode = "select";
+        Commit();
+    }
+
+    private void Delete(string id)
+    {
+        var index = _layers.FindIndex(l => l.Id == id);
+        if (index < 0)
+        {
+            return;
+        }
+        _layers.RemoveAt(index);
+        if (_selectedId == id)
+        {
+            _selectedId = null;
+            _mode = "select";
+        }
+        Commit();
+    }
+
+    private void Duplicate()
+    {
+        if (SelectedLayer is not { } layer)
+        {
+            return;
+        }
+        if (_layers.Count >= OverlaySpec.MaxBoxes)
+        {
+            Notifier.ShowWarning($"An image can hold {OverlaySpec.MaxBoxes} layers. Delete one to add another.");
+            return;
+        }
+        var copy = layer with
+        {
+            Id = BenchLayers.NewId(),
+            Name = BenchLayers.Truncate((layer.Name ?? LayerLabel(layer)) + " copy", 60),
+            X = Math.Clamp(layer.X + (24d / CurrentSlot.TargetWidth), -1, 1),
+            Y = Math.Clamp(layer.Y + (24d / CurrentSlot.TargetHeight), -1, 1),
+            Locked = false,
+        };
+        _layers.Insert(SelectedIndex + 1, copy);
+        _selectedId = copy.Id;
+        Commit();
+    }
+
+    /// <summary>z-order moves. front/back jump; forward/backward swap with the neighbour.</summary>
+    private void MoveZ(string where)
+    {
+        var index = SelectedIndex;
+        if (index < 0)
+        {
+            return;
+        }
+        var layer = _layers[index];
+        _layers.RemoveAt(index);
+        var target = where switch
+        {
+            "front" => _layers.Count,
+            "back" => 0,
+            "forward" => Math.Min(_layers.Count, index + 1),
+            _ => Math.Max(0, index - 1),
+        };
+        _layers.Insert(target, layer);
+        Commit();
+    }
+
+    private void ToggleVisible(string id)
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer)
+        {
+            Replace(layer with { Visible = !layer.Visible });
+            if (layer.Visible && _selectedId == id)
+            {
+                _mode = "select";
+            }
+            Commit();
+        }
+    }
+
+    private void ToggleLocked(string id)
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer)
+        {
+            Replace(layer with { Locked = !layer.Locked });
+            if (_selectedId == id && !layer.Locked)
+            {
+                _mode = "select";
+            }
+            Commit();
+        }
+    }
+
+    private void OnInspectorChange((OverlayBox Box, bool Commit) change)
+    {
+        Replace(change.Box);
+        if (change.Commit)
+        {
+            Commit();
+        }
+    }
+
+    private void SetShape(string shape)
+    {
+        if (SelectedLayer is not { } layer || !BenchLayers.IsImage(layer))
+        {
+            return;
+        }
+        Replace(BenchLayers.WithShape(layer, shape, CurrentSlot.TargetWidth, CurrentSlot.TargetHeight,
+            layer.LogoAssetId is { } id ? NaturalOf(id) : null));
+        Commit();
+    }
+
+    private void EditText(string id, string? text)
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer)
+        {
+            var value = text ?? string.Empty;
+            Replace(layer with { Text = value.Length > 160 ? value[..160] : value });
+        }
+    }
+
+    private void FinishTextEdit()
+    {
+        if (_mode != "text")
+        {
+            return;
+        }
+        _mode = "select";
+        Commit();
+        _focusRoot = true;
+    }
+
+    private async Task CommandAsync(string name)
+    {
+        var layer = SelectedLayer;
+        switch (name)
+        {
+            case "activate":
+                if (layer is { Locked: false })
+                {
+                    await CommandAsync(BenchLayers.IsImage(layer) ? "crop" : "editText");
+                }
+                return;
+            case "crop":
+                if (layer is { Locked: false } && BenchLayers.IsImage(layer))
+                {
+                    _mode = "crop";
+                }
+                break;
+            case "cropDone":
+                if (_mode == "crop")
+                {
+                    _mode = "select";
+                    Commit();
+                    _focusRoot = true;
+                }
+                break;
+            case "cropReset":
+                if (layer is not null && BenchLayers.IsImage(layer))
+                {
+                    Replace(layer with { Crop = new OverlayImageCrop() });
+                    Commit();
+                }
+                break;
+            case "editText":
+                if (layer is { Locked: false } && !BenchLayers.IsImage(layer))
+                {
+                    _mode = "text";
+                    _focusText = true;
+                }
+                break;
+            case "escape":
+                if (_mode == "text")
+                {
+                    FinishTextEdit();
+                }
+                else if (_mode == "crop")
+                {
+                    await CommandAsync("cropDone");
+                }
+                else if (_selectedId is not null)
+                {
+                    _selectedId = null;
+                }
+                else
+                {
+                    await RequestCloseAsync();
+                    return;
+                }
+                break;
+            case "delete":
+                if (layer is not null)
+                {
+                    Delete(layer.Id);
+                }
+                break;
+            case "duplicate":
+                Duplicate();
+                break;
+            case "front" or "back" or "forward" or "backward":
+                MoveZ(name);
+                break;
+            case "undo":
+                Undo();
+                break;
+            case "redo":
+                Redo();
+                break;
+            case "next" or "prev":
+                Cycle(name == "next" ? -1 : 1);
+                break;
+        }
+    }
+
+    /// <summary>Tab walks the stack front to back (the order the Layers list reads), skipping locked layers.</summary>
+    private void Cycle(int step)
+    {
+        var candidates = _layers.Where(l => !l.Locked && l.Visible).ToList();
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+        var current = candidates.FindIndex(l => l.Id == _selectedId);
+        var next = current < 0
+            ? candidates.Count - 1
+            : (current + step + candidates.Count) % candidates.Count;
+        Select(candidates[next].Id);
+    }
+
+    private Task CropZoomAsync(object? value)
+    {
+        var zoom = double.TryParse(value?.ToString(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var z) ? z : 1;
+        return _handle is null ? Task.CompletedTask : SafeInvokeAsync("zoomTo", Math.Clamp(zoom, 1, 4));
+    }
+
+    private async Task SafeInvokeAsync(string method, params object?[] args)
+    {
+        try
+        {
+            if (_handle is not null)
+            {
+                await _handle.InvokeVoidAsync(method, args);
+            }
+        }
+        catch (Exception ex) when (IsInteropTeardown(ex))
+        {
+            _handle = null;
+        }
+    }
+
+    // ---- JS → .NET ------------------------------------------------------------------
+
+    [JSInvokable]
+    public Task SelectLayer(string? id) => InvokeAsync(() =>
+    {
+        Select(id);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task CommitGeometry(string id, double x, double y, double w, double h) => InvokeAsync(() =>
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer)
+        {
+            Replace(layer with { X = Math.Clamp(x, -1, 1), Y = Math.Clamp(y, -1, 1), W = Math.Clamp(w, 0.01, 2), H = Math.Clamp(h, 0.01, 2) });
+            _selectedId = id;
+            Commit();
+            StateHasChanged();
+        }
+    });
+
+    [JSInvokable]
+    public Task CommitCrop(string id, double x, double y, double w, double h, double zoom, double focusX, double focusY) => InvokeAsync(() =>
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer)
+        {
+            Replace(layer with
+            {
+                X = Math.Clamp(x, -1, 1), Y = Math.Clamp(y, -1, 1), W = Math.Clamp(w, 0.01, 2), H = Math.Clamp(h, 0.01, 2),
+                Crop = new OverlayImageCrop(Math.Clamp(focusX, 0, 1), Math.Clamp(focusY, 0, 1), Math.Clamp(zoom, 1, 4)),
+            });
+            Commit();
+            StateHasChanged();
+        }
+    });
+
+    /// <summary>Arrow keys: consecutive nudges of one layer are one undo step.</summary>
+    [JSInvokable]
+    public Task Nudge(string id, double dx, double dy) => InvokeAsync(() =>
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is not { Locked: false } layer)
+        {
+            return;
+        }
+        Replace(layer with { X = Math.Clamp(layer.X + dx, -1, 1), Y = Math.Clamp(layer.Y + dy, -1, 1) });
+        var now = DateTimeOffset.UtcNow;
+        if (_lastNudge is { } last && last.Id == id && now - last.At < TimeSpan.FromMilliseconds(700) && _historyAt == _history.Count - 1 && _historyAt > 0)
+        {
+            Amend();
+        }
+        else
+        {
+            Commit();
+        }
+        _lastNudge = (id, now);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Command(string name) => InvokeAsync(async () =>
+    {
+        await CommandAsync(name);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task DropTile(string kind, string key, double centreX, double centreY, double aspect) => InvokeAsync(async () =>
+    {
+        if (kind == "image")
+        {
+            if (!Guid.TryParse(key, out var linkId) || AllAssets.FirstOrDefault(a => a.Id == linkId) is not { } asset)
+            {
+                return;
+            }
+            if (!HasBackground)
+            {
+                // The first picture onto an empty canvas is the backdrop, not a layer on nothing.
+                await SetBackgroundAsync(asset.Id, null);
+                return;
+            }
+            var natural = NaturalOf(linkId);
+            var ratio = natural is { Width: > 0, Height: > 0 } n ? (double)n.Width / n.Height : aspect > 0 ? aspect : (double?)null;
+            var layer = BenchLayers.NewImage(asset.Id, asset.Label ?? asset.FileName, centreX, centreY,
+                CurrentSlot.TargetWidth, CurrentSlot.TargetHeight, ratio);
+            if (ratio is null)
+            {
+                _fitOnMeasure.Add(layer.Id);
+            }
+            EnsureFullResolution(asset.Id);
+            Add(layer);
+        }
+        else if (BenchLayers.TextPresets.FirstOrDefault(p => p.Key == key) is { } preset)
+        {
+            if (!HasBackground)
+            {
+                Notifier.ShowInfo("Start with a background: drag a kit image onto the canvas first.");
+                return;
+            }
+            Add(BenchLayers.NewText(preset, centreX, centreY, CurrentSlot.TargetWidth, CurrentSlot.TargetHeight));
+        }
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task DropTileOnBackground(string key) => InvokeAsync(async () =>
+    {
+        if (Guid.TryParse(key, out var linkId) && AllAssets.Any(a => a.Id == linkId))
+        {
+            await SetBackgroundAsync(linkId, null);
+        }
+    });
+
+    [JSInvokable]
+    public Task TileClicked(string kind) => InvokeAsync(() =>
+        Notifier.ShowInfo(kind == "image"
+            ? "Drag it onto the canvas to add it as a layer, or onto Background to replace the backdrop."
+            : "Drag it onto the canvas to add a text layer."));
+
+    [JSInvokable]
+    public Task FileRejected(string name) => InvokeAsync(() =>
+        Notifier.ShowError($"“{name}” is over 20 MB. Export a smaller image and drop it again."));
+
+    [JSInvokable]
+    public Task DropFile(string name, string contentType, byte[] bytes, double centreX, double centreY, bool background) => InvokeAsync(async () =>
+    {
+        if (background || !HasBackground)
+        {
+            await SetBackgroundAsync(null, Convert.ToBase64String(bytes));
+            return;
+        }
+        if (BrandId is null)
+        {
+            Notifier.ShowError("Image layers come from the brand kit, and this campaign has no brand. Link a brand to add your own images as layers.");
+            return;
+        }
+        var added = await AddToKitAsync(name, contentType, bytes);
+        if (added is null)
+        {
+            return;
+        }
+        var layer = BenchLayers.NewImage(added.Id, added.Label ?? added.FileName, centreX, centreY,
+            CurrentSlot.TargetWidth, CurrentSlot.TargetHeight, null);
+        _fitOnMeasure.Add(layer.Id);
+        EnsureFullResolution(added.Id);
+        Add(layer);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task ReorderLayer(string id, int frontIndex) => InvokeAsync(() =>
+    {
+        var index = _layers.FindIndex(l => l.Id == id);
+        if (index < 0)
+        {
+            return;
+        }
+        var layer = _layers[index];
+        _layers.RemoveAt(index);
+        // The list shows the front first; the draft stores the back first.
+        var target = Math.Clamp(_layers.Count - Math.Clamp(frontIndex, 0, _layers.Count), 0, _layers.Count);
+        _layers.Insert(target, layer);
+        _selectedId = id;
+        Commit();
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task ImageMeasured(string assetKey, int width, int height) => InvokeAsync(() =>
+    {
+        if (!Guid.TryParse(assetKey, out var linkId) || width <= 0 || height <= 0)
+        {
+            return;
+        }
+        // Thumbnails and originals share an aspect; keep the larger so the resolution readout is the original's.
+        if (!_natural.TryGetValue(linkId, out var known) || width > known.Width)
+        {
+            _natural[linkId] = (width, height);
+        }
+        var changed = false;
+        for (var i = 0; i < _layers.Count; i++)
+        {
+            if (_layers[i].LogoAssetId == linkId && _fitOnMeasure.Remove(_layers[i].Id))
+            {
+                _layers[i] = BenchLayers.FitToImage(_layers[i], CurrentSlot.TargetWidth, CurrentSlot.TargetHeight, width, height);
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            Amend();
+            if (_historyAt == 0)
+            {
+                _saved = _saved.Select(s => _layers.FirstOrDefault(l => l.Id == s.Id) ?? s).ToArray();
+            }
+        }
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task TextNeedsHeight(string id, double height) => InvokeAsync(() =>
+    {
+        if (_layers.FirstOrDefault(l => l.Id == id) is { } layer && height > layer.H)
+        {
+            Replace(layer with { H = Math.Min(2, height) });
+            Amend();
+            StateHasChanged();
+        }
+    });
+
+    // ---- server calls ---------------------------------------------------------------
+
+    private async Task SetBackgroundAsync(Guid? brandAssetId, string? imageBase64)
+    {
+        if (_settingBase)
+        {
+            return;
+        }
+        _settingBase = true;
+        StateHasChanged();
+        try
+        {
+            var result = await Images.SetBaseImageAsync(CampaignId, CurrentSlot.Id, brandAssetId, imageBase64);
+            _latestSlot = result.Slot;
+            _settingBase = false;
+            _status = "Background set.";
+            StateHasChanged();
+            await OnSlotChanged.InvokeAsync(result.Slot);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _settingBase = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UploadBackgroundAsync(InputFileChangeEventArgs e)
+    {
+        var bytes = await ReadAsync(e.File);
+        if (bytes is not null)
+        {
+            await SetBackgroundAsync(null, Convert.ToBase64String(bytes));
+        }
+    }
+
+    private async Task UploadToKitAsync(InputFileChangeEventArgs e)
+    {
+        var bytes = await ReadAsync(e.File);
+        if (bytes is not null && await AddToKitAsync(e.File.Name, e.File.ContentType, bytes) is { } added)
+        {
+            Notifier.ShowSuccess($"Added “{added.Label ?? added.FileName}” to the kit. Drag it onto the canvas.");
+        }
+    }
+
+    private async Task<byte[]?> ReadAsync(IBrowserFile? file)
+    {
+        const long maxBytes = 20L * 1024 * 1024;
+        if (file is null)
+        {
+            return null;
+        }
+        if (file.Size > maxBytes)
+        {
+            Notifier.ShowError($"“{file.Name}” is over 20 MB. Export a smaller image and try again.");
+            return null;
+        }
+        try
+        {
+            await using var stream = file.OpenReadStream(maxBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+            return memory.ToArray();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Notifier.ShowError($"That file could not be read: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>The same three steps the Brands page uses: create the library asset, upload through the API, link it.</summary>
+    private async Task<BrandAssetResponse?> AddToKitAsync(string fileName, string contentType, byte[] bytes)
+    {
+        if (BrandId is not { } brandId)
+        {
+            return null;
+        }
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            var type = string.IsNullOrWhiteSpace(contentType) ? "image/png" : contentType;
+            var asset = await BrandsApi.CreateLibraryAssetAsync(fileName, type, bytes.LongLength);
+            await BrandsApi.UploadAssetContentAsync(asset.Id, bytes, type);
+            var label = BenchLayers.Truncate(Path.GetFileNameWithoutExtension(fileName), 60);
+            var linked = await BrandsApi.LinkAssetAsync(brandId, asset.Id, "other", label);
+            string? thumb = null;
+            try
+            {
+                thumb = (await BrandsApi.MintThumbsAsync([asset.Id])).FirstOrDefault()?.ReadUrl;
+            }
+            catch (ApiException)
+            {
+                // The tile stays usable with its label; the layer itself uses the original.
+            }
+            if (thumb is not null)
+            {
+                _addedThumbs[asset.Id] = thumb;
+            }
+            _addedAssets.Add(linked);
+            await OnKitAssetAdded.InvokeAsync((linked, thumb));
+            return linked;
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+            return null;
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// A layer draws from the ORIGINAL file, not the cached thumbnail: a 480 px preview scaled
+    /// up to a 600 px frame is what made layers look blurry. The thumbnail shows until the
+    /// read URL arrives so the canvas is never empty.
+    /// </summary>
+    private void EnsureFullResolution(Guid linkId)
+    {
+        if (AllAssets.FirstOrDefault(a => a.Id == linkId) is not { } asset
+            || _fullUrls.ContainsKey(asset.AssetId) || !_minting.Add(asset.AssetId))
+        {
+            return;
+        }
+        _ = MintAsync(asset.AssetId);
+
+        async Task MintAsync(Guid assetId)
+        {
+            try
+            {
+                var sas = await BrandsApi.MintReadSasAsync(assetId);
+                _fullUrls[assetId] = sas.ReadUrl;
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception ex) when (ex is ApiException or HttpRequestException or TaskCanceledException or InvalidOperationException)
+            {
+                // Best effort: the thumbnail keeps the layer visible.
+            }
+            finally
+            {
+                _minting.Remove(assetId);
+            }
+        }
+    }
+
+    private string? LayerSource(Guid linkId)
+    {
+        if (AllAssets.FirstOrDefault(a => a.Id == linkId) is not { } asset)
+        {
+            return null;
+        }
+        return _fullUrls.TryGetValue(asset.AssetId, out var full) ? full : RowThumbFor(asset.AssetId);
+    }
+
+    private string? RowThumb(Guid linkId) =>
+        AllAssets.FirstOrDefault(a => a.Id == linkId) is { } asset ? RowThumbFor(asset.AssetId) ?? LayerSource(linkId) : null;
+
+    private string? RowThumbFor(Guid assetId) =>
+        KitPreviews.TryGetValue(assetId, out var thumb) ? thumb : _addedThumbs.GetValueOrDefault(assetId);
+
+    private (int Width, int Height)? NaturalOf(Guid linkId) =>
+        _natural.TryGetValue(linkId, out var n) ? n : null;
+
+    private async Task SaveAsync()
+    {
+        if (_saving)
+        {
+            return;
+        }
+        if (_mode == "text")
+        {
+            FinishTextEdit();
+        }
+        _saving = true;
+        _status = null;
+        try
+        {
+            ImageSlotResponse slot;
+            if (_layers.Count == 0)
+            {
+                slot = await Images.ClearOverlayAsync(CampaignId, CurrentSlot.Id);
+                _status = "All layers deleted.";
+            }
+            else
+            {
+                var result = await Images.SetOverlayAsync(CampaignId, CurrentSlot.Id, new OverlaySpec([.. _layers]));
+                slot = result.Slot;
+                _status = result.FontFallback == true
+                    ? "Saved and composited, but a font was missing on the server, so a fallback face was used."
+                    : slot.State == "Filled" ? "Saved and composited." : "Saved. It is composited when an image is placed.";
+            }
+            _saved = [.. _layers];
+            _latestSlot = slot;
+            await OnSlotChanged.InvokeAsync(slot);
+        }
+        catch (ApiException ex)
+        {
+            _status = $"Not saved: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RequestCloseAsync()
+    {
+        if (Dirty)
+        {
+            var discard = await Confirm.ConfirmAsync(new ConfirmRequest(
+                "Unsaved image changes",
+                "This image has layer edits that are not saved. Close and lose them?",
+                "Discard changes", Destructive: true));
+            if (!discard)
+            {
+                return;
+            }
+        }
+        await OnClose.InvokeAsync();
+    }
+
+    // ---- presentation ---------------------------------------------------------------
+
+    private string LayerLabel(OverlayBox layer) =>
+        layer.Name is { Length: > 0 } name ? name
+        : BenchLayers.IsImage(layer)
+            ? AllAssets.FirstOrDefault(a => a.Id == layer.LogoAssetId) is { } asset ? asset.Label ?? asset.FileName : "Image"
+            : BenchLayers.FirstLine(layer.Text);
+
+    private static string RowDetail(OverlayBox layer)
+    {
+        var effect = BenchLayers.EffectOf(layer).Preset;
+        var fx = effect == "none" ? string.Empty : $" · {effect}";
+        return BenchLayers.IsImage(layer)
+            ? $"{(layer.Shape == "rectangle" ? "image" : layer.Shape)}{((layer.Crop?.Zoom ?? 1) > 1.001 ? " · cropped" : string.Empty)}{fx}"
+            : $"{layer.FontFamily ?? OverlayFonts.Default}{fx}";
+    }
+
+    /// <summary>Above the selection, or below it when there is no room at the top.</summary>
+    private static string ToolbarStyle(OverlayBox layer)
+    {
+        var centre = Math.Clamp(layer.X + (layer.W / 2), 0.12, 0.88);
+        return layer.Y < 0.14
+            ? $"left:{BenchLayers.Pct(centre)};top:{BenchLayers.Pct(Math.Min(layer.Y + layer.H, 0.96))};transform:translate(-50%, 0.9rem);"
+            : $"left:{BenchLayers.Pct(centre)};top:{BenchLayers.Pct(layer.Y)};transform:translate(-50%, calc(-100% - 0.75rem));";
+    }
+
+    private static bool IsInteropTeardown(Exception ex) =>
+        ex is JSException or InvalidOperationException or ObjectDisposedException or ArgumentException or TaskCanceledException;
+
+    public async ValueTask DisposeAsync()
+    {
+        var handle = _handle;
+        _handle = null;
+        if (handle is not null)
+        {
+            try { await handle.InvokeVoidAsync("dispose"); } catch (Exception ex) when (IsInteropTeardown(ex)) { }
+            try { await handle.DisposeAsync(); } catch (Exception ex) when (IsInteropTeardown(ex)) { }
+        }
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); } catch (Exception ex) when (IsInteropTeardown(ex)) { }
+        }
+        _self?.Dispose();
+    }
+}

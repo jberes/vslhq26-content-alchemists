@@ -479,9 +479,9 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
             await expectHealthyCircuit();
         }
 
-        // The no-model editor is a complete browser workflow: choose a real kit image as the
-        // background, add it again as a movable layer, then persist the composite. This used
-        // to be absent from E2E coverage, so a click-time circuit error shipped unnoticed.
+        // The no-model editor is a complete browser workflow: drag a real kit image in as the
+        // background, drag it again as a layer, then persist the composite. The deep editor
+        // behaviour (handles, crop, shapes, effects, text, z-order) is image-bench.spec.js.
         const launchGroup = page.locator('.cm-studio__group', { hasText: 'Launch post' });
         await launchGroup.getByRole('button', { name: 'Create from scratch' }).click();
         const manualEditor = page.getByRole('dialog', { name: 'Build an image' });
@@ -489,48 +489,28 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(manualEditor).toContainText('Start with a background.');
         await expectHealthyCircuit();
 
+        const benchStage = manualEditor.locator('[data-bench-stage]');
+        const wallTile = manualEditor.locator('[data-bench-tile][data-tile-label="Studio wall"]');
+        const dragOnto = async (fromLocator, fx, fy) => {
+            const from = await fromLocator.boundingBox();
+            const to = await benchStage.boundingBox();
+            await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+            await page.mouse.down();
+            await page.mouse.move(from.x + from.width / 2 + 6, from.y + from.height / 2 + 6, { steps: 2 });
+            await page.mouse.move(to.x + to.width * fx, to.y + to.height * fy, { steps: 12 });
+            await page.mouse.up();
+        };
         const baseResponse = page.waitForResponse(response =>
             response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/base`)
             && response.request().method() === 'POST');
-        await manualEditor.getByTitle('Studio wall').click();
+        await dragOnto(wallTile, 0.5, 0.5);
         expect((await baseResponse).ok()).toBeTruthy();
-        await expect(manualEditor.locator('.cm-imgeditor > img')).toBeVisible();
+        await expect(manualEditor.locator('img.cm-bench__bg')).toBeVisible();
 
-        await manualEditor.getByRole('button', { name: '+ Image', exact: true }).click();
-        await manualEditor.locator('.cm-layer-picker').getByTitle('Studio wall').click();
-        await expect(manualEditor.locator('.cm-imgeditor__layer')).toBeVisible();
-
-        // Image layers expose a real crop tool and frame shape. A square/circle is kept
-        // physically square even though the canvas uses ratio-based geometry.
-        const shape = manualEditor.getByLabel('Layer shape');
-        await expect(shape.locator('option')).toHaveText(['Rectangle', 'Square', 'Circle']);
-        await shape.selectOption('square');
-        let frame = await manualEditor.locator('.cm-imgeditor__box--selected').boundingBox();
-        expect(Math.abs(frame.width - frame.height)).toBeLessThanOrEqual(2);
-        await shape.selectOption('circle');
-        await manualEditor.getByLabel('Crop zoom').fill('2.25');
-        await manualEditor.getByLabel('Crop horizontal focus').fill('0.8');
-        await manualEditor.getByLabel('Crop vertical focus').fill('0.3');
-        await expect(manualEditor.locator('.cm-imgeditor__box--selected'))
-            .toHaveAttribute('data-layer-shape', 'circle');
-        await expect(manualEditor.locator('.cm-imgeditor__layer'))
-            .toHaveClass(/cm-imgeditor__layer--cropped/);
-
-        // Delete is immediate on the canvas. Re-add the layer so the persisted composite
-        // below also proves the crop/shape fields survive the API round trip.
-        await manualEditor.getByRole('button', { name: 'Delete selected layer' }).click();
-        await expect(manualEditor.locator('.cm-imgeditor__layer')).toHaveCount(0);
-        await manualEditor.getByRole('button', { name: '+ Image', exact: true }).click();
-        await manualEditor.locator('.cm-layer-picker').getByTitle('Studio wall').click();
-        await manualEditor.getByLabel('Layer shape').selectOption('circle');
-        await manualEditor.getByLabel('Crop zoom').fill('1.75');
-        await manualEditor.getByLabel('Crop horizontal focus').fill('0.7');
-
-        // Text backgrounds are independently colourable and translucent.
-        await manualEditor.getByRole('button', { name: '+ Text', exact: true }).click();
-        await manualEditor.getByLabel('Text background').check();
-        await manualEditor.getByLabel('Background colour').fill('#336699');
-        await manualEditor.getByLabel('Background opacity').fill('0.35');
+        await dragOnto(wallTile, 0.6, 0.5);
+        await expect(manualEditor.locator('[data-layer-id]')).toHaveCount(1);
+        await manualEditor.getByRole('button', { name: 'Circle', exact: true }).click();
+        await expect(manualEditor.locator('[data-layer-id]')).toHaveAttribute('data-shape', 'circle');
 
         const overlayResponse = page.waitForResponse(response =>
             response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/overlay`)
@@ -538,24 +518,18 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await manualEditor.getByRole('button', { name: 'Save image' }).click();
         const savedOverlay = await overlayResponse;
         expect(savedOverlay.ok()).toBeTruthy();
-        const overlayPayload = savedOverlay.request().postDataJSON();
-        const savedImageLayer = overlayPayload.boxes.find(box => box.logoAssetId);
-        const savedTextLayer = overlayPayload.boxes.find(box => !box.logoAssetId);
-        expect(savedImageLayer.shape).toBe('circle');
-        expect(savedImageLayer.crop).toMatchObject({ focusX: 0.7, zoom: 1.75 });
-        expect(savedTextLayer.band).toMatchObject({ color: '#336699', opacity: 0.35 });
+        const savedImageLayer = savedOverlay.request().postDataJSON().boxes.find(box => box.logoAssetId);
+        expect(savedImageLayer).toMatchObject({ kind: 'image', shape: 'circle' });
         await expect(manualEditor.getByRole('button', { name: 'Saved' })).toBeDisabled();
+        // Escape steps out of the selection first, then closes the dialog.
+        await page.keyboard.press('Escape');
         await page.keyboard.press('Escape');
         await expect(manualEditor).toHaveCount(0);
         await expectHealthyCircuit();
 
-        // Reopening is a different render path: the canvas and saved layers exist on the
-        // dialog's first frame, so interop attaches immediately instead of after base upload.
         await launchGroup.getByRole('button', { name: 'Create from scratch' }).click();
-        await expect(manualEditor.locator('.cm-imgeditor > img')).toBeVisible();
-        await expect(manualEditor.locator('.cm-imgeditor__layer')).toBeVisible();
-        await expect(manualEditor.locator('.cm-imgeditor__box[data-layer-shape="circle"]')).toHaveCount(1);
-        await expect(manualEditor.locator('.cm-imgeditor__text')).toHaveCount(1);
+        await expect(manualEditor.locator('img.cm-bench__bg')).toBeVisible();
+        await expect(manualEditor.locator('[data-layer-id][data-shape="circle"]')).toHaveCount(1);
         await expectHealthyCircuit();
         await manualEditor.getByRole('button', { name: 'Close' }).click();
         await expect(manualEditor).toHaveCount(0);

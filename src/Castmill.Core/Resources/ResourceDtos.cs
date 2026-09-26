@@ -197,31 +197,152 @@ public sealed record OverlayImageCrop(
     [property: Range(1, 4)] double Zoom = 1);
 
 /// <summary>
-/// One text box on the image. Geometry is in RATIOS of the slot (0–1) so the same spec renders
-/// on the editor's preview and the server's full-size composite; FontSize is a ratio of the
-/// slot height. Weight is 400 | 600 | 700. Align is left | center | right.
+/// The "pop" treatment of a v2 layer (ADR-082): one drop-shadow preset plus an inset border.
+/// Depth scales the preset (0.5 is the designed default); BorderWidth is a ratio of the slot
+/// height so the same number renders on the editor preview and the full-size composite.
+/// Preset is none | lift | float | sticker | bevel | glow.
+/// </summary>
+public sealed record OverlayEffect(
+    [property: MaxLength(12)] string Preset = "none",
+    [property: Range(0, 1)] double Depth = 0.5,
+    [property: Range(0, 0.1)] double BorderWidth = 0,
+    [property: MaxLength(9)] string BorderColor = "#FFFFFF");
+
+/// <summary>
+/// One layer on the image. Geometry is in RATIOS of the slot so the same spec renders on the
+/// editor's preview and the server's full-size composite; FontSize and CornerRadius are ratios
+/// of the slot height. A layer may hang partly off the canvas, hence the signed X/Y range.
+///
+/// <see cref="Kind"/> null is a legacy ADR-055 box (text sized to its band, image fitted
+/// inside its frame). A non-null Kind opts into the ADR-082 layer model: the band fills the
+/// whole box, image frames always cover-crop, and Opacity / Effect / FontFamily apply.
+/// Array order in <see cref="OverlaySpec.Boxes"/> is z-order, back first.
 /// </summary>
 public sealed record OverlayBox(
     [property: Required, MaxLength(40)] string Id,
-    [property: Required, MaxLength(160)] string Text,
-    [property: Range(0, 1)] double X,
-    [property: Range(0, 1)] double Y,
-    [property: Range(0.02, 1)] double W,
-    [property: Range(0.02, 1)] double H,
+    [property: Required(AllowEmptyStrings = true), MaxLength(160)] string Text,
+    [property: Range(-1, 1)] double X,
+    [property: Range(-1, 1)] double Y,
+    [property: Range(0.01, 2)] double W,
+    [property: Range(0.01, 2)] double H,
     [property: Range(0.01, 0.6)] double FontSize = 0.09,
     [property: Range(100, 900)] int Weight = 600,
     [property: MaxLength(9)] string Color = "#F2F2F3",
     [property: MaxLength(10)] string Align = "left",
     OverlayBand? Band = null,
-    /// <summary>Optional logo asset from the brand kit drawn into this box instead of text.</summary>
+    /// <summary>Optional brand-kit asset (the brand-asset LINK id) drawn into this box instead of text.</summary>
     Guid? LogoAssetId = null,
-    /// <summary>Optional cover crop for an image layer; null keeps the whole image visible.</summary>
+    /// <summary>Optional cover crop for an image layer; null keeps the whole image visible (legacy boxes only).</summary>
     OverlayImageCrop? Crop = null,
-    /// <summary>Image-frame mask: rectangle | square | circle. Ignored by text layers.</summary>
-    [property: MaxLength(10)] string Shape = "rectangle");
+    /// <summary>Image-frame mask: rectangle | square | circle | rounded. Ignored by text layers.</summary>
+    [property: MaxLength(10)] string Shape = "rectangle",
+    /// <summary>text | image for an ADR-082 layer; null for a legacy box.</summary>
+    [property: MaxLength(10)] string? Kind = null,
+    /// <summary>The producer's name for the layer, shown in the Layers panel.</summary>
+    [property: MaxLength(60)] string? Name = null,
+    [property: Range(0, 1)] double Opacity = 1,
+    /// <summary>Hidden layers are kept in the spec but never drawn.</summary>
+    bool Visible = true,
+    /// <summary>Editor-only: a locked layer cannot be selected on the canvas. No render effect.</summary>
+    bool Locked = false,
+    /// <summary>One of <see cref="OverlayFonts.Families"/>; null is the default display face.</summary>
+    [property: MaxLength(40)] string? FontFamily = null,
+    [property: Range(0, 1)] double TextOpacity = 1,
+    [property: Range(0, 0.5)] double CornerRadius = 0,
+    OverlayEffect? Effect = null);
 
+/// <summary>
+/// The whole overlay. Validates every layer and its nested records itself:
+/// <c>Validator.TryValidateObject</c> does not recurse, so without this the per-box ranges
+/// above were never enforced by the endpoint's validation filter.
+/// </summary>
 public sealed record OverlaySpec(
-    [property: Required, MaxLength(12)] IReadOnlyList<OverlayBox> Boxes);
+    [property: Required, MaxLength(OverlaySpec.MaxBoxes)] IReadOnlyList<OverlayBox> Boxes) : IValidatableObject
+{
+    public const int MaxBoxes = 24;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        var results = new List<ValidationResult>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < Boxes.Count; i++)
+        {
+            var box = Boxes[i];
+            var prefix = $"Boxes[{i}]";
+            if (box is null)
+            {
+                results.Add(new ValidationResult("A layer is missing.", [prefix]));
+                continue;
+            }
+            Check(box, prefix, results);
+            if (box.Band is { } band) Check(band, $"{prefix}.Band", results);
+            if (box.Crop is { } crop) Check(crop, $"{prefix}.Crop", results);
+            if (box.Effect is { } effect)
+            {
+                Check(effect, $"{prefix}.Effect", results);
+                if (!OverlayEffects.Presets.Contains(effect.Preset, StringComparer.Ordinal))
+                {
+                    results.Add(new ValidationResult(
+                        $"Effect must be one of: {string.Join(", ", OverlayEffects.Presets)}.", [$"{prefix}.Effect.Preset"]));
+                }
+            }
+            if (!ids.Add(box.Id))
+            {
+                results.Add(new ValidationResult("Layer ids must be unique.", [$"{prefix}.Id"]));
+            }
+            if (box.Kind is not null and not ("text" or "image"))
+            {
+                results.Add(new ValidationResult("Kind must be text or image.", [$"{prefix}.Kind"]));
+            }
+            if (box.Kind == "image" && box.LogoAssetId is null)
+            {
+                results.Add(new ValidationResult("An image layer needs an asset.", [$"{prefix}.LogoAssetId"]));
+            }
+            if (box.Shape is not ("rectangle" or "square" or "circle" or "rounded"))
+            {
+                results.Add(new ValidationResult("Shape must be rectangle, square, circle or rounded.", [$"{prefix}.Shape"]));
+            }
+            if (box.Align is not ("left" or "center" or "right"))
+            {
+                results.Add(new ValidationResult("Align must be left, center or right.", [$"{prefix}.Align"]));
+            }
+            if (box.FontFamily is { } family && !OverlayFonts.Families.Contains(family, StringComparer.Ordinal))
+            {
+                results.Add(new ValidationResult(
+                    $"Font must be one of: {string.Join(", ", OverlayFonts.Families)}.", [$"{prefix}.FontFamily"]));
+            }
+        }
+        return results;
+    }
+
+    private static void Check(object value, string prefix, List<ValidationResult> results)
+    {
+        var inner = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(value, new ValidationContext(value), inner, validateAllProperties: true))
+        {
+            results.AddRange(inner.Select(r => new ValidationResult(
+                r.ErrorMessage, r.MemberNames.Select(m => $"{prefix}.{m}").DefaultIfEmpty(prefix))));
+        }
+    }
+}
+
+/// <summary>The effect presets the editor offers and the composer draws (ADR-082).</summary>
+public static class OverlayEffects
+{
+    public static readonly IReadOnlyList<string> Presets = ["none", "lift", "float", "sticker", "bevel", "glow"];
+}
+
+/// <summary>
+/// Faces a text layer may use. Each ships with the API (Assets/Fonts) and with the UI RCL so
+/// the preview and the composite draw the same glyphs; OFL 1.1 throughout.
+/// </summary>
+public static class OverlayFonts
+{
+    public const string Default = "Barlow Condensed";
+
+    public static readonly IReadOnlyList<string> Families =
+        ["Barlow Condensed", "Barlow", "Anton", "DM Serif Display", "IBM Plex Mono"];
+}
 
 /// <summary>
 /// Sets a slot's base image WITHOUT a model call — the manual thumbnail path. Either a brand

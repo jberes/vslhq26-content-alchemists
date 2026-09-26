@@ -58,6 +58,93 @@ public sealed class PlanEndpointsTests(CastmillApiFactory factory)
         Assert.Equal(after.BaseImageUrl, after.PublishedUrl);
     }
 
+    private static OverlaySpec LayerSpec() => new([
+        new OverlayBox("img", string.Empty, -0.1, 0.2, 0.5, 0.6, LogoAssetId: Guid.NewGuid(),
+            Crop: new OverlayImageCrop(0.3, 0.7, 1.5), Shape: "rounded", Kind: "image", Name: "Portrait",
+            Opacity: 0.9, Locked: true, CornerRadius: 0.04,
+            Effect: new OverlayEffect("sticker", 0.7, 0.012, "#FFD166")),
+        new OverlayBox("head", "Deploy time, halved", 0.45, 0.1, 0.5, 0.3, 0.1, 800, "#FFFFFFCC", "right",
+            new OverlayBand("#101010", 0.8, 0.3), Kind: "text", Name: "Headline", Opacity: 0.95, Visible: true,
+            FontFamily: "DM Serif Display", TextOpacity: 0.85, CornerRadius: 0.02,
+            Effect: new OverlayEffect("bevel", 0.4, 0, "#FFFFFF")),
+        new OverlayBox("hidden", "Draft note", 0.1, 0.8, 0.3, 0.1, Kind: "text", Visible: false),
+    ]);
+
+    [Fact]
+    public async Task A_v2_layer_spec_round_trips_every_field_and_composites_onto_a_placed_take()
+    {
+        await using var app = WithImageFakes();
+        var (client, campaignId, slotId) = await SetUpSlotAsync(app);
+        var batch = (await (await client.PostAsJsonAsync(
+            $"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/generate", new { variants = 1 }))
+            .Content.ReadFromJsonAsync<VariantBatchResponse>())!;
+        (await client.PostAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/place",
+            new { variantId = Assert.Single(batch.Variants).Id })).EnsureSuccessStatusCode();
+
+        var spec = LayerSpec();
+        var put = await client.PutAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", spec);
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        var slot = (await client.GetFromJsonAsync<List<ImageSlotResponse>>($"/api/v1/campaigns/{campaignId}/image-slots"))!
+            .Single(s => s.Id == slotId);
+        Assert.Contains("/composited/", slot.PublishedUrl, StringComparison.Ordinal);
+        Assert.NotNull(slot.Overlay);
+        Assert.Equal(spec.Boxes.Count, slot.Overlay!.Boxes.Count);
+        for (var i = 0; i < spec.Boxes.Count; i++)
+        {
+            // Records compare by value, nested Band/Crop/Effect included.
+            Assert.Equal(spec.Boxes[i], slot.Overlay.Boxes[i]);
+        }
+        var image = slot.Overlay.Boxes[0];
+        Assert.Equal(("image", "Portrait", "rounded", true), (image.Kind, image.Name, image.Shape, image.Locked));
+        Assert.Equal(new OverlayEffect("sticker", 0.7, 0.012, "#FFD166"), image.Effect);
+        var text = slot.Overlay.Boxes[1];
+        Assert.Equal(("text", "DM Serif Display", 0.85, 0.02, 0.95), (text.Kind, text.FontFamily, text.TextOpacity, text.CornerRadius, text.Opacity));
+        Assert.False(slot.Overlay.Boxes[2].Visible);
+    }
+
+    [Theory]
+    [InlineData("preset", "Boxes[0].Effect.Preset")]
+    [InlineData("too-many", "Boxes")]
+    [InlineData("duplicate", "Boxes[1].Id")]
+    [InlineData("zoom", "Boxes[0].Crop.Zoom")]
+    public async Task An_invalid_nested_layer_value_is_a_validation_problem_naming_its_path(string defect, string path)
+    {
+        await using var app = WithImageFakes();
+        var (client, campaignId, slotId) = await SetUpSlotAsync(app);
+        var valid = LayerSpec();
+        OverlaySpec spec = defect switch
+        {
+            "preset" => new([valid.Boxes[0] with { Effect = new OverlayEffect("explode") }]),
+            "too-many" => new([.. Enumerable.Range(0, OverlaySpec.MaxBoxes + 1).Select(i => valid.Boxes[1] with { Id = $"t{i}" })]),
+            "duplicate" => new([valid.Boxes[1], valid.Boxes[2] with { Id = "head" }]),
+            _ => new([valid.Boxes[0] with { Crop = new OverlayImageCrop(Zoom: 9) }]),
+        };
+
+        var put = await client.PutAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", spec);
+
+        Assert.Equal(HttpStatusCode.BadRequest, put.StatusCode);
+        var problem = (await put.Content.ReadFromJsonAsync<Microsoft.AspNetCore.Http.HttpValidationProblemDetails>())!;
+        Assert.Contains(path, problem.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task A_slot_with_no_base_image_stores_a_v2_spec_without_compositing()
+    {
+        await using var app = WithImageFakes();
+        var (client, campaignId, slotId) = await SetUpSlotAsync(app);
+
+        var put = await client.PutAsJsonAsync($"/api/v1/campaigns/{campaignId}/image-slots/{slotId}/overlay", LayerSpec());
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        var slot = (await client.GetFromJsonAsync<List<ImageSlotResponse>>($"/api/v1/campaigns/{campaignId}/image-slots"))!
+            .Single(s => s.Id == slotId);
+        Assert.Null(slot.BaseImageUrl);
+        Assert.Null(slot.PublishedUrl);
+        Assert.Equal(LayerSpec().Boxes.Count, slot.Overlay!.Boxes.Count);
+        Assert.Equal("DM Serif Display", slot.Overlay.Boxes[1].FontFamily);
+    }
+
     [Fact]
     public async Task A_region_edit_needs_a_painted_mask_and_then_lands_as_a_child_take()
     {

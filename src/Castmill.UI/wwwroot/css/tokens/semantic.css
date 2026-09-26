@@ -17,6 +17,22 @@
     --cm-surface-inverse: var(--cmf-surface-inverse);
    --cm-scrim: rgb(0 0 0 / 0.44);
 
+    /* ---- Image canvas instruments (ADR-F72) -------------------------------------- */
+    /* Selection, crop and guide marks sit ON a producer's picture, so they must read against
+       any photograph rather than against the theme: one saturated set shared by every family
+       and mode, each drawn with a white/dark halo. */
+    --cm-canvas-select: #1f7cff;
+    --cm-canvas-crop: #f0a020;
+    --cm-canvas-guide: #ff3fa4;
+    --cm-canvas-handle: #ffffff;
+    --cm-canvas-halo: rgb(0 0 0 / 0.35);
+    --cm-canvas-ghost: rgb(255 255 255 / 0.45);
+    --cm-canvas-toolbar: #1d2d3d;
+    --cm-canvas-toolbar-crop: #3a2a0c;
+    --cm-on-canvas-toolbar: #f2f2f3;
+    --cm-on-canvas-toolbar-muted: #f2d9a8;
+    --cm-canvas-board: rgb(29 45 61 / 0.07);
+
     /* The workspace rail's own surface + text, so chrome reads apart from content. */
     --cm-surface-rail: var(--cmf-surface-rail);
     --cm-on-rail: var(--cmf-on-rail);

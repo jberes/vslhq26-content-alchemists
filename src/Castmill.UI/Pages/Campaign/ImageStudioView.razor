@@ -1376,246 +1376,14 @@
     </div>
 }
 
-@* The manual editor. ONE dialog for the whole job: choose a background, add text and image
-   layers, drag and resize them on the canvas, save. No model call anywhere in it. The pieces
-   were previously spread across a drawer panel, a picker and the take lightbox, which meant
-   three places to do one thing. *@
+@* The manual editor (ADR-F72): one dialog for the whole job — background, drag-to-add
+   layers, crop, shapes, effects, z-order — saved through the ordinary overlay endpoint. *@
 @if (_manualOpen && Selected is { } manualSlot)
 {
-    <div class="cm-modal" role="presentation" @onclick="CloseManualAsync">
-        <div class="cm-manual" role="dialog" aria-modal="true" aria-label="Build an image"
-             @ref="_manualPanel" @onclick:stopPropagation tabindex="-1">
-            <header class="cm-manual__head">
-                <div>
-                    <h2>Build @ArtifactDisplay.SlotLabel(manualSlot.Kind)</h2>
-                    <p class="cm-meta cm-mono">@manualSlot.TargetWidth×@manualSlot.TargetHeight · no model call</p>
-                </div>
-                <button type="button" class="cm-studio__drawer-close" aria-label="Close"
-                        title="Close (Esc)" @onclick="CloseManualAsync">✕</button>
-            </header>
-
-            <div class="cm-manual__body">
-                <div class="cm-manual__stage">
-                    @if (manualSlot.BaseImageUrl is { Length: > 0 } manualBase)
-                    {
-                        <div class="cm-imgeditor" @ref="_editorStage" data-editor-mode="boxes"
-                             style="@AspectStyle(manualSlot)">
-                            <img class="cm-lightbox__image" src="@(manualBase + "?v=" + manualSlot.UpdatedAt.ToUnixTimeSeconds())"
-                                 alt="Background" draggable="false" />
-                            @foreach (var box in _overlayDraft)
-                            {
-                                <div class="cm-imgeditor__box cm-imgeditor__box--live @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null)"
-                                     data-box="@box.Id" data-layer-shape="@LayerShape(box)" style="@BoxStyle(box)"
-                                     @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
-                                    @if (box.LogoAssetId is { } manualLayerId && _kitPreviews.TryGetValue(LayerAssetId(manualLayerId), out var manualThumb))
-                                    {
-                                        <img class="cm-imgeditor__layer @(UsesImageCrop(box) ? "cm-imgeditor__layer--cropped" : null)"
-                                             style="@LayerStyle(box)" src="@manualThumb" alt="" draggable="false" />
-                                    }
-                                    else if (box.LogoAssetId is not null)
-                                    {
-                                        <span class="cm-imgeditor__text cm-meta">Image layer</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="cm-imgeditor__text">@box.Text</span>
-                                    }
-                                    <span class="cm-imgeditor__handle" data-handle aria-hidden="true"></span>
-                                </div>
-                            }
-                            <div class="cm-imgeditor__mask" data-mask-layer hidden aria-hidden="true"></div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="cm-manual__empty">
-                            <strong>Start with a background.</strong>
-                            <p class="cm-meta">Pick one from the kit or upload your own. Everything else layers on top.</p>
-                        </div>
-                    }
-                </div>
-
-                <aside class="cm-manual__rail" aria-label="Image controls">
-                    <section class="cm-lightbox__group">
-                        <span class="cm-kicker">Background</span>
-                        @if (_settingBase)
-                        {
-                            <p class="cm-meta" role="status"><span class="cm-ai-dot" aria-hidden="true"></span> Applying…</p>
-                        }
-                        <div class="cm-studio__picks">
-                            @foreach (var asset in _brandAssets)
-                            {
-                                <button type="button" class="cm-studio__pick" disabled="@_settingBase"
-                                        title="@(asset.Label ?? asset.FileName)"
-                                        @onclick="() => UseBaseAssetAsync(asset)">
-                                    @if (_kitPreviews.TryGetValue(asset.AssetId, out var basePick))
-                                    {
-                                        <img src="@basePick" alt="" loading="lazy" />
-                                    }
-                                    <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
-                                </button>
-                            }
-                        </div>
-                        <InputFile OnChange="UploadBaseImageAsync" accept="image/*" disabled="@_settingBase"
-                                   aria-label="Upload a background image" />
-                        <span class="cm-meta">Fitted to @manualSlot.TargetWidth×@manualSlot.TargetHeight.</span>
-                    </section>
-
-                    @if (manualSlot.BaseImageUrl is { Length: > 0 })
-                    {
-                        <section class="cm-lightbox__group">
-                            <span class="cm-kicker">Layers</span>
-                            <p class="cm-meta">Drag to move, drag a corner to resize.</p>
-                            <div class="cm-studio__chips">
-                                @foreach (var box in _overlayDraft)
-                                {
-                                    <button type="button" class="cm-studio__chip @(box.Id == _selectedBoxId ? "cm-studio__chip--on" : null)"
-                                            @onclick="() => _selectedBoxId = box.Id">@(box.LogoAssetId is null ? Truncate(box.Text, 16) : $"▣ {Truncate(LayerLabel(box), 14)}")</button>
-                                }
-                            </div>
-                            <div class="cm-form__actions">
-                                <button type="button" class="cm-button cm-button--quiet" @onclick="AddBox">+ Text</button>
-                                <button type="button" class="cm-button cm-button--quiet" @onclick="OpenLayerPicker">+ Image</button>
-                            </div>
-                            @if (_layerPickerOpen)
-                            {
-                                <div class="cm-layer-picker">
-                                    <div class="cm-studio__picks">
-                                        @foreach (var asset in _brandAssets)
-                                        {
-                                            <button type="button" class="cm-studio__pick"
-                                                    title="@(asset.Label ?? asset.FileName)"
-                                                    @onclick="() => AddLayer(asset)">
-                                                @if (_kitPreviews.TryGetValue(asset.AssetId, out var manualPick))
-                                                {
-                                                    <img src="@manualPick" alt="" loading="lazy" />
-                                                }
-                                                <span class="cm-studio__pick-label">@(asset.Label ?? asset.FileName)</span>
-                                            </button>
-                                        }
-                                    </div>
-                                    <button type="button" class="cm-button cm-button--quiet" @onclick="CloseLayerPicker">Cancel</button>
-                                </div>
-                            }
-                            @if (SelectedBox is { } manualSel)
-                            {
-                                @if (manualSel.LogoAssetId is null)
-                                {
-                                    <label class="cm-field">
-                                        <span class="cm-field__label">Text</span>
-                                        <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Layer text"
-                                                  value="@manualSel.Text" @oninput="e => UpdateBox(manualSel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
-                                    </label>
-                                    <div class="cm-imgeditor-panel__row">
-                                        <label class="cm-field">
-                                            <span class="cm-field__label">Size</span>
-                                            <input type="range" min="0.03" max="0.30" step="0.005" aria-label="Font size"
-                                                   value="@manualSel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
-                                                   @oninput="e => UpdateBox(manualSel with { FontSize = ParseDouble(e.Value, manualSel.FontSize) })" />
-                                        </label>
-                                        <label class="cm-field">
-                                            <span class="cm-field__label">Weight</span>
-                                            <select class="cm-input" value="@manualSel.Weight" aria-label="Font weight"
-                                                    @onchange="e => UpdateBox(manualSel with { Weight = int.TryParse(e.Value?.ToString(), out var mw) ? mw : manualSel.Weight })">
-                                                <option value="400">Regular</option>
-                                                <option value="600">Semibold</option>
-                                                <option value="700">Bold</option>
-                                            </select>
-                                        </label>
-                                        <label class="cm-field">
-                                            <span class="cm-field__label">Colour</span>
-                                            <input type="color" class="cm-imgeditor-panel__color" value="@manualSel.Color" aria-label="Text colour"
-                                                   @onchange="e => UpdateBox(manualSel with { Color = e.Value?.ToString() ?? manualSel.Color })" />
-                                        </label>
-                                        <label class="cm-fanout__item cm-imgeditor-panel__toggle">
-                                            <input type="checkbox" checked="@(manualSel.Band is not null)" aria-label="Text background"
-                                                   @onchange='e => UpdateBox(manualSel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
-                                            <span>Background</span>
-                                        </label>
-                                    </div>
-                                    @if (manualSel.Band is { } manualBand)
-                                    {
-                                        <div class="cm-imgeditor-panel__row">
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Background colour</span>
-                                                <input type="color" class="cm-imgeditor-panel__color" value="@manualBand.Color" aria-label="Background colour"
-                                                       @onchange="e => UpdateBox(manualSel with { Band = manualBand with { Color = e.Value?.ToString() ?? manualBand.Color } })" />
-                                            </label>
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Background opacity</span>
-                                                <input type="range" min="0" max="1" step="0.05" value="@manualBand.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Background opacity"
-                                                       @oninput="e => UpdateBox(manualSel with { Band = manualBand with { Opacity = ParseDouble(e.Value, manualBand.Opacity) } })" />
-                                            </label>
-                                        </div>
-                                    }
-                                }
-                                else
-                                {
-                                    <p class="cm-meta">@LayerLabel(manualSel) — crop it, choose a frame, then drag it into place.</p>
-                                    <div class="cm-imgeditor-panel__row">
-                                        <label class="cm-field">
-                                            <span class="cm-field__label">Shape</span>
-                                            <select class="cm-input" value="@LayerShape(manualSel)" aria-label="Layer shape"
-                                                    @onchange="e => SetLayerShape(manualSel, e.Value?.ToString())">
-                                                <option value="rectangle">Rectangle</option>
-                                                <option value="square">Square</option>
-                                                <option value="circle">Circle</option>
-                                            </select>
-                                        </label>
-                                        <div class="cm-form__actions">
-                                            @if (manualSel.Crop is null)
-                                            {
-                                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => EnableImageCrop(manualSel)">Crop image</button>
-                                            }
-                                            else
-                                            {
-                                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => ResetImageCrop(manualSel)">Reset crop</button>
-                                            }
-                                        </div>
-                                    </div>
-                                    @if (manualSel.Crop is { } manualCrop)
-                                    {
-                                        <div class="cm-imgeditor-panel__crop" role="group" aria-label="Crop tool">
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Zoom</span>
-                                                <input type="range" min="1" max="4" step="0.05" value="@manualCrop.Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop zoom"
-                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { Zoom = ParseDouble(e.Value, manualCrop.Zoom) } })" />
-                                            </label>
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Left / right</span>
-                                                <input type="range" min="0" max="1" step="0.01" value="@manualCrop.FocusX.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop horizontal focus"
-                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { FocusX = ParseDouble(e.Value, manualCrop.FocusX) } })" />
-                                            </label>
-                                            <label class="cm-field">
-                                                <span class="cm-field__label">Up / down</span>
-                                                <input type="range" min="0" max="1" step="0.01" value="@manualCrop.FocusY.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop vertical focus"
-                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { FocusY = ParseDouble(e.Value, manualCrop.FocusY) } })" />
-                                            </label>
-                                        </div>
-                                    }
-                                }
-                                <div class="cm-form__actions">
-                                    <button type="button" class="cm-button cm-button--quiet cm-button--danger"
-                                            aria-label="Delete selected layer" @onclick="() => RemoveBox(manualSel.Id)">Delete layer</button>
-                                </div>
-                            }
-                        </section>
-
-                        <div class="cm-manual__save">
-                            <button type="button" class="cm-button" disabled="@(_savingOverlay || !_overlayDirty)"
-                                    @onclick="SaveOverlayAsync">
-                                @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save image" : "Saved")
-                            </button>
-                            @if (_overlayStatus is { } manualStatus)
-                            {
-                                <p class="cm-meta" role="status">@manualStatus</p>
-                            }
-                        </div>
-                    }
-                </aside>
-            </div>
-        </div>
-    </div>
+    <Castmill.UI.Pages.Campaign.Bench.ImageBench CampaignId="CampaignId" Slot="manualSlot" BrandId="Campaign.Brand?.Id"
+                                                 BrandAssets="_brandAssets" KitPreviews="_kitPreviews"
+                                                 OnClose="CloseManualAsync" OnSlotChanged="OnManualSlotChangedAsync"
+                                                 OnKitAssetAdded="OnManualKitAssetAdded" />
 }
 
 @if (_kitPickerOpen && Campaign.Brand is { } kitBrand)
@@ -2543,20 +2311,6 @@
             }
         }
 
-        if (_manualNeedsFocus)
-        {
-            _manualNeedsFocus = false;
-            if (_manualOpen)
-            {
-                await FocusSafelyAsync(_manualPanel);
-            }
-        }
-
-        // A save disables the clicked button and browsers then move focus to <body>. Keep a
-        // document-level Escape listener while this modal exists so closing it never depends
-        // on which child happens to retain focus.
-        await EnsureManualEscapeListenerAsync();
-
         // The editor island follows the lightbox: attached while a take is open, told the
         // current tool on every render, detached when the dialog closes (ADR-055).
         await EnsureEditorAttachedAsync();
@@ -2783,11 +2537,10 @@
 
     // ---- Editor (ADR-055): overlay boxes, region mask, compare, lineage ----------------
 
-    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=4";
+    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=5";
     private ElementReference _editorStage;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
-    private bool _manualEscapeListening;
     private DotNetObjectReference<ImageStudioView>? _editorSelf;
     private string _editorMode = "off";
     private List<OverlayBox> _overlayDraft = [];
@@ -2927,8 +2680,6 @@
 
     private bool _manualOpen;
     private Guid? _openingManual;
-    private ElementReference _manualPanel;
-    private bool _manualNeedsFocus;
 
     /// <summary>
     /// One click into the whole manual editor. Uses the content item's existing empty slot
@@ -2957,13 +2708,7 @@
             }
 
             await SelectSlotAsync(slot);
-            _editorMode = "boxes";
-            _overlayStatus = null;
-            _overlayDirty = false;
-            _layerPickerOpen = false;
-            SeedOverlayDraft();
             _manualOpen = true;
-            _manualNeedsFocus = true;
         }
         catch (ApiException ex)
         {
@@ -2975,7 +2720,7 @@
         }
     }
 
-    private async Task CloseManualAsync()
+    private Task CloseManualAsync()
     {
         _manualOpen = false;
         // Create-from-scratch temporarily selects a slot so the editor can reuse the normal
@@ -2983,73 +2728,32 @@
         // drawer open underneath made Escape appear to reveal a second editor.
         _selectedId = null;
         _drawerNeedsFocus = false;
-        _layerPickerOpen = false;
-        _editorMode = "off";
-        await DetachManualEscapeListenerAsync();
-        await DetachEditorAsync();
+        return Task.CompletedTask;
     }
 
-    private bool _settingBase;
-
-    private Task UseBaseAssetAsync(BrandAssetResponse asset) =>
-        ApplyBaseAsync(asset.Id, null);
-
-    /// <summary>
-    /// A one-off background. Capped well below the endpoint's limit so a 40 MB screenshot is
-    /// refused here, with a reason, rather than by a 400 after the upload.
-    /// </summary>
-    private async Task UploadBaseImageAsync(InputFileChangeEventArgs e)
+    /// <summary>The editor set a background or saved: refresh so the studio shows the result.</summary>
+    private async Task OnManualSlotChangedAsync(ImageSlotResponse _)
     {
-        var file = e.File;
-        if (file is null)
-        {
-            return;
-        }
-        if (file.Size > 20L * 1024 * 1024)
-        {
-            Notifier.ShowError("That image is over 20 MB — export a smaller one.");
-            return;
-        }
-
         try
         {
-            await using var stream = file.OpenReadStream(20L * 1024 * 1024);
-            using var memory = new MemoryStream();
-            await stream.CopyToAsync(memory);
-            await ApplyBaseAsync(null, Convert.ToBase64String(memory.ToArray()));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Notifier.ShowError($"That file could not be read: {ex.Message}");
-        }
-    }
-
-    private async Task ApplyBaseAsync(Guid? brandAssetId, string? imageBase64)
-    {
-        if (Selected is not { } slot || _settingBase)
-        {
-            return;
-        }
-
-        _settingBase = true;
-        try
-        {
-            var result = await Images.SetBaseImageAsync(CampaignId, slot.Id, brandAssetId, imageBase64);
             await Campaign.RefreshAsync(CampaignId);
-            // Re-select so the drawer shows the new base and the overlay editor is available.
-            if (Campaign.ImageSlots.FirstOrDefault(s => s.Id == result.Slot.Id) is { } refreshed)
-            {
-                await SelectSlotAsync(refreshed);
-            }
-            Notifier.ShowSuccess("Background set. Add text and image layers over it.");
         }
         catch (ApiException ex)
         {
             Notifier.ShowError(ex.Message);
         }
-        finally
+    }
+
+    /// <summary>A file joined the kit from inside the editor; the studio's own kit list gains it too.</summary>
+    private void OnManualKitAssetAdded((BrandAssetResponse Asset, string? ThumbUrl) added)
+    {
+        if (_brandAssets.All(a => a.Id != added.Asset.Id))
         {
-            _settingBase = false;
+            _brandAssets.Add(added.Asset);
+        }
+        if (added.ThumbUrl is { } thumb)
+        {
+            _kitPreviews[added.Asset.AssetId] = thumb;
         }
     }
 
@@ -3329,8 +3033,7 @@
         // ElementReference.Context remains populated after an element is removed. Test the
         // Razor state that actually renders the stage too, otherwise a background-less
         // dialog can attach to a previous lightbox's detached element.
-        var stageIsRendered = _openVariant is not null
-            || (_manualOpen && Selected?.BaseImageUrl is { Length: > 0 });
+        var stageIsRendered = _openVariant is not null;
         if (!stageIsRendered)
         {
             await DetachEditorAsync();
@@ -3391,54 +3094,6 @@
         }
     }
 
-    private async Task EnsureManualEscapeListenerAsync()
-    {
-        if (!_manualOpen)
-        {
-            await DetachManualEscapeListenerAsync();
-            return;
-        }
-        if (_manualEscapeListening)
-        {
-            return;
-        }
-        try
-        {
-            _editorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EditorModulePath);
-            _editorSelf ??= DotNetObjectReference.Create(this);
-            await _editorModule.InvokeVoidAsync("listenForEscape", _editorSelf);
-            _manualEscapeListening = true;
-        }
-        catch (Exception ex) when (IsInteropTeardown(ex))
-        {
-            // bUnit/headless hosts have no document; a closing WebView may be gone already.
-            _manualEscapeListening = false;
-        }
-    }
-
-    [JSInvokable]
-    public async Task ManualEscapeAsync()
-    {
-        await CloseManualAsync();
-        // JS-invokable methods do not receive Blazor event-callback's automatic repaint.
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private async Task DetachManualEscapeListenerAsync()
-    {
-        if (!_manualEscapeListening)
-        {
-            return;
-        }
-        _manualEscapeListening = false;
-        if (_editorModule is null)
-        {
-            return;
-        }
-        try { await _editorModule.InvokeVoidAsync("stopListeningForEscape"); }
-        catch (Exception ex) when (IsInteropTeardown(ex)) { }
-    }
-
     /// <summary>Interop cleanup is best-effort. A WebView may invalidate JS references while
     /// Blazor is removing the element that owned them; cleanup must never surface the host's
     /// fatal yellow bar.</summary>
@@ -3448,7 +3103,6 @@
     public async ValueTask DisposeAsync()
     {
         Dispose();
-        await DetachManualEscapeListenerAsync();
         await DetachEditorAsync();
         if (_editorModule is not null)
         {

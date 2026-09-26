@@ -159,29 +159,3 @@ export function attach(stage, dotnet) {
         },
     };
 }
-
-/**
- * Escape belongs to the manual editor even when focus falls back to document.body after a
- * clicked control is removed or disabled. The dialog's Razor key handler covers focused
- * interaction; this listener closes the focus gap and is disposed with the dialog.
- * @param {{invokeMethodAsync: (name: string) => Promise<unknown>}} dotnet
- */
-let escapeListener = null;
-
-export function listenForEscape(dotnet) {
-    stopListeningForEscape();
-    const onKeyDown = event => {
-        if (event.key === 'Escape') {
-            dotnet.invokeMethodAsync('ManualEscapeAsync');
-        }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    escapeListener = onKeyDown;
-}
-
-export function stopListeningForEscape() {
-    if (escapeListener) {
-        document.removeEventListener('keydown', escapeListener);
-        escapeListener = null;
-    }
-}

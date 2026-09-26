@@ -1,0 +1,310 @@
+@* The editor's right-hand inspector: every property of the selected layer, in output pixels.
+   Sliders and colour pickers stream live values (commit=false) and commit on change, so one
+   drag of a slider is one undo step. *@
+@using Castmill.Core.Resources
+
+<div class="cm-bench__inspector" aria-label="Layer properties" role="region">
+    @if (Layer is not { } layer)
+    {
+        <div class="cm-bench__empty">
+            <strong>Nothing selected</strong>
+            <p class="cm-meta">Click a layer on the canvas or in Layers. Drag from the left panel to add one.</p>
+            <p class="cm-meta"><kbd>Tab</kbd> selects the front layer. <kbd>⌘</kbd>-click picks the layer underneath.</p>
+        </div>
+    }
+    else
+    {
+        var isImage = BenchLayers.IsImage(layer);
+        var effect = BenchLayers.EffectOf(layer);
+        <header class="cm-bench__inspector-head">
+            <h3>@(isImage ? "Image layer" : "Text layer")</h3>
+            <span class="cm-bench__tag cm-mono">z @(ZIndex + 1) of @LayerCount</span>
+        </header>
+
+        <label class="cm-field">
+            <span class="cm-field__label">Layer name</span>
+            <input class="cm-input" maxlength="60" value="@(layer.Name ?? string.Empty)" aria-label="Layer name"
+                   placeholder="@(isImage ? "Image" : BenchLayers.FirstLine(layer.Text))"
+                   @onchange="e => Emit(layer with { Name = Text(e.Value, 60) }, true)" />
+        </label>
+
+        <section class="cm-bench__group" aria-label="Position and size">
+            <div class="cm-bench__group-head"><span class="cm-kicker">Position &amp; size</span><span class="cm-meta cm-mono">output px</span></div>
+            <div class="cm-bench__grid2">
+                <label class="cm-bench__num"><b>X</b><input inputmode="decimal" aria-label="X position" value="@Px(layer.X, SlotWidth)"
+                       @onchange="e => Emit(layer with { X = Math.Clamp(BenchLayers.FromPx(Parse(e.Value, layer.X * SlotWidth), SlotWidth), -1, 1) }, true)" /></label>
+                <label class="cm-bench__num"><b>Y</b><input inputmode="decimal" aria-label="Y position" value="@Px(layer.Y, SlotHeight)"
+                       @onchange="e => Emit(layer with { Y = Math.Clamp(BenchLayers.FromPx(Parse(e.Value, layer.Y * SlotHeight), SlotHeight), -1, 1) }, true)" /></label>
+                <label class="cm-bench__num"><b>W</b><input inputmode="decimal" aria-label="Width" value="@Px(layer.W, SlotWidth)"
+                       @onchange="e => SetSize(layer, Parse(e.Value, layer.W * SlotWidth), null)" /></label>
+                <label class="cm-bench__num"><b>H</b><input inputmode="decimal" aria-label="Height" value="@Px(layer.H, SlotHeight)"
+                       @onchange="e => SetSize(layer, null, Parse(e.Value, layer.H * SlotHeight))" /></label>
+            </div>
+            <div class="cm-field">
+                <span class="cm-field__label">Layer opacity <output class="cm-mono" aria-hidden="true">@Percent(layer.Opacity)</output></span>
+                <input type="range" min="0" max="1" step="0.01" aria-label="Layer opacity" value="@BenchLayers.Num(layer.Opacity)"
+                       @oninput="e => Emit(layer with { Opacity = Unit(e.Value, layer.Opacity) }, false)"
+                       @onchange="e => Emit(layer with { Opacity = Unit(e.Value, layer.Opacity) }, true)" />
+            </div>
+        </section>
+
+        @if (isImage)
+        {
+            <section class="cm-bench__group" aria-label="Resolution">
+                <span class="cm-kicker">Resolution</span>
+                @if (Natural is { Width: > 0, Height: > 0 } n)
+                {
+                    var cover = BenchLayers.Cover(layer, SlotWidth, SlotHeight, n.Width, n.Height);
+                    var density = cover.SourcePixelsPerOutputPixel;
+                    <div class="cm-bench__res cm-mono" data-testid="resolution">
+                        <span>Source @n.Width×@n.Height</span>
+                        <span>Visible @Math.Round(cover.SourceWidth)×@Math.Round(cover.SourceHeight) source px</span>
+                        <span>On output @Math.Round(cover.FrameWidth)×@Math.Round(cover.FrameHeight) px</span>
+                        @if (density >= 0.999)
+                        {
+                            <strong class="cm-bench__res-ok">Sharp · @density.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) source px per output px</strong>
+                        }
+                        else
+                        {
+                            <strong class="cm-bench__res-bad">Upscaled @((1 / density).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))× · will look soft</strong>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="cm-meta">Loading the full-resolution original…</p>
+                }
+            </section>
+
+            <section class="cm-bench__group" aria-label="Shape">
+                <span class="cm-kicker">Shape</span>
+                <div class="cm-bench__shapes" role="group" aria-label="Frame shape">
+                    @foreach (var (value, label) in BenchLayers.Shapes)
+                    {
+                        <button type="button" class="cm-bench__choice" aria-pressed="@(layer.Shape == value ? "true" : "false")"
+                                @onclick="() => OnShape.InvokeAsync(value)">
+                            <i class="cm-bench__shape-glyph cm-bench__shape-glyph--@value" aria-hidden="true"></i>@label
+                        </button>
+                    }
+                </div>
+                @if (layer.Shape == "rounded")
+                {
+                    <div class="cm-field">
+                        <span class="cm-field__label">Corner radius <output class="cm-mono" aria-hidden="true">@Px(layer.CornerRadius, SlotHeight) px</output></span>
+                        <input type="range" min="0" max="@(SlotHeight / 3)" step="1" aria-label="Corner radius" value="@Px(layer.CornerRadius, SlotHeight)"
+                               @oninput="e => Emit(layer with { CornerRadius = Radius(e.Value, layer.CornerRadius) }, false)"
+                               @onchange="e => Emit(layer with { CornerRadius = Radius(e.Value, layer.CornerRadius) }, true)" />
+                    </div>
+                }
+            </section>
+
+            <section class="cm-bench__group" aria-label="Crop">
+                <span class="cm-kicker">Crop</span>
+                <div class="cm-bench__line">
+                    <button type="button" class="cm-button cm-button--quiet cm-bench__grow" aria-pressed="@(CropMode ? "true" : "false")"
+                            @onclick='() => OnCommand.InvokeAsync(CropMode ? "cropDone" : "crop")'>
+                        <AppIcon Name="crop" /> @(CropMode ? "Finish crop" : "Crop image")
+                    </button>
+                    <button type="button" class="cm-button cm-button--quiet" @onclick='() => OnCommand.InvokeAsync("cropReset")'>Reset crop</button>
+                </div>
+                <div class="cm-field">
+                    <span class="cm-field__label">Zoom <output class="cm-mono" aria-hidden="true">@((layer.Crop ?? new OverlayImageCrop()).Zoom.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))×</output></span>
+                    <input type="range" min="1" max="4" step="0.01" aria-label="Zoom" value="@BenchLayers.Num((layer.Crop ?? new OverlayImageCrop()).Zoom)"
+                           @oninput="e => Emit(layer with { Crop = (layer.Crop ?? new OverlayImageCrop()) with { Zoom = Math.Clamp(Parse(e.Value, 1), 1, 4) } }, false)"
+                           @onchange="e => Emit(layer with { Crop = (layer.Crop ?? new OverlayImageCrop()) with { Zoom = Math.Clamp(Parse(e.Value, 1), 1, 4) } }, true)" />
+                </div>
+            </section>
+        }
+        else
+        {
+            var band = layer.Band ?? new OverlayBand("#000000", 0, BenchLayers.DefaultPadding, 0);
+            <section class="cm-bench__group" aria-label="Text">
+                <span class="cm-kicker">Text</span>
+                <textarea class="cm-input cm-textarea" rows="3" maxlength="160" aria-label="Layer text" value="@layer.Text"
+                          @oninput="e => Emit(layer with { Text = Text(e.Value, 160) ?? string.Empty }, false)"
+                          @onchange="e => Emit(layer with { Text = Text(e.Value, 160) ?? string.Empty }, true)"></textarea>
+                <div class="cm-bench__line">
+                    <label class="cm-field cm-bench__grow">
+                        <span class="cm-field__label">Font</span>
+                        <select class="cm-input" aria-label="Font" value="@(layer.FontFamily ?? OverlayFonts.Default)"
+                                @onchange="e => SetFamily(layer, e.Value?.ToString())">
+                            @foreach (var family in OverlayFonts.Families)
+                            {
+                                <option value="@family">@family</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="cm-field cm-bench__size">
+                        <span class="cm-field__label">Size</span>
+                        <span class="cm-bench__num"><input inputmode="numeric" aria-label="Font size" value="@Px(layer.FontSize, SlotHeight)"
+                               @onchange="e => Emit(layer with { FontSize = Math.Clamp(BenchLayers.FromPx(Parse(e.Value, layer.FontSize * SlotHeight), SlotHeight), 0.01, 0.6) }, true)" /><b>px</b></span>
+                    </label>
+                </div>
+                <div class="cm-field">
+                    <span class="cm-field__label">Weight</span>
+                    <div class="cm-bench__seg" role="group" aria-label="Font weight">
+                        @foreach (var (value, label) in BenchLayers.Weights)
+                        {
+                            var available = BenchLayers.WeightsFor(layer.FontFamily).Contains(value);
+                            <button type="button" aria-pressed="@(layer.Weight == value ? "true" : "false")" disabled="@(!available)"
+                                    title="@(available ? null : $"{layer.FontFamily ?? OverlayFonts.Default} has no {label.ToLowerInvariant()} weight")"
+                                    @onclick="() => Emit(layer with { Weight = value }, true)">@label</button>
+                        }
+                    </div>
+                </div>
+                <div class="cm-field">
+                    <span class="cm-field__label">Align</span>
+                    <div class="cm-bench__seg" role="group" aria-label="Text alignment">
+                        @foreach (var align in new[] { "left", "center", "right" })
+                        {
+                            <button type="button" aria-pressed="@(layer.Align == align ? "true" : "false")" aria-label="Align @align"
+                                    @onclick="() => Emit(layer with { Align = align }, true)">@(char.ToUpperInvariant(align[0]) + align[1..])</button>
+                        }
+                    </div>
+                </div>
+                <div class="cm-bench__grid2">
+                    <label class="cm-field">
+                        <span class="cm-field__label">Font colour</span>
+                        <span class="cm-bench__swatch"><input type="color" aria-label="Font colour" value="@BenchLayers.ColorInputValue(layer.Color)"
+                               @oninput="e => Emit(layer with { Color = Colour(e.Value, layer.Color) }, false)"
+                               @onchange="e => Emit(layer with { Color = Colour(e.Value, layer.Color) }, true)" /><code>@BenchLayers.ColorInputValue(layer.Color)</code></span>
+                    </label>
+                    <div class="cm-field">
+                        <span class="cm-field__label">Text opacity <output class="cm-mono" aria-hidden="true">@Percent(layer.TextOpacity)</output></span>
+                        <input type="range" min="0" max="1" step="0.01" aria-label="Text opacity" value="@BenchLayers.Num(layer.TextOpacity)"
+                               @oninput="e => Emit(layer with { TextOpacity = Unit(e.Value, layer.TextOpacity) }, false)"
+                               @onchange="e => Emit(layer with { TextOpacity = Unit(e.Value, layer.TextOpacity) }, true)" />
+                    </div>
+                </div>
+            </section>
+
+            <section class="cm-bench__group" aria-label="Text background">
+                <span class="cm-kicker">Text background</span>
+                <div class="cm-bench__grid2">
+                    <label class="cm-field">
+                        <span class="cm-field__label">Background colour</span>
+                        <span class="cm-bench__swatch"><input type="color" aria-label="Background colour" value="@BenchLayers.ColorInputValue(band.Color)"
+                               @oninput="e => Emit(layer with { Band = band with { Color = Colour(e.Value, band.Color) } }, false)"
+                               @onchange="e => Emit(layer with { Band = band with { Color = Colour(e.Value, band.Color) } }, true)" /><code>@BenchLayers.ColorInputValue(band.Color)</code></span>
+                    </label>
+                    <div class="cm-field">
+                        <span class="cm-field__label">Background opacity <output class="cm-mono" aria-hidden="true">@Percent(band.Opacity)</output></span>
+                        <input type="range" min="0" max="1" step="0.01" aria-label="Background opacity" value="@BenchLayers.Num(band.Opacity)"
+                               @oninput="e => Emit(layer with { Band = band with { Opacity = Unit(e.Value, band.Opacity) } }, false)"
+                               @onchange="e => Emit(layer with { Band = band with { Opacity = Unit(e.Value, band.Opacity) } }, true)" />
+                    </div>
+                    <div class="cm-field">
+                        <span class="cm-field__label">Padding <output class="cm-mono" aria-hidden="true">@PadPx(layer, band) px</output></span>
+                        <input type="range" min="0" max="80" step="1" aria-label="Padding" value="@PadPx(layer, band)"
+                               @oninput="e => Emit(layer with { Band = band with { Padding = Pad(e.Value, layer, band) } }, false)"
+                               @onchange="e => Emit(layer with { Band = band with { Padding = Pad(e.Value, layer, band) } }, true)" />
+                    </div>
+                    <div class="cm-field">
+                        <span class="cm-field__label">Corner radius <output class="cm-mono" aria-hidden="true">@Px(layer.CornerRadius, SlotHeight) px</output></span>
+                        <input type="range" min="0" max="80" step="1" aria-label="Corner radius" value="@Px(layer.CornerRadius, SlotHeight)"
+                               @oninput="e => Emit(layer with { CornerRadius = Radius(e.Value, layer.CornerRadius) }, false)"
+                               @onchange="e => Emit(layer with { CornerRadius = Radius(e.Value, layer.CornerRadius) }, true)" />
+                    </div>
+                </div>
+            </section>
+        }
+
+        <section class="cm-bench__group" aria-label="Effect">
+            <span class="cm-kicker">Effect · make it pop</span>
+            <div class="cm-bench__effects" role="group" aria-label="Effect preset">
+                @foreach (var (value, label) in BenchLayers.Effects)
+                {
+                    <button type="button" class="cm-bench__choice" aria-pressed="@(effect.Preset == value ? "true" : "false")"
+                            @onclick="() => Emit(layer with { Effect = effect with { Preset = value } }, true)">
+                        <i class="cm-bench__fx-glyph cm-bench__fx-glyph--@value" aria-hidden="true"></i>@label
+                    </button>
+                }
+            </div>
+            <div class="cm-field">
+                <span class="cm-field__label">Depth <output class="cm-mono" aria-hidden="true">@Percent(effect.Depth)</output></span>
+                <input type="range" min="0" max="1" step="0.01" aria-label="Effect depth" value="@BenchLayers.Num(effect.Depth)"
+                       @oninput="e => Emit(layer with { Effect = effect with { Depth = Unit(e.Value, effect.Depth) } }, false)"
+                       @onchange="e => Emit(layer with { Effect = effect with { Depth = Unit(e.Value, effect.Depth) } }, true)" />
+            </div>
+            <div class="cm-bench__grid2">
+                <div class="cm-field">
+                    <span class="cm-field__label">Border <output class="cm-mono" aria-hidden="true">@Px(effect.BorderWidth, SlotHeight) px</output></span>
+                    <input type="range" min="0" max="@(Math.Round(SlotHeight * 0.1))" step="1" aria-label="Border width" value="@Px(effect.BorderWidth, SlotHeight)"
+                           @oninput="e => Emit(layer with { Effect = effect with { BorderWidth = Border(e.Value, effect.BorderWidth) } }, false)"
+                           @onchange="e => Emit(layer with { Effect = effect with { BorderWidth = Border(e.Value, effect.BorderWidth) } }, true)" />
+                </div>
+                <label class="cm-field">
+                    <span class="cm-field__label">Border / glow colour</span>
+                    <span class="cm-bench__swatch"><input type="color" aria-label="Border colour" value="@BenchLayers.ColorInputValue(effect.BorderColor)"
+                           @oninput="e => Emit(layer with { Effect = effect with { BorderColor = Colour(e.Value, effect.BorderColor) } }, false)"
+                           @onchange="e => Emit(layer with { Effect = effect with { BorderColor = Colour(e.Value, effect.BorderColor) } }, true)" /><code>@BenchLayers.ColorInputValue(effect.BorderColor)</code></span>
+                </label>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public OverlayBox? Layer { get; set; }
+    [Parameter] public int SlotWidth { get; set; } = 1280;
+    [Parameter] public int SlotHeight { get; set; } = 720;
+    [Parameter] public int ZIndex { get; set; }
+    [Parameter] public int LayerCount { get; set; }
+    [Parameter] public (int Width, int Height)? Natural { get; set; }
+    [Parameter] public bool CropMode { get; set; }
+    [Parameter] public EventCallback<(OverlayBox Box, bool Commit)> OnChange { get; set; }
+    [Parameter] public EventCallback<string> OnCommand { get; set; }
+    [Parameter] public EventCallback<string> OnShape { get; set; }
+
+    private Task Emit(OverlayBox box, bool commit) => OnChange.InvokeAsync((box, commit));
+
+    private Task SetFamily(OverlayBox layer, string? family)
+    {
+        var chosen = family is { Length: > 0 } && OverlayFonts.Families.Contains(family) ? family : OverlayFonts.Default;
+        return Emit(layer with { FontFamily = chosen, Weight = BenchLayers.NearestWeight(chosen, layer.Weight) }, true);
+    }
+
+    /// <summary>Square and circle frames stay physically square whichever side is typed.</summary>
+    private Task SetSize(OverlayBox layer, double? widthPx, double? heightPx)
+    {
+        var w = widthPx is { } wp ? Math.Clamp(BenchLayers.FromPx(Math.Max(1, wp), SlotWidth), 0.01, 2) : layer.W;
+        var h = heightPx is { } hp ? Math.Clamp(BenchLayers.FromPx(Math.Max(1, hp), SlotHeight), 0.01, 2) : layer.H;
+        if (BenchLayers.IsFixedAspect(layer))
+        {
+            var side = widthPx ?? heightPx ?? layer.W * SlotWidth;
+            w = Math.Clamp(side / SlotWidth, 0.01, 2);
+            h = Math.Clamp(side / SlotHeight, 0.01, 2);
+        }
+        return Emit(layer with { W = w, H = h }, true);
+    }
+
+    private static string Px(double ratio, int size) =>
+        BenchLayers.Num(Math.Round(ratio * size));
+
+    private static string Percent(double value) => $"{Math.Round(value * 100)}%";
+
+    private static double Parse(object? value, double fallback) =>
+        double.TryParse(value?.ToString(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) && double.IsFinite(parsed) ? parsed : fallback;
+
+    private static double Unit(object? value, double fallback) => Math.Clamp(Parse(value, fallback), 0, 1);
+
+    private double Radius(object? value, double fallback) =>
+        Math.Clamp(BenchLayers.FromPx(Parse(value, fallback * SlotHeight), SlotHeight), 0, 0.5);
+
+    private double Border(object? value, double fallback) =>
+        Math.Clamp(BenchLayers.FromPx(Parse(value, fallback * SlotHeight), SlotHeight), 0, 0.1);
+
+    private string PadPx(OverlayBox layer, OverlayBand band) =>
+        BenchLayers.Num(Math.Round(band.Padding * layer.FontSize * SlotHeight));
+
+    /// <summary>Padding is stored as a ratio of the font size, the same unit the composer reads.</summary>
+    private double Pad(object? value, OverlayBox layer, OverlayBand band) =>
+        layer.FontSize <= 0 ? band.Padding : Math.Clamp(Parse(value, band.Padding * layer.FontSize * SlotHeight) / (layer.FontSize * SlotHeight), 0, 2);
+
+    private static string? Text(object? value, int max) =>
+        value?.ToString() is { } s ? (s.Length > max ? s[..max] : s) : null;
+
+    private static string Colour(object? value, string fallback) =>
+        value?.ToString() is { Length: 7 } s && s[0] == '#' ? s.ToUpperInvariant() : fallback;
+}
