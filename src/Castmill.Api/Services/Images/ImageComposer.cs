@@ -496,8 +496,9 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
     }
 
     /// <summary>
-    /// Fits an image layer inside its box: scaled to contain, centred, aspect preserved. The
-    /// editor's CSS preview uses object-fit: contain over the same rect, so the two agree.
+    /// Draws an image layer into its frame. Legacy layers with no crop remain fitted and
+    /// centred. Cropped layers cover the frame using their subject focus and zoom, and the
+    /// frame can clip to a true circle. The editor preview applies the same geometry in CSS.
     /// </summary>
     private static void DrawImageBox(
         SKCanvas canvas, Castmill.Core.Resources.OverlayBox box, int width, int height, byte[] bytes)
@@ -519,16 +520,56 @@ public sealed class ImageComposer(IConfiguration configuration, ILogger<ImageCom
             return;
         }
 
-        var scale = Math.Min(frameWidth / layer.Width, frameHeight / layer.Height);
-        var drawnWidth = layer.Width * scale;
-        var drawnHeight = layer.Height * scale;
-        var target = SKRect.Create(
-            frameLeft + ((frameWidth - drawnWidth) / 2f),
-            frameTop + ((frameHeight - drawnHeight) / 2f),
-            drawnWidth,
-            drawnHeight);
+        var frame = SKRect.Create(frameLeft, frameTop, frameWidth, frameHeight);
+        var shape = box.Shape is "square" or "circle" ? box.Shape : "rectangle";
+        var crop = box.Crop;
 
-        canvas.DrawBitmap(layer, target, SKSamplingOptions.Default);
+        canvas.Save();
+        try
+        {
+            if (shape == "circle")
+            {
+                using var builder = new SKPathBuilder();
+                builder.AddOval(frame);
+                using var circle = builder.Detach();
+                canvas.ClipPath(circle, SKClipOperation.Intersect, antialias: true);
+            }
+            else
+            {
+                canvas.ClipRect(frame, SKClipOperation.Intersect, antialias: true);
+            }
+
+            // A shape is necessarily a cropped frame even when it uses the default focus.
+            if (crop is not null || shape != "rectangle")
+            {
+                crop ??= new Castmill.Core.Resources.OverlayImageCrop();
+                var zoom = (float)Math.Clamp(crop.Zoom, 1, 4);
+                var coverScale = Math.Max(frameWidth / layer.Width, frameHeight / layer.Height) * zoom;
+                var sourceWidth = Math.Min(layer.Width, frameWidth / coverScale);
+                var sourceHeight = Math.Min(layer.Height, frameHeight / coverScale);
+                var focusX = (float)Math.Clamp(crop.FocusX, 0, 1) * layer.Width;
+                var focusY = (float)Math.Clamp(crop.FocusY, 0, 1) * layer.Height;
+                var sourceLeft = Math.Clamp(focusX - (sourceWidth / 2f), 0, layer.Width - sourceWidth);
+                var sourceTop = Math.Clamp(focusY - (sourceHeight / 2f), 0, layer.Height - sourceHeight);
+                var source = SKRect.Create(sourceLeft, sourceTop, sourceWidth, sourceHeight);
+                canvas.DrawBitmap(layer, source, frame, SKSamplingOptions.Default);
+                return;
+            }
+
+            var containScale = Math.Min(frameWidth / layer.Width, frameHeight / layer.Height);
+            var drawnWidth = layer.Width * containScale;
+            var drawnHeight = layer.Height * containScale;
+            var target = SKRect.Create(
+                frameLeft + ((frameWidth - drawnWidth) / 2f),
+                frameTop + ((frameHeight - drawnHeight) / 2f),
+                drawnWidth,
+                drawnHeight);
+            canvas.DrawBitmap(layer, target, SKSamplingOptions.Default);
+        }
+        finally
+        {
+            canvas.Restore();
+        }
     }
 
 }

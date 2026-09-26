@@ -44,7 +44,7 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task Kit_background_then_image_layer_renders_and_saves_the_layer_asset_id()
+    public async Task Image_layer_can_be_cropped_shaped_saved_and_deleted()
     {
         var filled = EmptySlot() with
         {
@@ -88,6 +88,16 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
             Assert.Contains("wall-thumb.png", layer.GetAttribute("src"), StringComparison.Ordinal);
         });
 
+        view.Find("select[aria-label='Layer shape']").Change("circle");
+        view.Find("input[aria-label='Crop zoom']").Input("2.25");
+        view.Find("input[aria-label='Crop horizontal focus']").Input("0.8");
+        view.Find("input[aria-label='Crop vertical focus']").Input("0.3");
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("border-radius:50%", view.Find(".cm-imgeditor__box").GetAttribute("style"), StringComparison.Ordinal);
+            Assert.Contains("cm-imgeditor__layer--cropped", view.Find(".cm-imgeditor__layer").ClassList);
+        });
+
         var saved = filled with
         {
             Overlay = new OverlaySpec([
@@ -104,7 +114,67 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
             var request = Http.Bodies.Single(body =>
                 body.Method == HttpMethod.Put && body.Path.EndsWith("/overlay", StringComparison.Ordinal));
             Assert.Contains(BrandAssetId.ToString(), request.Body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"shape\":\"circle\"", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\"zoom\":2.25", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\"focusX\":0.8", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\"focusY\":0.3", request.Body, StringComparison.Ordinal);
             Assert.Contains("Saved and composited", view.Markup, StringComparison.Ordinal);
+        });
+
+        Http.OnAsync(HttpMethod.Delete,
+            $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay",
+            () => Task.FromResult(StubHttpHandler.Json(filled)));
+        await view.Find("button[aria-label='Delete selected layer']").ClickAsync();
+        Assert.Empty(view.FindAll(".cm-imgeditor__layer"));
+        await view.Find(".cm-manual__save button").ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains(Http.Requests, request => request.Method == HttpMethod.Delete
+                && request.RequestUri!.AbsolutePath.EndsWith("/overlay", StringComparison.Ordinal));
+            Assert.Contains("All layers deleted", view.Markup, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task Text_layer_saves_background_colour_and_opacity()
+    {
+        var filled = EmptySlot() with
+        {
+            State = "Filled",
+            BaseImageUrl = "https://public.example/manual-base.webp",
+            PublishedUrl = "https://public.example/manual-base.webp",
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1),
+        };
+        Http.OnPost($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/base",
+            new OverlaySaveResult(filled, null));
+
+        var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForStateAsync(
+            () => view.FindAll(".cm-studio__manual-tile").Count == 1,
+            TimeSpan.FromSeconds(5));
+        await view.Find(".cm-studio__manual-tile").ClickAsync();
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", Preview(filled));
+        await view.Find(".cm-manual__rail .cm-studio__pick").ClickAsync();
+
+        await view.FindAll(".cm-manual__rail button")
+            .Single(button => button.TextContent.Trim() == "+ Text")
+            .ClickAsync();
+        view.Find("input[aria-label='Text background']").Change(true);
+        view.Find("input[aria-label='Background colour']").Change("#336699");
+        view.Find("input[aria-label='Background opacity']").Input("0.35");
+
+        Http.OnPut($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/overlay",
+            new OverlaySaveResult(filled, false));
+        await view.Find(".cm-manual__save button").ClickAsync();
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var request = Http.Bodies.Single(body =>
+                body.Method == HttpMethod.Put && body.Path.EndsWith("/overlay", StringComparison.Ordinal));
+            Assert.Contains("\"color\":\"#336699\"", request.Body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"opacity\":0.35", request.Body, StringComparison.Ordinal);
+            Assert.Contains("--cm-imgeditor-band:#33669959", view.Find(".cm-imgeditor__box").GetAttribute("style"), StringComparison.OrdinalIgnoreCase);
         });
     }
 

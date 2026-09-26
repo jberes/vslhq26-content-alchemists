@@ -187,6 +187,16 @@ public sealed record OverlayBand(
     [property: Range(0, 1)] double Radius = 0.12);
 
 /// <summary>
+/// Crop controls for an image layer. Focus coordinates identify the subject inside the source
+/// image (0–1); zoom is applied after the image covers its frame. A null crop on
+/// <see cref="OverlayBox"/> preserves the legacy fit-the-whole-image behaviour.
+/// </summary>
+public sealed record OverlayImageCrop(
+    [property: Range(0, 1)] double FocusX = 0.5,
+    [property: Range(0, 1)] double FocusY = 0.5,
+    [property: Range(1, 4)] double Zoom = 1);
+
+/// <summary>
 /// One text box on the image. Geometry is in RATIOS of the slot (0–1) so the same spec renders
 /// on the editor's preview and the server's full-size composite; FontSize is a ratio of the
 /// slot height. Weight is 400 | 600 | 700. Align is left | center | right.
@@ -204,7 +214,11 @@ public sealed record OverlayBox(
     [property: MaxLength(10)] string Align = "left",
     OverlayBand? Band = null,
     /// <summary>Optional logo asset from the brand kit drawn into this box instead of text.</summary>
-    Guid? LogoAssetId = null);
+    Guid? LogoAssetId = null,
+    /// <summary>Optional cover crop for an image layer; null keeps the whole image visible.</summary>
+    OverlayImageCrop? Crop = null,
+    /// <summary>Image-frame mask: rectangle | square | circle. Ignored by text layers.</summary>
+    [property: MaxLength(10)] string Shape = "rectangle");
 
 public sealed record OverlaySpec(
     [property: Required, MaxLength(12)] IReadOnlyList<OverlayBox> Boxes);

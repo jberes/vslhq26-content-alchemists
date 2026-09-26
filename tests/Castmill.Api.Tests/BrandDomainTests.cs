@@ -207,6 +207,50 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
     }
 
     [Fact]
+    public async Task Selected_asset_links_copy_to_another_brand_without_duplicating_files()
+    {
+        var client = await AuthedClientAsync();
+        var source = await CreateBrandAsync(client);
+        var destination = await CreateBrandAsync(client);
+
+        var firstAsset = await (await client.PostAsJsonAsync("/api/v1/assets",
+            new AssetCreateRequest("logo.png", "image/png", 100))).Content
+            .ReadFromJsonAsync<AssetResponse>();
+        var secondAsset = await (await client.PostAsJsonAsync("/api/v1/assets",
+            new AssetCreateRequest("portrait.png", "image/png", 100))).Content
+            .ReadFromJsonAsync<AssetResponse>();
+        var firstLink = await (await client.PostAsJsonAsync($"/api/v1/brands/{source.Id}/assets",
+            new BrandAssetLinkRequest(firstAsset!.Id, "logo", "Primary mark"))).Content
+            .ReadFromJsonAsync<BrandAssetResponse>();
+        var secondLink = await (await client.PostAsJsonAsync($"/api/v1/brands/{source.Id}/assets",
+            new BrandAssetLinkRequest(secondAsset!.Id, "face", "The host"))).Content
+            .ReadFromJsonAsync<BrandAssetResponse>();
+
+        // An asset already in the destination is skipped rather than making the bulk copy fail.
+        (await client.PostAsJsonAsync($"/api/v1/brands/{destination.Id}/assets",
+            new BrandAssetLinkRequest(firstAsset.Id, "other", "Destination override")))
+            .EnsureSuccessStatusCode();
+
+        var response = await client.PostAsJsonAsync($"/api/v1/brands/{destination.Id}/assets/copy",
+            new BrandAssetCopyRequest(source.Id, [firstLink!.Id, secondLink!.Id]));
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<BrandAssetCopyResult>();
+        Assert.Equal(1, result!.Copied);
+        Assert.Equal(1, result.AlreadyPresent);
+
+        var sourceKit = await client.GetFromJsonAsync<List<BrandAssetResponse>>(
+            $"/api/v1/brands/{source.Id}/assets");
+        var destinationKit = await client.GetFromJsonAsync<List<BrandAssetResponse>>(
+            $"/api/v1/brands/{destination.Id}/assets");
+        Assert.Equal(2, sourceKit!.Count);
+        Assert.Equal(2, destinationKit!.Count);
+        Assert.Equal(secondAsset.Id, destinationKit.Single(item => item.Label == "The host").AssetId);
+        Assert.Equal("face", destinationKit.Single(item => item.Label == "The host").Kind);
+        Assert.Equal("Destination override",
+            destinationKit.Single(item => item.AssetId == firstAsset.Id).Label);
+    }
+
+    [Fact]
     public async Task Brand_voice_template_and_context_links_reach_the_generation_prompt()
     {
         var capture = new CapturingFoundryFactory();

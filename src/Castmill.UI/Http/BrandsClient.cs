@@ -72,6 +72,13 @@ public sealed class BrandsClient(ApiClient api)
             $"api/v1/brands/{brandId}/assets/{brandAssetId}/kind",
             new BrandAssetKindRequest(kind), etag: null, ct);
 
+    public Task<BrandAssetCopyResult> CopyAssetsAsync(
+        Guid destinationBrandId, Guid sourceBrandId, IReadOnlyList<Guid> brandAssetIds,
+        CancellationToken ct = default) =>
+        api.PostAsync<BrandAssetCopyRequest, BrandAssetCopyResult>(
+            $"api/v1/brands/{destinationBrandId}/assets/copy",
+            new BrandAssetCopyRequest(sourceBrandId, brandAssetIds), anonymous: false, ct);
+
     public Task UnlinkAssetAsync(Guid brandId, Guid brandAssetId, CancellationToken ct = default) =>
         api.DeleteAsync($"api/v1/brands/{brandId}/assets/{brandAssetId}", ct);
 

@@ -201,6 +201,16 @@ public sealed record BrandAssetLabelRequest([property: MaxLength(200)] string? L
 public sealed record BrandAssetKindRequest(
     [property: Required, MinLength(1), MaxLength(20)] string Kind);
 
+/// <summary>
+/// Copies existing brand-kit links to another brand without duplicating the underlying
+/// uploaded files. The destination gets independent kind/label metadata.
+/// </summary>
+public sealed record BrandAssetCopyRequest(
+    [property: Required] Guid SourceBrandId,
+    [property: Required, MinLength(1), MaxLength(100)] IReadOnlyList<Guid> BrandAssetIds);
+
+public sealed record BrandAssetCopyResult(int Copied, int AlreadyPresent);
+
 public sealed record BrandAssetResponse(
     Guid Id, Guid BrandId, Guid AssetId, string Kind, string? Label,
     string FileName, string ContentType, DateTimeOffset CreatedAt);

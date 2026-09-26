@@ -17,6 +17,17 @@ public sealed class PlanHelpersTests
         return image.Encode(SKEncodedImageFormat.Png, 100).ToArray();
     }
 
+    private static byte[] SplitPng(int w, int h, SKColor left, SKColor right)
+    {
+        using var bitmap = new SKBitmap(w, h);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(left);
+        using var paint = new SKPaint { Color = right };
+        canvas.DrawRect(w / 2f, 0, w / 2f, h, paint);
+        using var image = SKImage.FromBitmap(bitmap);
+        return image.Encode(SKEncodedImageFormat.Png, 100).ToArray();
+    }
+
     [Fact]
     public void The_overlay_composite_draws_boxes_where_the_spec_says_and_wraps_long_text()
     {
@@ -90,6 +101,41 @@ public sealed class PlanHelpersTests
 
         using var bitmap = ImageReferenceResolver.TryDecode(result.Image)!;
         Assert.Equal(SKColors.DimGray.Red, bitmap.GetPixel(200, 200).Red);
+    }
+
+    [Fact]
+    public void An_image_layer_can_crop_to_its_focus_and_clip_to_a_circle()
+    {
+        var composer = new ImageComposer(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ImageComposer>.Instance);
+        var layerId = Guid.NewGuid();
+        var spec = new OverlaySpec([
+            new OverlayBox(
+                "portrait", string.Empty, 0.25, 0.25, 0.5, 0.5,
+                LogoAssetId: layerId,
+                Crop: new OverlayImageCrop(FocusX: 1, FocusY: 0.5, Zoom: 1),
+                Shape: "circle"),
+        ]);
+
+        var result = composer.ComposeOverlay(
+            Png(400, 400, SKColors.DimGray),
+            spec,
+            new Dictionary<Guid, byte[]>
+            {
+                [layerId] = SplitPng(200, 100, SKColors.Red, SKColors.Blue),
+            });
+
+        using var bitmap = ImageReferenceResolver.TryDecode(result.Image)!;
+        var centre = bitmap.GetPixel(200, 200);
+        Assert.True(centre.Blue > 200 && centre.Red < 60,
+            $"expected the crop to focus the blue half, got {centre}");
+
+        // Inside the square frame but outside its circular mask remains the base image.
+        var clippedCorner = bitmap.GetPixel(110, 110);
+        Assert.Equal(SKColors.DimGray.Red, clippedCorner.Red);
+        Assert.Equal(SKColors.DimGray.Green, clippedCorner.Green);
+        Assert.Equal(SKColors.DimGray.Blue, clippedCorner.Blue);
     }
 
     [Fact]

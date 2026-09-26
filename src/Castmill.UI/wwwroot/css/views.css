@@ -1771,14 +1771,19 @@ button.cm-intent {
     }
 }
 
-/* An image layer inside its editor box. contain, not cover: the server fits the asset the
-   same way, so dragging a corner here scales the picture exactly as it will composite. */
+/* An image layer keeps the whole asset visible until Crop image (or a shape) is selected.
+   Cropped layers cover their frame and are clipped by the box; object-position and transform
+   are written inline from the persisted focus/zoom values. */
 .cm-imgeditor__layer {
     inline-size: 100%;
     block-size: 100%;
     object-fit: contain;
     pointer-events: none;
     user-select: none;
+}
+
+.cm-imgeditor__layer--cropped {
+    object-fit: cover;
 }
 
 .cm-layer-picker {
@@ -5778,6 +5783,15 @@ button.cm-intent {
     flex: 1 1 8rem;
 }
 
+.cm-imgeditor-panel__crop {
+    display: grid;
+    gap: var(--cm-space-2);
+    padding: var(--cm-space-3);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-sm);
+    background: var(--cm-surface-sunken);
+}
+
 .cm-imgeditor-panel__color {
     inline-size: 3rem;
     block-size: 2rem;
@@ -8221,12 +8235,59 @@ body.cm-wire-dragging [data-wire-drag] {
    thumbnail wouldn't. The label is an input because it IS the prompt text. */
 .cm-asset-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
     gap: var(--cm-space-3);
 }
 
+.cm-brand__asset-tools {
+    position: sticky;
+    inset-block-start: var(--cm-space-2);
+    z-index: 12;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2) var(--cm-space-3);
+    margin-block: var(--cm-space-4) var(--cm-space-2);
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border: 1px solid color-mix(in srgb, var(--cm-accent) 45%, var(--cm-rule));
+    border-radius: var(--cm-radius-md);
+    background: color-mix(in srgb, var(--cm-surface-raised) 96%, transparent);
+    box-shadow: var(--cm-shadow-sm);
+    backdrop-filter: blur(12px);
+}
+
+.cm-brand__asset-select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-2);
+    cursor: pointer;
+}
+
+.cm-brand__asset-bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--cm-space-2);
+    margin-inline-start: auto;
+}
+
+.cm-brand__asset-bulk-actions .cm-button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--cm-space-1);
+    min-block-size: 2rem;
+    padding: var(--cm-space-1) var(--cm-space-2);
+}
+
+.cm-brand__asset-bulk-actions .cm-icon {
+    inline-size: 1rem;
+    block-size: 1rem;
+}
+
+.cm-brand__asset-help {
+    margin-block: var(--cm-space-3);
+}
+
 .cm-asset-card {
-    position: relative;
     display: flex;
     flex-direction: column;
     gap: var(--cm-space-1);
@@ -8235,6 +8296,17 @@ body.cm-wire-dragging [data-wire-drag] {
     border: 1px solid var(--cm-rule);
     border-radius: var(--cm-radius-md);
     background: var(--cm-surface-raised);
+}
+
+.cm-asset-card--selected {
+    border-color: var(--cm-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--cm-accent) 22%, transparent);
+}
+
+.cm-asset-card__media {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--cm-radius-sm);
 }
 
 .cm-asset-card__preview {
@@ -8262,22 +8334,15 @@ body.cm-wire-dragging [data-wire-drag] {
     background: var(--cm-surface-sunken);
 }
 
-.cm-asset-card__delete {
-    position: absolute;
-    inset-block-start: var(--cm-space-1);
-    inset-inline-end: var(--cm-space-1);
-    background: var(--cm-surface-raised);
-    border-radius: var(--cm-radius-sm);
-}
-
 .cm-asset-card__type {
     position: absolute;
-    inset-block-start: var(--cm-space-2);
+    inset-block-end: var(--cm-space-2);
     inset-inline-start: var(--cm-space-2);
+    z-index: 2;
     display: flex;
     align-items: center;
     gap: var(--cm-space-1);
-    max-inline-size: calc(100% - 3.5rem);
+    max-inline-size: calc(100% - var(--cm-space-4));
     padding: var(--cm-space-1) var(--cm-space-2);
     border: 1px solid color-mix(in srgb, var(--cm-rule-strong) 75%, transparent);
     border-radius: 999px;
@@ -8286,14 +8351,97 @@ body.cm-wire-dragging [data-wire-drag] {
     color: var(--cm-on-surface-muted);
     font-size: var(--cm-text-kicker);
     opacity: 0;
+    pointer-events: none;
+    transform: translateY(2px);
+    transition: opacity var(--cm-motion), transform var(--cm-motion);
+}
+
+.cm-asset-card__select {
+    position: absolute;
+    inset-block-start: var(--cm-space-2);
+    inset-inline-start: var(--cm-space-2);
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    border: 1px solid color-mix(in srgb, var(--cm-rule-strong) 75%, transparent);
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-surface-raised) 94%, transparent);
+    box-shadow: var(--cm-shadow-sm);
+    cursor: pointer;
+    opacity: 0;
     transform: translateY(-2px);
     transition: opacity var(--cm-motion), transform var(--cm-motion);
 }
 
-.cm-asset-card:hover .cm-asset-card__type,
-.cm-asset-card:focus-within .cm-asset-card__type {
+.cm-asset-card__select input {
+    inline-size: 1rem;
+    block-size: 1rem;
+    margin: 0;
+    accent-color: var(--cm-accent);
+    cursor: pointer;
+}
+
+.cm-asset-card__hover-actions {
+    position: absolute;
+    inset-block-start: var(--cm-space-2);
+    inset-inline-end: var(--cm-space-2);
+    z-index: 3;
+    display: flex;
+    gap: var(--cm-space-1);
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity var(--cm-motion), transform var(--cm-motion);
+}
+
+.cm-asset-card__hover-action {
+    display: grid;
+    place-items: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--cm-rule-strong) 75%, transparent);
+    border-radius: var(--cm-radius-sm);
+    background: color-mix(in srgb, var(--cm-surface-raised) 94%, transparent);
+    box-shadow: var(--cm-shadow-sm);
+    color: var(--cm-on-surface);
+    cursor: pointer;
+}
+
+.cm-asset-card__hover-action:hover,
+.cm-asset-card__hover-action:focus-visible {
+    border-color: var(--cm-accent);
+    color: var(--cm-accent);
+}
+
+.cm-asset-card__hover-action--danger:hover,
+.cm-asset-card__hover-action--danger:focus-visible {
+    border-color: var(--cm-danger);
+    background: var(--cm-danger);
+    color: white;
+}
+
+.cm-asset-card__hover-action:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.cm-asset-card__hover-action .cm-icon {
+    inline-size: 1rem;
+    block-size: 1rem;
+}
+
+.cm-asset-card:hover :is(.cm-asset-card__type, .cm-asset-card__select, .cm-asset-card__hover-actions),
+.cm-asset-card:focus-within :is(.cm-asset-card__type, .cm-asset-card__select, .cm-asset-card__hover-actions),
+.cm-asset-card--selected .cm-asset-card__select {
     opacity: 1;
     transform: translateY(0);
+}
+
+.cm-asset-card:hover .cm-asset-card__type,
+.cm-asset-card:focus-within .cm-asset-card__type {
+    pointer-events: auto;
 }
 
 .cm-asset-card__type select {
@@ -8309,15 +8457,31 @@ body.cm-wire-dragging [data-wire-drag] {
 }
 
 @media (hover: none) {
-    .cm-asset-card__type {
+    .cm-asset-card :is(.cm-asset-card__type, .cm-asset-card__select, .cm-asset-card__hover-actions) {
         opacity: 1;
         transform: none;
+    }
+
+    .cm-asset-card__type {
+        pointer-events: auto;
     }
 }
 
 .cm-asset-card__label {
     font-size: var(--cm-text-meta);
     padding: var(--cm-space-1) var(--cm-space-2);
+}
+
+.cm-asset-copy-dialog {
+    position: relative;
+    inline-size: min(28rem, calc(100vw - 2rem));
+}
+
+@media (max-width: 599.98px) {
+    .cm-brand__asset-bulk-actions {
+        inline-size: 100%;
+        margin-inline-start: 0;
+    }
 }
 
 .cm-brand-asset-viewer {

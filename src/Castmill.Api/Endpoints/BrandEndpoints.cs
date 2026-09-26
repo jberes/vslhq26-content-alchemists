@@ -51,6 +51,8 @@ public static partial class BrandEndpoints
         group.MapGet("/{id:guid}/assets", ListAssetsAsync);
         group.MapPost("/{id:guid}/assets", LinkAssetAsync)
             .Validate<BrandAssetLinkRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
+        group.MapPost("/{id:guid}/assets/copy", CopyAssetsAsync)
+            .Validate<BrandAssetCopyRequest>().RequireRateLimiting("writes").SerializeBrandWrite();
         group.MapDelete("/{id:guid}/assets/{brandAssetId:guid}", UnlinkAssetAsync)
             .RequireRateLimiting("writes").SerializeBrandWrite();
         group.MapPatch("/{id:guid}/assets/{brandAssetId:guid}", RenameAssetAsync)
@@ -537,6 +539,77 @@ public static partial class BrandEndpoints
         return Results.Created($"/api/v1/brands/{id}/assets/{link.Id}", new BrandAssetResponse(
             link.Id, link.BrandId, link.AssetId, link.Kind, link.Label,
             asset.FileName, asset.ContentType, link.CreatedAt));
+    }
+
+    /// <summary>
+    /// Reuses the uploaded Asset rows while copying their kit metadata to a destination
+    /// brand. The route brand is the destination so the serializable brand-write lock also
+    /// protects the destination's unique (brand, asset) links from concurrent copies.
+    /// </summary>
+    private static async Task<IResult> CopyAssetsAsync(
+        Guid id,
+        BrandAssetCopyRequest request,
+        ClaimsPrincipal principal,
+        ITenantProvider tenant,
+        IBrandAccessService access,
+        CastmillDbContext db,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var destination = await FindAccessAsync(id, principal, tenant, access, tracking: false, ct);
+        var source = await FindAccessAsync(
+            request.SourceBrandId, principal, tenant, access, tracking: false, ct);
+        if (destination is null || source is null
+            || destination.Brand.TenantId != source.Brand.TenantId)
+        {
+            return Results.NotFound();
+        }
+
+        var requestedIds = request.BrandAssetIds.Distinct().ToList();
+        if (requestedIds.Count == 0)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.BrandAssetIds)] = ["Select at least one asset."],
+            });
+        }
+
+        var sourceLinks = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(item => item.TenantId == source.Brand.TenantId
+                && item.BrandId == request.SourceBrandId
+                && requestedIds.Contains(item.Id))
+            .ToListAsync(ct);
+        if (sourceLinks.Count != requestedIds.Count)
+        {
+            return Results.NotFound();
+        }
+
+        var sourceAssetIds = sourceLinks.Select(item => item.AssetId).ToList();
+        var existingAssetIds = await db.BrandAssets.IgnoreQueryFilters()
+            .Where(item => item.TenantId == destination.Brand.TenantId
+                && item.BrandId == id
+                && sourceAssetIds.Contains(item.AssetId))
+            .Select(item => item.AssetId)
+            .ToHashSetAsync(ct);
+
+        var createdAt = clock.GetUtcNow();
+        var copies = sourceLinks
+            .Where(item => !existingAssetIds.Contains(item.AssetId))
+            .Select(item => new BrandAsset
+            {
+                Id = Guid.NewGuid(),
+                TenantId = destination.Brand.TenantId,
+                BrandId = id,
+                AssetId = item.AssetId,
+                Kind = item.Kind,
+                Label = item.Label,
+                CreatedAt = createdAt,
+            })
+            .ToList();
+
+        db.BrandAssets.AddRange(copies);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new BrandAssetCopyResult(copies.Count, sourceLinks.Count - copies.Count));
     }
 
     /// <summary>

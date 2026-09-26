@@ -6,6 +6,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
     let campaignId = null;
     let campaignName = null;
     let brandId = null;
+    let destinationBrandId = null;
     let assetId = null;
 
     try {
@@ -25,6 +26,13 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         });
         expect(brand.status()).toBe(201);
         brandId = (await brand.json()).id;
+
+        const destinationBrand = await request.post('http://localhost:5015/api/v1/brands', {
+            headers: bearer(accessToken),
+            data: { name: `Image UX Copy Target ${Date.now()}`, styleCard: { voice: 'Clear and direct.' } },
+        });
+        expect(destinationBrand.status()).toBe(201);
+        destinationBrandId = (await destinationBrand.json()).id;
 
         const studioWall = readFileSync(
             new URL('../../src/Castmill.Web/wwwroot/favicon.png', import.meta.url));
@@ -267,6 +275,58 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.getByText('Face · 1')).toBeVisible();
         await expect(typeSwitcher).toHaveValue('face');
 
+        // Individual actions stay out of the visual layout until the card is hovered or
+        // keyboard-focused. The selected state keeps its checkbox available afterward.
+        const copyThisAsset = page.getByRole('button', {
+            name: 'Copy Studio wall to another brand',
+        });
+        const deleteThisAsset = page.getByRole('button', {
+            name: 'Delete Studio wall from this brand',
+        });
+        await page.getByRole('tab', { name: 'Asset kit' }).hover();
+        await expect(page.locator('.cm-asset-card__hover-actions')).toHaveCSS('opacity', '0');
+        await page.locator('.cm-asset-card').hover();
+        await expect(page.locator('.cm-asset-card__hover-actions')).toHaveCSS('opacity', '1');
+        await expect(copyThisAsset).toBeVisible();
+        await expect(deleteThisAsset).toBeVisible();
+        await copyThisAsset.click();
+        const singleCopyDialog = page.getByRole('dialog', { name: 'Copy to another brand' });
+        await expect(singleCopyDialog).toBeVisible();
+        await expect(singleCopyDialog.getByLabel('Copy Studio wall to brand')).toBeVisible();
+        await singleCopyDialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(singleCopyDialog).toBeHidden();
+
+        // The Asset Kit supports a real multi-select copy workflow. The destination gets a
+        // separate brand link while both brands continue to reference the same uploaded file.
+        await page.getByLabel('Select Studio wall').check();
+        const selectedActions = page.getByLabel('Selected asset actions');
+        await expect(selectedActions).toBeVisible();
+        await expect(selectedActions.getByRole('button', { name: 'Delete selected assets from this brand' }))
+            .toBeVisible();
+        await selectedActions.getByRole('button', { name: 'Copy selected assets to another brand' }).click();
+        const bulkCopyDialog = page.getByRole('dialog', { name: 'Copy 1 selected asset' });
+        await bulkCopyDialog.getByLabel('Destination brand for selected assets')
+            .selectOption(destinationBrandId);
+        const copyAssets = page.waitForResponse(response =>
+            response.url().endsWith(`/api/v1/brands/${destinationBrandId}/assets/copy`)
+            && response.request().method() === 'POST');
+        await bulkCopyDialog.getByRole('button', { name: 'Copy 1 asset' }).click();
+        const copyAssetsResponse = await copyAssets;
+        expect(copyAssetsResponse.ok(), await copyAssetsResponse.text()).toBeTruthy();
+        expect(copyAssetsResponse.request().postDataJSON()).toMatchObject({
+            sourceBrandId: brandId,
+        });
+        await expect(page.locator('.cm-brand__section > [role="status"]'))
+            .toContainText('Copied 1 asset to Image UX Copy Target');
+        await expect(page.locator('.cm-asset-card--selected')).toHaveCount(0);
+        const destinationKit = await request.get(
+            `http://localhost:5015/api/v1/brands/${destinationBrandId}/assets`, {
+                headers: bearer(accessToken),
+            });
+        expect(destinationKit.ok()).toBeTruthy();
+        const copiedAsset = (await destinationKit.json()).find(item => item.assetId === assetId);
+        expect(copiedAsset).toMatchObject({ kind: 'face', label: 'Studio wall' });
+
         // Starter templates are seeded when the brand is created (ADR-069), so opening the tab
         // no longer POSTs a default — the editor simply opens on the seeded YouTube template.
         await page.getByRole('tab', { name: 'Templates' }).click();
@@ -391,6 +451,34 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
             .toBeVisible();
         await expect(page.getByText('Internal campaign summary', { exact: true })).toHaveCount(0);
 
+        // A dialog that happens to remain visible can still have killed its Blazor circuit.
+        // Treat the host error bar and renderer exceptions as first-class failures, and open
+        // every content shape before exercising the rest of the editor workflow.
+        const rendererErrors = [];
+        page.on('console', message => {
+            const text = message.text();
+            if (message.type() === 'error'
+                && /Unhandled exception rendering component|System\.(?:ArgumentNull|InvalidOperation)Exception/.test(text)) {
+                rendererErrors.push(text);
+            }
+        });
+        page.on('pageerror', error => rendererErrors.push(error.stack ?? error.message));
+        const expectHealthyCircuit = async () => {
+            await expect(page.locator('#blazor-error-ui')).toBeHidden();
+            expect(rendererErrors).toEqual([]);
+        };
+
+        for (const title of ['Launch article', 'Launch video package', 'Launch post']) {
+            const group = page.locator('.cm-studio__group', { hasText: title });
+            await group.getByRole('button', { name: 'Create from scratch' }).click();
+            const openedEditor = page.getByRole('dialog', { name: 'Build an image' });
+            await expect(openedEditor).toBeVisible();
+            await expectHealthyCircuit();
+            await openedEditor.getByRole('button', { name: 'Close' }).click();
+            await expect(openedEditor).toHaveCount(0);
+            await expectHealthyCircuit();
+        }
+
         // The no-model editor is a complete browser workflow: choose a real kit image as the
         // background, add it again as a movable layer, then persist the composite. This used
         // to be absent from E2E coverage, so a click-time circuit error shipped unnoticed.
@@ -399,6 +487,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         const manualEditor = page.getByRole('dialog', { name: 'Build an image' });
         await expect(manualEditor).toBeVisible();
         await expect(manualEditor).toContainText('Start with a background.');
+        await expectHealthyCircuit();
 
         const baseResponse = page.waitForResponse(response =>
             response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/base`)
@@ -411,18 +500,70 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await manualEditor.locator('.cm-layer-picker').getByTitle('Studio wall').click();
         await expect(manualEditor.locator('.cm-imgeditor__layer')).toBeVisible();
 
+        // Image layers expose a real crop tool and frame shape. A square/circle is kept
+        // physically square even though the canvas uses ratio-based geometry.
+        const shape = manualEditor.getByLabel('Layer shape');
+        await expect(shape.locator('option')).toHaveText(['Rectangle', 'Square', 'Circle']);
+        await shape.selectOption('square');
+        let frame = await manualEditor.locator('.cm-imgeditor__box--selected').boundingBox();
+        expect(Math.abs(frame.width - frame.height)).toBeLessThanOrEqual(2);
+        await shape.selectOption('circle');
+        await manualEditor.getByLabel('Crop zoom').fill('2.25');
+        await manualEditor.getByLabel('Crop horizontal focus').fill('0.8');
+        await manualEditor.getByLabel('Crop vertical focus').fill('0.3');
+        await expect(manualEditor.locator('.cm-imgeditor__box--selected'))
+            .toHaveAttribute('data-layer-shape', 'circle');
+        await expect(manualEditor.locator('.cm-imgeditor__layer'))
+            .toHaveClass(/cm-imgeditor__layer--cropped/);
+
+        // Delete is immediate on the canvas. Re-add the layer so the persisted composite
+        // below also proves the crop/shape fields survive the API round trip.
+        await manualEditor.getByRole('button', { name: 'Delete selected layer' }).click();
+        await expect(manualEditor.locator('.cm-imgeditor__layer')).toHaveCount(0);
+        await manualEditor.getByRole('button', { name: '+ Image', exact: true }).click();
+        await manualEditor.locator('.cm-layer-picker').getByTitle('Studio wall').click();
+        await manualEditor.getByLabel('Layer shape').selectOption('circle');
+        await manualEditor.getByLabel('Crop zoom').fill('1.75');
+        await manualEditor.getByLabel('Crop horizontal focus').fill('0.7');
+
+        // Text backgrounds are independently colourable and translucent.
+        await manualEditor.getByRole('button', { name: '+ Text', exact: true }).click();
+        await manualEditor.getByLabel('Text background').check();
+        await manualEditor.getByLabel('Background colour').fill('#336699');
+        await manualEditor.getByLabel('Background opacity').fill('0.35');
+
         const overlayResponse = page.waitForResponse(response =>
             response.url().endsWith(`/api/v1/campaigns/${campaignId}/image-slots/${slotId}/overlay`)
             && response.request().method() === 'PUT');
         await manualEditor.getByRole('button', { name: 'Save image' }).click();
-        expect((await overlayResponse).ok()).toBeTruthy();
+        const savedOverlay = await overlayResponse;
+        expect(savedOverlay.ok()).toBeTruthy();
+        const overlayPayload = savedOverlay.request().postDataJSON();
+        const savedImageLayer = overlayPayload.boxes.find(box => box.logoAssetId);
+        const savedTextLayer = overlayPayload.boxes.find(box => !box.logoAssetId);
+        expect(savedImageLayer.shape).toBe('circle');
+        expect(savedImageLayer.crop).toMatchObject({ focusX: 0.7, zoom: 1.75 });
+        expect(savedTextLayer.band).toMatchObject({ color: '#336699', opacity: 0.35 });
         await expect(manualEditor.getByRole('button', { name: 'Saved' })).toBeDisabled();
         await page.keyboard.press('Escape');
         await expect(manualEditor).toHaveCount(0);
+        await expectHealthyCircuit();
+
+        // Reopening is a different render path: the canvas and saved layers exist on the
+        // dialog's first frame, so interop attaches immediately instead of after base upload.
+        await launchGroup.getByRole('button', { name: 'Create from scratch' }).click();
+        await expect(manualEditor.locator('.cm-imgeditor > img')).toBeVisible();
+        await expect(manualEditor.locator('.cm-imgeditor__layer')).toBeVisible();
+        await expect(manualEditor.locator('.cm-imgeditor__box[data-layer-shape="circle"]')).toHaveCount(1);
+        await expect(manualEditor.locator('.cm-imgeditor__text')).toHaveCount(1);
+        await expectHealthyCircuit();
+        await manualEditor.getByRole('button', { name: 'Close' }).click();
+        await expect(manualEditor).toHaveCount(0);
+        await expectHealthyCircuit();
 
         // ADR-F43: the sheet opens with the drawer closed — coverage first, editor on demand.
         await expect(page.locator('.cm-studio__drawer')).toHaveCount(0);
-        await page.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
+        await launchGroup.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
         await expect(page.locator('.cm-studio__drawer')).toBeVisible();
         await expect(page).toHaveURL(new RegExp(`slot=${slotId}`));
         await expect(page.locator('.cm-studio__context'))
@@ -508,6 +649,11 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         }
         if (accessToken && brandId) {
             await request.delete(`http://localhost:5015/api/v1/brands/${brandId}`, {
+                headers: bearer(accessToken),
+            });
+        }
+        if (accessToken && destinationBrandId) {
+            await request.delete(`http://localhost:5015/api/v1/brands/${destinationBrandId}`, {
                 headers: bearer(accessToken),
             });
         }

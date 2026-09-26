@@ -41,6 +41,7 @@ export function attach(stage, dotnet) {
         drag = {
             kind: handle ? 'resize' : 'move',
             id: box.dataset.box,
+            shape: box.dataset.layerShape || 'rectangle',
             el: box,
             startX: e.clientX, startY: e.clientY,
             x: (b.left - r.left) / r.width, y: (b.top - r.top) / r.height,
@@ -66,8 +67,18 @@ export function attach(stage, dotnet) {
             x = clamp(x + dx, 0, 1 - w);
             y = clamp(y + dy, 0, 1 - h);
         } else {
-            w = clamp(w + dx, 0.04, 1 - x);
-            h = clamp(h + dy, 0.04, 1 - y);
+            if (drag.shape === 'square' || drag.shape === 'circle') {
+                const proposedWidth = clamp(w + dx, 0.04, 1 - x) * r.width;
+                const proposedHeight = clamp(h + dy, 0.04, 1 - y) * r.height;
+                const maxSide = Math.min((1 - x) * r.width, (1 - y) * r.height);
+                const minSide = Math.min(maxSide, Math.max(0.04 * r.width, 0.04 * r.height));
+                const side = clamp(Math.max(proposedWidth, proposedHeight), minSide, maxSide);
+                w = side / r.width;
+                h = side / r.height;
+            } else {
+                w = clamp(w + dx, 0.04, 1 - x);
+                h = clamp(h + dy, 0.04, 1 - y);
+            }
         }
         drag.live = { x, y, w, h };
         drag.el.style.left = `${x * 100}%`;
@@ -155,16 +166,22 @@ export function attach(stage, dotnet) {
  * interaction; this listener closes the focus gap and is disposed with the dialog.
  * @param {{invokeMethodAsync: (name: string) => Promise<unknown>}} dotnet
  */
+let escapeListener = null;
+
 export function listenForEscape(dotnet) {
+    stopListeningForEscape();
     const onKeyDown = event => {
         if (event.key === 'Escape') {
             dotnet.invokeMethodAsync('ManualEscapeAsync');
         }
     };
     document.addEventListener('keydown', onKeyDown);
-    return {
-        dispose() {
-            document.removeEventListener('keydown', onKeyDown);
-        },
-    };
+    escapeListener = onKeyDown;
+}
+
+export function stopListeningForEscape() {
+    if (escapeListener) {
+        document.removeEventListener('keydown', escapeListener);
+        escapeListener = null;
+    }
 }

@@ -908,13 +908,14 @@
                             @foreach (var box in _overlayDraft)
                             {
                                 <div class="cm-imgeditor__box @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null) @(_editorMode == "boxes" ? "cm-imgeditor__box--live" : null)"
-                                     data-box="@box.Id" style="@BoxStyle(box)"
+                                     data-box="@box.Id" data-layer-shape="@LayerShape(box)" style="@BoxStyle(box)"
                                      @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
                                     @if (box.LogoAssetId is { } layerId && _kitPreviews.TryGetValue(LayerAssetId(layerId), out var layerThumb))
                                     {
                                         @* object-fit: contain mirrors the server's fit exactly,
                                            so what is dragged here is what gets composited. *@
-                                        <img class="cm-imgeditor__layer" src="@layerThumb" alt="" draggable="false" />
+                                        <img class="cm-imgeditor__layer @(UsesImageCrop(box) ? "cm-imgeditor__layer--cropped" : null)"
+                                             style="@LayerStyle(box)" src="@layerThumb" alt="" draggable="false" />
                                     }
                                     else if (box.LogoAssetId is not null)
                                     {
@@ -1054,68 +1055,112 @@
                         }
                         @if (SelectedBox is { } sel)
                         {
-                            <label class="cm-field">
-                                <span class="cm-field__label">Text</span>
-                                <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Overlay text"
-                                          value="@sel.Text" @oninput="e => UpdateBox(sel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
-                            </label>
-                            <div class="cm-imgeditor-panel__row">
-                                <label class="cm-field">
-                                    <span class="cm-field__label">Size</span>
-                                    <input type="range" min="0.03" max="0.30" step="0.005" value="@sel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
-                                           aria-label="Font size"
-                                           @oninput="e => UpdateBox(sel with { FontSize = ParseDouble(e.Value, sel.FontSize) })" />
-                                </label>
-                                <label class="cm-field">
-                                    <span class="cm-field__label">Weight</span>
-                                    <select class="cm-input" value="@sel.Weight" aria-label="Font weight"
-                                            @onchange="e => UpdateBox(sel with { Weight = int.TryParse(e.Value?.ToString(), out var w) ? w : sel.Weight })">
-                                        <option value="400">Regular</option>
-                                        <option value="600">Semibold</option>
-                                        <option value="700">Bold</option>
-                                    </select>
-                                </label>
-                                <label class="cm-field">
-                                    <span class="cm-field__label">Align</span>
-                                    <select class="cm-input" value="@sel.Align" aria-label="Alignment"
-                                            @onchange='e => UpdateBox(sel with { Align = e.Value?.ToString() ?? "left" })'>
-                                        <option value="left">Left</option>
-                                        <option value="center">Centre</option>
-                                        <option value="right">Right</option>
-                                    </select>
-                                </label>
-                            </div>
-                            <div class="cm-imgeditor-panel__row">
-                                <label class="cm-field">
-                                    <span class="cm-field__label">Text colour</span>
-                                    <input type="color" class="cm-imgeditor-panel__color" value="@sel.Color" aria-label="Text colour"
-                                           @onchange="e => UpdateBox(sel with { Color = e.Value?.ToString() ?? sel.Color })" />
-                                </label>
-                                <label class="cm-fanout__item cm-imgeditor-panel__toggle">
-                                    <input type="checkbox" checked="@(sel.Band is not null)" aria-label="Solid band behind the text"
-                                           @onchange='e => UpdateBox(sel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
-                                    <span>Band behind text</span>
-                                </label>
-                                @if (sel.Band is { } band)
+                            @if (sel.LogoAssetId is not null)
+                            {
+                                <p class="cm-meta">@LayerLabel(sel) — crop it, choose a frame, then drag it into place.</p>
+                                <div class="cm-imgeditor-panel__row">
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Shape</span>
+                                        <select class="cm-input" value="@LayerShape(sel)" aria-label="Layer shape"
+                                                @onchange="e => SetLayerShape(sel, e.Value?.ToString())">
+                                            <option value="rectangle">Rectangle</option>
+                                            <option value="square">Square</option>
+                                            <option value="circle">Circle</option>
+                                        </select>
+                                    </label>
+                                    <div class="cm-form__actions">
+                                        @if (sel.Crop is null)
+                                        {
+                                            <button type="button" class="cm-button cm-button--quiet" @onclick="() => EnableImageCrop(sel)">Crop image</button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="cm-button cm-button--quiet" @onclick="() => ResetImageCrop(sel)">Reset crop</button>
+                                        }
+                                    </div>
+                                </div>
+                                @if (sel.Crop is { } crop)
                                 {
-                                    <label class="cm-field">
-                                        <span class="cm-field__label">Band colour</span>
-                                        <input type="color" class="cm-imgeditor-panel__color" value="@band.Color" aria-label="Band colour"
-                                               @onchange="e => UpdateBox(sel with { Band = band with { Color = e.Value?.ToString() ?? band.Color } })" />
-                                    </label>
-                                    <label class="cm-field">
-                                        <span class="cm-field__label">Opacity</span>
-                                        <input type="range" min="0.2" max="1" step="0.05" value="@band.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Band opacity"
-                                               @oninput="e => UpdateBox(sel with { Band = band with { Opacity = ParseDouble(e.Value, band.Opacity) } })" />
-                                    </label>
+                                    <div class="cm-imgeditor-panel__crop" role="group" aria-label="Crop tool">
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Zoom</span>
+                                            <input type="range" min="1" max="4" step="0.05" value="@crop.Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop zoom"
+                                                   @oninput="e => UpdateBox(sel with { Crop = crop with { Zoom = ParseDouble(e.Value, crop.Zoom) } })" />
+                                        </label>
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Left / right</span>
+                                            <input type="range" min="0" max="1" step="0.01" value="@crop.FocusX.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop horizontal focus"
+                                                   @oninput="e => UpdateBox(sel with { Crop = crop with { FocusX = ParseDouble(e.Value, crop.FocusX) } })" />
+                                        </label>
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Up / down</span>
+                                            <input type="range" min="0" max="1" step="0.01" value="@crop.FocusY.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop vertical focus"
+                                                   @oninput="e => UpdateBox(sel with { Crop = crop with { FocusY = ParseDouble(e.Value, crop.FocusY) } })" />
+                                        </label>
+                                    </div>
                                 }
-                            </div>
+                            }
+                            else
+                            {
+                                <label class="cm-field">
+                                    <span class="cm-field__label">Text</span>
+                                    <textarea class="cm-input cm-textarea" rows="2" maxlength="160" aria-label="Overlay text"
+                                              value="@sel.Text" @oninput="e => UpdateBox(sel with { Text = e.Value?.ToString() ?? string.Empty })"></textarea>
+                                </label>
+                                <div class="cm-imgeditor-panel__row">
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Size</span>
+                                        <input type="range" min="0.03" max="0.30" step="0.005" value="@sel.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                                               aria-label="Font size" @oninput="e => UpdateBox(sel with { FontSize = ParseDouble(e.Value, sel.FontSize) })" />
+                                    </label>
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Weight</span>
+                                        <select class="cm-input" value="@sel.Weight" aria-label="Font weight"
+                                                @onchange="e => UpdateBox(sel with { Weight = int.TryParse(e.Value?.ToString(), out var w) ? w : sel.Weight })">
+                                            <option value="400">Regular</option><option value="600">Semibold</option><option value="700">Bold</option>
+                                        </select>
+                                    </label>
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Align</span>
+                                        <select class="cm-input" value="@sel.Align" aria-label="Alignment"
+                                                @onchange='e => UpdateBox(sel with { Align = e.Value?.ToString() ?? "left" })'>
+                                            <option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="cm-imgeditor-panel__row">
+                                    <label class="cm-field">
+                                        <span class="cm-field__label">Text colour</span>
+                                        <input type="color" class="cm-imgeditor-panel__color" value="@sel.Color" aria-label="Text colour"
+                                               @onchange="e => UpdateBox(sel with { Color = e.Value?.ToString() ?? sel.Color })" />
+                                    </label>
+                                    <label class="cm-fanout__item cm-imgeditor-panel__toggle">
+                                        <input type="checkbox" checked="@(sel.Band is not null)" aria-label="Text background"
+                                               @onchange='e => UpdateBox(sel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
+                                        <span>Background</span>
+                                    </label>
+                                    @if (sel.Band is { } band)
+                                    {
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Background colour</span>
+                                            <input type="color" class="cm-imgeditor-panel__color" value="@band.Color" aria-label="Background colour"
+                                                   @onchange="e => UpdateBox(sel with { Band = band with { Color = e.Value?.ToString() ?? band.Color } })" />
+                                        </label>
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Background opacity</span>
+                                            <input type="range" min="0" max="1" step="0.05" value="@band.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Background opacity"
+                                                   @oninput="e => UpdateBox(sel with { Band = band with { Opacity = ParseDouble(e.Value, band.Opacity) } })" />
+                                        </label>
+                                    }
+                                </div>
+                            }
                             <div class="cm-form__actions">
-                                <button type="button" class="cm-button cm-button--quiet cm-button--danger" @onclick="() => RemoveBox(sel.Id)">Remove box</button>
+                                <button type="button" class="cm-button cm-button--quiet cm-button--danger" aria-label="Delete selected layer"
+                                        @onclick="() => RemoveBox(sel.Id)">Delete layer</button>
                             </div>
                         }
                         <div class="cm-form__actions">
-                            <button type="button" class="cm-button" disabled="@(_savingOverlay || _overlayDraft.Count == 0 || !_overlayDirty)" @onclick="SaveOverlayAsync">
+                            <button type="button" class="cm-button" disabled="@(_savingOverlay || !_overlayDirty)" @onclick="SaveOverlayAsync">
                                 @(_savingOverlay ? "Saving…" : _overlayDirty ? "Save overlay" : "Saved")
                             </button>
                             @if (Selected?.Overlay is not null)
@@ -1360,11 +1405,12 @@
                             @foreach (var box in _overlayDraft)
                             {
                                 <div class="cm-imgeditor__box cm-imgeditor__box--live @(box.Id == _selectedBoxId ? "cm-imgeditor__box--selected" : null)"
-                                     data-box="@box.Id" style="@BoxStyle(box)"
+                                     data-box="@box.Id" data-layer-shape="@LayerShape(box)" style="@BoxStyle(box)"
                                      @onclick="() => _selectedBoxId = box.Id" @onclick:stopPropagation>
                                     @if (box.LogoAssetId is { } manualLayerId && _kitPreviews.TryGetValue(LayerAssetId(manualLayerId), out var manualThumb))
                                     {
-                                        <img class="cm-imgeditor__layer" src="@manualThumb" alt="" draggable="false" />
+                                        <img class="cm-imgeditor__layer @(UsesImageCrop(box) ? "cm-imgeditor__layer--cropped" : null)"
+                                             style="@LayerStyle(box)" src="@manualThumb" alt="" draggable="false" />
                                     }
                                     else if (box.LogoAssetId is not null)
                                     {
@@ -1481,15 +1527,76 @@
                                             <input type="color" class="cm-imgeditor-panel__color" value="@manualSel.Color" aria-label="Text colour"
                                                    @onchange="e => UpdateBox(manualSel with { Color = e.Value?.ToString() ?? manualSel.Color })" />
                                         </label>
+                                        <label class="cm-fanout__item cm-imgeditor-panel__toggle">
+                                            <input type="checkbox" checked="@(manualSel.Band is not null)" aria-label="Text background"
+                                                   @onchange='e => UpdateBox(manualSel with { Band = e.Value is true ? new OverlayBand("#1F2933", 0.85) : null })' />
+                                            <span>Background</span>
+                                        </label>
                                     </div>
+                                    @if (manualSel.Band is { } manualBand)
+                                    {
+                                        <div class="cm-imgeditor-panel__row">
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Background colour</span>
+                                                <input type="color" class="cm-imgeditor-panel__color" value="@manualBand.Color" aria-label="Background colour"
+                                                       @onchange="e => UpdateBox(manualSel with { Band = manualBand with { Color = e.Value?.ToString() ?? manualBand.Color } })" />
+                                            </label>
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Background opacity</span>
+                                                <input type="range" min="0" max="1" step="0.05" value="@manualBand.Opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Background opacity"
+                                                       @oninput="e => UpdateBox(manualSel with { Band = manualBand with { Opacity = ParseDouble(e.Value, manualBand.Opacity) } })" />
+                                            </label>
+                                        </div>
+                                    }
                                 }
                                 else
                                 {
-                                    <p class="cm-meta">@LayerLabel(manualSel) — drag it on the canvas to place and size it.</p>
+                                    <p class="cm-meta">@LayerLabel(manualSel) — crop it, choose a frame, then drag it into place.</p>
+                                    <div class="cm-imgeditor-panel__row">
+                                        <label class="cm-field">
+                                            <span class="cm-field__label">Shape</span>
+                                            <select class="cm-input" value="@LayerShape(manualSel)" aria-label="Layer shape"
+                                                    @onchange="e => SetLayerShape(manualSel, e.Value?.ToString())">
+                                                <option value="rectangle">Rectangle</option>
+                                                <option value="square">Square</option>
+                                                <option value="circle">Circle</option>
+                                            </select>
+                                        </label>
+                                        <div class="cm-form__actions">
+                                            @if (manualSel.Crop is null)
+                                            {
+                                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => EnableImageCrop(manualSel)">Crop image</button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="cm-button cm-button--quiet" @onclick="() => ResetImageCrop(manualSel)">Reset crop</button>
+                                            }
+                                        </div>
+                                    </div>
+                                    @if (manualSel.Crop is { } manualCrop)
+                                    {
+                                        <div class="cm-imgeditor-panel__crop" role="group" aria-label="Crop tool">
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Zoom</span>
+                                                <input type="range" min="1" max="4" step="0.05" value="@manualCrop.Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop zoom"
+                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { Zoom = ParseDouble(e.Value, manualCrop.Zoom) } })" />
+                                            </label>
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Left / right</span>
+                                                <input type="range" min="0" max="1" step="0.01" value="@manualCrop.FocusX.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop horizontal focus"
+                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { FocusX = ParseDouble(e.Value, manualCrop.FocusX) } })" />
+                                            </label>
+                                            <label class="cm-field">
+                                                <span class="cm-field__label">Up / down</span>
+                                                <input type="range" min="0" max="1" step="0.01" value="@manualCrop.FocusY.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-label="Crop vertical focus"
+                                                       @oninput="e => UpdateBox(manualSel with { Crop = manualCrop with { FocusY = ParseDouble(e.Value, manualCrop.FocusY) } })" />
+                                            </label>
+                                        </div>
+                                    }
                                 }
                                 <div class="cm-form__actions">
                                     <button type="button" class="cm-button cm-button--quiet cm-button--danger"
-                                            @onclick="() => RemoveBox(manualSel.Id)">Remove layer</button>
+                                            aria-label="Delete selected layer" @onclick="() => RemoveBox(manualSel.Id)">Delete layer</button>
                                 </div>
                             }
                         </section>
@@ -2676,11 +2783,11 @@
 
     // ---- Editor (ADR-055): overlay boxes, region mask, compare, lineage ----------------
 
-    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=2";
+    private const string EditorModulePath = "./_content/Castmill.UI/js/castmill-overlay-editor.js?v=4";
     private ElementReference _editorStage;
     private IJSObjectReference? _editorModule;
     private IJSObjectReference? _editorHandle;
-    private IJSObjectReference? _manualEscapeHandle;
+    private bool _manualEscapeListening;
     private DotNetObjectReference<ImageStudioView>? _editorSelf;
     private string _editorMode = "off";
     private List<OverlayBox> _overlayDraft = [];
@@ -2732,7 +2839,31 @@
             var alpha = (int)Math.Clamp(Math.Round(band.Opacity * 255), 0, 255);
             style += $"--cm-imgeditor-band:{band.Color}{alpha:X2};";
         }
+        if (box.LogoAssetId is not null && LayerShape(box) == "circle")
+        {
+            style += "border-radius:50%;";
+        }
         return style;
+    }
+
+    private static string LayerShape(OverlayBox box) =>
+        box.Shape is "square" or "circle" ? box.Shape : "rectangle";
+
+    private static bool UsesImageCrop(OverlayBox box) =>
+        box.Crop is not null || LayerShape(box) != "rectangle";
+
+    private static string LayerStyle(OverlayBox box)
+    {
+        if (!UsesImageCrop(box))
+        {
+            return string.Empty;
+        }
+        var crop = box.Crop ?? new OverlayImageCrop();
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var x = (Math.Clamp(crop.FocusX, 0, 1) * 100).ToString("0.###", inv);
+        var y = (Math.Clamp(crop.FocusY, 0, 1) * 100).ToString("0.###", inv);
+        var zoom = Math.Clamp(crop.Zoom, 1, 4).ToString("0.###", inv);
+        return $"object-position:{x}% {y}%;transform:scale({zoom});transform-origin:{x}% {y}%;";
     }
 
     private void SeedOverlayDraft()
@@ -2981,6 +3112,41 @@
         }
     }
 
+    private void EnableImageCrop(OverlayBox box) =>
+        UpdateBox(box with { Crop = box.Crop ?? new OverlayImageCrop() });
+
+    private void ResetImageCrop(OverlayBox box) =>
+        UpdateBox(box with
+        {
+            Crop = LayerShape(box) == "rectangle" ? null : new OverlayImageCrop(),
+        });
+
+    private void SetLayerShape(OverlayBox box, string? requested)
+    {
+        var shape = requested is "square" or "circle" ? requested : "rectangle";
+        var updated = box with
+        {
+            Shape = shape,
+            Crop = shape == "rectangle" ? box.Crop : box.Crop ?? new OverlayImageCrop(),
+        };
+
+        // Square and circle are physically square, not merely equal percentages: X ratios
+        // use canvas width while Y ratios use canvas height.
+        if (shape != "rectangle" && Selected is { } slot)
+        {
+            var aspect = slot.TargetHeight <= 0 ? 1.7778 : (double)slot.TargetWidth / slot.TargetHeight;
+            var width = updated.W;
+            var height = width * aspect;
+            if (height > 1 - updated.Y)
+            {
+                height = Math.Max(0.02, 1 - updated.Y);
+                width = Math.Max(0.02, height / aspect);
+            }
+            updated = updated with { W = width, H = height };
+        }
+        UpdateBox(updated);
+    }
+
     /// <summary>Backdrop, ✕ and Escape: never lose unsaved overlay edits silently.</summary>
     private async Task RequestCloseAsync()
     {
@@ -3020,7 +3186,7 @@
 
     private async Task SaveOverlayAsync()
     {
-        if (Selected is not { } slot || _overlayDraft.Count == 0)
+        if (Selected is not { } slot)
         {
             return;
         }
@@ -3028,6 +3194,17 @@
         _overlayStatus = null;
         try
         {
+            if (_overlayDraft.Count == 0)
+            {
+                await Images.ClearOverlayAsync(CampaignId, slot.Id);
+                _selectedBoxId = null;
+                _overlayDirty = false;
+                _overlaySavedAt = DateTimeOffset.Now;
+                _overlayStatus = "All layers deleted.";
+                await Campaign.RefreshAsync(CampaignId);
+                return;
+            }
+
             var result = await Images.SetOverlayAsync(CampaignId, slot.Id, new OverlaySpec([.. _overlayDraft]));
             _overlayDirty = false;
             _overlaySavedAt = DateTimeOffset.Now;
@@ -3149,16 +3326,29 @@
 
     private async Task EnsureEditorAttachedAsync()
     {
-        // The manual dialog hosts the same stage, so it needs the same attachment.
-        if (_openVariant is null && !_manualOpen)
+        // ElementReference.Context remains populated after an element is removed. Test the
+        // Razor state that actually renders the stage too, otherwise a background-less
+        // dialog can attach to a previous lightbox's detached element.
+        var stageIsRendered = _openVariant is not null
+            || (_manualOpen && Selected?.BaseImageUrl is { Length: > 0 });
+        if (!stageIsRendered)
         {
             await DetachEditorAsync();
             return;
         }
         if (_editorHandle is not null)
         {
-            await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
-            return;
+            try
+            {
+                await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
+                return;
+            }
+            catch (Exception ex) when (IsInteropTeardown(ex))
+            {
+                // WKWebView invalidates a returned JS object when its DOM island is replaced.
+                // Drop that stale handle and attach the newly rendered stage below.
+                await DetachEditorAsync();
+            }
         }
         // A new manual image deliberately opens without a stage until its background exists.
         // Calling the JS module with that unconfigured ElementReference makes attach return
@@ -3180,23 +3370,24 @@
             }
             await _editorHandle.InvokeVoidAsync("setMode", _editorMode);
         }
-        catch (JSException)
+        catch (Exception ex) when (IsInteropTeardown(ex))
         {
-            // bUnit and headless hosts have no module loader; the panel still renders.
-        }
-        catch (InvalidOperationException)
-        {
-            // Prerender or a disposed circuit: nothing to attach to.
+            // bUnit/headless hosts have no loader; a closing WebView can also invalidate
+            // interop between render and attach. Neither is allowed to kill the circuit.
+            _editorHandle = null;
         }
     }
 
     private async Task DetachEditorAsync()
     {
-        if (_editorHandle is not null)
+        var handle = _editorHandle;
+        _editorHandle = null;
+        if (handle is not null)
         {
-            try { await _editorHandle.InvokeVoidAsync("dispose"); } catch (JSException) { }
-            try { await _editorHandle.DisposeAsync(); } catch (JSException) { }
-            _editorHandle = null;
+            try { await handle.InvokeVoidAsync("dispose"); }
+            catch (Exception ex) when (IsInteropTeardown(ex)) { }
+            try { await handle.DisposeAsync(); }
+            catch (Exception ex) when (IsInteropTeardown(ex)) { }
         }
     }
 
@@ -3207,7 +3398,7 @@
             await DetachManualEscapeListenerAsync();
             return;
         }
-        if (_manualEscapeHandle is not null)
+        if (_manualEscapeListening)
         {
             return;
         }
@@ -3215,16 +3406,13 @@
         {
             _editorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", EditorModulePath);
             _editorSelf ??= DotNetObjectReference.Create(this);
-            _manualEscapeHandle = await _editorModule.InvokeAsync<IJSObjectReference?>(
-                "listenForEscape", _editorSelf);
+            await _editorModule.InvokeVoidAsync("listenForEscape", _editorSelf);
+            _manualEscapeListening = true;
         }
-        catch (JSException)
+        catch (Exception ex) when (IsInteropTeardown(ex))
         {
-            // bUnit/headless hosts have no document; browser hosts always do.
-        }
-        catch (InvalidOperationException)
-        {
-            // Prerender or a disposed circuit.
+            // bUnit/headless hosts have no document; a closing WebView may be gone already.
+            _manualEscapeListening = false;
         }
     }
 
@@ -3238,14 +3426,24 @@
 
     private async Task DetachManualEscapeListenerAsync()
     {
-        if (_manualEscapeHandle is null)
+        if (!_manualEscapeListening)
         {
             return;
         }
-        try { await _manualEscapeHandle.InvokeVoidAsync("dispose"); } catch (JSException) { }
-        try { await _manualEscapeHandle.DisposeAsync(); } catch (JSException) { }
-        _manualEscapeHandle = null;
+        _manualEscapeListening = false;
+        if (_editorModule is null)
+        {
+            return;
+        }
+        try { await _editorModule.InvokeVoidAsync("stopListeningForEscape"); }
+        catch (Exception ex) when (IsInteropTeardown(ex)) { }
     }
+
+    /// <summary>Interop cleanup is best-effort. A WebView may invalidate JS references while
+    /// Blazor is removing the element that owned them; cleanup must never surface the host's
+    /// fatal yellow bar.</summary>
+    private static bool IsInteropTeardown(Exception ex) =>
+        ex is JSException or InvalidOperationException or ObjectDisposedException or ArgumentException;
 
     public async ValueTask DisposeAsync()
     {

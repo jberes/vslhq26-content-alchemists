@@ -12,6 +12,7 @@
 @inject BrandsClient Brands
 @inject HttpClient Http
 @inject INotifier Notifier
+@inject IConfirmService Confirm
 @inject NavigationManager Navigation
 
 <PageTitle>@(_name.Length > 0 ? _name : "Brand") — Castmill</PageTitle>
@@ -319,6 +320,50 @@
                     Labels double as prompt text: "the host, short dark hair" tells the image
                     model who may appear.
                 </p>
+                @if (SelectedAssetCount > 0)
+                {
+                    <div class="cm-brand__asset-tools" aria-label="Selected asset actions">
+                        <strong>@SelectedAssetCount selected</strong>
+                        <label class="cm-brand__asset-select-all">
+                            <input type="checkbox" checked="@AllAssetsSelected"
+                                   aria-label="Select all assets"
+                                   @onchange="e => SelectAllAssets(e.Value is true)" />
+                            <span>Select all</span>
+                        </label>
+                        <div class="cm-brand__asset-bulk-actions">
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    aria-label="Copy selected assets to another brand"
+                                    disabled="@(_copyingAssets || _deletingSelectedAssets)"
+                                    @onclick="OpenBulkCopyDialog">
+                                <AppIcon Name="share" />
+                                <span>Copy to</span>
+                            </button>
+                            <button type="button" class="cm-button cm-button--quiet cm-button--danger"
+                                    aria-label="Delete selected assets from this brand"
+                                    disabled="@(_copyingAssets || _deletingSelectedAssets)"
+                                    @onclick="DeleteSelectedAssetsAsync">
+                                <AppIcon Name="trash" />
+                                <span>@(_deletingSelectedAssets ? "Deleting…" : "Delete")</span>
+                            </button>
+                            <button type="button" class="cm-button cm-button--quiet"
+                                    aria-label="Clear asset selection"
+                                    disabled="@(_copyingAssets || _deletingSelectedAssets)"
+                                    @onclick="ClearAssetSelection">
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                }
+                @if (_assetCopyStatus is { } copyStatus)
+                {
+                    <p class="cm-meta" role="status">@copyStatus</p>
+                }
+                @if (_assets.Count > 0)
+                {
+                    <p class="cm-meta cm-brand__asset-help">
+                        Hover an image to select, copy or delete it. Selected images can be managed together.
+                    </p>
+                }
                 @* Square cards, label editable in place: the label IS the prompt text,
                    and "20210920 Infragistics 005" steers an image model toward nothing. *@
                 @foreach (var group in GroupedAssets)
@@ -328,43 +373,63 @@
                         <div class="cm-asset-grid">
                             @foreach (var asset in group)
                             {
-                                <figure class="cm-asset-card" @key="asset.Id">
-                                    @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
-                                    {
-                                        @* decoding=async keeps a large decode off the UI thread —
-                                           a grid of faces otherwise stalls the first paint. *@
-                                        <button type="button" class="cm-asset-card__preview"
-                                                aria-label="View @(asset.Label ?? asset.FileName) full size"
-                                                title="View full size"
-                                                @onclick="() => OpenAssetViewerAsync(asset)">
-                                            <img src="@url" alt="@(asset.Label ?? asset.FileName)"
-                                                 loading="lazy" decoding="async" />
-                                        </button>
-                                    }
-                                    else
-                                    {
-                                        <button type="button" class="cm-asset-card__preview"
-                                                aria-label="View @(asset.Label ?? asset.FileName) full size"
-                                                title="View full size"
-                                                @onclick="() => OpenAssetViewerAsync(asset)">
-                                            <span class="cm-asset-card__blank" aria-hidden="true"></span>
-                                        </button>
-                                    }
-                                    <button type="button" class="cm-tree__delete cm-asset-card__delete"
-                                            aria-label="Remove @(asset.Label ?? asset.FileName) from the kit"
-                                            @onclick="() => UnlinkAssetAsync(asset)"><AppIcon Name="trash" /></button>
-                                    <label class="cm-asset-card__type">
-                                        <span>Type</span>
-                                        <select value="@asset.Kind"
-                                                disabled="@(_retypingAsset == asset.Id)"
-                                                aria-label="Type for @(asset.Label ?? asset.FileName)"
-                                                @onchange="e => ChangeAssetKindAsync(asset, e)">
-                                            @foreach (var kind in AssetKinds)
-                                            {
-                                                <option value="@kind">@KindLabel(kind)</option>
-                                            }
-                                        </select>
-                                    </label>
+                                <figure class="cm-asset-card @(_selectedAssetIds.Contains(asset.Id) ? "cm-asset-card--selected" : null)" @key="asset.Id">
+                                    <div class="cm-asset-card__media">
+                                        @if (_assetPreviews.TryGetValue(asset.AssetId, out var url))
+                                        {
+                                            @* decoding=async keeps a large decode off the UI thread —
+                                               a grid of faces otherwise stalls the first paint. *@
+                                            <button type="button" class="cm-asset-card__preview"
+                                                    aria-label="View @(asset.Label ?? asset.FileName) full size"
+                                                    title="View full size"
+                                                    @onclick="() => OpenAssetViewerAsync(asset)">
+                                                <img src="@url" alt="@(asset.Label ?? asset.FileName)"
+                                                     loading="lazy" decoding="async" />
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button type="button" class="cm-asset-card__preview"
+                                                    aria-label="View @(asset.Label ?? asset.FileName) full size"
+                                                    title="View full size"
+                                                    @onclick="() => OpenAssetViewerAsync(asset)">
+                                                <span class="cm-asset-card__blank" aria-hidden="true"></span>
+                                            </button>
+                                        }
+                                        <label class="cm-asset-card__select" title="Select for bulk actions">
+                                            <input type="checkbox" checked="@_selectedAssetIds.Contains(asset.Id)"
+                                                   aria-label="Select @(asset.Label ?? asset.FileName)"
+                                                   @onchange="e => SetAssetSelected(asset.Id, e.Value is true)" />
+                                            <span class="cm-sr-only">Select for bulk actions</span>
+                                        </label>
+                                        <div class="cm-asset-card__hover-actions">
+                                            <button type="button" class="cm-asset-card__hover-action"
+                                                    aria-label="Copy @(asset.Label ?? asset.FileName) to another brand"
+                                                    title="Copy to another brand"
+                                                    @onclick="() => OpenAssetCopyDialog(asset)">
+                                                <AppIcon Name="share" />
+                                            </button>
+                                            <button type="button" class="cm-asset-card__hover-action cm-asset-card__hover-action--danger"
+                                                    aria-label="Delete @(asset.Label ?? asset.FileName) from this brand"
+                                                    title="Delete from this brand"
+                                                    disabled="@(_deletingAsset == asset.Id)"
+                                                    @onclick="() => UnlinkAssetAsync(asset)">
+                                                <AppIcon Name="trash" />
+                                            </button>
+                                        </div>
+                                        <label class="cm-asset-card__type">
+                                            <span>Type</span>
+                                            <select value="@asset.Kind"
+                                                    disabled="@(_retypingAsset == asset.Id)"
+                                                    aria-label="Type for @(asset.Label ?? asset.FileName)"
+                                                    @onchange="e => ChangeAssetKindAsync(asset, e)">
+                                                @foreach (var kind in AssetKinds)
+                                                {
+                                                    <option value="@kind">@KindLabel(kind)</option>
+                                                }
+                                            </select>
+                                        </label>
+                                    </div>
                                     <input class="cm-input cm-asset-card__label"
                                            value="@(asset.Label ?? asset.FileName)"
                                            aria-label="Label — used as prompt text"
@@ -727,6 +792,85 @@
     </div>
 }
 
+@if (_assetBeingCopied is { } assetBeingCopied)
+{
+    <div class="cm-modal" role="presentation" @onclick="CloseAssetCopyDialog">
+        <section class="cm-modal__panel cm-asset-copy-dialog" role="dialog" aria-modal="true"
+                 aria-labelledby="cm-asset-copy-title" @onclick:stopPropagation
+                 @onkeydown="OnAssetCopyDialogKey" tabindex="-1">
+            <h2 id="cm-asset-copy-title" class="cm-modal__title">Copy to another brand</h2>
+            <p class="cm-modal__message">
+                Copy “@(assetBeingCopied.Label ?? assetBeingCopied.FileName)” while keeping its type and label.
+            </p>
+            <label class="cm-field">
+                <span class="cm-field__label">Destination brand</span>
+                <select class="cm-input"
+                        aria-label="Copy @(assetBeingCopied.Label ?? assetBeingCopied.FileName) to brand"
+                        value="@(_singleAssetDestinationBrandId?.ToString() ?? string.Empty)"
+                        disabled="@(_copyingSingleAsset || OtherBrands.Count == 0)"
+                        @onchange="SetSingleAssetDestination">
+                    <option value="">@(OtherBrands.Count == 0 ? "No other brands available" : "Choose a brand…")</option>
+                    @foreach (var brand in OtherBrands.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@brand.Id">@brand.Name</option>
+                    }
+                </select>
+            </label>
+            @if (_singleAssetCopyError is { } copyError)
+            {
+                <p class="cm-form__error" role="alert">@copyError</p>
+            }
+            <div class="cm-modal__actions">
+                <button type="button" class="cm-button cm-button--quiet"
+                        disabled="@_copyingSingleAsset" @onclick="CloseAssetCopyDialog">Cancel</button>
+                <button type="button" class="cm-button"
+                        disabled="@(_copyingSingleAsset || _singleAssetDestinationBrandId is null)"
+                        @onclick="CopySingleAssetAsync">
+                    @(_copyingSingleAsset ? "Copying…" : "Copy asset")
+                </button>
+            </div>
+        </section>
+    </div>
+}
+
+@if (_bulkCopyDialogOpen && SelectedAssetCount > 0)
+{
+    <div class="cm-modal" role="presentation" @onclick="CloseBulkCopyDialog">
+        <section class="cm-modal__panel cm-asset-copy-dialog" role="dialog" aria-modal="true"
+                 aria-labelledby="cm-bulk-asset-copy-title" @onclick:stopPropagation
+                 @onkeydown="OnBulkCopyDialogKey" tabindex="-1">
+            <h2 id="cm-bulk-asset-copy-title" class="cm-modal__title">
+                Copy @SelectedAssetCount selected asset@(SelectedAssetCount == 1 ? "" : "s")
+            </h2>
+            <p class="cm-modal__message">
+                The destination brand receives its own references while the uploaded files are reused.
+            </p>
+            <label class="cm-field">
+                <span class="cm-field__label">Destination brand</span>
+                <select class="cm-input" value="@(_assetDestinationBrandId?.ToString() ?? string.Empty)"
+                        aria-label="Destination brand for selected assets"
+                        disabled="@(_copyingAssets || OtherBrands.Count == 0)"
+                        @onchange="SetAssetDestination">
+                    <option value="">@(OtherBrands.Count == 0 ? "No other brands available" : "Choose a brand…")</option>
+                    @foreach (var brand in OtherBrands.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <option value="@brand.Id">@brand.Name</option>
+                    }
+                </select>
+            </label>
+            <div class="cm-modal__actions">
+                <button type="button" class="cm-button cm-button--quiet"
+                        disabled="@_copyingAssets" @onclick="CloseBulkCopyDialog">Cancel</button>
+                <button type="button" class="cm-button"
+                        disabled="@(_copyingAssets || _assetDestinationBrandId is null)"
+                        @onclick="CopySelectedAssetsAsync">
+                    @(_copyingAssets ? "Copying…" : $"Copy {SelectedAssetCount} asset{(SelectedAssetCount == 1 ? "" : "s")}")
+                </button>
+            </div>
+        </section>
+    </div>
+}
+
 @code {
 
     /// <summary>
@@ -760,6 +904,10 @@
         if (tab == "knowledge" && _knowledge is null)
         {
             await LoadKnowledgeAsync();
+        }
+        if (tab == "assets")
+        {
+            await EnsureBrandChoicesAsync();
         }
         if (tab == "sharing" && _isOwner)
         {
@@ -1024,6 +1172,18 @@
     private readonly List<GradientRow> _gradients = [];
     private readonly List<PersonaRow> _personas = [];
     private readonly List<BrandAssetResponse> _assets = [];
+    private readonly HashSet<Guid> _selectedAssetIds = [];
+    private Guid? _assetDestinationBrandId;
+    private bool _bulkCopyDialogOpen;
+    private BrandAssetResponse? _assetBeingCopied;
+    private Guid? _singleAssetDestinationBrandId;
+    private bool _copyingSingleAsset;
+    private string? _singleAssetCopyError;
+    private Guid? _deletingAsset;
+    private bool _deletingSelectedAssets;
+    private bool _copyingAssets;
+    private bool _brandChoicesLoaded;
+    private string? _assetCopyStatus;
     private readonly List<BrandTemplateResponse> _templates = [];
     private readonly Dictionary<Guid, string> _assetPreviews = [];
     private BrandAssetResponse? _viewingAsset;
@@ -1057,7 +1217,7 @@
             _knowledge = await Brands.GetKnowledgeAsync(BrandId);
             // Reuse needs the other brands the user can already see; a failure here must not
             // stop the knowledge tab from rendering.
-            try { _allBrands = await Brands.ListAsync(); } catch (ApiException) { _allBrands = []; }
+            await EnsureBrandChoicesAsync();
         }
         catch (ApiException ex)
         {
@@ -1682,6 +1842,250 @@
             .GroupBy(a => a.Kind.ToLowerInvariant())
             .OrderBy(g => Array.IndexOf(AssetKinds, g.Key) is var i && i >= 0 ? i : AssetKinds.Length);
 
+    private int SelectedAssetCount => _selectedAssetIds.Count;
+
+    private bool AllAssetsSelected =>
+        _assets.Count > 0 && _assets.All(asset => _selectedAssetIds.Contains(asset.Id));
+
+    private async Task EnsureBrandChoicesAsync()
+    {
+        if (_brandChoicesLoaded)
+        {
+            return;
+        }
+        try
+        {
+            _allBrands = await Brands.ListAsync();
+            _brandChoicesLoaded = true;
+        }
+        catch (ApiException ex)
+        {
+            _assetCopyStatus = $"Other brands couldn't be loaded — {ex.Message}";
+        }
+    }
+
+    private void SetAssetSelected(Guid id, bool selected)
+    {
+        if (selected)
+        {
+            _selectedAssetIds.Add(id);
+        }
+        else
+        {
+            _selectedAssetIds.Remove(id);
+        }
+        _assetCopyStatus = null;
+    }
+
+    private void SelectAllAssets(bool selected)
+    {
+        _selectedAssetIds.Clear();
+        if (selected)
+        {
+            _selectedAssetIds.UnionWith(_assets.Select(asset => asset.Id));
+        }
+        _assetCopyStatus = null;
+    }
+
+    private void SetAssetDestination(ChangeEventArgs e) =>
+        _assetDestinationBrandId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+
+    private void OpenBulkCopyDialog()
+    {
+        if (_selectedAssetIds.Count == 0)
+        {
+            return;
+        }
+
+        _assetDestinationBrandId = null;
+        _bulkCopyDialogOpen = true;
+    }
+
+    private void CloseBulkCopyDialog()
+    {
+        if (_copyingAssets)
+        {
+            return;
+        }
+
+        _bulkCopyDialogOpen = false;
+        _assetDestinationBrandId = null;
+    }
+
+    private void OnBulkCopyDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseBulkCopyDialog();
+        }
+    }
+
+    private void ClearAssetSelection()
+    {
+        _selectedAssetIds.Clear();
+        _assetCopyStatus = null;
+        _bulkCopyDialogOpen = false;
+        _assetDestinationBrandId = null;
+    }
+
+    private void OpenAssetCopyDialog(BrandAssetResponse asset)
+    {
+        _assetBeingCopied = asset;
+        _singleAssetDestinationBrandId = null;
+        _singleAssetCopyError = null;
+    }
+
+    private void CloseAssetCopyDialog()
+    {
+        if (_copyingSingleAsset)
+        {
+            return;
+        }
+
+        _assetBeingCopied = null;
+        _singleAssetDestinationBrandId = null;
+        _singleAssetCopyError = null;
+    }
+
+    private void OnAssetCopyDialogKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            CloseAssetCopyDialog();
+        }
+    }
+
+    private void SetSingleAssetDestination(ChangeEventArgs e) =>
+        _singleAssetDestinationBrandId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : null;
+
+    private async Task CopySingleAssetAsync()
+    {
+        if (_assetBeingCopied is not { } asset ||
+            _singleAssetDestinationBrandId is not { } destinationId)
+        {
+            return;
+        }
+
+        var destinationName = OtherBrands.FirstOrDefault(brand => brand.Id == destinationId)?.Name
+            ?? "the selected brand";
+        _copyingSingleAsset = true;
+        _singleAssetCopyError = null;
+        try
+        {
+            BrandAssetCopyResult result;
+            try
+            {
+                result = await Brands.CopyAssetsAsync(destinationId, BrandId, [asset.Id]);
+            }
+            catch (ApiException ex) when (ex.StatusCode == 404)
+            {
+                result = await CopyAssetsWithLinkEndpointAsync(destinationId, [asset]);
+            }
+
+            var status = result.AlreadyPresent == 0
+                ? $"Copied {asset.Label ?? asset.FileName} to {destinationName}."
+                : $"{asset.Label ?? asset.FileName} is already in {destinationName}.";
+            _assetCopyStatus = status;
+            Notifier.ShowSuccess(status);
+            _assetBeingCopied = null;
+            _singleAssetDestinationBrandId = null;
+        }
+        catch (ApiException ex)
+        {
+            _singleAssetCopyError = $"That asset wasn't copied — {ex.Message}";
+        }
+        finally
+        {
+            _copyingSingleAsset = false;
+        }
+    }
+
+    private async Task CopySelectedAssetsAsync()
+    {
+        if (_assetDestinationBrandId is not { } destinationId || _selectedAssetIds.Count == 0)
+        {
+            return;
+        }
+
+        var destinationName = OtherBrands.FirstOrDefault(brand => brand.Id == destinationId)?.Name
+            ?? "the selected brand";
+        var selectedAssets = _assets
+            .Where(asset => _selectedAssetIds.Contains(asset.Id))
+            .ToList();
+        if (selectedAssets.Count == 0)
+        {
+            return;
+        }
+
+        _copyingAssets = true;
+        _assetCopyStatus = null;
+        try
+        {
+            BrandAssetCopyResult result;
+            try
+            {
+                result = await Brands.CopyAssetsAsync(
+                    destinationId, BrandId, selectedAssets.Select(asset => asset.Id).ToList());
+            }
+            catch (ApiException ex) when (ex.StatusCode == 404)
+            {
+                // Older deployed APIs do not yet expose the bulk route. The established
+                // one-link endpoint has the same copy semantics, so desktop clients remain
+                // compatible during a rolling client/server deployment.
+                result = await CopyAssetsWithLinkEndpointAsync(destinationId, selectedAssets);
+            }
+            _selectedAssetIds.Clear();
+            _bulkCopyDialogOpen = false;
+            _assetDestinationBrandId = null;
+            _assetCopyStatus = result.AlreadyPresent == 0
+                ? $"Copied {result.Copied} asset{(result.Copied == 1 ? "" : "s")} to {destinationName}."
+                : $"Copied {result.Copied} to {destinationName}; {result.AlreadyPresent} already there.";
+            Notifier.ShowSuccess(_assetCopyStatus);
+        }
+        catch (ApiException ex)
+        {
+            _assetCopyStatus = $"Assets weren't copied — {ex.Message}";
+            Notifier.ShowError(_assetCopyStatus);
+        }
+        finally
+        {
+            _copyingAssets = false;
+        }
+    }
+
+    private async Task<BrandAssetCopyResult> CopyAssetsWithLinkEndpointAsync(
+        Guid destinationId, IReadOnlyList<BrandAssetResponse> selectedAssets)
+    {
+        var destinationAssets = await Brands.ListAssetsAsync(destinationId);
+        var existingAssetIds = destinationAssets.Select(asset => asset.AssetId).ToHashSet();
+        var copied = 0;
+        var alreadyPresent = 0;
+
+        foreach (var asset in selectedAssets)
+        {
+            if (existingAssetIds.Contains(asset.AssetId))
+            {
+                alreadyPresent++;
+                continue;
+            }
+            try
+            {
+                await Brands.LinkAssetAsync(
+                    destinationId, asset.AssetId, asset.Kind, asset.Label);
+                existingAssetIds.Add(asset.AssetId);
+                copied++;
+            }
+            catch (ApiException ex) when (ex.StatusCode == 409)
+            {
+                // A concurrent copy won the unique destination-brand/asset link race.
+                existingAssetIds.Add(asset.AssetId);
+                alreadyPresent++;
+            }
+        }
+
+        return new BrandAssetCopyResult(copied, alreadyPresent);
+    }
+
     private bool _contextOpen;
     private string _contextUrl = string.Empty;
     private string _contextNotes = string.Empty;
@@ -1778,14 +2182,78 @@
 
     private async Task UnlinkAssetAsync(BrandAssetResponse asset)
     {
+        var label = asset.Label ?? asset.FileName;
+        if (!await Confirm.ConfirmAsync(new ConfirmRequest(
+            "Delete asset from this brand?",
+            $"Delete “{label}” from {_name}'s Asset Kit? The uploaded file and copies in other brands stay available.",
+            "Delete", Destructive: true)))
+        {
+            return;
+        }
+
+        _deletingAsset = asset.Id;
         try
         {
             await Brands.UnlinkAssetAsync(BrandId, asset.Id);
             _assets.RemoveAll(a => a.Id == asset.Id);
+            _selectedAssetIds.Remove(asset.Id);
+            Notifier.ShowSuccess($"Deleted {label} from this brand.");
         }
         catch (ApiException ex)
         {
-            Notifier.ShowError(ex.Message);
+            Notifier.ShowError($"Couldn't delete that asset — {ex.Message}");
+        }
+        finally
+        {
+            _deletingAsset = null;
+        }
+    }
+
+    private async Task DeleteSelectedAssetsAsync()
+    {
+        var selectedAssets = _assets
+            .Where(asset => _selectedAssetIds.Contains(asset.Id))
+            .ToList();
+        if (selectedAssets.Count == 0)
+        {
+            return;
+        }
+
+        var noun = selectedAssets.Count == 1 ? "asset" : "assets";
+        if (!await Confirm.ConfirmAsync(new ConfirmRequest(
+            $"Delete {selectedAssets.Count} selected {noun}?",
+            $"Remove the selected {noun} from {_name}'s Asset Kit? Uploaded files and copies in other brands stay available.",
+            "Delete", Destructive: true)))
+        {
+            return;
+        }
+
+        _deletingSelectedAssets = true;
+        var deleted = 0;
+        var failed = 0;
+        foreach (var asset in selectedAssets)
+        {
+            try
+            {
+                await Brands.UnlinkAssetAsync(BrandId, asset.Id);
+                _assets.RemoveAll(item => item.Id == asset.Id);
+                _selectedAssetIds.Remove(asset.Id);
+                deleted++;
+            }
+            catch (ApiException)
+            {
+                failed++;
+            }
+        }
+
+        _deletingSelectedAssets = false;
+        if (failed == 0)
+        {
+            Notifier.ShowSuccess($"Deleted {deleted} selected {noun} from this brand.");
+        }
+        else
+        {
+            Notifier.ShowError($"Deleted {deleted}; {failed} couldn't be deleted.");
         }
     }
 
