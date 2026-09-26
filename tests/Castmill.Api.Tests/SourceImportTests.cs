@@ -202,6 +202,63 @@ public sealed class SourceImportTests(CastmillApiFactory factory)
         Assert.DoesNotContain("tracking.gif", productImage.LocatorJson, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// revealbi.io/ai, 2026-09-26: a server-rendered marketing page whose FIRST &lt;article&gt; is a
+    /// customer-story card inside the header mega-menu. Taking that card as the content root left
+    /// nothing to import, and the page's many scripts turned that into "renders its content with
+    /// JavaScript". The region holding the page's text must win instead.
+    /// </summary>
+    [Fact]
+    public void A_promo_card_article_in_a_mega_menu_does_not_replace_the_pages_main_content()
+    {
+        var scripts = string.Concat(Enumerable.Range(0, 12).Select(i =>
+            $"<script>window.__analytics{i} = {{ id: {i}, payload: 'tracking bootstrap code that is long enough' }};</script>"));
+        var extracted = SourceImportService.ExtractWebPage(
+            $$"""
+            <html><head><title>Conversational Analytics Software – Reveal AI</title>{{scripts}}</head><body>
+              <div class="mega-menu">
+                <article class="item-article card">
+                  <a href="/case-studies/scriptly"><span>Scriptly Helps Pharmacies Identify Trends in Real Time with Reveal</span></a>
+                  <span>Read Story</span>
+                </article>
+              </div>
+              <main id="content" role="main">
+                <h1>Embedded AI analytics your users can talk to</h1>
+                <p>Reveal brings conversational analytics into your application without choosing an AI vendor for you.</p>
+                <h2>Ask questions in plain language</h2>
+                <p>Users type a question and get a chart grounded in their own governed data sources.</p>
+                <ul><li>Bring your own model provider and keep data inside your boundary.</li></ul>
+              </main>
+            </body></html>
+            """,
+            new Uri("https://www.revealbi.io/ai"));
+
+        Assert.True(extracted.HasReadableBody);
+        Assert.False(extracted.IsJavaScriptShell);
+        Assert.Contains(extracted.Blocks, block => block.Content.StartsWith("Reveal brings conversational analytics", StringComparison.Ordinal));
+        Assert.Contains(extracted.Blocks, block => block.Content == "Ask questions in plain language");
+        Assert.DoesNotContain(extracted.Blocks, block => block.Content.Contains("Scriptly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_script_heavy_page_with_visible_text_is_not_called_a_javascript_shell()
+    {
+        var extracted = SourceImportService.ExtractWebPage(
+            """
+            <html><head><title>Div soup</title>
+              <script>window.__BOOTSTRAP__ = { payload: 'a long client bootstrap blob that easily passes two hundred characters of script text so the old heuristic fired on it regardless of how much text the page actually showed to readers' };</script>
+            </head><body><div id="app">
+              <div class="copy">This page shows plenty of readable text to anyone who opens it in a browser,</div>
+              <div class="copy">but none of it sits in headings, paragraphs or list items, so there are no sections to capture.</div>
+              <div class="copy">It is server-rendered all the same, and the error must not claim otherwise.</div>
+            </div></body></html>
+            """,
+            new Uri("https://example.com/div-soup"));
+
+        Assert.False(extracted.HasReadableBody);
+        Assert.False(extracted.IsJavaScriptShell);
+    }
+
     [Fact]
     public async Task Javascript_shell_returns_an_honest_failure_without_executing_scripts()
     {

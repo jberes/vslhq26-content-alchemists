@@ -1649,8 +1649,69 @@ button.cm-intent {
     border-inline-start-color: var(--cm-status-queued);
 }
 
+/* Two lines, then an ellipsis: a long title no longer turns the tree into a column of prose.
+   The whole title is in the row's tooltip and in the accessible name. */
 .cm-focus__list-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
     font-size: var(--cm-text-body);
+}
+
+/* The outline's single tooltip (castmill-focus-tips.js, attached to <body> and placed with
+   fixed coordinates so the scrolling outline cannot clip it). */
+.cm-focus__tip {
+    --cm-focus-tip-arrow: 18px;
+    position: fixed;
+    z-index: 95;
+    display: none;
+    flex-direction: column;
+    gap: var(--cm-space-1);
+    max-inline-size: min(24rem, calc(100vw - 2rem));
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-inverse);
+    color: var(--cm-on-inverse);
+    box-shadow: var(--cm-shadow-md);
+    pointer-events: none;
+}
+
+.cm-focus__tip[data-open] {
+    display: flex;
+}
+
+.cm-focus__tip::before {
+    content: "";
+    position: absolute;
+    inset-block-start: var(--cm-focus-tip-arrow);
+    inset-inline-start: -6px;
+    border-block: 6px solid transparent;
+    border-inline-end: 6px solid var(--cm-surface-inverse);
+    transform: translateY(-50%);
+}
+
+.cm-focus__tip[data-side="left"]::before {
+    inset-inline-start: auto;
+    inset-inline-end: -6px;
+    border-inline-end: 0;
+    border-inline-start: 6px solid var(--cm-surface-inverse);
+}
+
+.cm-focus__tip-kicker {
+    font-family: var(--cm-font-mono);
+    font-size: var(--cm-text-kicker);
+    letter-spacing: var(--cm-tracking-kicker);
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+
+.cm-focus__tip-title {
+    font-family: var(--cm-font-body);
+    font-size: var(--cm-text-body);
+    line-height: var(--cm-leading-tight);
 }
 
 .cm-focus__list-meta {

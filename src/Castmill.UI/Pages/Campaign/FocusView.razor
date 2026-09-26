@@ -14,6 +14,7 @@
 @using Castmill.UI.Scheduling
 @using Castmill.UI.State
 @implements IDisposable
+@implements IAsyncDisposable
 @inject CampaignState Campaign
 @inject CampaignsClient Campaigns
 @inject ScheduleClient Schedule
@@ -50,7 +51,10 @@
 
                 RenderFragment<ArtifactPreviewResponse> Row = item =>
                     @<div class="cm-tree__row">
-                        <button type="button"
+                        @* Titles are clamped to two lines; the one shared tooltip shows the whole title. *@
+                        <button type="button" id="@TreeItemId(item)"
+                                data-tip-kicker="@($"{ArtifactDisplay.KindLabel(item.Kind)} · {ArtifactDisplay.StatusLabel(item.Status)}")"
+                                data-tip-title="@item.Title"
                                 class="cm-focus__list-item @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
                                 aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
                                 aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
@@ -82,13 +86,17 @@
                    drops it: the platform mark and the short kind are the only things that
                    differ, and one line each keeps a post's whole set in view. The full title
                    still reaches assistive tech and the tooltip. *@
-                RenderFragment<ArtifactPreviewResponse> ChildRow = item =>
-                    @<div class="cm-tree__row cm-tree__row--compact">
-                        <button type="button"
+                RenderFragment<(ArtifactPreviewResponse Item, ArtifactPreviewResponse Parent)> ChildRow = pair =>
+                {
+                    var item = pair.Item;
+                    return @<div class="cm-tree__row cm-tree__row--compact">
+                        @* A child row shows only its platform, so its tooltip names the document it came from. *@
+                        <button type="button" id="@TreeItemId(item)"
+                                data-tip-kicker="@($"{ArtifactDisplay.KindLabel(item.Kind)} · {ArtifactDisplay.StatusLabel(item.Status)} · from")"
+                                data-tip-title="@pair.Parent.Title"
                                 class="cm-focus__list-item cm-focus__list-item--compact @ArtifactDisplay.StatusEdgeModifier(item.Status) @(item.Id == (_loadingArtifactId ?? _artifactId) ? "cm-focus__list-item--active" : "")"
                                 aria-current="@(item.Id == (_loadingArtifactId ?? _artifactId) ? "true" : "false")"
                                 aria-busy="@(item.Id == _loadingArtifactId ? "true" : "false")"
-                                title="@item.Title"
                                 aria-label="@item.Title — @ArtifactDisplay.KindLabel(item.Kind), @ArtifactDisplay.StatusLabel(item.Status)"
                                 @onclick="() => SelectAsync(item.Id)">
                             <span class="cm-tree__mark cm-mono" aria-hidden="true">@ArtifactDisplay.KindMark(item.Kind)</span>
@@ -111,6 +119,7 @@
                             <AppIcon Name="trash" />
                         </button>
                     </div>;
+                };
 
                 RenderFragment<FocusBranch> Branch = branch =>
                     @<li class="cm-tree__branch">
@@ -120,7 +129,7 @@
                             <ul class="cm-tree__children">
                                 @foreach (var child in branch.Children)
                                 {
-                                    <li>@ChildRow(child)</li>
+                                    <li>@ChildRow((child, branch.Root))</li>
                                 }
                             </ul>
                         }
@@ -1130,6 +1139,9 @@
         }
     }
 
+    /// <summary>A stable DOM id per tree row: the anchor its tooltip attaches to.</summary>
+    private static string TreeItemId(ArtifactPreviewResponse item) => $"cm-focus-item-{item.Id:N}";
+
     private static string CategoryId(string lane) =>
         new(lane.ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray());
 
@@ -1182,6 +1194,17 @@
         if (!firstRender)
         {
             return;
+        }
+
+        // The outline's one shared tooltip (ADR-F73). Best effort: no tooltip is not an error.
+        try
+        {
+            _tipsModule = await JS.InvokeAsync<IJSObjectReference>("import", TipsModulePath);
+            _tips = await _tipsModule.InvokeAsync<IJSObjectReference?>("attach");
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            _tips = null;
         }
 
         if (GenerateOnOpen && _artifact is { } artifact
@@ -2488,4 +2511,29 @@
     }, Notifier, StateHasChanged, "Opening the artifact"));
 
     public void Dispose() => Campaign.Changed -= OnChanged;
+
+    private const string TipsModulePath = "./_content/Castmill.UI/js/castmill-focus-tips.js?v=2";
+    private IJSObjectReference? _tipsModule;
+    private IJSObjectReference? _tips;
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        try
+        {
+            if (_tips is not null)
+            {
+                await _tips.InvokeVoidAsync("dispose");
+                await _tips.DisposeAsync();
+            }
+            if (_tipsModule is not null)
+            {
+                await _tipsModule.DisposeAsync();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or ObjectDisposedException or TaskCanceledException)
+        {
+            // The WebView may already be tearing down; the tooltip goes with the page.
+        }
+    }
 }

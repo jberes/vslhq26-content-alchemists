@@ -107,6 +107,51 @@ public sealed class ArtifactTreeTests : CastmillUiTestContext
             Assert.Equal("Launch thread", view.Find(".cm-focus__manuscript h1").TextContent));
     }
 
+    /// <summary>
+    /// Long titles are clamped to two lines; ONE shared tooltip (castmill-focus-tips.js) shows the
+    /// whole title for the row under the pointer. Each row declares its words: a document row
+    /// its own title, a supporting row the title of the document it was made from.
+    /// </summary>
+    [Fact]
+    public async Task Each_tree_row_declares_its_tooltip_and_supporting_rows_name_their_document()
+    {
+        var view = Render<FocusView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await view.WaitForAssertionAsync(() => Assert.NotNull(RailRow(view, "Launch thread")));
+
+        var blogRow = RailRow(view, "Launch-day blog post");
+        Assert.Equal("Launch-day blog post", blogRow.GetAttribute("data-tip-title"));
+        Assert.Contains("Blog", blogRow.GetAttribute("data-tip-kicker")!, StringComparison.Ordinal);
+
+        var threadRow = RailRow(view, "Launch thread");
+        Assert.Equal("Launch-day blog post", threadRow.GetAttribute("data-tip-title"));
+        Assert.EndsWith("from", threadRow.GetAttribute("data-tip-kicker")!, StringComparison.Ordinal);
+        // No per-row tooltip components and no native title tooltips to stack on top.
+        Assert.Empty(view.FindAll("igc-tooltip"));
+        Assert.Null(threadRow.GetAttribute("title"));
+        Assert.All(view.FindAll(".cm-focus__list-item"), row => Assert.False(string.IsNullOrEmpty(row.GetAttribute("data-tip-title"))));
+        Assert.Contains(JSInterop.Invocations, i => i.Identifier == "import"
+            && i.Arguments.Count > 0 && i.Arguments[0]?.ToString()?.Contains("castmill-focus-tips.js", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void The_tree_title_is_clamped_to_two_lines_in_the_stylesheet()
+    {
+        var css = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "Castmill.UI", "wwwroot", "css", "views.css"));
+        var rule = System.Text.RegularExpressions.Regex.Match(css, @"\.cm-focus__list-title \{(?<body>[^}]*)\}").Groups["body"].Value;
+        Assert.Contains("-webkit-line-clamp: 2", rule, StringComparison.Ordinal);
+        Assert.Contains("overflow: hidden", rule, StringComparison.Ordinal);
+    }
+
+    private static string RepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Castmill.sln")))
+        {
+            dir = dir.Parent;
+        }
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root not found.");
+    }
+
     [Fact]
     public async Task Document_outline_lives_beside_the_editor_and_scrolls_independently()
     {

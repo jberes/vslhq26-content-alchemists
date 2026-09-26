@@ -322,9 +322,7 @@ public sealed class SourceImportService(
                 }, Json)));
         }
 
-        var contentRoot = document.QuerySelector("article")
-            ?? document.QuerySelector("main")
-            ?? document.Body;
+        var contentRoot = ChooseContentRoot(document);
         foreach (var image in ExtractEligibleImages(document, contentRoot, url, title, structuredFacts))
         {
             var imageOrdinal = blocks.Count(block => block.LocatorKind == EvidenceLocatorKinds.WebPageImage) + 1;
@@ -347,7 +345,7 @@ public sealed class SourceImportService(
         var ordinal = 0;
         foreach (var element in contentRoot is null
             ? Enumerable.Empty<IElement>()
-            : contentRoot.QuerySelectorAll("h1,h2,h3,h4,h5,h6,p,li,blockquote"))
+            : contentRoot.QuerySelectorAll(ReadableBlockSelector))
         {
             var content = NormalizeText(element.TextContent);
             if (string.IsNullOrWhiteSpace(content))
@@ -381,13 +379,82 @@ public sealed class SourceImportService(
                 }, Json)));
         }
         var hasReadableBody = blocks.Count > bodyStart;
+        // "Rendered with JavaScript" is a claim about the page, so it needs evidence: almost no
+        // visible text in the server HTML. A script-heavy page that has real text but nothing
+        // this extractor could shape into sections is a different failure and says so.
+        var visibleText = NormalizeText(document.Body?.TextContent ?? string.Empty).Length;
         return new WebPageExtraction(
             title,
             canonicalUrl,
             hasReadableBody,
-            !hasReadableBody && (hasApplicationRoot || scriptCharacters >= 200),
+            !hasReadableBody && visibleText < JavaScriptShellTextLimit && (hasApplicationRoot || scriptCharacters >= 200),
             blocks);
     }
+
+    private const string ReadableBlockSelector = "h1,h2,h3,h4,h5,h6,p,li,blockquote";
+
+    /// <summary>Below this much visible server text a script-driven page is treated as a client-rendered shell.</summary>
+    private const int JavaScriptShellTextLimit = 200;
+
+    /// <summary>
+    /// The region whose text is the page. The FIRST &lt;article&gt; is not it: marketing sites put
+    /// &lt;article&gt; promo cards in mega-menus, and taking one of those left a server-rendered page
+    /// with nothing to import. The candidate (main, [role=main], article) holding the most
+    /// readable text wins when it carries at least half of the body's; then an article inside it
+    /// that carries most of ITS text narrows the capture further (a teaser beside the article in
+    /// &lt;main&gt; stays out). Anything less and the whole body is read.
+    /// </summary>
+    internal static IElement? ChooseContentRoot(IDocument document)
+    {
+        var body = document.Body;
+        if (body is null)
+        {
+            return null;
+        }
+        var bodyScore = ReadableScore(body);
+        IElement? best = null;
+        var bestScore = 0;
+        foreach (var candidate in document.QuerySelectorAll("main,[role='main'],article"))
+        {
+            var score = ReadableScore(candidate);
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+        if (best is null || bestScore * 2 < bodyScore)
+        {
+            return body;
+        }
+        while (true)
+        {
+            IElement? narrower = null;
+            var narrowerScore = 0;
+            foreach (var article in best.QuerySelectorAll("article"))
+            {
+                var score = ReadableScore(article);
+                if (score > narrowerScore)
+                {
+                    narrower = article;
+                    narrowerScore = score;
+                }
+            }
+            if (narrower is null || narrowerScore * 2 < bestScore)
+            {
+                return best;
+            }
+            best = narrower;
+            bestScore = narrowerScore;
+        }
+    }
+
+    /// <summary>Characters of text in the blocks the extractor would capture (headings, paragraphs, list items, quotes of 20+ characters).</summary>
+    private static int ReadableScore(IElement root) =>
+        root.QuerySelectorAll(ReadableBlockSelector)
+            .Select(element => NormalizeText(element.TextContent))
+            .Where(text => text.Length >= 20)
+            .Sum(text => text.Length);
 
     private static List<StructuredWebFact> ExtractStructuredFacts(IDocument document)
     {
