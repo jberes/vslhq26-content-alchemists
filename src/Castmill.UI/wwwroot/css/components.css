@@ -173,6 +173,13 @@
     flex: 1 1 auto;
 }
 
+.cm-toast__action {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    white-space: nowrap;
+}
+
 .cm-toast__dismiss {
     border: 0;
     background: transparent;
@@ -746,4 +753,62 @@ input[type="file"]:disabled::file-selector-button {
 .cm-topbar__theme svg {
     inline-size: 17px;
     block-size: 17px;
+}
+
+
+/* ---- Work in progress (ADR-F74) ---------------------------------------------------- */
+/* castmill-activity.js marks the control whose click started an API request. The control
+   keeps its size and place: a pulsing accent edge and a progress cursor say "working", and
+   it ignores further clicks until its requests settle. No spinner (ADR-F13). */
+[data-cm-busy] {
+    cursor: progress;
+    pointer-events: none;
+    animation: cm-busy-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes cm-busy-pulse {
+    0%,
+    100% {
+        box-shadow: inset 0 -3px 0 var(--cm-accent);
+        opacity: 1;
+    }
+
+    50% {
+        box-shadow: inset 0 -3px 0 transparent;
+        opacity: 0.65;
+    }
+}
+
+/* The app-level cue: a slim bar across the top while anything the producer started runs. */
+:root[data-cm-activity] body::after {
+    content: "";
+    position: fixed;
+    inset-block-start: 0;
+    inset-inline: 0;
+    z-index: 200;
+    block-size: 3px;
+    background: linear-gradient(90deg, transparent, var(--cm-accent), transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: cm-activity-sweep 1.2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes cm-activity-sweep {
+    from { background-position: -40% 0; }
+    to { background-position: 140% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-cm-busy] {
+        animation: none;
+        box-shadow: inset 0 -3px 0 var(--cm-accent);
+        opacity: 0.75;
+    }
+
+    :root[data-cm-activity] body::after {
+        animation: none;
+        background: var(--cm-accent);
+        opacity: 0.6;
+    }
 }

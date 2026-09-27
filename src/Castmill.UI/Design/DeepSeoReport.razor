@@ -415,12 +415,22 @@
                         @if (OnDraftAngle.HasDelegate)
                         {
                             @* Queued, not awaited: the click hands the angle to the press and
-                               returns immediately, so the button never holds the producer. The
-                               header's run pill is what reports it, from whichever view. *@
+                               returns immediately. The card says it is being written and the
+                               producer gets a notification with a link when it lands in Focus. *@
+                            var seedingThis = SeedingAngle == angle.Angle;
                             <button type="button" class="cm-button cm-button--quiet"
+                                    disabled="@(SeedingAngle is not null)" aria-busy="@(seedingThis ? "true" : "false")"
+                                    title="@(SeedingAngle is not null && !seedingThis ? "Another blog is being written — one at a time" : null)"
                                     @onclick="() => OnDraftAngle.InvokeAsync(angle)">
-                                Seed blog from this angle
+                                @(seedingThis ? "Writing in the background…" : "Seed blog from this angle")
                             </button>
+                            @if (seedingThis)
+                            {
+                                <p class="cm-meta cm-report-angle__seeding" role="status">
+                                    <span class="cm-ai-dot" aria-hidden="true"></span>
+                                    You'll get a notification with a link when it's ready in Focus mode. You can keep working meanwhile.
+                                </p>
+                            }
                         }
                     </li>
                 }
@@ -432,6 +442,9 @@
 @code {
     [Parameter, EditorRequired] public SeoAnalysisReportResponse Report { get; set; } = default!;
     [Parameter] public EventCallback<SeoContentAngle> OnDraftAngle { get; set; }
+
+    /// <summary>The angle whose blog is being written in the background; empty string when a seeded run's angle is no longer listed.</summary>
+    [Parameter] public string? SeedingAngle { get; set; }
 
     [Parameter] public EventCallback OnRegenerateAngles { get; set; }
     [Parameter] public bool RegeneratingAngles { get; set; }

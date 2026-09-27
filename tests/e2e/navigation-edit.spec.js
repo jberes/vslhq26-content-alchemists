@@ -81,10 +81,12 @@ test('Mill Floor Edit opens the clicked artifact and Back keeps completed progre
         await page.getByRole('button', { name: 'Print 1 newsletter' }).click();
         await expect(page.getByRole('button', { name: 'Done — back to the board' })).toBeVisible();
 
-        await page.locator('.cm-card--lane', { hasText: 'Exact clicked article' }).hover();
-        await page.getByRole('button', { name: 'Edit Exact clicked article' }).click();
+        // The card itself opens the artifact (its only tool is Delete).
+        await page.locator('.cm-card--lane', { hasText: 'Exact clicked article' }).click();
         await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/focus\\?artifact=${artifactId}$`));
-        await expect(page.locator('.cm-focus__head h1')).toHaveText('Exact clicked article');
+        // The body opens with its own H1, so Focus shows the title there, not twice; the
+        // active outline row names the item that is open.
+        await expect(page.locator('.cm-focus__list-item[aria-current="true"]')).toContainText('Exact clicked article');
 
         await page.goBack();
         await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/floor$`));

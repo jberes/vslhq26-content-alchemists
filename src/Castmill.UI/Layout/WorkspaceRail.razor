@@ -15,6 +15,7 @@
 @inject INotifier Notifier
 @inject NavigationManager Navigation
 @inject ThemeService Theme
+@inject TimeProvider Clock
 
 <nav class="cm-rail" aria-label="Workspace">
     <div class="cm-rail__head">
@@ -95,7 +96,8 @@
             {
                 @foreach (var campaign in Workspace.RailCampaigns)
                 {
-                    <li class="cm-rail__row">
+                    <li class="cm-rail__row @(Workspace.Deleting?.Id == campaign.Id ? "cm-rail__row--deleting" : null)"
+                        aria-busy="@(Workspace.Deleting?.Id == campaign.Id ? "true" : "false")">
                         <button type="button"
                                 class="cm-rail__item cm-rail__item--switch @(Workspace.Active?.Id == campaign.Id ? "cm-rail__item--active" : "")"
                                 aria-current="@(Workspace.Active?.Id == campaign.Id ? "true" : "false")"
@@ -115,7 +117,7 @@
                                 </span>
                             </span>
                         </button>
-                        <button type="button" class="cm-rail__delete"
+                        <button type="button" class="cm-rail__delete" disabled="@(Workspace.Deleting is not null)"
                                 title="Delete campaign" aria-label="Delete @campaign.Name"
                                 @onclick="() => DeleteAsync(campaign)" @onclick:stopPropagation="true">
                             <AppIcon Name="trash" />
@@ -155,6 +157,11 @@
         // was open at first paint — navigation never re-renders a persistent layout child.
         Navigation.LocationChanged += OnLocationChanged;
     }
+
+    // The rail is on every signed-in page, so it loads its own list: a page that never asks
+    // for campaigns (The Wire, Brands, Settings, a reload there) left it on "Loading campaigns…"
+    // for good. Single-flight — pages that load the list as well share this one request.
+    protected override Task OnInitializedAsync() => Workspace.LoadAsync();
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
         OnChanged();
@@ -201,6 +208,12 @@
             return;
         }
 
+        if (Workspace.Deleting is not null)
+        {
+            return;
+        }
+
+        Workspace.BeginDeleting(campaign, Clock.GetUtcNow());
         try
         {
             var wasActive = Workspace.Active?.Id == campaign.Id
@@ -220,6 +233,14 @@
         catch (ApiException ex)
         {
             Notifier.ShowError(ex.Message);
+        }
+        catch (HttpRequestException)
+        {
+            Notifier.ShowError("Couldn't reach the Castmill API. The campaign was not deleted.");
+        }
+        finally
+        {
+            Workspace.EndDeleting();
         }
     }
 

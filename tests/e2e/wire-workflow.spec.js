@@ -50,6 +50,9 @@ test('The Wire schedules by keyboard and drag across three projections', async (
         await page.goto('/wire');
         await expect(page.locator('.cm-run-show__timeline')).toBeVisible();
         await expect(page.locator('.cm-run-show__queue-card')).toHaveCount(2);
+        // Opened directly, The Wire never asks for campaigns itself: the rail loads its own.
+        await expect(page.locator('.cm-rail__row', { hasText: 'Wire E2E' })).toBeVisible();
+        await expect(page.getByText('Loading campaigns…')).toHaveCount(0);
         // Every day is a full lane (--cm-wire-day-min), empty or weekend included (backlog 2026-09-05).
         await expect(page.locator('.cm-run-show__day--empty').first()).toHaveCSS('height', '72px');
         await expect(page.locator('.cm-run-show__day--weekend').first()).toHaveCSS('height', '72px');
@@ -91,11 +94,18 @@ test('The Wire schedules by keyboard and drag across three projections', async (
         const targetLane = page.locator('.cm-run-show__lane').filter({ hasNotText: 'collapsed' }).nth(2);
         const laneBox = await targetLane.boundingBox();
         expect(laneBox).not.toBeNull();
-        await dragCard.dragTo(targetLane, {
-            targetPosition: { x: Math.round(laneBox.width * 0.5), y: 12 },
-        });
+        // A real pointer gesture: press, travel, release. The Wire drags with pointer events
+        // (castmill-wire.js); Playwright's dragTo no longer produces a sequence it recognises.
+        const cardBox = await dragCard.boundingBox();
+        await page.mouse.move(cardBox.x + 40, cardBox.y + 20);
+        await page.mouse.down();
+        await page.mouse.move(laneBox.x + laneBox.width * 0.5, laneBox.y + 12, { steps: 12 });
+        await page.mouse.up();
+        // The drop either schedules straight away or asks for a time first — wait for one.
         const dragDialog = page.locator('igc-dialog[open]');
-        if (await dragDialog.isVisible()) {
+        await expect.poll(async () => (await dragDialog.count()) > 0
+            || (await page.locator('.cm-run-show__queue-card').count()) === 0, { timeout: 30_000 }).toBe(true);
+        if (await dragDialog.count() > 0) {
             const timeInput = dragDialog.getByRole('textbox', { name: 'HH:mm' });
             await timeInput.fill('14:00');
             await timeInput.press('Tab');

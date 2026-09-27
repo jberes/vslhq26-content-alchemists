@@ -60,7 +60,9 @@ test('Image studio names the owning item and Back returns to it in Focus mode', 
         await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 
         await page.goto(`/campaigns/${campaignId}/focus?artifact=${artifactId}`);
-        await expect(page.locator('.cm-focus__head h1')).toHaveText('Owning article for the image');
+        // The body opens with its own H1, so Focus shows the title there, not twice; the
+        // active outline row names the item that is open.
+        await expect(page.locator('.cm-focus__list-item[aria-current="true"]')).toContainText('Owning article for the image');
         await expect(page.locator('.cm-campaign-header__trail')).toContainText('Focus mode');
         await expect(page.locator('.cm-campaign-header__trail')).toContainText('Owning article for the image');
 
@@ -72,7 +74,9 @@ test('Image studio names the owning item and Back returns to it in Focus mode', 
 
         await page.locator('.cm-studio__drawer-head a.cm-studio__back').click();
         await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/focus\\?artifact=${artifactId}$`));
-        await expect(page.locator('.cm-focus__head h1')).toHaveText('Owning article for the image');
+        // The body opens with its own H1, so Focus shows the title there, not twice; the
+        // active outline row names the item that is open.
+        await expect(page.locator('.cm-focus__list-item[aria-current="true"]')).toContainText('Owning article for the image');
 
         await page.getByRole('button', { name: 'Go back' }).click();
         await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/images\\?slot=${slotId}$`));

@@ -1,13 +1,13 @@
 import { expect, signInFreshUser, test } from './fixtures.js';
 
 // Focus mode's outline: a long document title is clamped to two lines with an ellipsis, and a
-// styled tooltip (IgbTooltip, top layer — never clipped by the scrolling outline) shows the
+// styled tooltip (one shared element on <body> — never clipped by the scrolling outline) shows the
 // whole title. A supporting row (X, LinkedIn) shows its parent document's title instead.
 
 const API = 'http://localhost:5015';
 const LONG_TITLE = 'React Data Grid Accessibility: Inspecting ARIA Labels and Keyboard Navigation in Ignite UI for React';
 
-test('Focus outline clamps titles to two lines and shows the full title in a tooltip', async ({ page, request }) => {
+test('Focus outline clamps titles to two lines and shows the full title in a tooltip', async ({ page, request, browserName }) => {
     const headers = await signInFreshUser(page, request, 'focus-tip');
     let campaignId = null;
     try {
@@ -77,6 +77,18 @@ test('Focus outline clamps titles to two lines and shows the full title in a too
         await expect(tip).toBeVisible();
         await blogRow.click();
         await expect(tip).toBeHidden();
+        // Keyboard: a row reached by keyboard shows its title too, and Escape closes it.
+        await page.mouse.move(700, 300, { steps: 2 });
+        await blogRow.focus();
+        // WebKit on macOS moves focus to buttons only with Option+Tab, exactly as Safari does.
+        const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+        await page.keyboard.press(`Shift+${tab}`);
+        await page.keyboard.press(tab);
+        await expect(blogRow).toBeFocused();
+        await expect(tip).toBeVisible();
+        await expect(tip.locator('.cm-focus__tip-title')).toHaveText(LONG_TITLE);
+        await page.keyboard.press('Escape');
+        await expect(tip).toBeHidden();
         // Sweeping quickly over every row never leaves more than the one tooltip, and none after.
         for (const row of await page.locator('.cm-focus__list-item').all()) {
             await glide(row, 2);
@@ -87,7 +99,7 @@ test('Focus outline clamps titles to two lines and shows the full title in a too
         await page.screenshot({ path: test.info().outputPath('focus-tooltip.png') });
     } finally {
         if (campaignId) {
-            await request.delete(`${API}/api/v1/campaigns/${campaignId}`, { headers });
+            await request.delete(`${API}/api/v1/campaigns/${campaignId}`, { headers, timeout: 120_000 });
         }
     }
 });

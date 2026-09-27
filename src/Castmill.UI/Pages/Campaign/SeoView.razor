@@ -114,6 +114,7 @@
                 {
                     <DeepSeoReport Report="deepReport"
                                    OnDraftAngle="DraftAngle"
+                                   SeedingAngle="@SeedingAngle(deepReport)"
                                    OnRegenerateAngles="RegenerateAnglesAsync"
                                    RegeneratingAngles="_regeneratingAngles" />
                     <section class="cm-deep-report__section">
@@ -458,6 +459,7 @@
     protected override void OnInitialized()
     {
         Campaign.Changed += OnChanged;
+        PressRun.Changed += OnPressChanged;
 
         _chartOptions = new ApexChartOptions<KeywordRow>
         {
@@ -862,9 +864,10 @@
             copies: 1,
             // The SEO analysis seeds a placeholder blog per angle; drafting consumes it
             // instead of leaving a stub on the board beside the finished piece.
-            replaceArtifactId: Campaign.Artifacts.FirstOrDefault(a => a.IsPlaceholder)?.Id);
+            replaceArtifactId: Campaign.Artifacts.FirstOrDefault(a => a.IsPlaceholder)?.Id,
+            announcement: SeedAnnouncement(angle));
 
-        Notifier.ShowSuccess($"Seeding \"{angle.Angle}\" — it prints in the background; the header tracks it.");
+        Notifier.ShowInfo($"Writing the blog from “{angle.Angle}” in the background. You'll be notified when it's ready in Focus mode.");
     }
 
     private async Task CopyAsync(string text)
@@ -879,5 +882,20 @@
         }
     }
 
-    public void Dispose() => Campaign.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Campaign.Changed -= OnChanged;
+        PressRun.Changed -= OnPressChanged;
+    }
+
+    private void OnPressChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>The announcement a seeded angle's run carries; also how the page recognises it on return.</summary>
+    private static string SeedAnnouncement(SeoContentAngle angle) => $"the blog from “{angle.Angle}”";
+
+    /// <summary>The angle whose blog is being written right now for this campaign, if any.</summary>
+    private string? SeedingAngle(SeoAnalysisReportResponse report) =>
+        PressRun.IsRunning && PressRun.CampaignId == CampaignId && PressRun.Announcement is { } announcement
+            ? report.Insights?.ContentAngles.FirstOrDefault(angle => SeedAnnouncement(angle) == announcement)?.Angle ?? string.Empty
+            : null;
 }

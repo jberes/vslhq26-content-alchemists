@@ -1,11 +1,6 @@
 import { expect, test } from './fixtures.js';
 
-const live = process.env.CASTMILL_E2E_LIVE === '1';
-
 test.describe('analysis-first campaign production', () => {
-    test.skip(!live,
-        'Set CASTMILL_E2E_LIVE=1 to run the metered DataForSEO and answer-engine scenario.');
-
     test('deep report gates production and renders ApexCharts plus ApexTree', async ({ page, request }, testInfo) => {
         let campaignId = null;
         let brandId = null;
@@ -218,9 +213,10 @@ test.describe('analysis-first campaign production', () => {
             await expect(page.getByText(renamed, { exact: true }).first()).toBeVisible();
             await expect(page.getByRole('button', { name: 'Ready', exact: true })).toBeVisible();
             await expect(page.getByText('Real search data informing this content')).toBeVisible();
-            const socialGroup = page.getByRole('region', { name: 'Social (1)' });
-            await expect(socialGroup.getByRole('button', { name: /X post Draft$/ }))
-                .toBeVisible();
+            // Supporting work nests under the piece it was made from: the owned X post sits in
+            // its parent blog's row of the outline, not in a group of its own.
+            const parentRow = page.locator('li', { has: page.locator(`#cm-focus-item-${blogId.replaceAll('-', '')}`) });
+            await expect(parentRow.getByRole('button', { name: /— X post, Draft$/ })).toBeVisible();
 
             await page.goto(`/campaigns/${campaignId}/seo`);
             await expect(page.locator('.apexcharts-svg').first()).toBeVisible();

@@ -151,7 +151,30 @@ public sealed class TestVoiceCaptureService : IVoiceCaptureService
     public int StopCalls { get; private set; }
     public int DiscardCalls { get; private set; }
     public int UseCalls { get; private set; }
+    public List<AudioInput> InputList { get; } = [];
+    public IReadOnlyList<AudioInput> Inputs => InputList;
+    public AudioInput? SelectedInput { get; set; }
+    public List<AudioInput?> Selections { get; } = [];
+
+    /// <summary>The input choice Record was started with — what the browser would be asked to open.</summary>
+    public AudioInput? StartedWith { get; private set; }
     public event Action? Changed;
+
+    public Task SelectInputAsync(AudioInput? input, CancellationToken ct = default)
+    {
+        Selections.Add(input);
+        SelectedInput = input;
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>A microphone was plugged in or removed.</summary>
+    public void SetInputs(params AudioInput[] inputs)
+    {
+        InputList.Clear();
+        InputList.AddRange(inputs);
+        Changed?.Invoke();
+    }
 
     public Task InitializeAsync(CancellationToken ct = default)
     {
@@ -163,7 +186,8 @@ public sealed class TestVoiceCaptureService : IVoiceCaptureService
     public Task StartAsync(int maxSeconds, CancellationToken ct = default)
     {
         StartCalls++;
-        Set(new VoiceCaptureSnapshot(VoiceCaptureStates.Recording));
+        StartedWith = SelectedInput;
+        Set(new VoiceCaptureSnapshot(VoiceCaptureStates.Recording, InputLabel: SelectedInput?.Label));
         return Task.CompletedTask;
     }
 

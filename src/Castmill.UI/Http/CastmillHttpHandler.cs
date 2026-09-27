@@ -15,7 +15,7 @@ namespace Castmill.UI.Http;
 /// UI code never touches HttpClient directly, which is what keeps auth and error handling
 /// from being reimplemented per feature.
 /// </summary>
-public sealed class CastmillHttpHandler(IAuthTokenProvider tokens) : DelegatingHandler
+public sealed class CastmillHttpHandler(IAuthTokenProvider tokens, IUserActivity? activity = null) : DelegatingHandler
 {
     public const string CorrelationHeader = "X-Correlation-ID";
 
@@ -30,7 +30,20 @@ public sealed class CastmillHttpHandler(IAuthTokenProvider tokens) : DelegatingH
 
         var correlationId = Guid.NewGuid().ToString("n");
         request.Headers.TryAddWithoutValidation(CorrelationHeader, correlationId);
+        activity?.Started(correlationId);
+        try
+        {
+            return await SendCoreAsync(request, correlationId, cancellationToken);
+        }
+        finally
+        {
+            activity?.Finished(correlationId);
+        }
+    }
 
+    private async Task<HttpResponseMessage> SendCoreAsync(
+        HttpRequestMessage request, string correlationId, CancellationToken cancellationToken)
+    {
         var anonymous = request.Options.TryGetValue(Anonymous, out var flag) && flag;
         if (!anonymous)
         {

@@ -53,10 +53,14 @@ public static class CastmillUiServices
         // ---- HTTP --------------------------------------------------------------
         // Every call goes through CastmillHttpHandler — the one chokepoint for the bearer
         // token, the correlation ID, silent refresh and typed errors.
+        services.AddScoped<UserActivity>();
+        services.AddScoped<IUserActivity>(sp => sp.GetRequiredService<UserActivity>());
         services.AddScoped(sp => new HttpClient(
-            new CastmillHttpHandler(sp.GetRequiredService<IAuthTokenProvider>())
+            new CastmillHttpHandler(sp.GetRequiredService<IAuthTokenProvider>(), sp.GetService<IUserActivity>())
             {
-                InnerHandler = new HttpClientHandler(),
+                // A shell may supply its own transport (the desktop pins NSURLSession's
+                // request windows to the same 10-minute budget as the client below).
+                InnerHandler = sp.GetService<IPlatformHttpHandlerFactory>()?.Create() ?? new HttpClientHandler(),
             })
         {
             BaseAddress = apiBaseAddress,

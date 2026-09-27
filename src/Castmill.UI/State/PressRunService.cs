@@ -11,7 +11,8 @@ namespace Castmill.UI.State;
 /// poll of <c>runs/latest</c> that surfaces per-artifact completions while the POST is still
 /// buffering. The reveal is driven by real completion events, never a timer (ADR-F13).
 /// </summary>
-public sealed class PressRunService(GenerationClient generation, CampaignState campaign) : IDisposable
+public sealed class PressRunService(
+    GenerationClient generation, CampaignState campaign, Castmill.UI.Design.INotifier? notifier = null) : IDisposable
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(800);
 
@@ -33,6 +34,12 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
 
     public event Action? Changed;
 
+    /// <summary>
+    /// What to call this run when it finishes in the background ("the blog from “Faster
+    /// grids”"), or null when the caller watches the run itself (the Press Run board).
+    /// </summary>
+    public string? Announcement { get; private set; }
+
     /// <summary>True when the given campaign has a run in flight or a just-finished one to reveal.</summary>
     public bool IsActiveFor(Guid campaignId) =>
         CampaignId == campaignId && (IsRunning || Progress is not null);
@@ -44,8 +51,12 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
     /// rather than leave a stub beside the real thing. Honoured only for a single kind and a
     /// single copy; the multi-kind press has nothing to replace.
     /// </param>
+    /// <param name="announcement">
+    /// When set, the producer is told when the run finishes — from whichever page they are on —
+    /// with a link straight to the new piece in Focus mode.
+    /// </param>
     public void Start(Guid campaignId, Guid? transcriptArtifactId, string? brief, string[] kinds,
-        int copies = 1, Guid? replaceArtifactId = null)
+        int copies = 1, Guid? replaceArtifactId = null, string? announcement = null)
     {
         ArgumentNullException.ThrowIfNull(kinds);
 
@@ -59,6 +70,7 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
         Copies = copies;
         Progress = null;
         Error = null;
+        Announcement = announcement;
         IsRunning = true;
         Changed?.Invoke();
 
@@ -176,6 +188,7 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
             if (!ct.IsCancellationRequested)
             {
                 IsRunning = false;
+                Announce(campaignId);
                 Changed?.Invoke();
 
                 // Reconciliation: whatever the poll saw or missed, the run is over — one
@@ -189,6 +202,31 @@ public sealed class PressRunService(GenerationClient generation, CampaignState c
             }
         }
     }
+
+    private void Announce(Guid campaignId)
+    {
+        if (notifier is null || Announcement is not { } what)
+        {
+            return;
+        }
+        var made = Progress?.Items.FirstOrDefault(item => item.Success && item.ArtifactId is not null);
+        if (made?.ArtifactId is { } artifactId)
+        {
+            notifier.ShowReady(
+                $"{Capitalize(what)} is ready.",
+                "Open in Focus mode",
+                $"campaigns/{campaignId}/focus?artifact={artifactId}");
+        }
+        else
+        {
+            var reason = Error ?? Progress?.Items.FirstOrDefault(item => !item.Success)?.Error ?? "the run did not produce it";
+            notifier.ShowError($"{Capitalize(what)} could not be written: {reason}");
+        }
+        Announcement = null;
+    }
+
+    private static string Capitalize(string text) =>
+        text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     /// <summary>
     /// Follows a run the request lost by polling its row until it reaches a terminal state.

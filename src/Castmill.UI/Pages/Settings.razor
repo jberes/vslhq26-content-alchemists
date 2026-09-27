@@ -310,11 +310,17 @@
         </div>
 
         <div class="cm-form__actions cm-settings__links-actions">
-            <button type="button" class="cm-button cm-button--quiet" @onclick="AddLink">+ Add a link</button>
-            <button type="button" class="cm-button" disabled="@_savingLinks" @onclick="SaveLinksAsync">
+            @* Editing waits for the saved links: a row typed before they arrived was replaced by
+               the load, and Save then wrote an empty list over the producer's links. *@
+            <button type="button" class="cm-button cm-button--quiet" disabled="@(!_linksLoaded)" @onclick="AddLink">+ Add a link</button>
+            <button type="button" class="cm-button" disabled="@(_savingLinks || !_linksLoaded)" @onclick="SaveLinksAsync">
                 @(_savingLinks ? "Saving…" : "Save links")
             </button>
-            @if (_links.Count == 0)
+            @if (!_linksLoaded)
+            {
+                <span class="cm-meta" role="status">@(_loadError is null ? "Loading your links…" : "Your links couldn't be loaded, so they can't be edited right now.")</span>
+            }
+            else if (_links.Count == 0)
             {
                 <span class="cm-meta">Nothing yet — add your site and socials.</span>
             }
@@ -493,6 +499,7 @@
     }
 
     private readonly List<LinkRow> _links = [];
+    private bool _linksLoaded;
     private bool _savingLinks;
 
     /// <summary>The destinations almost every workspace has, in the order people expect.</summary>
@@ -708,6 +715,10 @@
             _links.Clear();
             _links.AddRange(SettingsClient.ReadLinks(settings)
                 .Select(l => new LinkRow { Label = l.Label, Url = l.Url }));
+            _linksLoaded = true;
+            // Show them now: the model status read below can take a while, and until this
+            // render the Links tab would still say "Nothing yet".
+            StateHasChanged();
             _defaultImageModel = SettingsClient.ReadDefaultImageModel(settings);
             // Whisper unless saved otherwise; the browser shell cannot run it and is pinned
             // to Azure, with the control disabled and the reason stated (G3).

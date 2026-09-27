@@ -159,6 +159,40 @@ public sealed class HttpChokepointTests
             ex.Message);
     }
 
+    /// <summary>
+    /// ADR-F74: the chokepoint reports every request's start and end so the control that
+    /// started it can show it is working. The end is reported even when the request throws,
+    /// or a button would stay "busy" forever after a network failure.
+    /// </summary>
+    [Fact]
+    public async Task Every_request_reports_its_start_and_end_to_the_activity_feedback_even_on_failure()
+    {
+        var activity = new RecordingActivity();
+        var ok = new HttpClient(new CastmillHttpHandler(new RefreshingTokenProvider(), activity)
+        {
+            InnerHandler = new SequenceHandler(_ => JsonOk(new { })),
+        }) { BaseAddress = new Uri("https://api.test/") };
+        await ok.GetAsync("api/v1/campaigns");
+
+        var failing = new HttpClient(new CastmillHttpHandler(new RefreshingTokenProvider(), activity)
+        {
+            InnerHandler = new SequenceHandler(_ => throw new HttpRequestException("offline")),
+        }) { BaseAddress = new Uri("https://api.test/") };
+        await Assert.ThrowsAsync<HttpRequestException>(() => failing.GetAsync("api/v1/campaigns"));
+
+        Assert.Equal(2, activity.Started.Count);
+        Assert.Equal(activity.Started, activity.Finished);
+        Assert.All(activity.Started, id => Assert.Equal(32, id.Length));
+    }
+
+    private sealed class RecordingActivity : IUserActivity
+    {
+        public List<string> Started { get; } = [];
+        public List<string> Finished { get; } = [];
+        void IUserActivity.Started(string requestId) => Started.Add(requestId);
+        void IUserActivity.Finished(string requestId) => Finished.Add(requestId);
+    }
+
     private static HttpClient Client(IAuthTokenProvider tokens, HttpMessageHandler inner) =>
         new(new CastmillHttpHandler(tokens) { InnerHandler = inner })
         {

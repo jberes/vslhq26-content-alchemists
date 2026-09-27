@@ -10,6 +10,10 @@
     {
         <div class="cm-toast cm-toast--@note.Severity.ToString().ToLowerInvariant()" @key="note.Id">
             <span class="cm-toast__message">@note.Message</span>
+            @if (note.ActionLabel is { } label && note.ActionHref is { } href)
+            {
+                <a class="cm-toast__action" href="@href" @onclick="() => Notifier.Dismiss(note.Id)">@label</a>
+            }
             @if (note.Duration == Timeout.InfiniteTimeSpan)
             {
                 <button type="button" class="cm-toast__dismiss" aria-label="Dismiss"

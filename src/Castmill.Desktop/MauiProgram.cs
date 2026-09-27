@@ -43,6 +43,7 @@ public static class MauiProgram
 
         // Platform seam (Roadmap §2.2): the desktop implementations.
         builder.Services.AddSingleton<IShellInfo, DesktopShellInfo>();
+        builder.Services.AddSingleton<IPlatformHttpHandlerFactory, DesktopHttpHandlerFactory>();
         builder.Services.AddScoped<IAuthTokenProvider, DesktopTokenProvider>();
         builder.Services.AddScoped<IExternalBrowserLauncher, DesktopExternalBrowserLauncher>();
         builder.Services.AddSingleton<IMediaPipeline, DesktopMediaPipeline>();

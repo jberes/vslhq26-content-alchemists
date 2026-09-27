@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "install-browser": "playwright install chromium"
+    "install-browser": "playwright install chromium webkit"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

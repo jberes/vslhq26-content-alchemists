@@ -1124,6 +1124,27 @@ button.cm-intent {
     max-inline-size: 36rem;
 }
 
+.cm-voice__input {
+    display: grid;
+    gap: var(--cm-space-2);
+    max-inline-size: 28rem;
+}
+
+.cm-voice__source {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+/* A chosen microphone that is not connected: said plainly, never a silent substitute. */
+.cm-voice__notice {
+    margin: 0;
+    padding: var(--cm-space-2) var(--cm-space-3);
+    border-inline-start: var(--cm-status-bar-width) solid var(--cm-warning);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    font-size: var(--cm-text-meta);
+}
+
 @media (max-width: 899.98px) {
     .cm-steps {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7665,6 +7686,12 @@ body.cm-wire-dragging [data-wire-drag] {
     .cm-front__item-actions {
         margin-inline-start: 0;
     }
+}
+
+/* The campaign being deleted stays in place, dimmed, until the delete returns. */
+.cm-rail__row--deleting {
+    opacity: 0.45;
+    pointer-events: none;
 }
 
 /* ---- Rail tooltips ---------------------------------------------------------------- */

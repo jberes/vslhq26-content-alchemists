@@ -13,6 +13,7 @@
 @inject AuthState Auth
 @inject INotifier Notifier
 @inject NavigationManager Navigation
+@inject Castmill.UI.Http.UserActivity Activity
 
 @if (!Auth.IsReady)
 {
@@ -91,6 +92,7 @@ else
 
             <main class="cm-app__main">
                 @Body
+                <WorkspaceBusyOverlay />
             </main>
         </div>
     </div>
@@ -124,6 +126,15 @@ else
     }
 
     private bool _railOpen;
+
+    /// <summary>Click tracking for the app-wide busy feedback (ADR-F74) must exist before the first click.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Activity.StartAsync();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

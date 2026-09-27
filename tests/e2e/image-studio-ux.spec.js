@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 
-test('Brand asset types and Image Studio controls update in place', async ({ page, request }) => {
+test('Brand asset types and Image Studio controls update in place', async ({ page, request, browserName }) => {
     let accessToken = null;
     let campaignId = null;
     let campaignName = null;
@@ -206,13 +206,25 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(printKinds.filter({ hasText: 'Campaign summary' })).toHaveCount(0);
         await expect(printKinds.filter({ hasText: 'SEO brief' })).toHaveCount(0);
 
-        await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+        // Chromium can grant clipboard access and read it back; WebKit has no such permission, so
+        // there the page's writes are recorded instead. Either way it is the text the app copied.
+        let readClipboard;
+        if (browserName === 'chromium') {
+            await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+            readClipboard = () => page.evaluate(() => navigator.clipboard.readText());
+        } else {
+            await page.evaluate(() => {
+                window.__cmCopied = null;
+                navigator.clipboard.writeText = async text => { window.__cmCopied = text; };
+            });
+            readClipboard = () => page.evaluate(() => window.__cmCopied);
+        }
         await page.getByRole('button', { name: 'Copy', exact: true }).click();
-        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        await expect.poll(readClipboard)
             .toBe('A focused visual story for every content channel.');
         await page.getByRole('button', { name: 'View', exact: true }).click();
         await page.getByRole('button', { name: 'Copy all', exact: true }).click();
-        await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        await expect.poll(readClipboard)
             .toBe('A focused visual story for every content channel.');
         await page.getByRole('button', { name: 'Close', exact: true }).click();
 
@@ -619,6 +631,9 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         if (accessToken && campaignId) {
             await request.delete(`http://localhost:5015/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
+                // A campaign delete removes every artifact, image and blob; against the shared
+                // dev database it can take well over the default 30 seconds.
+                timeout: 120_000,
             });
         }
         if (accessToken && brandId) {

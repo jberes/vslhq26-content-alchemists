@@ -111,6 +111,33 @@ public sealed class WorkspaceState(CampaignsClient campaigns)
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// The campaign being deleted right now. Deleting removes every artifact, image and
+    /// uploaded file and can take a while, so the shell covers the main pane and says so
+    /// rather than leaving a page that looks frozen but still accepts clicks.
+    /// </summary>
+    public CampaignResponse? Deleting { get; private set; }
+
+    public DateTimeOffset? DeletingSince { get; private set; }
+
+    public void BeginDeleting(CampaignResponse campaign, DateTimeOffset now)
+    {
+        Deleting = campaign;
+        DeletingSince = now;
+        Changed?.Invoke();
+    }
+
+    public void EndDeleting()
+    {
+        if (Deleting is null)
+        {
+            return;
+        }
+        Deleting = null;
+        DeletingSince = null;
+        Changed?.Invoke();
+    }
+
     /// <summary>Removes a deleted campaign from the list (the server delete already ran).</summary>
     public void Remove(Guid campaignId)
     {

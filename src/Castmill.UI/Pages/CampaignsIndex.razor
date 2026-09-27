@@ -16,6 +16,7 @@
 @inject NavigationManager Navigation
 @inject IConfirmService Confirm
 @inject INotifier Notifier
+@inject TimeProvider Clock
 
 <PageTitle>Campaigns — Castmill</PageTitle>
 
@@ -234,6 +235,7 @@
         }
 
         _deleting = campaign.Id;
+        Workspace.BeginDeleting(campaign, Clock.GetUtcNow());
         StateHasChanged();
         try
         {
@@ -255,6 +257,7 @@
         finally
         {
             _deleting = null;
+            Workspace.EndDeleting();
             StateHasChanged();
         }
     }

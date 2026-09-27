@@ -15,6 +15,11 @@ let pausedDuration = 0;
 let elapsedSeconds = 0;
 let maxTimer;
 let actualMimeType;
+let inputInfo = {};
+let inputWatcher;
+
+// Browser aliases for "whatever the system uses" — the picker offers its own System default.
+const ALIAS_INPUTS = new Set(['default', 'communications']);
 
 export function chooseMimeType(MediaRecorderType = globalThis.MediaRecorder) {
     if (!MediaRecorderType) return null;
@@ -43,7 +48,82 @@ export function capability() {
     return { state: 'Idle' };
 }
 
-export async function start(callback, maxSeconds = 600) {
+/**
+ * The named microphones. Browsers name inputs (and in Safari even list them) only after the
+ * microphone has been allowed once, so an empty list means "not yet allowed", not "none".
+ */
+export async function listInputs() {
+    if (!navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+        .filter(device => device.kind === 'audioinput' && device.deviceId && device.label
+            && !ALIAS_INPUTS.has(device.deviceId))
+        .map(device => ({ deviceId: device.deviceId, label: device.label }));
+}
+
+/** Reports the list again whenever a microphone is plugged in or removed. */
+export function watchInputs(callback) {
+    unwatchInputs();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    inputWatcher = async () => {
+        try {
+            await callback.invokeMethodAsync('OnInputsChanged', await listInputs());
+        } catch {
+            // The page is tearing down; the next page load lists the inputs afresh.
+        }
+    };
+    navigator.mediaDevices.addEventListener('devicechange', inputWatcher);
+}
+
+export function unwatchInputs() {
+    if (inputWatcher) navigator.mediaDevices?.removeEventListener?.('devicechange', inputWatcher);
+    inputWatcher = undefined;
+}
+
+function audioConstraints(deviceId) {
+    return {
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
+        video: false,
+    };
+}
+
+const isMissingInput = error => error?.name === 'OverconstrainedError' || error?.name === 'NotFoundError';
+
+/**
+ * Opens the chosen microphone, exactly — never a silent substitute. A saved id can go stale
+ * (unplugged, or Safari handing out a new id), so it is looked up again by name; only when no
+ * input by that name exists does recording fall back to the system default, and it says so.
+ */
+async function openInput(preferred) {
+    if (!preferred?.deviceId && !preferred?.label) {
+        return { stream: await navigator.mediaDevices.getUserMedia(audioConstraints()) };
+    }
+    if (preferred.deviceId) {
+        try {
+            return { stream: await navigator.mediaDevices.getUserMedia(audioConstraints(preferred.deviceId)) };
+        } catch (error) {
+            if (!isMissingInput(error)) throw error;
+        }
+    }
+    const fallback = await navigator.mediaDevices.getUserMedia(audioConstraints());
+    const match = (await listInputs()).find(input => input.label === preferred.label);
+    if (match) {
+        if (fallback.getAudioTracks()[0]?.getSettings?.().deviceId === match.deviceId) return { stream: fallback };
+        fallback.getTracks().forEach(track => track.stop());
+        return { stream: await navigator.mediaDevices.getUserMedia(audioConstraints(match.deviceId)) };
+    }
+    return {
+        stream: fallback,
+        notice: `“${preferred.label}” isn't connected, so this is recording from the system default instead.`,
+    };
+}
+
+export async function start(callback, maxSeconds = 600, preferredInput = null) {
     const supported = capability();
     if (supported.state !== 'Idle') {
         await callback.invokeMethodAsync('OnVoiceCaptureChanged', supported);
@@ -59,17 +139,18 @@ export async function start(callback, maxSeconds = 600) {
     }
 
     await dispose();
+    inputInfo = {};
     dotnet = callback;
     await emit({ state: 'RequestingPermission' });
     try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-            },
-            video: false,
-        });
+        const opened = await openInput(preferredInput);
+        stream = opened.stream;
+        const track = stream.getAudioTracks?.()[0];
+        inputInfo = {
+            inputLabel: track?.label || null,
+            inputDeviceId: track?.getSettings?.().deviceId || null,
+            notice: opened.notice ?? null,
+        };
     } catch (error) {
         await emit({
             state: error?.name === 'NotAllowedError' ? 'PermissionDenied' : 'Error',
@@ -79,6 +160,13 @@ export async function start(callback, maxSeconds = 600) {
         });
         stopTracks();
         return;
+    }
+
+    // Allowing the microphone is what makes the browser name its inputs.
+    try {
+        await callback.invokeMethodAsync('OnInputsChanged', await listInputs());
+    } catch {
+        // Listing is a convenience; the recording itself goes ahead.
     }
 
     const mimeType = chooseMimeType();
@@ -220,7 +308,7 @@ function elapsed() {
 }
 
 async function emit(snapshot) {
-    if (dotnet) await dotnet.invokeMethodAsync('OnVoiceCaptureChanged', snapshot);
+    if (dotnet) await dotnet.invokeMethodAsync('OnVoiceCaptureChanged', { ...inputInfo, ...snapshot });
 }
 
 function stopMeters() {

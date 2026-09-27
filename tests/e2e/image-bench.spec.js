@@ -148,11 +148,12 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         // 2 · Very visible handles: eight of them, at least 14 px, on a corner-aspect-locked resize.
         const handles = editor.locator('.cm-bench__handle');
         await expect(handles).toHaveCount(8);
-        for (const h of await handles.all()) {
-            const hb = await h.boundingBox();
-            expect(Math.min(hb.width, hb.height)).toBeGreaterThanOrEqual(10);
-            expect(Math.max(hb.width, hb.height)).toBeGreaterThanOrEqual(14);
-        }
+        // Measured in one snapshot: the selection frame re-renders as the layer settles, and
+        // measuring handle by handle could catch one mid-replacement.
+        await expect.poll(() => handles.evaluateAll(els => els.map(el => {
+            const r = el.getBoundingClientRect();
+            return Math.min(r.width, r.height) >= 10 && Math.max(r.width, r.height) >= 14;
+        }).filter(Boolean).length)).toBe(8);
         const before = await photo.boundingBox();
         await drag(page, await centre(editor.locator('.cm-bench__handle--se')), {
             x: before.x + before.width + 80, y: before.y + before.height + 20,

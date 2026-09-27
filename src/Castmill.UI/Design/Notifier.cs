@@ -24,6 +24,13 @@ public sealed class Notifier : INotifier
     // Timeout.InfiniteTimeSpan means "until dismissed".
     public void ShowError(string message) => Add(message, NotificationSeverity.Error, Timeout.InfiniteTimeSpan);
 
+    public void ShowReady(string message, string actionLabel, string actionHref)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        _current.Add(new Notification(message, NotificationSeverity.Success, Timeout.InfiniteTimeSpan, actionLabel, actionHref));
+        Changed?.Invoke();
+    }
+
     public void Dismiss(Guid id)
     {
         if (_current.RemoveAll(n => n.Id == id) > 0)

@@ -28,10 +28,11 @@
         <a class="cm-meta" href="campaigns">Campaigns /</a>
         @if (_renaming)
         {
-            <input class="cm-input cm-campaign-header__rename" aria-label="Campaign name"
+            <input class="cm-input cm-campaign-header__rename" aria-label="Campaign name" disabled="@_saving"
                    @bind="_name" @onkeydown="OnRenameKey" />
-            <button type="button" class="cm-button cm-button--quiet" @onclick="SaveRenameAsync">Save</button>
-                 <button type="button" class="cm-button cm-button--quiet" @onclick="CancelRename">Cancel</button>
+            <button type="button" class="cm-button cm-button--quiet" disabled="@_saving" aria-busy="@(_saving ? "true" : "false")"
+                    @onclick="SaveRenameAsync">@(_saving ? "Saving…" : "Save")</button>
+            <button type="button" class="cm-button cm-button--quiet" disabled="@_saving" @onclick="CancelRename">Cancel</button>
         }
         else
         {
@@ -45,8 +46,11 @@
                 }
             </nav>
             <div class="cm-campaign-header__actions" aria-label="Campaign actions">
+                @* Rename saves against the loaded campaign; before it arrives a Save would do nothing,
+                   which read as a frozen app. The button says why it is waiting. *@
                 <button type="button" class="cm-button cm-button--quiet cm-campaign-header__icon"
-                        title="Rename campaign" aria-label="Rename campaign" @onclick="BeginRename">
+                        disabled="@(Campaign.Campaign is null)"
+                        title="@(Campaign.Campaign is null ? "Loading the campaign…" : "Rename campaign")" aria-label="Rename campaign" @onclick="BeginRename">
                     <AppIcon Name="pencil" />
                 </button>
                 @if (Campaign.Campaign is { IsOwner: true })
@@ -363,7 +367,11 @@
 
     private void BeginRename()
     {
-        _name = Campaign.Campaign?.Name ?? string.Empty;
+        if (Campaign.Campaign is null)
+        {
+            return;
+        }
+        _name = Campaign.Campaign.Name;
         _renaming = true;
     }
 
@@ -382,8 +390,11 @@
     private async Task SaveRenameAsync()
     {
         if (_saving || Campaign.Campaign is not { } campaign || string.IsNullOrWhiteSpace(_name)) return;
-        await SaveCampaignAsync(campaign, _name.Trim(), campaign.Status);
-        _renaming = false;
+        // A failed save keeps the editor open with what was typed, so the producer can retry.
+        if (await SaveCampaignAsync(campaign, _name.Trim(), campaign.Status))
+        {
+            _renaming = false;
+        }
     }
 
     private async Task ToggleReadyAsync()
@@ -445,7 +456,7 @@
         }
     }
 
-    private async Task SaveCampaignAsync(Castmill.Core.Resources.CampaignResponse campaign, string name, string status)
+    private async Task<bool> SaveCampaignAsync(Castmill.Core.Resources.CampaignResponse campaign, string name, string status)
     {
         _saving = true;
         try
@@ -460,8 +471,13 @@
             Workspace.Synchronize(updated);
             await Campaign.RefreshAsync(campaign.Id);
             Notifier.ShowSuccess(status == campaign.Status ? "Campaign renamed." : $"Campaign marked {status.ToLowerInvariant()}.");
+            return true;
         }
-        catch (ApiException ex) { Notifier.ShowError(ex.Message); }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+            return false;
+        }
         finally { _saving = false; }
     }
 

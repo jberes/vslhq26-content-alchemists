@@ -82,6 +82,35 @@
     overflow: hidden;
 }
 
+/* A workspace-level operation in progress (a campaign delete): the main pane is blurred and
+   blocked, and a status card says what is happening. -webkit- for the desktop WebView. */
+.cm-app__busy {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    padding: var(--cm-space-6);
+    background: color-mix(in srgb, var(--cm-surface) 70%, transparent);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    cursor: progress;
+}
+
+.cm-app__busy-card {
+    display: grid;
+    justify-items: center;
+    gap: var(--cm-space-2);
+    max-inline-size: 28rem;
+    padding: var(--cm-space-6);
+    border: 1px solid var(--cm-rule);
+    border-radius: var(--cm-radius-md);
+    background: var(--cm-surface-raised);
+    color: var(--cm-on-surface);
+    box-shadow: var(--cm-shadow-md);
+    text-align: center;
+}
+
 /* Document-style pages: their own scrollbar, the old page padding. */
 .cm-page {
     min-block-size: 0;

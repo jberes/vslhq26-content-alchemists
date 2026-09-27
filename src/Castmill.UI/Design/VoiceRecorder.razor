@@ -24,6 +24,10 @@
             <strong class="cm-mono">@Clock(_snapshot.ElapsedSeconds)</strong>
             <span class="cm-meta">@FormatBytes(_snapshot.SizeBytes)</span>
         </div>
+        @if (_snapshot.InputLabel is { Length: > 0 } recordedFrom)
+        {
+            <p class="cm-meta cm-voice__source">Recorded from <strong>@recordedFrom</strong></p>
+        }
         @if (_snapshot.PlaybackUrl is { Length: > 0 } playbackUrl)
         {
             <audio class="cm-voice__playback" controls src="@playbackUrl">
@@ -46,6 +50,14 @@
             <strong class="cm-mono">@Clock(_snapshot.ElapsedSeconds)</strong>
             <span class="cm-meta">10:00 maximum</span>
         </div>
+        @if (_snapshot.InputLabel is { Length: > 0 } recordingFrom)
+        {
+            <p class="cm-meta cm-voice__source">Recording from <strong>@recordingFrom</strong></p>
+        }
+        @if (_snapshot.Notice is { Length: > 0 } notice)
+        {
+            <p class="cm-voice__notice" role="alert">@notice</p>
+        }
         <div class="cm-voice__meter" role="meter" aria-label="Microphone input level"
              aria-valuemin="0" aria-valuemax="100" aria-valuenow="@LevelPercent">
             <div class="cm-voice__meter-fill" style="inline-size: @LevelPercent%"></div>
@@ -70,6 +82,31 @@
             <strong>Capture the idea while it is fresh.</strong>
             <span class="cm-meta">Your microphone opens only after you press Record. Nothing uploads until you choose Use recording.</span>
         </div>
+        @if (Voice.Inputs.Count > 0 || Voice.SelectedInput is not null)
+        {
+            <label class="cm-voice__input">
+                <span class="cm-kicker">Microphone</span>
+                <select class="cm-input" disabled="@_busy" @onchange="ChooseInputAsync">
+                    <option value="" selected="@(Voice.SelectedInput is null)">System default</option>
+                    @foreach (var input in Voice.Inputs)
+                    {
+                        <option value="@input.DeviceId" selected="@IsChosen(input)">@input.Label</option>
+                    }
+                    @if (ChosenIsMissing && Voice.SelectedInput is { } missing)
+                    {
+                        <option value="@missing.DeviceId" selected disabled>@missing.Label (not connected)</option>
+                    }
+                </select>
+            </label>
+            @if (ChosenIsMissing && Voice.Inputs.Count > 0)
+            {
+                <p class="cm-voice__notice" role="status">“@Voice.SelectedInput!.Label” isn't connected. Record will use the system default.</p>
+            }
+        }
+        else
+        {
+            <p class="cm-meta cm-voice__source">Recording uses your system's default microphone. Once you've allowed the microphone, you can choose another input here.</p>
+        }
         <button type="button" class="cm-button" disabled="@_busy" @onclick="StartAsync">Record</button>
     }
 </section>
@@ -94,6 +131,25 @@
         VoiceCaptureStates.Paused => "Recording paused",
         _ => "Recording",
     };
+
+    /// <summary>The saved input, matched by id — or by name when the browser has given it a new id.</summary>
+    private bool IsChosen(AudioInput input) =>
+        Voice.SelectedInput is { } chosen
+        && (input.DeviceId == chosen.DeviceId
+            || (Voice.Inputs.All(i => i.DeviceId != chosen.DeviceId) && input.Label == chosen.Label));
+
+    /// <summary>
+    /// The saved input is not among the named inputs. Before the microphone has been allowed
+    /// nothing is named, so absence proves nothing — only a non-empty list can say it is gone.
+    /// </summary>
+    private bool ChosenIsMissing =>
+        Voice.SelectedInput is not null && Voice.Inputs.Count > 0 && !Voice.Inputs.Any(IsChosen);
+
+    private async Task ChooseInputAsync(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        await Voice.SelectInputAsync(string.IsNullOrEmpty(id) ? null : Voice.Inputs.FirstOrDefault(i => i.DeviceId == id));
+    }
 
     private int LevelPercent => (int)Math.Round(Math.Clamp(_snapshot.InputLevel, 0, 1) * 100);
 
