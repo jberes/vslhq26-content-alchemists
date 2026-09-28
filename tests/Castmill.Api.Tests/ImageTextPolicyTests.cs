@@ -39,6 +39,19 @@ public sealed class ImageTextPolicyTests
     }
 
     [Fact]
+    public void The_rules_swap_accepts_windows_line_endings()
+    {
+        var rules = ImagePromptRules
+            .Apply("A dark navy studio backdrop.", 1280, 720, 1536, 864)
+            .ReplaceLineEndings("\r\n");
+
+        var allowed = ImagePromptRules.WithRenderedTextAllowed(rules);
+
+        Assert.DoesNotContain("Do not render any new text", allowed, StringComparison.Ordinal);
+        Assert.Contains("Render ONLY the text the brief", allowed, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_brief_writer_is_told_the_asset_the_frame_and_whether_text_is_allowed()
     {
         var request = new VisualBriefRequest(

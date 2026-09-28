@@ -19,40 +19,9 @@ public static class ImagePromptRules
 
     private const int SafeCentrePercent = 100 - (2 * SafeMarginPercent);
 
-    public static readonly string Composition = $"""
-        COMPOSITION REQUIREMENTS (mandatory, override any conflicting instruction above):
-        - This image is centre-cropped to its final aspect ratio after generation. Anything
-          within {SafeMarginPercent}% of any edge WILL be cut off.
-        - Keep ALL text, logos, faces, product UI and other critical content inside the
-          central {SafeCentrePercent}% of the frame. Leave at least {SafeMarginPercent}% of the width and the
-          height completely clear on every edge — top, bottom, left and right.
-        - Never let a letter, word, or subject touch, overlap, or run past any edge.
-        - Every word rendered must be complete and fully legible: no clipped glyphs, no
-          truncated headlines, no text running out of frame, no text split across an edge.
-        - Do not render any new text, letters, numbers, captions, headlines, labels, badges
-          or logos. Castmill composites exact authored text after generation. If an
-          authoritative reference image already contains text, keep the entire referenced
-          panel inside the safe area without recreating, enlarging or repositioning its text.
-        - Compose for the centre: background, gradients and atmosphere may reach the edges,
-          but meaning must not.
-        """;
-
-    /// <summary>Slot kinds whose whole job is a headline read at thumbnail size (ADR-075).</summary>
-    public static bool IsTextFirst(string? kind) =>
-        kind is "youtube-thumbnail" or "social-card";
-
-    /// <summary>
-    /// Who may put words in a picture (ADR-075, widened by ADR-085). Only a model that spells
-    /// reliably, and then only the exact strings the brief quotes: a text-first slot's title, or
-    /// any scene's own labels (a chart title, the question in an assistant, an answer). A
-    /// text-first slot whose headline Castmill composites stays text-free, so the model never
-    /// paints a competing title. Every other model paints no text at all.
-    /// </summary>
-    public static bool AllowsRenderedText(string? kind, string? headlineText, bool modelRendersText) =>
-        modelRendersText && (!IsTextFirst(kind) || string.IsNullOrWhiteSpace(headlineText));
-
-    // Raw string literals strip their common indentation, so the bullets below are matched
-    // exactly as they appear in the emitted text: at column 0 with two-space continuations.
+    // Keep these bullets as the single source of truth for both prompt construction and
+    // text-policy replacement. Interpolating them avoids source-file line endings making
+    // visually identical rules fail an ordinal match on Windows.
     private const string NoTextBulletLong =
         "- Do not render any new text, letters, numbers, captions, headlines, labels, badges\n"
         + "  or logos. Castmill composites exact authored text after generation. If an\n"
@@ -73,6 +42,35 @@ public static class ImagePromptRules
         "- Render ONLY the text the brief quotes, spelled exactly and fully legible; no\n"
         + "  other words. Keep it well inside the safe area.";
 
+    public static readonly string Composition = $"""
+        COMPOSITION REQUIREMENTS (mandatory, override any conflicting instruction above):
+        - This image is centre-cropped to its final aspect ratio after generation. Anything
+          within {SafeMarginPercent}% of any edge WILL be cut off.
+        - Keep ALL text, logos, faces, product UI and other critical content inside the
+          central {SafeCentrePercent}% of the frame. Leave at least {SafeMarginPercent}% of the width and the
+          height completely clear on every edge — top, bottom, left and right.
+        - Never let a letter, word, or subject touch, overlap, or run past any edge.
+        - Every word rendered must be complete and fully legible: no clipped glyphs, no
+          truncated headlines, no text running out of frame, no text split across an edge.
+        {NoTextBulletLong}
+        - Compose for the centre: background, gradients and atmosphere may reach the edges,
+          but meaning must not.
+        """;
+
+    /// <summary>Slot kinds whose whole job is a headline read at thumbnail size (ADR-075).</summary>
+    public static bool IsTextFirst(string? kind) =>
+        kind is "youtube-thumbnail" or "social-card";
+
+    /// <summary>
+    /// Who may put words in a picture (ADR-075, widened by ADR-085). Only a model that spells
+    /// reliably, and then only the exact strings the brief quotes: a text-first slot's title, or
+    /// any scene's own labels (a chart title, the question in an assistant, an answer). A
+    /// text-first slot whose headline Castmill composites stays text-free, so the model never
+    /// paints a competing title. Every other model paints no text at all.
+    /// </summary>
+    public static bool AllowsRenderedText(string? kind, string? headlineText, bool modelRendersText) =>
+        modelRendersText && (!IsTextFirst(kind) || string.IsNullOrWhiteSpace(headlineText));
+
     /// <summary>
     /// Swaps the no-text rules for the exact-text rules when the slot may carry rendered words.
     /// Throws if the rules text has drifted so neither bullet is found: silently leaving the
@@ -80,6 +78,10 @@ public static class ImagePromptRules
     /// </summary>
     public static string WithRenderedTextAllowed(string rulesText)
     {
+        // Prompts may cross Windows and Unix boundaries between construction, persistence and
+        // rendering. Canonicalise them before applying the exact policy substitutions.
+        rulesText = rulesText.ReplaceLineEndings("\n");
+
         if (!rulesText.Contains(NoTextBulletLong, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("The composition rules no longer contain the no-text bullet this swap expects.");
@@ -131,8 +133,7 @@ public static class ImagePromptRules
             - Keep every essential visual entirely inside x={{left}} through x={{right}} and
               y={{top}} through y={{bottom}} of the generated frame. The complete outer area
               is disposable crop and must contain background only.
-            - Do not render any new text. Reserve clean negative space for Castmill's
-              deterministic, crop-safe text compositor.
+            {{NoTextBulletShort}}
             """;
     }
 }
