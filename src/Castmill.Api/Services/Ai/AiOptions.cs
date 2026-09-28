@@ -121,7 +121,7 @@ public sealed class AiOptions
                 Enabled = true,
                 Kind = "gemini",
                 Endpoint = "https://generativelanguage.googleapis.com/v1beta",
-                Model = "gemini-2.5-flash-image",
+                Model = "gemini-3-pro-image",
                 Credential = Secrets.SecretKind.NanoBananaKey,
             },
             // The gpt-image-2.5 pair (ADR-078). Two entries rather than one provider with a

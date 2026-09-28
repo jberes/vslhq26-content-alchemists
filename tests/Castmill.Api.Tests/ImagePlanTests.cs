@@ -490,6 +490,7 @@ public sealed class ImagePlanTests(CastmillApiFactory factory)
         var nano = Assert.Single(status.ImageProviders, p => p.Name == "nano-banana");
         Assert.False(nano.Ready);
         Assert.Contains("NanoBananaKey", nano.Reason!, StringComparison.Ordinal);
+        Assert.Equal("gemini-3-pro-image", nano.Model);
 
         var sunburst = Assert.Single(status.ImageProviders, p => p.Name == "gpt-image-sunburst");
         Assert.False(sunburst.Ready);

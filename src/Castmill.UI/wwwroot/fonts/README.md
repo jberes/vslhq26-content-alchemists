@@ -1,6 +1,6 @@
 # Self-hosted typefaces
 
-All seven families are **SIL Open Font License 1.1**. The full licence text for each sits
+Every family here is **SIL Open Font License 1.1**. The full licence text for each sits
 beside the fonts as `LICENSE-<family>.txt`; OFL requires it to travel with the files.
 
 Self-hosted rather than loaded from a CDN so the Static Web Apps CSP needs no third-party
@@ -14,6 +14,7 @@ font host (frontend §6, Security) and so the desktop shell works offline.
 | `barlow-{400,500,600}.woff2` | Barlow | 400, 500, 600 | Industry Blueprint body |
 | `ibm-plex-mono-{400,500}.woff2` | IBM Plex Mono | 400, 500 | timecodes, segment IDs, character counters — both families |
 | `barlow-condensed-{400,700,800}.ttf`, `barlow-{700,800}.ttf`, `ibm-plex-mono-{600,700}.ttf`, `anton-400.ttf`, `dm-serif-display-400.ttf` | image-layer faces | as named | text layers in the image editor (ADR-082). TTF, byte-identical to `src/Castmill.Api/Assets/Fonts`, so the preview and the composite draw the same glyphs |
+| `{roboto,inter,open-sans,lato,montserrat,poppins,arimo,carlito,merriweather,playfair-display,tinos,bebas-neue,oswald}-{400,600,700,800}.ttf` (the weights each family ships) | the 13 faces added with the font picker (ADR-F78) | as named | image-editor text layers. Static TTFs from the Google Fonts `css2` endpoint, subset with `pyftsubset` to Latin, Latin Extended, Vietnamese, punctuation, currency and symbol ranges (all layout features kept). Byte-identical to `src/Castmill.Api/Assets/Fonts`; the catalogue is `OverlayFonts.Faces`. Inter is declared as "Inter Image" so it never replaces the chrome's variable Inter. Tinos's upstream folder has no licence file; `LICENSE-tinos.txt` is the OFL text with the copyright line from its name table (its METADATA.pb says OFL) |
 
 Latin subset only (~272 KB total). Fetched from the Google Fonts `css2` endpoint, which
 serves the same binaries as the `google/fonts` repository.

@@ -50,12 +50,7 @@ public static class BenchLayers
     /// weight is missing and browsers synthesise differently, so offering a weight a face does
     /// not have would make the preview and the published image disagree.
     /// </summary>
-    public static IReadOnlyList<int> WeightsFor(string? family) => (family ?? OverlayFonts.Default) switch
-    {
-        "Anton" or "DM Serif Display" => [400],
-        "IBM Plex Mono" => [400, 600, 700],
-        _ => [400, 600, 700, 800],
-    };
+    public static IReadOnlyList<int> WeightsFor(string? family) => OverlayFonts.Face(family ?? OverlayFonts.Default).Weights;
 
     /// <summary>The nearest weight the face ships, preferring the heavier on a tie.</summary>
     public static int NearestWeight(string? family, int weight) =>
@@ -305,11 +300,20 @@ public static class BenchLayers
             + $"width:{Pct(drawnWidth / g.FrameWidth)};height:{Pct(drawnHeight / g.FrameHeight)};";
     }
 
+    /// <summary>
+    /// The CSS font-family for an image-layer face. The chrome's variable Inter owns the name
+    /// "Inter", so the image layer's static Inter (the file the compositor draws) is "Inter Image".
+    /// </summary>
+    public static string CssFamily(string? family)
+    {
+        var name = OverlayFonts.Face(family ?? OverlayFonts.Default).Family;
+        return $"\"{(name == "Inter" ? "Inter Image" : name)}\",var(--cm-font-body)";
+    }
+
     public static string TextStyle(OverlayBox box)
     {
         var padX = (box.Band?.Padding ?? DefaultPadding) * box.FontSize * 100;
-        var family = box.FontFamily ?? OverlayFonts.Default;
-        return $"font-family:\"{family}\",var(--cm-font-body);font-size:{Num(box.FontSize * 100)}cqh;font-weight:{box.Weight};"
+        return $"font-family:{CssFamily(box.FontFamily)};font-size:{Num(box.FontSize * 100)}cqh;font-weight:{box.Weight};"
             + $"line-height:{Num(LineHeight)};color:{Rgba(box.Color, box.TextOpacity)};text-align:{box.Align};"
             + $"padding:{Num(padX / 2)}cqh {Num(padX)}cqh;";
     }

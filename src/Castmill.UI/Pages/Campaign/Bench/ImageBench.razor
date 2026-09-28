@@ -231,16 +231,25 @@
                             </li>
                         }
                     </ol>
-                    <div class="cm-bench__bgrow" data-bench-bgdrop>
+                    @* The background is a layer like the others: select it here, then Delete or the bin. *@
+                    <div class="cm-bench__bgrow @(_backgroundSelected ? "cm-bench__bgrow--on" : null)" data-bench-bgdrop>
+                        <button type="button" class="cm-bench__bgselect" aria-pressed="@(_backgroundSelected ? "true" : "false")"
+                                aria-label="Select the background" disabled="@(!HasBackground)" @onclick="SelectBackground">
+                            @if (HasBackground)
+                            {
+                                <img class="cm-bench__row-thumb" src="@BackgroundUrl" alt="" draggable="false" />
+                            }
+                            else
+                            {
+                                <span class="cm-bench__row-thumb" aria-hidden="true"></span>
+                            }
+                            <span class="cm-bench__row-name">Background<small>@(_settingBase ? "Applying…" : HasBackground ? "Select, then Delete to remove · drop an image here to replace" : "Drop a kit image or file here")</small></span>
+                        </button>
                         @if (HasBackground)
                         {
-                            <img class="cm-bench__row-thumb" src="@BackgroundUrl" alt="" draggable="false" />
+                            <button type="button" class="cm-bench__iconbtn cm-bench__row-delete" title="Delete the background"
+                                    aria-label="Delete background" disabled="@_settingBase" @onclick="DeleteBackgroundAsync"><AppIcon Name="trash" /></button>
                         }
-                        else
-                        {
-                            <span class="cm-bench__row-thumb" aria-hidden="true"></span>
-                        }
-                        <span class="cm-bench__row-name">Background<small>@(_settingBase ? "Applying…" : "Drop a kit image or file here to replace")</small></span>
                         <label class="cm-bench__iconbtn cm-bench__bg-upload" title="Replace the background with a file">
                             <InputFile OnChange="UploadBackgroundAsync" accept="image/*" disabled="@_settingBase" aria-label="Replace the background with a file" />
                             <AppIcon Name="refresh" />
@@ -532,6 +541,7 @@
 
     private void Select(string? id)
     {
+        _backgroundSelected = false;
         if (id == _selectedId)
         {
             return;
@@ -736,6 +746,10 @@
                 {
                     _selectedId = null;
                 }
+                else if (_backgroundSelected)
+                {
+                    _backgroundSelected = false;
+                }
                 else
                 {
                     await RequestCloseAsync();
@@ -746,6 +760,11 @@
                 if (layer is not null)
                 {
                     Delete(layer.Id);
+                }
+                else if (_backgroundSelected)
+                {
+                    await DeleteBackgroundAsync();
+                    return;
                 }
                 break;
             case "duplicate":
@@ -1030,6 +1049,65 @@
             _status = "Background set.";
             StateHasChanged();
             await OnSlotChanged.InvokeAsync(result.Slot);
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError(ex.Message);
+        }
+        finally
+        {
+            _settingBase = false;
+            StateHasChanged();
+        }
+    }
+
+    private bool _backgroundSelected;
+
+    private void SelectBackground()
+    {
+        if (_mode == "text")
+        {
+            FinishTextEdit();
+        }
+        _mode = "select";
+        _selectedId = null;
+        _backgroundSelected = HasBackground;
+    }
+
+    /// <summary>
+    /// Removes the background and keeps every layer. It is saved at once (like setting one), so
+    /// it asks first; the picture itself is not lost — it stays in this image's takes.
+    /// </summary>
+    private async Task DeleteBackgroundAsync()
+    {
+        if (!HasBackground || _settingBase)
+        {
+            return;
+        }
+        if (!await Confirm.ConfirmAsync(new ConfirmRequest(
+                "Delete the background?",
+                "Your layers stay where they are. The background stays in this image's takes, so it can be placed again later.",
+                "Delete background", Destructive: true)))
+        {
+            return;
+        }
+        _settingBase = true;
+        StateHasChanged();
+        try
+        {
+            await Images.DeleteAsync(CampaignId, CurrentSlot.Id);
+            var cleared = CurrentSlot with
+            {
+                State = "Empty",
+                BaseImageUrl = null,
+                PublishedUrl = null,
+                PublishedHiResUrl = null,
+                UpdatedAt = CurrentSlot.UpdatedAt.AddTicks(1),
+            };
+            _latestSlot = cleared;
+            _backgroundSelected = false;
+            _status = "Background deleted.";
+            await OnSlotChanged.InvokeAsync(cleared);
         }
         catch (ApiException ex)
         {

@@ -194,8 +194,10 @@ public sealed class ImageModelCapabilities : IImageModelCapabilities
     };
 
     /// <summary>Whether this model spells text well enough to be asked for exact words (ADR-075).</summary>
+    /// <summary>Models that spell short quoted strings reliably: the gpt-image family and Gemini 3's image models.</summary>
     public static bool RendersText(string model) =>
-        model.Contains("gpt-image", StringComparison.OrdinalIgnoreCase);
+        model.Contains("gpt-image", StringComparison.OrdinalIgnoreCase)
+        || (model.StartsWith("gemini-3", StringComparison.OrdinalIgnoreCase) && model.Contains("image", StringComparison.OrdinalIgnoreCase));
 
     private static string Key(string model, string parameter) => $"{model}{parameter}";
 }
@@ -517,7 +519,8 @@ internal static class OpenAiShapedImages
         return null;
     }
 
-    internal static InvalidOperationException ToException(string providerLabel, ProviderError error)
+    internal static InvalidOperationException ToException(
+        string providerLabel, ProviderError error, string? quotaAdvice = null)
     {
         // Moderation refusals get producer-facing advice: this is the one failure the user can
         // actually act on. Every vendor spells it differently — Azure OpenAI says
@@ -532,6 +535,19 @@ internal static class OpenAiShapedImages
                 + "fine), or generate without references. Azure OpenAI deployments can also be "
                 + $"granted modified content filters; MAI deployments cannot. Provider said: "
                 + $"{Truncate(error.Message, 160)}");
+        }
+
+        // Vendors answer 429 both for "slow down" and for "this key has no quota at all" (no
+        // billing, or a model with no free tier). Only the first clears by waiting; calling the
+        // second "rate limited — wait a moment" sent a producer back to retry a dead key.
+        if (IsQuotaExhausted(error))
+        {
+            return new ImageProviderException(
+                $"{providerLabel} can't render with this API key: its quota is used up or it has no "
+                + "billing for this model (429). Waiting won't fix this — "
+                + (quotaAdvice ?? "enable billing or raise the quota on the key's account")
+                + ", or choose another model. "
+                + $"Provider said: {Truncate(error.Message, 200)}");
         }
 
         // MAI image deployments are quota-limited in single-digit requests per MINUTE, so a
@@ -550,6 +566,17 @@ internal static class OpenAiShapedImages
             + (string.IsNullOrWhiteSpace(error.Code) ? ")" : $", {error.Code})")
             + $": {Truncate(error.Message, 400)}");
     }
+
+    /// <summary>
+    /// A 429 that is about the account, not the moment: OpenAI's <c>insufficient_quota</c>, and
+    /// Google's "exceeded your current quota … plan and billing" / free-tier "limit: 0".
+    /// </summary>
+    internal static bool IsQuotaExhausted(ProviderError error) =>
+        error.Status == 429
+        && (string.Equals(error.Code, "insufficient_quota", StringComparison.OrdinalIgnoreCase)
+            || error.Message.Contains("exceeded your current quota", StringComparison.OrdinalIgnoreCase)
+            || error.Message.Contains("plan and billing", StringComparison.OrdinalIgnoreCase)
+            || error.Message.Contains("limit: 0", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// A content-safety refusal in any of the spellings the image providers use. Matched on the
@@ -1285,6 +1312,14 @@ public sealed class GeminiImageProvider(
 {
     public override bool SupportsReferenceImages => true;
 
+    /// <summary>Google gives its image models no free-tier quota: a key without billing always gets 429.</summary>
+    private const string GeminiQuotaAdvice =
+        "Google's image models have no free tier, so the Google AI Studio key needs billing turned on "
+        + "for its project (aistudio.google.com → Billing)";
+
+    public override Task<bool> RendersTextAsync(Guid userId, string? modelAlias, CancellationToken ct) =>
+        Task.FromResult(ImageModelCapabilities.RendersText(ModelFor(modelAlias)));
+
     public override Task<byte[]> GenerateAsync(
         Guid userId, string prompt, string aspectRatio, string? modelAlias, CancellationToken ct) =>
         GenerateAsync(userId, prompt, aspectRatio, modelAlias, [], ct);
@@ -1316,7 +1351,11 @@ public sealed class GeminiImageProvider(
             generationConfig = new
             {
                 responseModalities = (string[])["IMAGE"],
-                imageConfig = new { aspectRatio = AspectFor(aspectRatio) },
+                // Gemini 3 image models paint 1K unless asked; 2K is the same price and gives the
+                // crop pass real pixels. 2.5 rejects the field, so it is sent only to Gemini 3.
+                imageConfig = IsGemini3(model)
+                    ? (object)new { aspectRatio = AspectFor(aspectRatio), imageSize = Gemini3ImageSize }
+                    : new { aspectRatio = AspectFor(aspectRatio) },
             },
         };
 
@@ -1337,7 +1376,7 @@ public sealed class GeminiImageProvider(
             logger.LogError(
                 "{Provider} image request failed: HTTP {Status} code={Code} message={Message}",
                 label, error.Status, error.Code ?? "-", error.Message);
-            throw OpenAiShapedImages.ToException(label, error);
+            throw OpenAiShapedImages.ToException(label, error, GeminiQuotaAdvice);
         }
 
         return ExtractInlineImage(payload, label);
@@ -1373,7 +1412,7 @@ public sealed class GeminiImageProvider(
         {
             var error = OpenAiShapedImages.Parse((int)response.StatusCode, payload);
             logger.LogError("{Provider} edit failed: HTTP {Status} code={Code} message={Message}", label, error.Status, error.Code ?? "-", error.Message);
-            throw OpenAiShapedImages.ToException(label, error);
+            throw OpenAiShapedImages.ToException(label, error, GeminiQuotaAdvice);
         }
         return ExtractInlineImage(payload, label);
     }
@@ -1431,7 +1470,7 @@ public sealed class GeminiImageProvider(
     }
 
     /// <summary>
-    /// Gemini's documented output frames per aspect ratio. It takes a ratio, not a pixel
+    /// Gemini 2.5 Flash Image's output frames per aspect ratio. It takes a ratio, not a pixel
     /// size, so a 16:9 slot is painted natively at 1344×768 and the crop pass removes
     /// nothing but rounding.
     /// </summary>
@@ -1450,6 +1489,26 @@ public sealed class GeminiImageProvider(
             ["21:9"] = (1536, 672),
         };
 
+    internal const string Gemini3ImageSize = "2K";
+
+    /// <summary>Gemini 3 image models' frames at <see cref="Gemini3ImageSize"/>, per aspect ratio.</summary>
+    internal static readonly IReadOnlyDictionary<string, (int Width, int Height)> Gemini3Frames =
+        new Dictionary<string, (int, int)>(StringComparer.Ordinal)
+        {
+            ["1:1"] = (2048, 2048),
+            ["2:3"] = (1696, 2528),
+            ["3:2"] = (2528, 1696),
+            ["3:4"] = (1792, 2400),
+            ["4:3"] = (2400, 1792),
+            ["4:5"] = (1856, 2304),
+            ["5:4"] = (2304, 1856),
+            ["9:16"] = (1536, 2752),
+            ["16:9"] = (2752, 1536),
+            ["21:9"] = (3168, 1344),
+        };
+
+    internal static bool IsGemini3(string model) => model.StartsWith("gemini-3", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The supported ratio closest to the requested one (exact size or ratio string).</summary>
     internal static string AspectFor(string aspectRatio)
     {
@@ -1461,8 +1520,11 @@ public sealed class GeminiImageProvider(
     }
 
     public override Task<(int Width, int Height)> FrameForAsync(
-        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct) =>
-        Task.FromResult(NativeFrames[AspectFor(ImageAspect.Describe(targetWidth, targetHeight))]);
+        Guid userId, int targetWidth, int targetHeight, string? modelAlias, CancellationToken ct)
+    {
+        var aspect = AspectFor(ImageAspect.Describe(targetWidth, targetHeight));
+        return Task.FromResult(IsGemini3(ModelFor(modelAlias)) ? Gemini3Frames[aspect] : NativeFrames[aspect]);
+    }
 }
 
 /// <summary>Registers the Foundry provider plus every configured/built-in alternate.</summary>

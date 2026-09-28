@@ -340,15 +340,50 @@ public static class OverlayEffects
 }
 
 /// <summary>
+/// One face a text layer may use: the weights it really ships (of the editor's 400/600/700/800),
+/// the picker group it sits in, and — for the metric-compatible stand-ins — which system font
+/// it matches.
+/// </summary>
+public sealed record OverlayFace(string Family, string Group, IReadOnlyList<int> Weights, string? Matches = null);
+
+/// <summary>
 /// Faces a text layer may use. Each ships with the API (Assets/Fonts) and with the UI RCL so
-/// the preview and the composite draw the same glyphs; OFL 1.1 throughout.
+/// the preview and the composite draw the same glyphs; OFL 1.1 throughout. System fonts
+/// (Arial, Calibri, Aptos, Times New Roman) cannot be bundled — their licences forbid it and
+/// the compositor has none of them — so the metric-compatible open equivalents stand in.
 /// </summary>
 public static class OverlayFonts
 {
     public const string Default = "Barlow Condensed";
 
-    public static readonly IReadOnlyList<string> Families =
-        ["Barlow Condensed", "Barlow", "Anton", "DM Serif Display", "IBM Plex Mono"];
+    public static readonly IReadOnlyList<string> Groups = ["Sans serif", "Serif", "Display", "Monospace"];
+
+    public static readonly IReadOnlyList<OverlayFace> Faces =
+    [
+        new("Barlow Condensed", "Sans serif", [400, 600, 700, 800]),
+        new("Barlow", "Sans serif", [400, 600, 700, 800]),
+        new("Roboto", "Sans serif", [400, 600, 700, 800]),
+        new("Inter", "Sans serif", [400, 600, 700, 800]),
+        new("Open Sans", "Sans serif", [400, 600, 700, 800]),
+        new("Lato", "Sans serif", [400, 700]),
+        new("Montserrat", "Sans serif", [400, 600, 700, 800]),
+        new("Poppins", "Sans serif", [400, 600, 700, 800]),
+        new("Arimo", "Sans serif", [400, 600, 700], "Arial / Helvetica"),
+        new("Carlito", "Sans serif", [400, 700], "Calibri"),
+        new("Merriweather", "Serif", [400, 600, 700, 800]),
+        new("Playfair Display", "Serif", [400, 600, 700, 800]),
+        new("DM Serif Display", "Serif", [400]),
+        new("Tinos", "Serif", [400, 700], "Times New Roman"),
+        new("Anton", "Display", [400]),
+        new("Bebas Neue", "Display", [400]),
+        new("Oswald", "Display", [400, 600, 700]),
+        new("IBM Plex Mono", "Monospace", [400, 600, 700]),
+    ];
+
+    public static readonly IReadOnlyList<string> Families = [.. Faces.Select(f => f.Family)];
+
+    public static OverlayFace Face(string? family) =>
+        Faces.FirstOrDefault(f => f.Family == family) ?? Faces[0];
 }
 
 /// <summary>

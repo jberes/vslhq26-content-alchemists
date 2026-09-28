@@ -305,12 +305,10 @@ public sealed class OverlayLayerCompositionTests
         Assert.True(Bright(shown) > 100, "control: the same layer at full text opacity draws glyphs");
     }
 
+    public static TheoryData<string> BundledFamilies() => [.. OverlayFonts.Families];
+
     [Theory]
-    [InlineData("Barlow Condensed")]
-    [InlineData("Barlow")]
-    [InlineData("Anton")]
-    [InlineData("DM Serif Display")]
-    [InlineData("IBM Plex Mono")]
+    [MemberData(nameof(BundledFamilies))]
     public void Every_bundled_family_renders_without_falling_back(string family)
     {
         var spec = new OverlaySpec([
@@ -364,6 +362,12 @@ public sealed class OverlayLayerCompositionTests
     [InlineData("DM Serif Display", 450, "DMSerifDisplay-Regular.ttf", false)]
     [InlineData("DM Serif Display", 500, "DMSerifDisplay-Regular.ttf", true)]
     [InlineData("IBM Plex Mono", 800, "IBMPlexMono-Bold.ttf", true)]
+    [InlineData("Roboto", 600, "roboto-600.ttf", false)]
+    [InlineData("Lato", 600, "lato-700.ttf", false)]
+    [InlineData("Lato", 800, "lato-700.ttf", true)]
+    [InlineData("Playfair Display", 800, "playfair-display-800.ttf", false)]
+    [InlineData("Bebas Neue", 700, "bebas-neue-400.ttf", true)]
+    [InlineData("Inter", 400, "inter-400.ttf", false)]
     [InlineData(null, 600, "BarlowCondensed-SemiBold.ttf", false)]
     [InlineData(null, 750, "BarlowCondensed-ExtraBold.ttf", false)]
     public void The_face_is_matched_like_css_and_heavier_requests_are_emboldened(

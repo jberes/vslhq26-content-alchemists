@@ -42,12 +42,14 @@ public static class ImagePromptRules
         kind is "youtube-thumbnail" or "social-card";
 
     /// <summary>
-    /// A text-first slot with no composited headline configured, on a model that spells
-    /// reliably, may render the exact words the brief quotes (ADR-075). Everything else keeps
-    /// the compositor path: the model paints no text and Castmill places the authored words.
+    /// Who may put words in a picture (ADR-075, widened by ADR-085). Only a model that spells
+    /// reliably, and then only the exact strings the brief quotes: a text-first slot's title, or
+    /// any scene's own labels (a chart title, the question in an assistant, an answer). A
+    /// text-first slot whose headline Castmill composites stays text-free, so the model never
+    /// paints a competing title. Every other model paints no text at all.
     /// </summary>
     public static bool AllowsRenderedText(string? kind, string? headlineText, bool modelRendersText) =>
-        IsTextFirst(kind) && string.IsNullOrWhiteSpace(headlineText) && modelRendersText;
+        modelRendersText && (!IsTextFirst(kind) || string.IsNullOrWhiteSpace(headlineText));
 
     // Raw string literals strip their common indentation, so the bullets below are matched
     // exactly as they appear in the emitted text: at column 0 with two-space continuations.
@@ -58,7 +60,7 @@ public static class ImagePromptRules
         + "  panel inside the safe area without recreating, enlarging or repositioning its text.";
 
     private const string ExactTextBulletLong =
-        "- Render ONLY the text the brief puts in quotation marks, spelled exactly, in a bold\n"
+        "- Render ONLY the text the brief puts in quotation marks, spelled exactly, in a crisp\n"
         + "  highly legible face, fully inside the safe area. No other words, labels, badges,\n"
         + "  watermarks or logos. If a reference image already contains text, keep that panel\n"
         + "  inside the safe area without recreating or repositioning its text.";

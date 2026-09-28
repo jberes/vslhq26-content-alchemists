@@ -236,7 +236,32 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         await page.keyboard.type('SHIP IT FAST');
         await page.keyboard.press('Escape');
         await expect(headline.locator('[data-words]')).toHaveText('SHIP IT FAST');
-        await editor.getByLabel('Font', { exact: true }).selectOption('Anton');
+        // The font picker draws every name in its own face (ADR-F78): each of the 18 faces'
+        // 400 file really loads, and the list's keys stay in the list — End moves, Delete never
+        // deletes the layer, Escape closes only the list.
+        const fontButton = editor.getByRole('button', { name: 'Font', exact: true });
+        await fontButton.click();
+        const fontList = editor.getByRole('listbox', { name: 'Fonts' });
+        const options = fontList.getByRole('option');
+        await expect(options).toHaveCount(18);
+        const cssFamilies = await options.evaluateAll(els => els.map(el =>
+            getComputedStyle(el.querySelector('.cm-bench__fontname')).fontFamily.split(',')[0].replace(/"/g, '').trim()));
+        expect(cssFamilies).toContain('Inter Image');
+        await page.waitForFunction(families => families.every(f =>
+            [...document.fonts].some(face => face.family.replace(/"/g, '') === f && face.weight === '400' && face.status === 'loaded')), cssFamilies);
+        await expect(fontList.getByRole('option', { name: /Barlow Condensed/ })).toBeFocused();
+        await page.keyboard.press('End');
+        await expect(fontList.getByRole('option', { name: 'IBM Plex Mono' })).toBeFocused();
+        await page.keyboard.press('Delete');
+        await expect(layers).toHaveCount(2);
+        await page.keyboard.press('Escape');
+        await expect(fontList).toHaveCount(0);
+        await expect(editor).toBeVisible();
+        await expect(fontButton).toBeFocused();
+        await fontButton.click();
+        await fontList.getByRole('option', { name: 'Anton' }).click();
+        await expect(fontList).toHaveCount(0);
+        await expect(fontButton).toHaveText('Anton');
         await editor.getByLabel('Font size').fill('110');
         await editor.getByLabel('Font size').press('Tab');
         await editor.getByLabel('Font colour').fill('#ffdd00');
@@ -343,6 +368,7 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         // dialog show the composite (hi-res master), the download is that master, and editing
         // returns to the image editor on this slot.
         await group.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
+        await page.getByRole('tab', { name: 'Details', exact: true }).click();
         await expect(page.locator('.cm-studio__placed img')).toHaveAttribute('src', /@2x\.webp/);
         await expect(page.locator('.cm-gallery button img').first()).toHaveAttribute('src', /\/composited\//);
         await page.locator('.cm-gallery button').first().click();
@@ -360,6 +386,28 @@ test('Image editor: drag to add, resize, crop, shape, pop, text, z-order, delete
         await expect(editor).toBeVisible();
         await expect(editor.locator('[data-layer-id]')).toHaveCount(2);
         await expect(editor.locator(`[data-layer-id="${photoId}"]`)).toHaveAttribute('data-shape', 'circle');
+        await healthy();
+
+        // The background deletes like any layer: select its row, press Delete, confirm. Declining
+        // keeps it; confirming clears it on the server while the layers stay.
+        const bgSelect = editor.getByRole('button', { name: 'Select the background' });
+        await bgSelect.click();
+        await expect(bgSelect).toHaveAttribute('aria-pressed', 'true');
+        await page.keyboard.press('Delete');
+        const ask = page.getByRole('alertdialog');
+        await expect(ask).toContainText('Delete the background?');
+        await ask.getByRole('button', { name: 'Cancel' }).click();
+        await expect(editor.locator('img.cm-bench__bg')).toHaveCount(1);
+        await editor.getByRole('button', { name: 'Delete background' }).click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete background' }).click();
+        await expect(editor).toContainText('Start with a background.');
+        await expect(editor.locator('img.cm-bench__bg')).toHaveCount(0);
+        await expect(editor.locator('[data-layer-id]')).toHaveCount(2);
+        const cleared = (await (await request.get(`${API}/api/v1/campaigns/${campaignId}/image-slots`, { headers: bearer(token) })).json())
+            .find(s => s.id === slot.id);
+        expect(cleared.baseImageUrl ?? null).toBeNull();
+        expect(cleared.state).toBe('Empty');
+        expect(cleared.overlay.boxes).toHaveLength(2);
         await healthy();
     } finally {
         if (token && campaignId) {
@@ -403,8 +451,11 @@ async function drag(page, from, to) {
     await page.mouse.up();
 }
 
+// The bench redraws its selection chrome wholesale (one synchronous pass, so nothing flickers
+// on screen), but a locator can resolve to the element a redraw just replaced: measure again.
 async function centre(locator) {
-    const b = await locator.boundingBox();
+    let b = null;
+    await expect.poll(async () => (b = await locator.boundingBox()) !== null).toBe(true);
     return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 }
 

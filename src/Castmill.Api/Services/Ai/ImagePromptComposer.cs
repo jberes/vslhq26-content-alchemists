@@ -307,6 +307,80 @@ public static class ImagePromptComposer
         return Trim(string.Join("\n", lines.Distinct(StringComparer.Ordinal)), maxChars);
     }
 
+    /// <summary>
+    /// What the visual brief writer reads (ADR-085): the summary fields plus the whole body in
+    /// order — headings and paragraphs, cleaned — capped for a text model, not an image model.
+    /// <see cref="ContentDigest"/> gave it only the headings and one opening line, so the piece's
+    /// own example (the question, the cause, the result) never reached it and every brief fell
+    /// back on the topic in the abstract.
+    /// </summary>
+    public static string? BriefSource(string? contentJson, int maxChars = 6000)
+    {
+        if (string.IsNullOrWhiteSpace(contentJson))
+        {
+            return null;
+        }
+        JsonElement root;
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson);
+            root = document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return Trim(Clean(contentJson), maxChars);
+        }
+        if (root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("content", out var inner)
+            && inner.ValueKind == JsonValueKind.Object)
+        {
+            root = inner;
+        }
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return Trim(Clean(root.ToString()), maxChars);
+        }
+
+        var lines = new List<string>();
+        foreach (var key in DigestKeys)
+        {
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.Name.Equals(key, StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && property.Value.GetString() is { Length: > 0 } value)
+                {
+                    lines.Add(Clean(value));
+                }
+            }
+        }
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Name is "markdown" or "body" or "script" or "text"
+                && property.Value.ValueKind == JsonValueKind.String
+                && property.Value.GetString() is { Length: > 0 } body)
+            {
+                foreach (var raw in body.Split('\n'))
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith('!'))
+                    {
+                        continue;
+                    }
+                    var cleaned = Clean(line);
+                    if (cleaned.Length > 0)
+                    {
+                        lines.Add(line.StartsWith('#') ? $"[{cleaned}]" : cleaned);
+                    }
+                }
+                break;
+            }
+        }
+        return lines.Count == 0
+            ? Trim(Clean(root.ToString()), maxChars)
+            : Trim(string.Join("\n", lines.Distinct(StringComparer.Ordinal)), maxChars);
+    }
+
     /// <summary>Markdown emphasis, headings, links, images and [[cite:…]] markers — none of it should be painted.</summary>
     internal static string Clean(string text)
     {

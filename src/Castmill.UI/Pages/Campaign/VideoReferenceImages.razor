@@ -14,16 +14,22 @@
 @inject IMediaPipeline Media
 @inject INotifier Notifier
 
-<PageTitle>Video references — Castmill</PageTitle>
+@if (!InSheet)
+{
+    <PageTitle>Video references — Castmill</PageTitle>
+}
 
-<div class="cm-page cm-reference-page" tabindex="0" @onkeydown="HandleKeyAsync">
+<div class="cm-page cm-reference-page @(InSheet ? "cm-reference-page--sheet" : null)" tabindex="0" @onkeydown="HandleKeyAsync">
     <header class="cm-reference-hero">
         <div>
             <span class="cm-kicker">Video reference images</span>
             <h1>Extract exact frames. Keep the source pixels.</h1>
             <p class="cm-meta">Capture manually or let Castmill select strong, distinct frames. AI may rank and suggest crops; it never generates or alters pixels.</p>
         </div>
-        <a class="cm-button cm-button--quiet" href="campaigns/@CampaignId/images">Back to Image Studio</a>
+        @if (!InSheet)
+        {
+            <a class="cm-button cm-button--quiet" href="campaigns/@CampaignId/images">Back to Image Studio</a>
+        }
     </header>
 
     @if (_loading)
@@ -294,6 +300,9 @@
 
 @code {
     [Parameter] public Guid CampaignId { get; set; }
+
+    /// <summary>Hosted in Image Studio's side sheet (ADR-F77): no page title, no back link.</summary>
+    [Parameter] public bool InSheet { get; set; }
     [Parameter, SupplyParameterFromQuery(Name = "sourceId")] public Guid? SourceId { get; set; }
 
     private CampaignPreview? _preview;

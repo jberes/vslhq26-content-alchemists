@@ -1,0 +1,126 @@
+@* The text layer's face, each name drawn in its own face (ADR-F78). A native <select> cannot
+   do that — macOS draws its own popup and ignores per-option fonts — so this is a listbox.
+   It renders two siblings: the field, and (when open) the list, which the inspector's line
+   wraps to a full-width row under the Font and Size fields. *@
+@using Castmill.Core.Resources
+
+<div class="cm-field cm-bench__grow">
+    <span class="cm-field__label" id="@($"{_id}-label")">Font</span>
+    <button type="button" class="cm-input cm-bench__fontbtn" @ref="_trigger"
+            aria-label="Font" aria-haspopup="listbox" aria-expanded="@(_open ? "true" : "false")" aria-controls="@($"{_id}-list")"
+            @onclick="ToggleAsync" @onkeydown="OnTriggerKeyAsync">
+        <span class="cm-bench__fontname" style="@FamilyStyle(Current.Family)">@Current.Family</span>
+    </button>
+</div>
+@if (_open)
+{
+    <div class="cm-bench__fontlist" id="@($"{_id}-list")" role="listbox" aria-label="Fonts" @onkeydown="OnListKeyAsync">
+        @foreach (var group in OverlayFonts.Groups)
+        {
+            <div class="cm-bench__fontgroup" role="group" aria-labelledby="@($"{_id}-{GroupKey(group)}")">
+                <span class="cm-bench__fontgroup-name" id="@($"{_id}-{GroupKey(group)}")">@group</span>
+                @foreach (var face in OverlayFonts.Faces.Where(f => f.Group == group))
+                {
+                    <div class="cm-bench__fontoption" role="option" id="@OptionId(face.Family)" data-font="@face.Family"
+                         aria-selected="@(face.Family == Current.Family ? "true" : "false")"
+                         tabindex="@(face.Family == _active ? "0" : "-1")" @ref="_options[face.Family]"
+                         @onclick="() => ChooseAsync(face.Family)">
+                        <span class="cm-bench__fontname" style="@FamilyStyle(face.Family)">@face.Family</span>
+                        @if (face.Matches is { } matches)
+                        {
+                            <span class="cm-bench__fontnote" title="Metric-compatible with @matches: same widths, so text set in @matches fits the same way">@matches metrics</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+
+    private readonly string _id = $"cm-font-{Guid.NewGuid():N}"[..17];
+    private readonly Dictionary<string, ElementReference> _options = new(StringComparer.Ordinal);
+    private ElementReference _trigger;
+    private bool _open;
+    private string _active = OverlayFonts.Default;
+    private bool _focusActive;
+    private bool _focusTrigger;
+
+    private OverlayFace Current => OverlayFonts.Face(Value ?? OverlayFonts.Default);
+
+    private static string FamilyStyle(string family) => $"font-family:{BenchLayers.CssFamily(family)};font-weight:400;";
+
+    private static string GroupKey(string group) => group.ToLowerInvariant().Replace(' ', '-');
+
+    private string OptionId(string family) => $"{_id}-{family.ToLowerInvariant().Replace(' ', '-')}";
+
+    private Task ToggleAsync() => _open ? CloseAsync() : OpenAsync();
+
+    private Task OpenAsync()
+    {
+        _open = true;
+        _active = Current.Family;
+        _focusActive = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseAsync()
+    {
+        _open = false;
+        _focusTrigger = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task ChooseAsync(string family)
+    {
+        await CloseAsync();
+        if (family != Current.Family) await OnChange.InvokeAsync(family);
+    }
+
+    private Task OnTriggerKeyAsync(KeyboardEventArgs e) =>
+        !_open && e.Key is "ArrowDown" or "ArrowUp" ? OpenAsync() : Task.CompletedTask;
+
+    private async Task OnListKeyAsync(KeyboardEventArgs e)
+    {
+        var families = OverlayFonts.Families;
+        var index = Math.Max(0, families.ToList().IndexOf(_active));
+        switch (e.Key)
+        {
+            case "ArrowDown": Move(families[Math.Min(families.Count - 1, index + 1)]); break;
+            case "ArrowUp": Move(families[Math.Max(0, index - 1)]); break;
+            case "Home": Move(families[0]); break;
+            case "End": Move(families[^1]); break;
+            case "Enter" or " ": await ChooseAsync(_active); break;
+            case "Escape" or "Tab": await CloseAsync(); break;
+            case { Length: 1 } letter when char.IsLetter(letter[0]):
+                // Type-ahead: the next face after the active one that starts with the letter.
+                var next = families.Skip(index + 1).Concat(families.Take(index + 1))
+                    .FirstOrDefault(f => f.StartsWith(letter, StringComparison.OrdinalIgnoreCase));
+                if (next is not null) Move(next);
+                break;
+        }
+    }
+
+    private void Move(string family)
+    {
+        _active = family;
+        _focusActive = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusActive && _open && _options.TryGetValue(_active, out var option))
+        {
+            _focusActive = false;
+            await option.FocusAsync();
+        }
+        else if (_focusTrigger)
+        {
+            _focusTrigger = false;
+            await _trigger.FocusAsync();
+        }
+    }
+}

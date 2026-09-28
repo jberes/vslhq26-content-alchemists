@@ -150,4 +150,31 @@ public sealed class ImagePromptComposerTests
         using (var canvas = new SKCanvas(flat)) { canvas.Clear(SKColors.DimGray); }
         Assert.Equal((0, 80), ImageComposer.CropOffset(flat, 1536, 864));
     }
+
+    /// <summary>ADR-085: the brief writer reads the whole article, so the piece's own example
+    /// reaches it — the digest held only headings and one opening line.</summary>
+    [Fact]
+    public void The_brief_source_carries_the_articles_body_not_just_its_headings()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            content = new
+            {
+                markdown = "# Conversational Analytics\n\nBusiness users want answers, not report builders, inside the product they use.\n\n"
+                    + "## From question to explanation\nThe assistant explains that **East Coast** sales fell because a supply-chain delay held back shipments.\n\n"
+                    + "![chart](https://example.com/c.png)\n[[cite:S3]]",
+            },
+        });
+
+        var source = Castmill.Api.Services.Ai.ImagePromptComposer.BriefSource(json)!;
+        var digest = Castmill.Api.Services.Ai.ImagePromptComposer.ContentDigest(json)!;
+
+        Assert.Contains("East Coast sales fell because a supply-chain delay held back shipments.", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("East Coast", digest, StringComparison.Ordinal);
+        Assert.Contains("[From question to explanation]", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("**", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("cite:", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.com/c.png", source, StringComparison.Ordinal);
+        Assert.True(Castmill.Api.Services.Ai.ImagePromptComposer.BriefSource(json, 60)!.Length <= 61);
+    }
 }

@@ -33,6 +33,17 @@
     --cm-on-canvas-toolbar-muted: #f2d9a8;
     --cm-canvas-board: rgb(29 45 61 / 0.07);
 
+    /* ---- Image stage (ADR-F77) ------------------------------------------------------- */
+    /* The neutral ground a take is judged on. Dark in every family and mode: a bright or
+       tinted surface biases how a picture reads, and these are judged for publication. */
+    --cm-stage: #262b31;
+    --cm-stage-edge: #1b1f24;
+    --cm-on-stage: #e9eaec;
+    --cm-on-stage-muted: #aab0b7;
+    --cm-stage-line: rgb(233 234 236 / 0.18);
+    --cm-stage-chip: rgb(20 24 28 / 0.82);
+    --cm-stage-guide: #ff3fa4;
+
     /* The workspace rail's own surface + text, so chrome reads apart from content. */
     --cm-surface-rail: var(--cmf-surface-rail);
     --cm-on-rail: var(--cmf-on-rail);

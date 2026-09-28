@@ -45,6 +45,15 @@ track: it records from a chosen input, proves the choice is remembered on a fres
 inputs, follows a microphone being unplugged and plugged back in, and checks that a remembered
 microphone that is gone falls back to the system default with a notice while the choice is kept.
 
+The Image Studio brief regression rewrites a real visual brief and watches the "prompt Castmill will
+send" disclosure's `open` attribute: it must open exactly once and stay put (the old toggle handler
+flipped it 1,729 times in three seconds), and a click on its summary must still close it.
+
+The Image Studio layout regression (ADR-F77) renders real takes and proves the navigator keeps
+every content item while one slot is open, the take is the hero on the stage with a filmstrip and
+taskbar, every inspector tab keeps the generate dock, compare is an A/B split with a slider, the
+board survives the round trip, and Extract from video opens as a side sheet.
+
 The live webpage import imports `https://www.revealbi.io/ai` through the real bounded fetch and
 checks its main copy is captured, not a menu card or a JavaScript-shell verdict. It calls no model
 but needs the public internet.

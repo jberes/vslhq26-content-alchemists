@@ -92,7 +92,7 @@ public sealed class ImagePromptBuilder(
         new(
             EffectiveSlotKind(slot, owner), slot.TargetWidth, slot.TargetHeight,
             Subject: owner?.Title ?? campaign.Name,
-            ContentDigest: ImagePromptComposer.ContentDigest(owner?.ContentJson),
+            ContentDigest: ImagePromptComposer.BriefSource(owner?.ContentJson),
             CampaignBrief: campaign.Brief,
             CreativeDirection: slot.Prompt,
             BrandLook: brand.ImageStyleBlock,

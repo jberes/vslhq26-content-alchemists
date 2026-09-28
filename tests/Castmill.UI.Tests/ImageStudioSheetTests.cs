@@ -86,12 +86,12 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
     {
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count == 2,
+            () => view.FindAll(".cm-studio__card--row").Count == 2,
             TimeSpan.FromSeconds(5));
 
-        // The wrapper carries the ratio and sizing so the destructive control can live
-        // outside the select button; the button fills the wrapper.
-        var tiles = view.FindAll(".cm-studio__tile");
+        // With nothing selected the board shows the whole plan: each tile's wrapper carries
+        // the ratio and sizing so the destructive control can live outside the select button.
+        var tiles = view.FindAll(".cm-studio__board .cm-studio__tile");
 
         var empty = tiles.Single(t => t.TextContent.Contains("Empty", StringComparison.Ordinal));
         Assert.Contains("aspect-ratio: 1600 / 840", empty.GetAttribute("style"), StringComparison.Ordinal);
@@ -113,10 +113,10 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count == 1,
+            () => view.FindAll(".cm-studio__card--row").Count == 1,
             TimeSpan.FromSeconds(5));
 
-        var tile = view.Find(".cm-studio__card:not(.cm-studio__card--add)");
+        var tile = view.Find(".cm-studio__card--row");
         Assert.Contains("In takes", tile.TextContent, StringComparison.Ordinal);
         Assert.Contains("thumbs/take-7", tile.QuerySelector("img")!.GetAttribute("src"), StringComparison.Ordinal);
     }
@@ -156,7 +156,7 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
     }
 
     [Fact]
-    public async Task A_youtube_focus_link_shows_only_its_single_thumbnail_box()
+    public async Task A_youtube_focus_link_selects_its_single_thumbnail_and_keeps_every_item_in_view()
     {
         Http.OnGet($"api/v1/campaigns/{CampaignId}/preview",
             new CampaignPreview(Campaign(), [Blog(), Youtube()],
@@ -168,14 +168,17 @@ public sealed class ImageStudioSheetTests : CastmillUiTestContext
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll(".cm-studio__group").Count == 1, TimeSpan.FromSeconds(5));
+            () => view.FindAll(".cm-studio__group").Count == 2, TimeSpan.FromSeconds(5));
 
-        var group = view.Find(".cm-studio__group");
+        // ADR-F77: the link highlights its item and opens its one thumbnail; every other
+        // item stays in the navigator (it used to vanish, and a click reused the same filter).
+        var group = view.Find(".cm-studio__group--linked");
         Assert.Contains("YouTube package", group.TextContent, StringComparison.Ordinal);
         Assert.Contains("Accessibility that actually works", group.TextContent, StringComparison.Ordinal);
-        Assert.DoesNotContain("Enterprise grid performance", view.Markup, StringComparison.Ordinal);
-        Assert.Single(view.FindAll(".cm-studio__card:not(.cm-studio__card--add)"));
-        Assert.Empty(view.FindAll(".cm-studio__card--add"));
+        Assert.Single(group.QuerySelectorAll(".cm-studio__card--row"));
+        Assert.Empty(group.QuerySelectorAll(".cm-studio__card--add"));
+        Assert.Contains("Enterprise grid performance", view.Find(".cm-studio__sheet").TextContent, StringComparison.Ordinal);
+        await view.WaitForAssertionAsync(() => Assert.NotEmpty(view.FindAll(".cm-studio__drawer")));
     }
 
     [Fact]

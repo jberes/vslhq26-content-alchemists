@@ -307,13 +307,16 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         await view.Find(".cm-gallery__tile").ClickAsync();
 
-        var dialog = view.Find(".cm-lightbox");
-        Assert.Contains("full-size", dialog.QuerySelector(".cm-lightbox__image")!.GetAttribute("alt"),
+        // ADR-F77: the take is the stage itself; steering sits in the inspector's Refine tab.
+        var stage = view.Find(".cm-lightbox--inline");
+        Assert.Contains("full-size", stage.QuerySelector(".cm-lightbox__image")!.GetAttribute("alt"),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Steer a new take", dialog.TextContent, StringComparison.Ordinal);
+        await view.Find("#cm-studio-tab-refine").ClickAsync();
+        Assert.Contains("Steer a new take", view.Find(".cm-studio__drawer").TextContent, StringComparison.Ordinal);
 
-        await dialog.KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+        await view.Find(".cm-lightbox--inline").KeyDownAsync(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
         Assert.Empty(view.FindAll(".cm-lightbox"));
+        Assert.NotEmpty(view.FindAll(".cm-studio__board")); // Escape returns to the board
     }
 
     [Fact]
@@ -445,9 +448,9 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await view.WaitForStateAsync(
-            () => view.FindAll(".cm-studio__content-title").Count == 1, TimeSpan.FromSeconds(5));
+            () => view.FindAll(".cm-studio__sheet .cm-studio__content-title").Count == 1, TimeSpan.FromSeconds(5));
 
-        var titles = view.FindAll(".cm-studio__content-title").Select(node => node.TextContent).ToList();
+        var titles = view.FindAll(".cm-studio__sheet .cm-studio__content-title").Select(node => node.TextContent).ToList();
         Assert.Contains("Public article", titles);
         Assert.DoesNotContain("Short-form clips", titles);
         Assert.DoesNotContain(titles, title => title.Contains("Internal", StringComparison.Ordinal));
@@ -477,12 +480,14 @@ public sealed class ImageStudioGalleryTests : CastmillUiTestContext
 
         var view = Render<ImageStudioView>(p => p.Add(c => c.CampaignId, CampaignId));
         await OpenFirstSlotAsync(view);
+        // The supporting copy lives in the inspector's Details tab (ADR-F77), for every take.
+        await view.Find("#cm-studio-tab-details").ClickAsync();
         await view.WaitForAssertionAsync(() =>
             Assert.Contains(supportingCopy, view.Find(".cm-studio__context").TextContent,
                 StringComparison.Ordinal));
 
         await view.Find(".cm-gallery__tile").ClickAsync();
-        Assert.Contains(supportingCopy, view.Find(".cm-lightbox__context").TextContent,
+        Assert.Contains(supportingCopy, view.Find(".cm-studio__drawer .cm-studio__context").TextContent,
             StringComparison.Ordinal);
     }
 

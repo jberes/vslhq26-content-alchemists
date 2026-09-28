@@ -459,7 +459,7 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await page.goto(`/campaigns/${campaignId}/images`);
         await expect(page.getByRole('tab', { name: 'Image studio' }))
             .toHaveAttribute('aria-selected', 'true');
-        await expect(page.locator('.cm-studio__content-title', { hasText: 'Launch post' }))
+        await expect(page.locator('.cm-studio__sheet .cm-studio__content-title', { hasText: 'Launch post' }))
             .toBeVisible();
         await expect(page.getByText('Internal campaign summary', { exact: true })).toHaveCount(0);
 
@@ -547,13 +547,16 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(manualEditor).toHaveCount(0);
         await expectHealthyCircuit();
 
-        // ADR-F43: the sheet opens with the drawer closed — coverage first, editor on demand.
-        await expect(page.locator('.cm-studio__drawer')).toHaveCount(0);
+        // ADR-F77: the slot built by hand stays on the stage; choosing it again keeps it there,
+        // with every other content item still in the navigator.
         await launchGroup.locator('.cm-studio__card:not(.cm-studio__card--add)').first().click();
         await expect(page.locator('.cm-studio__drawer')).toBeVisible();
         await expect(page).toHaveURL(new RegExp(`slot=${slotId}`));
+        await expect(page.locator('.cm-studio__sheet .cm-studio__group')).toHaveCount(3);
+        await page.getByRole('tab', { name: 'Details', exact: true }).click();
         await expect(page.locator('.cm-studio__context'))
             .toContainText('A concise product launch post.');
+        await page.getByRole('tab', { name: 'Prompt', exact: true }).click();
 
         const compactModel = page.locator('.cm-studio__models');
         await expect(compactModel).toContainText('DEFAULT');
@@ -568,7 +571,6 @@ test('Brand asset types and Image Studio controls update in place', async ({ pag
         await expect(page.getByRole('button', { name: 'Show discarded takes' })).toHaveCount(0);
         await page.locator('.cm-gallery__tile').click();
         await page.getByRole('button', { name: 'Lock image' }).click();
-        await page.getByRole('button', { name: 'Close image' }).click();
         await expect(page.locator('.cm-gallery__tile')).toHaveClass(/cm-gallery__tile--locked/);
         await expect(page.locator('.cm-gallery__lock')).toContainText('Locked');
         const loadedPreviewRequests = previewRequests;

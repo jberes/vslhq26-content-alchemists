@@ -155,6 +155,35 @@ public sealed class TechEditTests : CastmillUiTestContext
         Assert.DoesNotContain("Tech edited · v", view.Markup, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A piece that carries a technical brief opens the section on load. The browser answers that
+    /// with a toggle event; flipping a flag on toggle closed it again and looped open/closed.
+    /// </summary>
+    [Fact]
+    public async Task A_loaded_technical_brief_opens_its_section_once_and_toggle_echoes_do_not_close_it()
+    {
+        StubStatus(configured: true, provider: new TextProviderReadiness("anthropic", true, null));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/artifacts/{BlogId}", new ArtifactResponse(
+            BlogId, CampaignId, "blog", "Launch-day blog post", """{"content":{"markdown":"x"}}""",
+            ArtifactStatus.Draft, 1, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow,
+            TechnicalBrief: new TechnicalBrief("Ignite UI for React", "24.2")));
+        var domOpen = JSInterop.Setup<bool>("Reflect.get", _ => true);
+        domOpen.SetResult(true);
+
+        var view = await OpenAsync();
+        await view.WaitForAssertionAsync(() => Assert.True(view.Find(".cm-techbrief").HasAttribute("open")));
+
+        for (var i = 0; i < 5; i++)
+        {
+            await view.Find(".cm-techbrief").TriggerEventAsync("ontoggle", EventArgs.Empty);
+            Assert.True(view.Find(".cm-techbrief").HasAttribute("open"));
+        }
+
+        domOpen.SetResult(false);
+        await view.Find(".cm-techbrief").TriggerEventAsync("ontoggle", EventArgs.Empty);
+        Assert.False(view.Find(".cm-techbrief").HasAttribute("open"));
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     /// <summary>Technical brief (ADR-056): off by default, saved as metadata, sent with the Tech Edit.</summary>

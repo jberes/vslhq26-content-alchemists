@@ -61,6 +61,7 @@ public sealed class ImageStudioBlogTargetTests : CastmillUiTestContext
         StubPreview(Blog(FirstBlogId, "The first blog"), Blog(SecondBlogId, "The second blog"));
 
         var view = await OpenTakeAsync();
+        await view.Find("#cm-studio-tab-details").ClickAsync();
 
         var picker = view.Find("select[aria-label='Blog to place this image into']");
         await picker.ChangeAsync(new Microsoft.AspNetCore.Components.ChangeEventArgs

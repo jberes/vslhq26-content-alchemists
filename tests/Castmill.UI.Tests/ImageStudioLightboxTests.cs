@@ -45,7 +45,8 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         Assert.NotNull(view.Find(".cm-lightbox__stage .cm-lightbox__toolbar"));
         Assert.NotNull(view.Find(".cm-lightbox__toolbar > .cm-lightbox__toolbar-actions"));
         Assert.NotNull(view.Find(".cm-lightbox__toolbar > .cm-lightbox__lock"));
-        Assert.NotNull(view.Find("button.cm-lightbox__close[aria-label='Close image']"));
+        // On the studio stage (ADR-F77) the take is inline: the stage header's close returns to the board.
+        Assert.NotNull(view.Find("button.cm-studio__drawer-close[aria-label='Close the editor']"));
         Assert.Empty(view.FindAll(".cm-lightbox__toolbar .cm-button--compact"));
         Assert.Contains("Use this image", view.Find(".cm-lightbox__toolbar").TextContent,
             StringComparison.Ordinal);
@@ -63,8 +64,9 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
     public async Task The_overlay_band_colour_travels_with_the_composite_request()
     {
         var view = await OpenAsync();
+        await view.Find("#cm-studio-tab-text").ClickAsync();
 
-        view.Find(".cm-lightbox__rail input.cm-input").Change("Deploy time, halved");
+        view.Find(".cm-studio__drawer input.cm-input[maxlength='32']").Change("Deploy time, halved");
 
         var swatches = view.FindAll(".cm-ring");
         Assert.True(swatches.Count >= 2, "expected a choice of band colours");
@@ -73,7 +75,7 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
         Http.OnPost("api/v1/images/composite",
             new PlaceResult(Slot("Filled"), null, false));
 
-        await view.FindAll(".cm-lightbox__rail button")
+        await view.FindAll(".cm-studio__drawer button")
             .First(b => b.TextContent.Contains("Apply overlay", StringComparison.Ordinal))
             .ClickAsync();
 
@@ -91,12 +93,13 @@ public sealed class ImageStudioLightboxTests : CastmillUiTestContext
     public async Task Choosing_no_band_sends_no_colour()
     {
         var view = await OpenAsync();
-        view.Find(".cm-lightbox__rail input.cm-input").Change("Headline");
+        await view.Find("#cm-studio-tab-text").ClickAsync();
+        view.Find(".cm-studio__drawer input.cm-input[maxlength='32']").Change("Headline");
 
         await view.FindAll(".cm-ring")[0].ClickAsync(); // "No band"
 
         Http.OnPost("api/v1/images/composite", new PlaceResult(Slot("Filled"), null, false));
-        await view.FindAll(".cm-lightbox__rail button")
+        await view.FindAll(".cm-studio__drawer button")
             .First(b => b.TextContent.Contains("Apply overlay", StringComparison.Ordinal))
             .ClickAsync();
 

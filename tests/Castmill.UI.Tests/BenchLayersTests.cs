@@ -164,6 +164,9 @@ public sealed class BenchLayersTests
     }
 
     [Theory]
+    [InlineData("Lato", 600, 700)]
+    [InlineData("Bebas Neue", 800, 400)]
+    [InlineData("Tinos", 800, 700)]
     [InlineData("Anton", 800, 400)]
     [InlineData("IBM Plex Mono", 800, 700)]
     [InlineData("Barlow", 500, 600)]
@@ -171,5 +174,50 @@ public sealed class BenchLayersTests
     public void Weights_clamp_to_what_the_face_ships(string? family, int requested, int expected)
     {
         Assert.Equal(expected, BenchLayers.NearestWeight(family, requested));
+    }
+
+    [Fact]
+    public void Inter_on_an_image_layer_is_the_static_face_not_the_chromes_variable_inter()
+    {
+        Assert.Equal("\"Inter Image\",var(--cm-font-body)", BenchLayers.CssFamily("Inter"));
+        Assert.Equal("\"Roboto\",var(--cm-font-body)", BenchLayers.CssFamily("Roboto"));
+        Assert.Equal("\"Barlow Condensed\",var(--cm-font-body)", BenchLayers.CssFamily("Comic Sans MS"));
+        Assert.Equal("\"Barlow Condensed\",var(--cm-font-body)", BenchLayers.CssFamily(null));
+    }
+
+    /// <summary>
+    /// The preview and the composite must draw the same file (ADR-082): every catalogue weight
+    /// has an @font-face whose file exists in the RCL and is byte-identical to the API's copy.
+    /// </summary>
+    [Fact]
+    public void Every_catalogue_weight_has_a_font_face_whose_file_matches_the_compositors()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Castmill.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var ui = Path.Combine(root.FullName, "src", "Castmill.UI", "wwwroot");
+        var api = Path.Combine(root.FullName, "src", "Castmill.Api", "Assets", "Fonts");
+        var css = File.ReadAllText(Path.Combine(ui, "css", "base.css"));
+        var faces = System.Text.RegularExpressions.Regex.Matches(css,
+                @"@font-face\s*\{[^}]*font-family:\s*""?(?<family>[^;""]+)""?;[^}]*url\(""\.\./fonts/(?<file>[^""]+)""\)[^}]*font-weight:\s*(?<weight>\d+);")
+            .Select(m => (Family: m.Groups["family"].Value, File: m.Groups["file"].Value, Weight: int.Parse(m.Groups["weight"].Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToList();
+
+        foreach (var face in OverlayFonts.Faces)
+        {
+            var cssName = face.Family == "Inter" ? "Inter Image" : face.Family;
+            Assert.True(File.Exists(Path.Combine(ui, "fonts", $"LICENSE-{face.Family.ToLowerInvariant().Replace(" ", "")}.txt")), $"{face.Family} licence ships with the files");
+            foreach (var weight in face.Weights)
+            {
+                var declared = faces.Where(f => f.Family == cssName && f.Weight == weight).ToList();
+                Assert.True(declared.Count == 1, $"{face.Family} {weight}: one @font-face, found {declared.Count}");
+                Assert.True(File.Exists(Path.Combine(ui, "fonts", declared[0].File)), $"{declared[0].File} is in wwwroot/fonts");
+                if (declared[0].File.EndsWith(".ttf", StringComparison.Ordinal) && !face.Family.StartsWith("Barlow", StringComparison.Ordinal)
+                    && face.Family is not ("Anton" or "DM Serif Display" or "IBM Plex Mono"))
+                {
+                    Assert.Equal(File.ReadAllBytes(Path.Combine(api, declared[0].File)), File.ReadAllBytes(Path.Combine(ui, "fonts", declared[0].File)));
+                }
+            }
+        }
     }
 }

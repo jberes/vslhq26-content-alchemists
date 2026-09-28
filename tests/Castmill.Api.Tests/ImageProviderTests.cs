@@ -444,6 +444,53 @@ public sealed class ImageProviderTests
         Assert.Contains("fewer takes", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Google answers 429 for a key with no billing on an image model (no free tier) — it never
+    /// clears by waiting, so it must not read "rate limited, wait a moment". Body as Google sends it.
+    /// </summary>
+    [Fact]
+    public async Task Nano_banana_with_no_quota_on_the_key_says_billing_not_wait()
+    {
+        var provider = new GeminiImageProvider(
+            "nano-banana",
+            new AiOptions.ImageProviderOptions
+            {
+                Enabled = true, Kind = "gemini", Endpoint = "https://generativelanguage.example/v1beta",
+                Model = "gemini-2.5-flash-image", Credential = SecretKind.NanoBananaKey,
+            },
+            new SingleHttpClientFactory(new HttpClient(new FixedResponseHandler((HttpStatusCode)429, """
+                {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.","status":"RESOURCE_EXHAUSTED"}}
+                """))),
+            new StubSecrets("AIza-test-key"),
+            NullLogger.Instance);
+
+        var ex = await Assert.ThrowsAsync<ImageProviderException>(() => provider.GenerateAsync(
+            Guid.NewGuid(), "a lighthouse", "16:9", null, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Waiting won't fix this", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("no free tier", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("billing", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("choose another model", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("rate limited right now", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("insufficient_quota", "You exceeded your current quota, please check your plan and billing details.", true)]
+    [InlineData("429", "Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-2.5-flash-image", true)]
+    [InlineData("429", "Requests to the model exceeded the quota.", false)]
+    [InlineData("rate_limit_exceeded", "Rate limit reached for images per min.", false)]
+    public void A_429_is_quota_exhaustion_only_when_the_account_itself_is_out(string code, string message, bool exhausted) =>
+        Assert.Equal(exhausted, OpenAiShapedImages.IsQuotaExhausted(new OpenAiShapedImages.ProviderError(429, code, null, message)));
+
+    private sealed class FixedResponseHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+    }
+
     /// <summary>Nano Banana: prompt and references are parts of one content turn, the ratio is
     /// a generation-config field, and the image comes back as inline base64.</summary>
     [Fact]
@@ -475,8 +522,34 @@ public sealed class ImageProviderTests
         Assert.Equal("AIza-test-key", handler.ApiKeyHeader);
         Assert.Contains("\"aspectRatio\":\"16:9\"", handler.Body, StringComparison.Ordinal);
         Assert.Contains("inline_data", handler.Body, StringComparison.Ordinal);
+        // 2.5 has no imageSize and rejects it; only Gemini 3 is asked for 2K.
+        Assert.DoesNotContain("imageSize", handler.Body, StringComparison.Ordinal);
         // The key belongs in a header — a key in a query string reaches request logs.
         Assert.DoesNotContain("AIza-test-key", handler.RequestUri, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Nano Banana ships on Gemini 3 Pro Image (stable id <c>gemini-3-pro-image</c>). It paints 1K
+    /// unless asked, so it is asked for 2K — and the renderer's frame is the 2K frame it paints.
+    /// </summary>
+    [Fact]
+    public async Task Nano_banana_renders_gemini_3_pro_image_at_2k_and_reports_that_frame()
+    {
+        var png = SolidPng(12, 12, SKColors.Green);
+        var handler = new GeminiHandler(png);
+        var options = AiOptions.MergeImageProviders(new Dictionary<string, AiOptions.ImageProviderOptions>())["nano-banana"];
+        var provider = new GeminiImageProvider("nano-banana", options,
+            new SingleHttpClientFactory(new HttpClient(handler)), new StubSecrets("AIza-test-key"), NullLogger.Instance);
+
+        Assert.Equal("gemini-3-pro-image", options.Model);
+        await provider.GenerateAsync(Guid.NewGuid(), "a lighthouse", "1280x720", null, TestContext.Current.CancellationToken);
+
+        Assert.Contains("models/gemini-3-pro-image:generateContent", handler.RequestUri, StringComparison.Ordinal);
+        Assert.Contains("\"aspectRatio\":\"16:9\"", handler.Body, StringComparison.Ordinal);
+        Assert.Contains("\"imageSize\":\"2K\"", handler.Body, StringComparison.Ordinal);
+        Assert.Equal((2752, 1536), await provider.FrameForAsync(Guid.NewGuid(), 1280, 720, null, TestContext.Current.CancellationToken));
+        // A card pinned to 2.5 keeps 2.5's frame.
+        Assert.Equal((1344, 768), await provider.FrameForAsync(Guid.NewGuid(), 1280, 720, "gemini-2.5-flash-image", TestContext.Current.CancellationToken));
     }
 
     /// <summary>A provider with no stored key is not ready, and says which credential to fill

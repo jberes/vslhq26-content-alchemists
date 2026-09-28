@@ -75,9 +75,9 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
         Assert.False(save().HasAttribute("disabled"));
         Assert.Equal("Save", save().TextContent.Trim());
 
-        // Closing with unsaved edits asks; declining keeps the lightbox open.
+        // Closing the slot with unsaved edits asks; declining keeps the take on the stage.
         _confirm.Answer = false;
-        await view.Find("button.cm-lightbox__close").ClickAsync();
+        await view.Find("button.cm-studio__drawer-close").ClickAsync();
         Assert.NotEmpty(view.FindAll(".cm-lightbox"));
         Assert.Contains("Unsaved overlay changes", Assert.Single(_confirm.Requests).Title, StringComparison.Ordinal);
 
@@ -90,9 +90,9 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
         });
         Assert.True(save().HasAttribute("disabled"));
 
-        // Clean now: close needs no confirmation.
+        // Clean now: closing the slot needs no confirmation.
         _confirm.Requests.Clear();
-        await view.Find("button.cm-lightbox__close").ClickAsync();
+        await view.Find("button.cm-studio__drawer-close").ClickAsync();
         await view.WaitForAssertionAsync(() => Assert.Empty(view.FindAll(".cm-lightbox")));
         Assert.Empty(_confirm.Requests);
     }
@@ -128,6 +128,7 @@ public sealed class ImageStudioEditorTests : CastmillUiTestContext
     public async Task Take_history_shows_the_chain_a_take_was_steered_from()
     {
         var view = await OpenTakeAsync(TakeB);
+        await view.Find("#cm-studio-tab-details").ClickAsync();
 
         var nodes = view.FindAll(".cm-lineage__node");
         Assert.Equal(2, nodes.Count);

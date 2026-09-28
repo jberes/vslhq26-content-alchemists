@@ -17,8 +17,9 @@ internal sealed class OverlayFontResolver(string fontsDirectory)
     /// <summary>A requested weight this far above the chosen file's weight is emboldened synthetically.</summary>
     internal const int SyntheticBoldThreshold = 100;
 
-    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<(int Weight, string File)>> Faces =
-        new Dictionary<string, IReadOnlyList<(int Weight, string File)>>(StringComparer.Ordinal)
+    /// <summary>The first five families, bundled before the catalogue grew (ADR-082); their files keep their names.</summary>
+    private static readonly Dictionary<string, IReadOnlyList<(int Weight, string File)>> Original =
+        new(StringComparer.Ordinal)
         {
             ["Barlow Condensed"] =
             [
@@ -46,6 +47,21 @@ internal sealed class OverlayFontResolver(string fontsDirectory)
                 (700, "IBMPlexMono-Bold.ttf"),
             ],
         };
+
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<(int Weight, string File)>> Faces = BuildFaces();
+
+    /// <summary>The UI serves the same file as <c>fonts/{slug}-{weight}.ttf</c>, byte for byte.</summary>
+    internal static string Slug(string family) => family.ToLowerInvariant().Replace(' ', '-');
+
+    private static Dictionary<string, IReadOnlyList<(int Weight, string File)>> BuildFaces()
+    {
+        var faces = new Dictionary<string, IReadOnlyList<(int Weight, string File)>>(Original, StringComparer.Ordinal);
+        foreach (var face in OverlayFonts.Faces.Where(f => !Original.ContainsKey(f.Family)))
+        {
+            faces[face.Family] = [.. face.Weights.Select(w => (w, $"{Slug(face.Family)}-{w}.ttf"))];
+        }
+        return faces;
+    }
 
     private readonly ConcurrentDictionary<string, SKTypeface?> _loaded = new(StringComparer.Ordinal);
 

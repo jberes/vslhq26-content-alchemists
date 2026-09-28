@@ -66,6 +66,39 @@ public sealed class ImageStudioBriefTests : CastmillUiTestContext
             Assert.Single(Http.Bodies, b => b.Method == HttpMethod.Post && b.Path.EndsWith("/brief/rewrite", StringComparison.Ordinal)));
     }
 
+    /// <summary>
+    /// Rewrite brief opens the "prompt Castmill will send" disclosure. The browser answers that
+    /// write with a toggle event; flipping a flag on toggle closed it again, which toggled again —
+    /// the whole panel flashed open/closed without end. Toggles now follow the element's real state.
+    /// </summary>
+    [Fact]
+    public async Task Rewrite_opens_the_prompt_preview_once_and_its_own_toggle_events_do_not_flap_it()
+    {
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/preview", new CampaignPreview(Campaign(), [Owner()], [Slot("Auto")], 0, 6));
+        Http.OnGet($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/prompt-preview",
+            new ImagePromptPreviewResponse(Brief, "Auto", 1280, 720, 1536, 864, 0, 0, false, Brief));
+        var domOpen = JSInterop.Setup<bool>("Reflect.get", _ => true);
+        var view = await OpenSlotAsync();
+        await view.WaitForAssertionAsync(() => Assert.NotNull(view.Find(".cm-studio__drawer textarea.cm-studio__brief")));
+        Assert.False(view.Find("details.cm-studio__preview").HasAttribute("open"));
+
+        await view.FindAll(".cm-studio__drawer button").Single(b => b.TextContent.Trim() == "Rewrite brief").ClickAsync();
+        await view.WaitForAssertionAsync(() => Assert.True(view.Find("details.cm-studio__preview").HasAttribute("open")));
+
+        // What the browser does next: a toggle for the open we just wrote — as many as it likes.
+        domOpen.SetResult(true);
+        for (var i = 0; i < 5; i++)
+        {
+            await view.Find("details.cm-studio__preview").TriggerEventAsync("ontoggle", EventArgs.Empty);
+            Assert.True(view.Find("details.cm-studio__preview").HasAttribute("open"));
+        }
+
+        // The producer closing it still closes it.
+        domOpen.SetResult(false);
+        await view.Find("details.cm-studio__preview").TriggerEventAsync("ontoggle", EventArgs.Empty);
+        Assert.False(view.Find("details.cm-studio__preview").HasAttribute("open"));
+    }
+
     [Fact]
     public async Task Manual_mode_keeps_the_editable_prompt_and_offers_no_rewrite()
     {
@@ -89,7 +122,7 @@ public sealed class ImageStudioBriefTests : CastmillUiTestContext
 
         var view = await OpenSlotAsync();
 
-        var back = view.Find(".cm-studio__drawer-head a.cm-studio__back");
+        var back = view.Find(".cm-studio__stagehead a.cm-studio__back");
         Assert.Contains("Back to", back.TextContent, StringComparison.Ordinal);
         Assert.Contains("Grid accessibility tutorial", back.TextContent, StringComparison.Ordinal);
         Assert.Equal($"campaigns/{CampaignId}/focus?artifact={ArtifactId}", back.GetAttribute("href"));

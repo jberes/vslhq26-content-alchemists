@@ -28,19 +28,21 @@ Architecture docs are authoritative: [Backend-Architecture.md](Backend-Architect
 - Any prompt authored by a generator (`Generators.cs`) must ask for clear edge margins and
   centre-weighted composition. Prompts that place headlines, logos or key subjects near an
   edge are wrong regardless of how good the image looks before cropping.
-- Text in images (ADR-075): a headline the producer configured (`HeadlineText`) is always
-  composited after generation (`ImageComposer`), never spelled by the model. A text-first slot
-  (`youtube-thumbnail`, `social-card`) with NO configured headline, rendered on a model that
-  spells reliably (gpt-image family), may render the exact quoted words the visual brief
-  chose — `ImagePromptRules.AllowsRenderedText` is the one place that decides, and the rules
-  block then permits only quoted text inside the safe area. Every other kind and model: no text.
+- Text in images (ADR-075, widened by ADR-085): a headline the producer configured (`HeadlineText`)
+  is always composited after generation (`ImageComposer`), never spelled by the model. On a model
+  that spells reliably (gpt-image family, Gemini 3 image models — `ImageModelCapabilities.RendersText`)
+  the model may render ONLY the exact strings the visual brief quotes: a text-first slot's title
+  (when no headline is composited) or any scene's own labels (chart title, the question, the answer).
+  `ImagePromptRules.AllowsRenderedText` is the one place that decides, and the rules block then
+  permits only quoted text inside the safe area. Models that cannot spell: no text, ever.
 - A safety refusal on a render that carries a `face` reference is retried once without the
   face (`RenderWithSafetyFallbackAsync`, ADR-076) and the take says so; any other refusal
   reaches the producer unchanged. Azure OpenAI declines photographs of real people unless the
   deployment has modified content filters.
-- Image prompts are WRITTEN, not concatenated (ADR-075): in Auto mode `VisualBriefWriter`
-  turns the piece into a visual brief (one hook, focal point, hierarchy, palette as used,
-  exact words where allowed) and `ImagePromptBuilder` caches it on the slot by input hash.
+- Image prompts are WRITTEN, not concatenated (ADR-075, ADR-085): in Auto mode `VisualBriefWriter`
+  art-directs the piece's one concrete moment as a staged scene (explicit layout, named elements,
+  the link between cause and answer, quoted labels where allowed, colours only from the brand
+  palette with a role each) and `ImagePromptBuilder` caches it on the slot by input hash.
   The composer's `FromBrief` then appends only the numbered reference roles; the renderer
   appends the frame rules. gpt-image-2 renders its native frame (1536×864 for 16:9) at
   `quality: high`; both fall back through the parameter-repair loop if a deployment refuses.

@@ -123,17 +123,8 @@
                 <textarea class="cm-input cm-textarea" rows="3" maxlength="160" aria-label="Layer text" value="@layer.Text"
                           @oninput="e => Emit(layer with { Text = Text(e.Value, 160) ?? string.Empty }, false)"
                           @onchange="e => Emit(layer with { Text = Text(e.Value, 160) ?? string.Empty }, true)"></textarea>
-                <div class="cm-bench__line">
-                    <label class="cm-field cm-bench__grow">
-                        <span class="cm-field__label">Font</span>
-                        <select class="cm-input" aria-label="Font" value="@(layer.FontFamily ?? OverlayFonts.Default)"
-                                @onchange="e => SetFamily(layer, e.Value?.ToString())">
-                            @foreach (var family in OverlayFonts.Families)
-                            {
-                                <option value="@family">@family</option>
-                            }
-                        </select>
-                    </label>
+                <div class="cm-bench__line cm-bench__line--font">
+                    <FontPicker @key="layer.Id" Value="@layer.FontFamily" OnChange="family => SetFamily(layer, family)" />
                     <label class="cm-field cm-bench__size">
                         <span class="cm-field__label">Size</span>
                         <span class="cm-bench__num"><input inputmode="numeric" aria-label="Font size" value="@Px(layer.FontSize, SlotHeight)"

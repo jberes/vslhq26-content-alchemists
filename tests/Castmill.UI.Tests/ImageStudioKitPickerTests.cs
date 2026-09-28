@@ -183,15 +183,16 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
         var view = await OpenDrawerAsync();
         await view.WaitForStateAsync(() => view.FindAll(".cm-gallery__tile").Count == 1, TimeSpan.FromSeconds(5));
         await view.Find(".cm-gallery__tile").ClickAsync();
-        await view.WaitForStateAsync(() => view.FindAll(".cm-lightbox").Count == 1, TimeSpan.FromSeconds(5));
+        // The take is on the stage; steering (with its kit upload) is in the Refine tab.
+        await view.WaitForStateAsync(() => view.FindAll(".cm-studio__drawer input[type=file]").Count == 1, TimeSpan.FromSeconds(5));
 
-        var file = view.Find(".cm-lightbox input[type=file]");
+        var file = view.Find(".cm-studio__drawer input[type=file]");
         Assert.True(file.HasAttribute("disabled"));
         Assert.Contains("Type a description first", view.Find("#cm-kit-upload-hint").TextContent, StringComparison.Ordinal);
 
-        view.Find(".cm-lightbox input[aria-label='Description used as prompt text']").Input("the Berlin studio wall");
+        view.Find(".cm-studio__drawer input[aria-label='Description used as prompt text']").Input("the Berlin studio wall");
 
-        file = view.Find(".cm-lightbox input[type=file]");
+        file = view.Find(".cm-studio__drawer input[type=file]");
         Assert.False(file.HasAttribute("disabled"));
         Assert.Contains("Ready", view.Find("#cm-kit-upload-hint").TextContent, StringComparison.Ordinal);
     }
@@ -203,6 +204,8 @@ public sealed class ImageStudioKitPickerTests : CastmillUiTestContext
             () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count > 0,
             TimeSpan.FromSeconds(5));
         await view.Find(".cm-studio__card:not(.cm-studio__card--add)").ClickAsync();
+        // References live in the inspector's Refine tab (ADR-F77).
+        await view.Find("#cm-studio-tab-refine").ClickAsync();
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-studio__refbar button").Count > 0, TimeSpan.FromSeconds(5));
         return view;

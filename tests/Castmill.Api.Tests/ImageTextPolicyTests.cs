@@ -14,10 +14,11 @@ public sealed class ImageTextPolicyTests
     [InlineData("social-card", "", true, true)]
     [InlineData("youtube-thumbnail", "REACT GRID", true, false)] // a configured headline is composited, never spelled
     [InlineData("youtube-thumbnail", null, false, false)]        // a model that cannot spell paints no text
-    [InlineData("blog-hero", null, true, false)]                 // not a text-first kind
-    [InlineData("og-image", null, true, false)]
-    [InlineData(null, null, true, false)]
-    public void Only_a_text_first_slot_without_a_headline_on_a_spelling_model_may_render_words(
+    [InlineData("content-image", null, true, true)]              // ADR-085: a scene's own quoted labels
+    [InlineData("content-image", "Composited headline", true, true)] // labels yes; the brief forbids a painted title
+    [InlineData("content-image", null, false, false)]
+    [InlineData("blog-inline-1", null, false, false)]
+    public void Only_a_spelling_model_may_render_words_and_never_over_a_composited_thumbnail_title(
         string? kind, string? headline, bool modelRendersText, bool expected) =>
         Assert.Equal(expected, ImagePromptRules.AllowsRenderedText(kind, headline, modelRendersText));
 
@@ -59,20 +60,72 @@ public sealed class ImageTextPolicyTests
         Assert.Contains("quotation marks", prompt, StringComparison.Ordinal);
         Assert.Contains("Attached references, in order: background, face", prompt, StringComparison.Ordinal);
         Assert.Contains("Audience: Front-end developers", prompt, StringComparison.Ordinal);
-        Assert.Contains("Subject: React Grid accessibility that speaks", prompt, StringComparison.Ordinal);
+        Assert.Contains("Title: React Grid accessibility that speaks", prompt, StringComparison.Ordinal);
         Assert.Contains("Producer's direction (honour it): Dark, cinematic, one bold headline.", prompt, StringComparison.Ordinal);
         Assert.Contains("navy #0B1F3A", prompt, StringComparison.Ordinal);
         Assert.Contains("specific to the actual subject, feature, problem or payoff", prompt, StringComparison.Ordinal);
         Assert.Contains("AUTHORITATIVE BRAND CONTENT TEMPLATE", prompt, StringComparison.Ordinal);
         Assert.Contains("Titles must name the demonstrated feature", prompt, StringComparison.Ordinal);
         Assert.Contains("generic phrases are forbidden", prompt, StringComparison.Ordinal);
-        Assert.Contains("ONE hook", prompt, StringComparison.Ordinal);
-        Assert.Contains("Output ONLY the final image-generation prompt", prompt, StringComparison.Ordinal);
+        Assert.Contains("one immediately recognisable hook", prompt, StringComparison.Ordinal);
+        Assert.Contains("Output ONLY the prompt", prompt, StringComparison.Ordinal);
 
         var noText = VisualBriefWriter.BuildPrompt(request with { TextMayBeRendered = false, ReferenceKinds = [] });
         Assert.Contains("Text in the image: NOT allowed", noText, StringComparison.Ordinal);
         Assert.DoesNotContain("Attached references", noText, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// ADR-085: the writer is an art director — the piece's concrete moment, staged as a scene
+    /// with a layout, named elements, a visible link between cause and answer, quoted labels on a
+    /// spelling model, and a colour scheme built only from the brand palette, each colour given a role.
+    /// </summary>
+    [Fact]
+    public void The_brief_writer_stages_the_pieces_concrete_moment_in_the_brand_palette()
+    {
+        var request = new VisualBriefRequest(
+            SlotKind: "content-image", TargetWidth: 1600, TargetHeight: 840,
+            Subject: "Conversational Analytics with Governed Queries",
+            ContentDigest: "Ask \"What caused the revenue drop last quarter?\" and get a chart and an explanation.",
+            CampaignBrief: null, CreativeDirection: null,
+            BrandLook: "Brand palette: Primary #2D2A90, Accent #00B4D8, Background #EBEBF5.",
+            Audience: null, ReferenceKinds: [], TextMayBeRendered: true);
+
+        var prompt = VisualBriefWriter.BuildPrompt(request);
+
+        Assert.Contains("single most concrete, showable moment", prompt, StringComparison.Ordinal);
+        Assert.Contains("if the piece gives an example, use that example", prompt, StringComparison.Ordinal);
+        Assert.Contains("split-screen left/right", prompt, StringComparison.Ordinal);
+        Assert.Contains("visible connection", prompt, StringComparison.Ordinal);
+        Assert.Contains("ONLY from the brand palette", prompt, StringComparison.Ordinal);
+        Assert.Contains("Assign each brand colour a role", prompt, StringComparison.Ordinal);
+        Assert.Contains("Primary #2D2A90", prompt, StringComparison.Ordinal);
+        Assert.Contains("ALLOWED for the scene's own labels", prompt, StringComparison.Ordinal);
+        Assert.Contains("At most six strings", prompt, StringComparison.Ordinal);
+        Assert.Contains("never invented alternatives", prompt, StringComparison.Ordinal);
+        Assert.Contains("never substitutes of your own", prompt, StringComparison.Ordinal);
+        Assert.Contains("the scene's answer element states it", prompt, StringComparison.Ordinal);
+        Assert.Contains("not an atmospheric backdrop", prompt, StringComparison.Ordinal);
+        Assert.Contains("never present a statistic as a real claim", prompt, StringComparison.Ordinal);
+
+        var composited = VisualBriefWriter.BuildPrompt(request with { HeadlineWillBeComposited = true });
+        Assert.Contains("Do NOT paint a headline or page title", composited, StringComparison.Ordinal);
+
+        var cannotSpell = VisualBriefWriter.BuildPrompt(request with { TextMayBeRendered = false });
+        Assert.Contains("interface elements carry shapes, bars and lines instead of readable text", cannotSpell, StringComparison.Ordinal);
+        Assert.DoesNotContain("ALLOWED for the scene's own labels", cannotSpell, StringComparison.Ordinal);
+
+        var noBrand = VisualBriefWriter.BuildPrompt(request with { BrandLook = null });
+        Assert.Contains("No brand look is set", noBrand, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("gpt-image-2.5-sunburst", true)]
+    [InlineData("gemini-3-pro-image", true)]
+    [InlineData("gemini-2.5-flash-image", false)]
+    [InlineData("MAI-Image-2.5-Pro", false)]
+    public void Gemini_3_image_models_spell_like_the_gpt_image_family(string model, bool spells) =>
+        Assert.Equal(spells, Castmill.Api.Services.Ai.ImageModelCapabilities.RendersText(model));
 
     [Fact]
     public void A_youtube_thumbnail_receives_the_brands_authoritative_youtube_template()
@@ -96,13 +149,13 @@ public sealed class ImageTextPolicyTests
     {
         var figure = new VisualBriefRequest("content-image", 1280, 720, "Grid a11y", null, null, null, null, null, ["product"], false);
         var prompt = VisualBriefWriter.BuildPrompt(figure);
-        Assert.Contains("fill the whole frame with the subject", prompt, StringComparison.Ordinal);
-        Assert.DoesNotContain("where that headline will sit", prompt, StringComparison.Ordinal);
+        Assert.Contains("fill the whole frame with the scene", prompt, StringComparison.Ordinal);
+        Assert.DoesNotContain("leave one calm, clear area for it", prompt, StringComparison.Ordinal);
         Assert.Contains("product screenshot may be reproduced faithfully, including the text already on that screen", prompt, StringComparison.Ordinal);
-        Assert.Contains("flat wireframe", prompt, StringComparison.Ordinal);
+        Assert.Contains("never a wireframe", prompt, StringComparison.Ordinal);
 
         var hero = VisualBriefWriter.BuildPrompt(figure with { SlotKind = "youtube-thumbnail", HeadlineWillBeComposited = true, ReferenceKinds = [] });
-        Assert.Contains("where that headline will sit", hero, StringComparison.Ordinal);
+        Assert.Contains("leave one calm, clear area for it", hero, StringComparison.Ordinal);
         Assert.DoesNotContain("product screenshot may be reproduced", hero, StringComparison.Ordinal);
     }
 

@@ -51,7 +51,7 @@ public sealed class ImageStudioPromptTests : CastmillUiTestContext
         Assert.Contains("Prompt Castmill will send", view.Find(".cm-studio__drawer .cm-studio__preview summary").TextContent,
             StringComparison.Ordinal);
         // The size line tells the truth about the crop instead of claiming an exact render.
-        var head = view.Find(".cm-studio__drawer-head").TextContent;
+        var head = view.Find(".cm-studio__stagehead").TextContent;
         Assert.Contains("Published at 1280×720", head, StringComparison.Ordinal);
         Assert.Contains("1536×1024", head, StringComparison.Ordinal);
         Assert.DoesNotContain("no client-side cropping", head, StringComparison.Ordinal);
@@ -61,8 +61,9 @@ public sealed class ImageStudioPromptTests : CastmillUiTestContext
     public async Task The_lightbox_shows_the_prompt_a_take_was_rendered_from_and_can_regenerate_it()
     {
         var view = await OpenTakeAsync();
+        await view.Find("#cm-studio-tab-details").ClickAsync();
 
-        Assert.Contains(TakePrompt, view.Find(".cm-lightbox__rail .cm-studio__preview-text").TextContent,
+        Assert.Contains(TakePrompt, view.Find(".cm-studio__drawer .cm-lightbox__head .cm-studio__preview-text").TextContent,
             StringComparison.Ordinal);
 
         await view.FindAll(".cm-lightbox__toolbar button")
@@ -76,7 +77,8 @@ public sealed class ImageStudioPromptTests : CastmillUiTestContext
             Assert.Contains("\"modelAlias\":\"nano-banana\"", body, StringComparison.Ordinal);
             Assert.Contains("\"variants\":1", body, StringComparison.Ordinal);
         });
-        Assert.Empty(view.FindAll(".cm-lightbox"));
+        // On the stage nothing closes: the take stays in view while the new one renders.
+        Assert.NotEmpty(view.FindAll(".cm-lightbox--inline"));
     }
 
     [Fact]
@@ -120,6 +122,58 @@ public sealed class ImageStudioPromptTests : CastmillUiTestContext
             Assert.Contains("\"variants\":1", body, StringComparison.Ordinal);
         });
     }
+
+    private const string QuotaReason =
+        "Image provider 'nano-banana' (gemini-3-pro-image) can't render with this API key: its quota is used up or it has no billing for this model (429). Waiting won't fix this.";
+
+    /// <summary>
+    /// When every take fails for one reason, that reason IS the message — "try a simpler prompt"
+    /// was the wrong advice for a key with no quota, and the real cause sat in small print.
+    /// </summary>
+    [Fact]
+    public async Task When_every_take_fails_for_one_reason_the_headline_is_that_reason()
+    {
+        Http.OnPost($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/generate",
+            new VariantBatchResponse(Guid.NewGuid(), SlotId, "youtube-thumbnail", [], [$"v1: {QuotaReason}", $"v2: {QuotaReason}"]));
+        var view = await OpenSlotAsync();
+
+        await ClickGenerateAsync(view);
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            var alert = view.Find(".cm-studio__drawer p.cm-form__error[role='alert']");
+            Assert.Equal($"No takes came back. {QuotaReason}", alert.TextContent.Trim());
+            Assert.DoesNotContain("simpler prompt", view.Markup, StringComparison.Ordinal);
+            // Said once, not repeated per take underneath.
+            Assert.Single(view.FindAll(".cm-studio__drawer .cm-form__error"));
+        });
+    }
+
+    [Fact]
+    public async Task Takes_that_fail_for_different_reasons_list_each_reason()
+    {
+        Http.OnPost($"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}/generate",
+            new VariantBatchResponse(Guid.NewGuid(), SlotId, "youtube-thumbnail", [],
+                ["v1: The provider's safety system declined this render.", $"v2: {QuotaReason}"]));
+        var view = await OpenSlotAsync();
+
+        await ClickGenerateAsync(view);
+
+        await view.WaitForAssertionAsync(() =>
+        {
+            Assert.Equal("No takes came back — each take's reason is below.",
+                view.Find(".cm-studio__drawer p.cm-form__error[role='alert']").TextContent.Trim());
+            // Each take's reason is listed with the takes, in the filmstrip under the stage.
+            var lines = view.FindAll(".cm-studio__film .cm-form__error").Select(e => e.TextContent.Trim()).ToList();
+            Assert.Contains("Take v1: The provider's safety system declined this render.", lines);
+            Assert.Contains($"Take v2: {QuotaReason}", lines);
+        });
+    }
+
+    private static async Task ClickGenerateAsync(IRenderedComponent<ImageStudioView> view) =>
+        await view.FindAll(".cm-studio__row > button.cm-button")
+            .Single(button => button.TextContent.Contains("Generate", StringComparison.Ordinal)
+                && button.TextContent.Contains("variant", StringComparison.Ordinal)).ClickAsync();
 
     private async Task<IRenderedComponent<ImageStudioView>> OpenSlotAsync()
     {

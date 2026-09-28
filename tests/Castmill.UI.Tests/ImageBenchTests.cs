@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Components.Web;
 using System.Globalization;
 using System.Net;
 using Bunit;
@@ -174,7 +175,7 @@ public sealed class ImageBenchTests : CastmillUiTestContext
         var bench = RenderBench();
         await bench.Instance.DropTile("text", "headline", 0.3, 0.3, 0);
 
-        await bench.Find("select[aria-label=Font]").ChangeAsync("Barlow");
+        await PickFont(bench, "Barlow");
         await bench.Find("input[aria-label='Font size']").ChangeAsync("120");
         await bench.Find("input[aria-label='Font colour']").ChangeAsync("#ff0000");
         await bench.Find("input[aria-label='Text opacity']").ChangeAsync("0.5");
@@ -202,13 +203,87 @@ public sealed class ImageBenchTests : CastmillUiTestContext
         Assert.Contains($"\"fontSize\":{(120d / 720).ToString(CultureInfo.InvariantCulture)}", body, StringComparison.Ordinal);
     }
 
+    private static async Task PickFont(IRenderedComponent<ImageBench> bench, string family)
+    {
+        await bench.Find("button[aria-label=Font]").ClickAsync();
+        await bench.Find($"[role=option][data-font='{family}']").ClickAsync();
+    }
+
+    /// <summary>
+    /// ADR-F78: the picker draws every name in its own face (a native select cannot on macOS),
+    /// grouped, with the metric-compatible stand-ins saying which system font they match.
+    /// </summary>
+    [Fact]
+    public async Task The_font_picker_shows_every_face_in_its_own_font_grouped_and_picks_one()
+    {
+        var bench = RenderBench();
+        await bench.Instance.DropTile("text", "headline", 0.3, 0.3, 0);
+        var trigger = bench.Find("button[aria-label=Font]");
+        Assert.Equal("false", trigger.GetAttribute("aria-expanded"));
+        Assert.StartsWith("font-family:\"Barlow Condensed\"", trigger.QuerySelector(".cm-bench__fontname")!.GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Empty(bench.FindAll("select[aria-label=Font]"));
+
+        await trigger.ClickAsync();
+
+        var options = bench.FindAll("[role=listbox] [role=option]");
+        Assert.Equal(OverlayFonts.Families, options.Select(o => o.GetAttribute("data-font")));
+        Assert.All(options, o => Assert.Contains(
+            BenchLayers.CssFamily(o.GetAttribute("data-font")), o.QuerySelector(".cm-bench__fontname")!.GetAttribute("style"), StringComparison.Ordinal));
+        Assert.Equal(OverlayFonts.Groups, bench.FindAll(".cm-bench__fontgroup-name").Select(g => g.TextContent));
+        Assert.Equal("true", bench.Find("[role=option][data-font='Barlow Condensed']").GetAttribute("aria-selected"));
+        Assert.Contains("Arial / Helvetica metrics", bench.Find("[role=option][data-font='Arimo']").TextContent, StringComparison.Ordinal);
+        Assert.Contains("Calibri metrics", bench.Find("[role=option][data-font='Carlito']").TextContent, StringComparison.Ordinal);
+        Assert.Contains("Times New Roman metrics", bench.Find("[role=option][data-font='Tinos']").TextContent, StringComparison.Ordinal);
+
+        await bench.Find("[role=option][data-font='Roboto']").ClickAsync();
+
+        Assert.Empty(bench.FindAll("[role=listbox]"));
+        Assert.Contains("font-family:\"Roboto\"", bench.Find("[data-layer-id] [style*='font-family']").GetAttribute("style"), StringComparison.Ordinal);
+        Assert.Contains(">Roboto<", bench.Find("button[aria-label=Font]").InnerHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_font_list_is_driven_by_the_keyboard_and_escape_only_closes_it()
+    {
+        var bench = RenderBench();
+        await bench.Instance.DropTile("text", "headline", 0.3, 0.3, 0);
+        await bench.Find("button[aria-label=Font]").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        var list = bench.Find("[role=listbox]");
+        string Active() => bench.Find("[role=option][tabindex='0']").GetAttribute("data-font")!;
+        Assert.Equal("Barlow Condensed", Active());
+
+        await list.KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        Assert.Equal("Barlow", Active());
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "End" });
+        Assert.Equal("IBM Plex Mono", Active());
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "p" });
+        Assert.Equal("Poppins", Active());
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "p" });
+        Assert.Equal("Playfair Display", Active());
+
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "Escape" });
+        Assert.Empty(bench.FindAll("[role=listbox]"));
+        Assert.Single(bench.FindAll("[data-layer-id]"));   // Escape closed the list, nothing else
+        Assert.Contains(">Barlow Condensed<", bench.Find("button[aria-label=Font]").InnerHtml, StringComparison.Ordinal);
+
+        await bench.Find("button[aria-label=Font]").ClickAsync();
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "l" });
+        await bench.Find("[role=listbox]").KeyDownAsync(new KeyboardEventArgs { Key = "Enter" });
+        Assert.Contains(">Lato<", bench.Find("button[aria-label=Font]").InnerHtml, StringComparison.Ordinal);
+        // Lato ships 400 and 700 only: the headline's heavier weight clamps, 600/800 disable.
+        var weights = bench.FindAll("[aria-label='Font weight'] button");
+        Assert.True(weights.Single(b => b.TextContent == "Semibold").HasAttribute("disabled"));
+        Assert.True(weights.Single(b => b.TextContent == "Black").HasAttribute("disabled"));
+        Assert.False(weights.Single(b => b.TextContent == "Bold").HasAttribute("disabled"));
+    }
+
     [Fact]
     public async Task A_face_without_heavier_weights_disables_them_and_clamps_the_weight()
     {
         var bench = RenderBench();
         await bench.Instance.DropTile("text", "headline", 0.3, 0.3, 0);
 
-        await bench.Find("select[aria-label=Font]").ChangeAsync("Anton");
+        await PickFont(bench, "Anton");
 
         await bench.WaitForAssertionAsync(() =>
         {
@@ -250,6 +325,72 @@ public sealed class ImageBenchTests : CastmillUiTestContext
                 && r.RequestUri!.AbsolutePath.EndsWith("/overlay", StringComparison.Ordinal));
             Assert.Contains("All layers deleted", bench.Markup, StringComparison.Ordinal);
         });
+    }
+
+    /// <summary>
+    /// The background deletes like any other layer: select its row, then the Delete key (or the
+    /// row's bin). It is saved at once, so it asks first; the layers stay, and the canvas goes
+    /// back to "Start with a background."
+    /// </summary>
+    [Fact]
+    public async Task The_background_is_selected_and_deleted_like_a_layer_and_the_layers_stay()
+    {
+        Http.OnStatus(HttpMethod.Delete, $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}", System.Net.HttpStatusCode.OK);
+        var bench = RenderBench();
+        await bench.Instance.DropTile("text", "subhead", 0.3, 0.6, 0);
+        Assert.Single(bench.FindAll("[data-layer-id]"));
+
+        await bench.Find("button[aria-label='Select the background']").ClickAsync();
+        Assert.Contains("cm-bench__bgrow--on", bench.Find(".cm-bench__bgrow").ClassName, StringComparison.Ordinal);
+
+        await bench.Instance.Command("delete");
+
+        await bench.WaitForAssertionAsync(() =>
+        {
+            Assert.Contains("Delete the background?", Assert.Single(_confirm.Requests).Title, StringComparison.Ordinal);
+            Assert.Contains(Http.Requests, r => r.Method == HttpMethod.Delete
+                && r.RequestUri!.AbsolutePath.EndsWith($"image-slots/{SlotId}", StringComparison.Ordinal));
+            Assert.Contains("Start with a background.", bench.Markup, StringComparison.Ordinal);
+            Assert.Empty(bench.FindAll("img.cm-bench__bg"));
+            Assert.Empty(bench.FindAll("button[aria-label='Delete background']"));
+        });
+        // The layers are untouched, and the host hears the slot is empty again.
+        Assert.Single(bench.FindAll(".cm-bench__row"));
+        var reported = _slotChanges[^1];
+        Assert.Null(reported.BaseImageUrl);
+        Assert.Equal("Empty", reported.State);
+    }
+
+    [Fact]
+    public async Task Declining_keeps_the_background_and_the_row_bin_deletes_it_too()
+    {
+        Http.OnStatus(HttpMethod.Delete, $"api/v1/campaigns/{CampaignId}/image-slots/{SlotId}", System.Net.HttpStatusCode.OK);
+        var bench = RenderBench();
+
+        _confirm.Answer = false;
+        await bench.Find("button[aria-label='Delete background']").ClickAsync();
+        Assert.NotEmpty(bench.FindAll("img.cm-bench__bg"));
+        Assert.DoesNotContain(Http.Requests, r => r.Method == HttpMethod.Delete);
+
+        _confirm.Answer = true;
+        await bench.Find("button[aria-label='Delete background']").ClickAsync();
+        await bench.WaitForAssertionAsync(() => Assert.Empty(bench.FindAll("img.cm-bench__bg")));
+    }
+
+    [Fact]
+    public async Task Selecting_a_layer_or_escape_leaves_the_background_selection()
+    {
+        var bench = RenderBench();
+        await bench.Instance.DropTile("text", "subhead", 0.3, 0.6, 0);
+
+        await bench.Find("button[aria-label='Select the background']").ClickAsync();
+        await bench.Instance.SelectLayer(bench.Find("[data-layer-id]").GetAttribute("data-layer-id"));
+        Assert.DoesNotContain("cm-bench__bgrow--on", bench.Find(".cm-bench__bgrow").ClassName, StringComparison.Ordinal);
+
+        await bench.Find("button[aria-label='Select the background']").ClickAsync();
+        await bench.Instance.Command("escape");
+        Assert.DoesNotContain("cm-bench__bgrow--on", bench.Find(".cm-bench__bgrow").ClassName, StringComparison.Ordinal);
+        Assert.NotEmpty(bench.FindAll("img.cm-bench__bg")); // Escape never deletes
     }
 
     [Fact]

@@ -157,6 +157,7 @@ public sealed class ImageStudioManualEditorTests : CastmillUiTestContext
         await view.WaitForStateAsync(
             () => view.FindAll(".cm-studio__card:not(.cm-studio__card--add)").Count > 0, TimeSpan.FromSeconds(5));
         await view.Find(".cm-studio__card:not(.cm-studio__card--add)").ClickAsync();
+        await view.Find("#cm-studio-tab-details").ClickAsync();
 
         await view.WaitForAssertionAsync(() =>
         {

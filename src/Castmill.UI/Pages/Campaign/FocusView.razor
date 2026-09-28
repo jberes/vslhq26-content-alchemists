@@ -602,7 +602,7 @@
 
                     @* Technical brief (ADR-056): off by default. A piece that never opens this
                        behaves exactly as before; a technical one hands every pass the facts. *@
-                    <details class="cm-techbrief" open="@_briefOpen" @ontoggle="() => _briefOpen = !_briefOpen">
+                    <details class="cm-techbrief" open="@_briefOpen" @ontoggle="OnBriefToggle" @ref="_briefDetails">
                         <summary>
                             <span class="cm-kicker">Technical depth</span>
                             <span class="cm-meta">@(_brief.IsEmpty ? "off — add product facts for a technical piece" : $"{_brief.Product ?? "brief"}{(string.IsNullOrWhiteSpace(_brief.Version) ? "" : " " + _brief.Version)} · feeds generation and Tech Edit")</span>
@@ -1006,6 +1006,10 @@
     // Technical brief + verification (ADR-056)
     private TechnicalBrief _brief = new();
     private bool _briefOpen;
+    private ElementReference _briefDetails;
+
+    private async Task OnBriefToggle() =>
+        _briefOpen = await Disclosure.IsOpenAsync(JS, _briefDetails, _briefOpen);
     private bool _savingBrief;
     private string? _briefStatus;
     private List<ClaimCheck> _claims = [];

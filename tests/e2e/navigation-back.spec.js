@@ -72,7 +72,7 @@ test('Image studio names the owning item and Back returns to it in Focus mode', 
         await expect(page.locator('.cm-campaign-header__trail')).toContainText('Owning article for the image');
         await expect(page.locator('.cm-studio__drawer textarea.cm-studio__prompt')).toHaveValue('a supporting figure, exactly this');
 
-        await page.locator('.cm-studio__drawer-head a.cm-studio__back').click();
+        await page.locator('.cm-studio__stagehead a.cm-studio__back').click();
         await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/focus\\?artifact=${artifactId}$`));
         // The body opens with its own H1, so Focus shows the title there, not twice; the
         // active outline row names the item that is open.

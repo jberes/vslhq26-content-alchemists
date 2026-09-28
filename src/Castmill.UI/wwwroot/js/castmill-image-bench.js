@@ -453,6 +453,12 @@ export function attach(root, dotnet) {
         if (e.key === 'Enter' && e.target.matches?.('input[type="range"]') && state.mode === 'crop') {
             e.preventDefault(); e.target.blur(); call('Command', 'cropDone'); return;
         }
+        // The font list owns its keys (arrows, Home/End, Space, Delete, Escape): never a nudge, a
+        // delete or a step out of the editor, and never a native scroll of the list.
+        if (e.target.closest?.('[role="listbox"]')) {
+            if (['ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', ' '].includes(e.key)) e.preventDefault();
+            return;
+        }
         if (isTyping(e.target)) {
             if (e.key === 'Escape') { e.target.blur(); e.preventDefault(); }
             return;
@@ -469,9 +475,14 @@ export function attach(root, dotnet) {
         if (e.key === 'Tab' && !e.target.closest?.('button, a, [data-bench-tile], [tabindex]:not([tabindex="-1"])')) {
             e.preventDefault(); call('Command', e.shiftKey ? 'prev' : 'next'); return;
         }
+        const onControl = e.target.closest?.('button, a, [data-bench-tile]');
+        // The background is selected from its own row (not the canvas), so Delete works from there too.
+        if ((e.key === 'Delete' || e.key === 'Backspace') && root.querySelector('.cm-bench__bgselect[aria-pressed="true"]')
+            && (!onControl || e.target.closest?.('.cm-bench__bgselect'))) {
+            e.preventDefault(); call('Command', 'delete'); return;
+        }
         const sel = layerEl(state.selectedId);
         if (!sel) return;
-        const onControl = e.target.closest?.('button, a, [data-bench-tile]');
         if ((e.key === 'Delete' || e.key === 'Backspace') && !onControl) { e.preventDefault(); call('Command', 'delete'); return; }
         if (e.key === 'Enter' && !onControl) { e.preventDefault(); call('Command', state.mode === 'crop' ? 'cropDone' : 'activate'); return; }
         if (mod && (e.key === ']' || e.code === 'BracketRight')) { e.preventDefault(); call('Command', e.shiftKey ? 'front' : 'forward'); return; }
