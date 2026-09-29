@@ -31,7 +31,8 @@
 			"titleBar.activeBackground": "#e97451",
 			"titleBar.activeForeground": "#15202b",
 			"titleBar.inactiveBackground": "#e9745199",
-			"titleBar.inactiveForeground": "#15202b99"
+			"titleBar.inactiveForeground": "#15202b99",
+			"statusBar.inactiveBackground": "#e97451"
 		},
 		"peacock.color": "#E97451",
 		"dotnet.defaultSolution": "Castmill.NoDesktop.slnf"
