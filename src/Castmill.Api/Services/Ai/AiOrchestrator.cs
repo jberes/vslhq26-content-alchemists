@@ -289,11 +289,7 @@ public sealed class AiOrchestrator(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Generator {Kind} failed", spec.Kind);
-            return Fail(spec.Kind,
-                ex is AiNotConfiguredException or GenerationEvidenceException or ModelJsonException
-                    ? ex.Message
-                    : $"Generation failed: {ex.GetType().Name}",
-                stopwatch);
+            return Fail(spec.Kind, FailureMessage(ex), stopwatch);
         }
     }
 
@@ -415,9 +411,7 @@ public sealed class AiOrchestrator(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "YouTube pipeline failed");
-            return Fail("youtube",
-                ex is AiNotConfiguredException or ModelJsonException ? ex.Message : $"Generation failed: {ex.GetType().Name}",
-                stopwatch);
+            return Fail("youtube", FailureMessage(ex), stopwatch);
         }
     }
 
@@ -634,7 +628,7 @@ public sealed class AiOrchestrator(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Blog pipeline failed");
-            return Fail("blog", ex is AiNotConfiguredException ? ex.Message : $"Generation failed: {ex.GetType().Name}", stopwatch);
+            return Fail("blog", FailureMessage(ex), stopwatch);
         }
     }
 
@@ -1418,6 +1412,13 @@ public sealed class AiOrchestrator(
 
     private static GenerationResult Fail(string kind, string error, Stopwatch stopwatch) =>
         new(kind, false, null, error, [], stopwatch.ElapsedMilliseconds);
+
+    /// <summary>Exceptions written for the producer show their message; anything else shows
+    /// only its type, never internals.</summary>
+    internal static string FailureMessage(Exception ex) =>
+        ex is AiNotConfiguredException or GenerationEvidenceException or ModelJsonException
+            ? ex.Message
+            : $"Generation failed: {ex.GetType().Name}";
 
     private static string Excerpt(string value) =>
         value.Length <= PromptLog.ExcerptLength ? value : value[..PromptLog.ExcerptLength];

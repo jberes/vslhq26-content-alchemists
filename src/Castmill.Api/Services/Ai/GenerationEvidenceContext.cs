@@ -127,13 +127,16 @@ public sealed record GenerationEvidenceContext(
         return true;
     }
 
+    /// <summary>
+    /// The budget is the rendered evidence, not the block count. A transcript block is one
+    /// short caption segment, so an hour-long webinar is ~1,000 blocks of only ~50,000
+    /// characters — a block cap refused it outright. 700,000 is roughly what the import caps
+    /// (1,000 blocks, 400,000 characters) could already render, citation lines included.
+    /// </summary>
+    internal const int MaxPromptCharacters = 700_000;
+
     public string ToPromptText()
     {
-        if (Blocks.Count > 1_000 || Blocks.Sum(block => (long)block.Content.Length) > 400_000)
-        {
-            throw new GenerationEvidenceException(
-                "Approved evidence exceeds the generation context limit; exclude or split sources before generating.");
-        }
         var prompt = new StringBuilder();
         foreach (var block in Blocks)
         {
@@ -143,6 +146,11 @@ public sealed record GenerationEvidenceContext(
                 .AppendLine(block.LocatorJson);
             prompt.Append("Content: ").AppendLine(block.Content);
             prompt.AppendLine();
+            if (prompt.Length > MaxPromptCharacters)
+            {
+                throw new GenerationEvidenceException(
+                    "Approved evidence exceeds the generation context limit; exclude or split sources before generating.");
+            }
         }
         return prompt.ToString();
     }

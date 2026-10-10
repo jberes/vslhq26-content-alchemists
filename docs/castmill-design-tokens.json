@@ -1,0 +1,1223 @@
+{
+  "$description": "Castmill design tokens — two theme families (Warm Editorial, Industry Blueprint) × light/dark, plus the shared type/space/motion scale. Generated from src/Castmill.UI/wwwroot/css/tokens. Format: W3C Design Tokens Community Group (DTCG). Colours with alpha are 8-digit hex; the original CSS is kept in $extensions['com.castmill.css'].",
+  "shared": {
+    "font": {
+      "mono": {
+        "$type": "fontFamily",
+        "$value": [
+          "IBM Plex Mono",
+          "ui-monospace",
+          "SF Mono",
+          "Menlo",
+          "monospace"
+        ]
+      }
+    },
+    "fontSize": {
+      "h1": {
+        "$type": "dimension",
+        "$value": "2.625rem",
+        "$description": "Fluid: max size. Use the CSS clamp in $extensions on the web.",
+        "$extensions": {
+          "com.castmill.css": "clamp(2rem, 1.6rem + 1.4vw, 2.625rem)"
+        }
+      },
+      "h2": {
+        "$type": "dimension",
+        "$value": "2rem"
+      },
+      "h3": {
+        "$type": "dimension",
+        "$value": "1.5625rem"
+      },
+      "h4": {
+        "$type": "dimension",
+        "$value": "1.25rem"
+      },
+      "body": {
+        "$type": "dimension",
+        "$value": "1rem"
+      },
+      "meta": {
+        "$type": "dimension",
+        "$value": "0.8125rem"
+      },
+      "kicker": {
+        "$type": "dimension",
+        "$value": "0.6875rem"
+      }
+    },
+    "lineHeight": {
+      "tight": {
+        "$type": "number",
+        "$value": 1.15
+      },
+      "body": {
+        "$type": "number",
+        "$value": 1.55
+      },
+      "loose": {
+        "$type": "number",
+        "$value": 1.62
+      }
+    },
+    "letterSpacing": {
+      "kicker": {
+        "$type": "dimension",
+        "$value": "0.13em"
+      },
+      "wordmark": {
+        "$type": "dimension",
+        "$value": "0.18em"
+      }
+    },
+    "space": {
+      "unit": {
+        "$type": "dimension",
+        "$value": "4px",
+        "$description": "Base unit; every step is a multiple. Compact density sets it to 3.4px."
+      },
+      "1": {
+        "$type": "dimension",
+        "$value": "4px"
+      },
+      "2": {
+        "$type": "dimension",
+        "$value": "8px"
+      },
+      "3": {
+        "$type": "dimension",
+        "$value": "12px"
+      },
+      "4": {
+        "$type": "dimension",
+        "$value": "16px"
+      },
+      "6": {
+        "$type": "dimension",
+        "$value": "24px"
+      },
+      "8": {
+        "$type": "dimension",
+        "$value": "32px"
+      },
+      "12": {
+        "$type": "dimension",
+        "$value": "48px"
+      }
+    },
+    "density": {
+      "compact": {
+        "spaceUnit": {
+          "$type": "dimension",
+          "$value": "3.4px"
+        },
+        "lineHeightBody": {
+          "$type": "number",
+          "$value": 1.45
+        }
+      }
+    },
+    "motion": {
+      "duration": {
+        "$type": "duration",
+        "$value": "200ms",
+        "$description": "Collapse to 1ms under prefers-reduced-motion. No bounce, no parallax."
+      },
+      "easing": {
+        "$type": "cubicBezier",
+        "$value": [
+          0.2,
+          0.0,
+          0.2,
+          1.0
+        ]
+      }
+    },
+    "statusBarWidth": {
+      "$type": "dimension",
+      "$value": "3px"
+    },
+    "color": {
+      "scrim": {
+        "$type": "color",
+        "$value": "#00000070",
+        "$extensions": {
+          "com.castmill.css": "rgb(0 0 0 / 0.44)"
+        },
+        "$description": "Modal backdrop; same in every theme."
+      }
+    }
+  },
+  "themes": {
+    "warm-editorial": {
+      "$description": "Warm, editorial, book-like. Ivory paper, ink text, terracotta accent, brass second accent. Rounded corners; paper grain in light mode. Default family.",
+      "light": {
+        "colorScheme": {
+          "$type": "string",
+          "$value": "light"
+        },
+        "color": {
+          "surface": {
+            "surface": {
+              "$type": "color",
+              "$value": "#f5f0e8",
+              "$description": "Page background."
+            },
+            "surface-raised": {
+              "$type": "color",
+              "$value": "#fbf8f2",
+              "$description": "Cards, docks, dialogs."
+            },
+            "surface-sunken": {
+              "$type": "color",
+              "$value": "#ebe4d8",
+              "$description": "Wells; the board behind cards."
+            },
+            "surface-inverse": {
+              "$type": "color",
+              "$value": "#26221e",
+              "$description": "Toasts and inverse panels."
+            },
+            "surface-rail": {
+              "$type": "color",
+              "$value": "#efe7da",
+              "$description": "Navigation rail; one step from the page so chrome reads apart from content."
+            }
+          },
+          "text": {
+            "on-surface": {
+              "$type": "color",
+              "$value": "#1a1815",
+              "$description": "Primary text."
+            },
+            "on-surface-muted": {
+              "$type": "color",
+              "$value": "#6b5a3c",
+              "$description": "Secondary text (AA on surface)."
+            },
+            "on-surface-subtle": {
+              "$type": "color",
+              "$value": "#6b5a3c",
+              "$description": "Tertiary text."
+            },
+            "on-inverse": {
+              "$type": "color",
+              "$value": "#ede7dd",
+              "$description": "Text on surface-inverse."
+            },
+            "on-rail": {
+              "$type": "color",
+              "$value": "#1a1815",
+              "$description": "Text on surface-rail."
+            },
+            "on-rail-muted": {
+              "$type": "color",
+              "$value": "#6b5a3c",
+              "$description": "Secondary text on surface-rail."
+            },
+            "on-accent": {
+              "$type": "color",
+              "$value": "#fbf8f2",
+              "$description": "Text on accent-strong."
+            },
+            "on-status-queued": {
+              "$type": "color",
+              "$value": "#ffffff",
+              "$description": "Text on a status-queued fill."
+            }
+          },
+          "accent": {
+            "accent": {
+              "$type": "color",
+              "$value": "#c15f3c",
+              "$description": "Identity and decoration: rules, glyphs, thin bars. NOT behind text."
+            },
+            "accent-strong": {
+              "$type": "color",
+              "$value": "#9e4526",
+              "$description": "The only accent allowed behind text; pairs with on-accent. Filled buttons, active tabs."
+            },
+            "accent-hover": {
+              "$type": "color",
+              "$value": "#a94f30",
+              "$description": "Hover state of accent-strong fills."
+            },
+            "accent-wash": {
+              "$type": "color",
+              "$value": "#c15f3c1f",
+              "$extensions": {
+                "com.castmill.css": "rgb(193 95 60 / 0.12)"
+              },
+              "$description": "Translucent accent tint for selected rows/backgrounds."
+            },
+            "accent-alt": {
+              "$type": "color",
+              "$value": "#8a7248",
+              "$description": "Second accent, decoration only — never behind text."
+            },
+            "accent-alt-wash": {
+              "$type": "color",
+              "$value": "#8a724824",
+              "$extensions": {
+                "com.castmill.css": "rgb(138 114 72 / 0.14)"
+              },
+              "$description": "Translucent tint of accent-alt."
+            }
+          },
+          "rule": {
+            "rule": {
+              "$type": "color",
+              "$value": "#ddd3c2",
+              "$description": "Hairline dividers."
+            },
+            "rule-strong": {
+              "$type": "color",
+              "$value": "#c3b59c",
+              "$description": "Emphasised dividers, input borders."
+            }
+          },
+          "feedback": {
+            "success": {
+              "$type": "color",
+              "$value": "#4c5f43",
+              "$description": "Success feedback."
+            },
+            "warning": {
+              "$type": "color",
+              "$value": "#7e5f1e",
+              "$description": "Warning feedback."
+            },
+            "danger": {
+              "$type": "color",
+              "$value": "#9c3b2c",
+              "$description": "Error / destructive feedback."
+            }
+          },
+          "status": {
+            "status-draft": {
+              "$type": "color",
+              "$value": "#b0a48c",
+              "$description": "Artifact status: draft. Always paired with a 3px status bar — never colour alone."
+            },
+            "status-review": {
+              "$type": "color",
+              "$value": "#b56a24",
+              "$description": "Artifact status: in review."
+            },
+            "status-queued": {
+              "$type": "color",
+              "$value": "#287a45",
+              "$description": "Artifact status: queued."
+            },
+            "status-published": {
+              "$type": "color",
+              "$value": "#287a45",
+              "$description": "Artifact status: published."
+            }
+          }
+        },
+        "radius": {
+          "sm": {
+            "$type": "dimension",
+            "$value": "4px"
+          },
+          "md": {
+            "$type": "dimension",
+            "$value": "5px"
+          },
+          "lg": {
+            "$type": "dimension",
+            "$value": "7px"
+          }
+        },
+        "shadow": {
+          "sm": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#1a18151a",
+              "offsetX": "0px",
+              "offsetY": "1px",
+              "blur": "2px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 1px 2px rgb(26 24 21 / 0.10)"
+            }
+          },
+          "md": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#1a18151f",
+              "offsetX": "0px",
+              "offsetY": "3px",
+              "blur": "10px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 3px 10px rgb(26 24 21 / 0.12)"
+            }
+          },
+          "lg": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#1a18152e",
+              "offsetX": "0px",
+              "offsetY": "12px",
+              "blur": "32px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 12px 32px rgb(26 24 21 / 0.18)"
+            }
+          }
+        },
+        "font": {
+          "display": {
+            "$type": "fontFamily",
+            "$value": [
+              "Source Serif 4",
+              "Georgia",
+              "Times New Roman",
+              "serif"
+            ]
+          },
+          "body": {
+            "$type": "fontFamily",
+            "$value": [
+              "Inter",
+              "system-ui",
+              "-apple-system",
+              "Segoe UI",
+              "sans-serif"
+            ]
+          },
+          "displayWeight": {
+            "$type": "fontWeight",
+            "$value": 600
+          }
+        },
+        "texture": {
+          "opacity": {
+            "$type": "number",
+            "$value": 0.025
+          },
+          "image": {
+            "$type": "string",
+            "$value": "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23g)' opacity='0.55'/%3E%3C/svg%3E\")",
+            "$description": "CSS background-image (inline SVG tile), or none."
+          }
+        }
+      },
+      "dark": {
+        "colorScheme": {
+          "$type": "string",
+          "$value": "dark"
+        },
+        "color": {
+          "surface": {
+            "surface": {
+              "$type": "color",
+              "$value": "#1e1b18",
+              "$description": "Page background."
+            },
+            "surface-raised": {
+              "$type": "color",
+              "$value": "#26221e",
+              "$description": "Cards, docks, dialogs."
+            },
+            "surface-sunken": {
+              "$type": "color",
+              "$value": "#171512",
+              "$description": "Wells; the board behind cards."
+            },
+            "surface-inverse": {
+              "$type": "color",
+              "$value": "#ede7dd",
+              "$description": "Toasts and inverse panels."
+            },
+            "surface-rail": {
+              "$type": "color",
+              "$value": "#24201b",
+              "$description": "Navigation rail; one step from the page so chrome reads apart from content."
+            }
+          },
+          "text": {
+            "on-surface": {
+              "$type": "color",
+              "$value": "#ede7dd",
+              "$description": "Primary text."
+            },
+            "on-surface-muted": {
+              "$type": "color",
+              "$value": "#b39c74",
+              "$description": "Secondary text (AA on surface)."
+            },
+            "on-surface-subtle": {
+              "$type": "color",
+              "$value": "#a1927a",
+              "$description": "Tertiary text."
+            },
+            "on-inverse": {
+              "$type": "color",
+              "$value": "#1a1815",
+              "$description": "Text on surface-inverse."
+            },
+            "on-rail": {
+              "$type": "color",
+              "$value": "#ede7dd",
+              "$description": "Text on surface-rail."
+            },
+            "on-rail-muted": {
+              "$type": "color",
+              "$value": "#b39c74",
+              "$description": "Secondary text on surface-rail."
+            },
+            "on-accent": {
+              "$type": "color",
+              "$value": "#1a1815",
+              "$description": "Text on accent-strong."
+            },
+            "on-status-queued": {
+              "$type": "color",
+              "$value": "#102316",
+              "$description": "Text on a status-queued fill."
+            }
+          },
+          "accent": {
+            "accent": {
+              "$type": "color",
+              "$value": "#d97757",
+              "$description": "Identity and decoration: rules, glyphs, thin bars. NOT behind text."
+            },
+            "accent-strong": {
+              "$type": "color",
+              "$value": "#e58e70",
+              "$description": "The only accent allowed behind text; pairs with on-accent. Filled buttons, active tabs."
+            },
+            "accent-hover": {
+              "$type": "color",
+              "$value": "#e58e70",
+              "$description": "Hover state of accent-strong fills."
+            },
+            "accent-wash": {
+              "$type": "color",
+              "$value": "#d9775729",
+              "$extensions": {
+                "com.castmill.css": "rgb(217 119 87 / 0.16)"
+              },
+              "$description": "Translucent accent tint for selected rows/backgrounds."
+            },
+            "accent-alt": {
+              "$type": "color",
+              "$value": "#a98e63",
+              "$description": "Second accent, decoration only — never behind text."
+            },
+            "accent-alt-wash": {
+              "$type": "color",
+              "$value": "#a98e6329",
+              "$extensions": {
+                "com.castmill.css": "rgb(169 142 99 / 0.16)"
+              },
+              "$description": "Translucent tint of accent-alt."
+            }
+          },
+          "rule": {
+            "rule": {
+              "$type": "color",
+              "$value": "#3a342e",
+              "$description": "Hairline dividers."
+            },
+            "rule-strong": {
+              "$type": "color",
+              "$value": "#544c42",
+              "$description": "Emphasised dividers, input borders."
+            }
+          },
+          "feedback": {
+            "success": {
+              "$type": "color",
+              "$value": "#8fa682",
+              "$description": "Success feedback."
+            },
+            "warning": {
+              "$type": "color",
+              "$value": "#d2a24a",
+              "$description": "Warning feedback."
+            },
+            "danger": {
+              "$type": "color",
+              "$value": "#e0806f",
+              "$description": "Error / destructive feedback."
+            }
+          },
+          "status": {
+            "status-draft": {
+              "$type": "color",
+              "$value": "#6b6252",
+              "$description": "Artifact status: draft. Always paired with a 3px status bar — never colour alone."
+            },
+            "status-review": {
+              "$type": "color",
+              "$value": "#e0b354",
+              "$description": "Artifact status: in review."
+            },
+            "status-queued": {
+              "$type": "color",
+              "$value": "#91d99a",
+              "$description": "Artifact status: queued."
+            },
+            "status-published": {
+              "$type": "color",
+              "$value": "#91d99a",
+              "$description": "Artifact status: published."
+            }
+          }
+        },
+        "radius": {
+          "sm": {
+            "$type": "dimension",
+            "$value": "4px"
+          },
+          "md": {
+            "$type": "dimension",
+            "$value": "5px"
+          },
+          "lg": {
+            "$type": "dimension",
+            "$value": "7px"
+          }
+        },
+        "shadow": {
+          "sm": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#0000004c",
+              "offsetX": "0px",
+              "offsetY": "1px",
+              "blur": "2px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 1px 2px rgb(0 0 0 / 0.30)"
+            }
+          },
+          "md": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#00000061",
+              "offsetX": "0px",
+              "offsetY": "3px",
+              "blur": "10px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 3px 10px rgb(0 0 0 / 0.38)"
+            }
+          },
+          "lg": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#0000007a",
+              "offsetX": "0px",
+              "offsetY": "12px",
+              "blur": "32px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 12px 32px rgb(0 0 0 / 0.48)"
+            }
+          }
+        },
+        "font": {
+          "display": {
+            "$type": "fontFamily",
+            "$value": [
+              "Source Serif 4",
+              "Georgia",
+              "Times New Roman",
+              "serif"
+            ]
+          },
+          "body": {
+            "$type": "fontFamily",
+            "$value": [
+              "Inter",
+              "system-ui",
+              "-apple-system",
+              "Segoe UI",
+              "sans-serif"
+            ]
+          },
+          "displayWeight": {
+            "$type": "fontWeight",
+            "$value": 600
+          }
+        },
+        "texture": {
+          "opacity": {
+            "$type": "number",
+            "$value": 0.0
+          },
+          "image": {
+            "$type": "string",
+            "$value": "none",
+            "$description": "CSS background-image (inline SVG tile), or none."
+          }
+        }
+      }
+    },
+    "industry-blueprint": {
+      "$description": "Technical, drafting-table. Neutral greys, steel-blue accent, amber second accent. Square corners (radius 0), hairline frames, blueprint grid texture.",
+      "light": {
+        "colorScheme": {
+          "$type": "string",
+          "$value": "light"
+        },
+        "color": {
+          "surface": {
+            "surface": {
+              "$type": "color",
+              "$value": "#f2f2f3",
+              "$description": "Page background."
+            },
+            "surface-raised": {
+              "$type": "color",
+              "$value": "#e9e9ea",
+              "$description": "Cards, docks, dialogs."
+            },
+            "surface-sunken": {
+              "$type": "color",
+              "$value": "#e7e7ea",
+              "$description": "Wells; the board behind cards."
+            },
+            "surface-inverse": {
+              "$type": "color",
+              "$value": "#1d2d3d",
+              "$description": "Toasts and inverse panels."
+            },
+            "surface-rail": {
+              "$type": "color",
+              "$value": "#e3eaf1",
+              "$description": "Navigation rail; one step from the page so chrome reads apart from content."
+            }
+          },
+          "text": {
+            "on-surface": {
+              "$type": "color",
+              "$value": "#1d1f20",
+              "$description": "Primary text."
+            },
+            "on-surface-muted": {
+              "$type": "color",
+              "$value": "#5d5d60",
+              "$description": "Secondary text (AA on surface)."
+            },
+            "on-surface-subtle": {
+              "$type": "color",
+              "$value": "#5d5d60",
+              "$description": "Tertiary text."
+            },
+            "on-inverse": {
+              "$type": "color",
+              "$value": "#f2f2f3",
+              "$description": "Text on surface-inverse."
+            },
+            "on-rail": {
+              "$type": "color",
+              "$value": "#1d1f20",
+              "$description": "Text on surface-rail."
+            },
+            "on-rail-muted": {
+              "$type": "color",
+              "$value": "#4d5a66",
+              "$description": "Secondary text on surface-rail."
+            },
+            "on-accent": {
+              "$type": "color",
+              "$value": "#f2f2f3",
+              "$description": "Text on accent-strong."
+            },
+            "on-status-queued": {
+              "$type": "color",
+              "$value": "#ffffff",
+              "$description": "Text on a status-queued fill."
+            }
+          },
+          "accent": {
+            "accent": {
+              "$type": "color",
+              "$value": "#5980a6",
+              "$description": "Identity and decoration: rules, glyphs, thin bars. NOT behind text."
+            },
+            "accent-strong": {
+              "$type": "color",
+              "$value": "#416180",
+              "$description": "The only accent allowed behind text; pairs with on-accent. Filled buttons, active tabs."
+            },
+            "accent-hover": {
+              "$type": "color",
+              "$value": "#4a6f92",
+              "$description": "Hover state of accent-strong fills."
+            },
+            "accent-wash": {
+              "$type": "color",
+              "$value": "#5980a629",
+              "$extensions": {
+                "com.castmill.css": "rgb(89 128 166 / 0.16)"
+              },
+              "$description": "Translucent accent tint for selected rows/backgrounds."
+            },
+            "accent-alt": {
+              "$type": "color",
+              "$value": "#b06e10",
+              "$description": "Second accent, decoration only — never behind text."
+            },
+            "accent-alt-wash": {
+              "$type": "color",
+              "$value": "#b06e1024",
+              "$extensions": {
+                "com.castmill.css": "rgb(176 110 16 / 0.14)"
+              },
+              "$description": "Translucent tint of accent-alt."
+            }
+          },
+          "rule": {
+            "rule": {
+              "$type": "color",
+              "$value": "#1d1f2029",
+              "$extensions": {
+                "com.castmill.css": "rgb(29 31 32 / 0.16)"
+              },
+              "$description": "Hairline dividers."
+            },
+            "rule-strong": {
+              "$type": "color",
+              "$value": "#1d1f2052",
+              "$extensions": {
+                "com.castmill.css": "rgb(29 31 32 / 0.32)"
+              },
+              "$description": "Emphasised dividers, input borders."
+            }
+          },
+          "feedback": {
+            "success": {
+              "$type": "color",
+              "$value": "#2f6b41",
+              "$description": "Success feedback."
+            },
+            "warning": {
+              "$type": "color",
+              "$value": "#7a5a12",
+              "$description": "Warning feedback."
+            },
+            "danger": {
+              "$type": "color",
+              "$value": "#a32a2a",
+              "$description": "Error / destructive feedback."
+            }
+          },
+          "status": {
+            "status-draft": {
+              "$type": "color",
+              "$value": "#b7b7ba",
+              "$description": "Artifact status: draft. Always paired with a 3px status bar — never colour alone."
+            },
+            "status-review": {
+              "$type": "color",
+              "$value": "#a8760a",
+              "$description": "Artifact status: in review."
+            },
+            "status-queued": {
+              "$type": "color",
+              "$value": "#147a3f",
+              "$description": "Artifact status: queued."
+            },
+            "status-published": {
+              "$type": "color",
+              "$value": "#147a3f",
+              "$description": "Artifact status: published."
+            }
+          }
+        },
+        "radius": {
+          "sm": {
+            "$type": "dimension",
+            "$value": "0px"
+          },
+          "md": {
+            "$type": "dimension",
+            "$value": "0px"
+          },
+          "lg": {
+            "$type": "dimension",
+            "$value": "0px"
+          }
+        },
+        "shadow": {
+          "sm": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#2b2b2d24",
+              "offsetX": "0px",
+              "offsetY": "1px",
+              "blur": "2px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 1px 2px rgb(43 43 45 / 0.14)"
+            }
+          },
+          "md": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#2b2b2d29",
+              "offsetX": "0px",
+              "offsetY": "3px",
+              "blur": "10px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 3px 10px rgb(43 43 45 / 0.16)"
+            }
+          },
+          "lg": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#2b2b2d38",
+              "offsetX": "0px",
+              "offsetY": "12px",
+              "blur": "32px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 12px 32px rgb(43 43 45 / 0.22)"
+            }
+          }
+        },
+        "font": {
+          "display": {
+            "$type": "fontFamily",
+            "$value": [
+              "Barlow Condensed",
+              "Arial Narrow",
+              "system-ui",
+              "sans-serif"
+            ]
+          },
+          "body": {
+            "$type": "fontFamily",
+            "$value": [
+              "Barlow",
+              "system-ui",
+              "-apple-system",
+              "Segoe UI",
+              "sans-serif"
+            ]
+          },
+          "displayWeight": {
+            "$type": "fontWeight",
+            "$value": 600
+          }
+        },
+        "texture": {
+          "opacity": {
+            "$type": "number",
+            "$value": 0.05
+          },
+          "image": {
+            "$type": "string",
+            "$value": "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M24 0v96M48 0v96M72 0v96M0 24h96M0 48h96M0 72h96' stroke='%231d2d3d' stroke-width='1' fill='none'/%3E%3Cpath d='M0.75 0v96M0 0.75h96' stroke='%231d2d3d' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
+            "$description": "CSS background-image (inline SVG tile), or none."
+          }
+        }
+      },
+      "dark": {
+        "colorScheme": {
+          "$type": "string",
+          "$value": "dark"
+        },
+        "color": {
+          "surface": {
+            "surface": {
+              "$type": "color",
+              "$value": "#1d1f20",
+              "$description": "Page background."
+            },
+            "surface-raised": {
+              "$type": "color",
+              "$value": "#2b2b2d",
+              "$description": "Cards, docks, dialogs."
+            },
+            "surface-sunken": {
+              "$type": "color",
+              "$value": "#171819",
+              "$description": "Wells; the board behind cards."
+            },
+            "surface-inverse": {
+              "$type": "color",
+              "$value": "#e9e9ea",
+              "$description": "Toasts and inverse panels."
+            },
+            "surface-rail": {
+              "$type": "color",
+              "$value": "#16222d",
+              "$description": "Navigation rail; one step from the page so chrome reads apart from content."
+            }
+          },
+          "text": {
+            "on-surface": {
+              "$type": "color",
+              "$value": "#f2f2f3",
+              "$description": "Primary text."
+            },
+            "on-surface-muted": {
+              "$type": "color",
+              "$value": "#b7b7ba",
+              "$description": "Secondary text (AA on surface)."
+            },
+            "on-surface-subtle": {
+              "$type": "color",
+              "$value": "#98989b",
+              "$description": "Tertiary text."
+            },
+            "on-inverse": {
+              "$type": "color",
+              "$value": "#1d1f20",
+              "$description": "Text on surface-inverse."
+            },
+            "on-rail": {
+              "$type": "color",
+              "$value": "#f2f2f3",
+              "$description": "Text on surface-rail."
+            },
+            "on-rail-muted": {
+              "$type": "color",
+              "$value": "#9db4c9",
+              "$description": "Secondary text on surface-rail."
+            },
+            "on-accent": {
+              "$type": "color",
+              "$value": "#14202b",
+              "$description": "Text on accent-strong."
+            },
+            "on-status-queued": {
+              "$type": "color",
+              "$value": "#102316",
+              "$description": "Text on a status-queued fill."
+            }
+          },
+          "accent": {
+            "accent": {
+              "$type": "color",
+              "$value": "#94bce3",
+              "$description": "Identity and decoration: rules, glyphs, thin bars. NOT behind text."
+            },
+            "accent-strong": {
+              "$type": "color",
+              "$value": "#b5d9fd",
+              "$description": "The only accent allowed behind text; pairs with on-accent. Filled buttons, active tabs."
+            },
+            "accent-hover": {
+              "$type": "color",
+              "$value": "#b5d9fd",
+              "$description": "Hover state of accent-strong fills."
+            },
+            "accent-wash": {
+              "$type": "color",
+              "$value": "#94bce32e",
+              "$extensions": {
+                "com.castmill.css": "rgb(148 188 227 / 0.18)"
+              },
+              "$description": "Translucent accent tint for selected rows/backgrounds."
+            },
+            "accent-alt": {
+              "$type": "color",
+              "$value": "#e0b354",
+              "$description": "Second accent, decoration only — never behind text."
+            },
+            "accent-alt-wash": {
+              "$type": "color",
+              "$value": "#e0b3542e",
+              "$extensions": {
+                "com.castmill.css": "rgb(224 179 84 / 0.18)"
+              },
+              "$description": "Translucent tint of accent-alt."
+            }
+          },
+          "rule": {
+            "rule": {
+              "$type": "color",
+              "$value": "#f2f2f329",
+              "$extensions": {
+                "com.castmill.css": "rgb(242 242 243 / 0.16)"
+              },
+              "$description": "Hairline dividers."
+            },
+            "rule-strong": {
+              "$type": "color",
+              "$value": "#f2f2f352",
+              "$extensions": {
+                "com.castmill.css": "rgb(242 242 243 / 0.32)"
+              },
+              "$description": "Emphasised dividers, input borders."
+            }
+          },
+          "feedback": {
+            "success": {
+              "$type": "color",
+              "$value": "#7fc492",
+              "$description": "Success feedback."
+            },
+            "warning": {
+              "$type": "color",
+              "$value": "#e0b354",
+              "$description": "Warning feedback."
+            },
+            "danger": {
+              "$type": "color",
+              "$value": "#f08a8a",
+              "$description": "Error / destructive feedback."
+            }
+          },
+          "status": {
+            "status-draft": {
+              "$type": "color",
+              "$value": "#7a7a7d",
+              "$description": "Artifact status: draft. Always paired with a 3px status bar — never colour alone."
+            },
+            "status-review": {
+              "$type": "color",
+              "$value": "#e0b354",
+              "$description": "Artifact status: in review."
+            },
+            "status-queued": {
+              "$type": "color",
+              "$value": "#68dc8d",
+              "$description": "Artifact status: queued."
+            },
+            "status-published": {
+              "$type": "color",
+              "$value": "#68dc8d",
+              "$description": "Artifact status: published."
+            }
+          }
+        },
+        "radius": {
+          "sm": {
+            "$type": "dimension",
+            "$value": "0px"
+          },
+          "md": {
+            "$type": "dimension",
+            "$value": "0px"
+          },
+          "lg": {
+            "$type": "dimension",
+            "$value": "0px"
+          }
+        },
+        "shadow": {
+          "sm": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#00000057",
+              "offsetX": "0px",
+              "offsetY": "1px",
+              "blur": "2px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 1px 2px rgb(0 0 0 / 0.34)"
+            }
+          },
+          "md": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#0000006b",
+              "offsetX": "0px",
+              "offsetY": "3px",
+              "blur": "10px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 3px 10px rgb(0 0 0 / 0.42)"
+            }
+          },
+          "lg": {
+            "$type": "shadow",
+            "$value": {
+              "color": "#00000085",
+              "offsetX": "0px",
+              "offsetY": "12px",
+              "blur": "32px",
+              "spread": "0px"
+            },
+            "$extensions": {
+              "com.castmill.css": "0 12px 32px rgb(0 0 0 / 0.52)"
+            }
+          }
+        },
+        "font": {
+          "display": {
+            "$type": "fontFamily",
+            "$value": [
+              "Barlow Condensed",
+              "Arial Narrow",
+              "system-ui",
+              "sans-serif"
+            ]
+          },
+          "body": {
+            "$type": "fontFamily",
+            "$value": [
+              "Barlow",
+              "system-ui",
+              "-apple-system",
+              "Segoe UI",
+              "sans-serif"
+            ]
+          },
+          "displayWeight": {
+            "$type": "fontWeight",
+            "$value": 600
+          }
+        },
+        "texture": {
+          "opacity": {
+            "$type": "number",
+            "$value": 0.05
+          },
+          "image": {
+            "$type": "string",
+            "$value": "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cpath d='M24 0v96M48 0v96M72 0v96M0 24h96M0 48h96M0 72h96' stroke='%23b5d9fd' stroke-width='1' fill='none'/%3E%3Cpath d='M0.75 0v96M0 0.75h96' stroke='%23b5d9fd' stroke-width='1.5' fill='none'/%3E%3C/svg%3E\")",
+            "$description": "CSS background-image (inline SVG tile), or none."
+          }
+        }
+      }
+    }
+  },
+  "$extensions": {
+    "com.castmill.igniteUi": {
+      "$description": "How the themes feed Ignite UI: set these --ig-* roots from the theme tokens.",
+      "--ig-primary-500": "color.accent.accent-strong",
+      "--ig-secondary-500": "color.accent.accent",
+      "--ig-surface-500": "color.surface.surface-raised",
+      "--ig-gray-500": "color.text.on-surface-muted",
+      "--ig-info-500": "color.accent.accent",
+      "--ig-success-500": "color.feedback.success",
+      "--ig-warn-500": "color.feedback.warning",
+      "--ig-error-500": "color.feedback.danger",
+      "--ig-font-family": "font.body",
+      "--ig-h1..h6-font-family": "font.display",
+      "--ig-caption/overline-font-family": "shared.font.mono",
+      "--ig-button-text-transform": "none",
+      "--ig-button-letter-spacing": "0.01em"
+    },
+    "com.castmill.rules": [
+      "Text goes on accent-strong (with on-accent), never on accent or accent-alt.",
+      "Status is encoded twice: colour AND a 3px bar.",
+      "Fonts: Source Serif 4, Inter (Warm Editorial); Barlow Condensed, Barlow (Blueprint); IBM Plex Mono (both). All OFL."
+    ]
+  }
+}
