@@ -54,6 +54,12 @@ every content item while one slot is open, the take is the hero on the stage wit
 taskbar, every inspector tab keeps the generate dock, compare is an A/B split with a slider, the
 board survives the round trip, and Extract from video opens as a side sheet.
 
+The long-transcript regression pastes an hour-long webinar's worth of caption lines (1,100
+segments, one evidence block each) and drives the real producer path — intent, research
+context, deep SEO/AEO report, approval, Press Run — with live models. Every piece in the Press
+Run must print. A recording's transcript is ~1,000 short blocks rather than a few long ones, and
+a block-count guard once refused every generator for exactly that shape.
+
 The live webpage import imports `https://www.revealbi.io/ai` through the real bounded fetch and
 checks its main copy is captured, not a menu card or a JavaScript-shell verdict. It calls no model
 but needs the public internet.

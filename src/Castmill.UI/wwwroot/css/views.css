@@ -8056,7 +8056,8 @@ body.cm-wire-dragging [data-wire-drag] {
     animation: cm-press-pop 320ms ease-out;
 }
 
-.cm-press__item--failed .cm-press__mark {
+.cm-press__item--failed .cm-press__mark,
+.cm-press__mark--failed {
     background: var(--cm-danger);
     color: var(--cm-surface);
     font-weight: 700;

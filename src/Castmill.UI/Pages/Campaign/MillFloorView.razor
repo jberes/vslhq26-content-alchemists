@@ -275,7 +275,8 @@
                     else
                     {
                         <p class="cm-press__summary">
-                            <span class="cm-press__mark cm-press__mark--done" aria-hidden="true">✓</span>
+                            @* A run with any failure never wears the success tick. *@
+                            <span class="cm-press__mark @(FailedCount > 0 ? "cm-press__mark--failed" : "cm-press__mark--done")" aria-hidden="true">@(FailedCount > 0 ? "✕" : "✓")</span>
                             @DoneCount of @PressRun.Kinds.Count printed@(FailedCount > 0 ? $" · {FailedCount} failed" : "")
                             <button type="button" class="cm-button cm-button--quiet"
                                     @onclick="() => _rolledUp = !_rolledUp">

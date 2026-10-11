@@ -271,14 +271,48 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
 
     private List<ArtifactPreviewResponse> StubbedArtifacts { get; } = [];
 
-    private static void SetFinishedPressRun(PressRunService press, Guid campaignId)
+    [Fact]
+    public async Task A_finished_run_with_failures_does_not_show_the_success_tick()
     {
+        StubPreview(Artifact("blog", "Printed draft"));
+        SetFinishedPressRun(Services.GetRequiredService<PressRunService>(), CampaignId,
+            new RunItem("blog", true, Guid.NewGuid(), null, [], 10),
+            new RunItem("youtube", false, null, "Approved evidence exceeds the generation context limit.", [], 10));
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Printed draft");
+
+        var summary = view.Find(".cm-press__summary");
+        Assert.Contains("1 of 2 printed · 1 failed", summary.TextContent, StringComparison.Ordinal);
+        Assert.Empty(summary.QuerySelectorAll(".cm-press__mark--done"));
+        Assert.Equal("✕", summary.QuerySelector(".cm-press__mark--failed")!.TextContent);
+        Assert.Contains("Approved evidence exceeds the generation context limit.", view.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_finished_run_with_every_piece_printed_shows_the_success_tick()
+    {
+        StubPreview(Artifact("blog", "Printed draft"));
+        SetFinishedPressRun(Services.GetRequiredService<PressRunService>(), CampaignId);
+        var view = Render<MillFloorView>(p => p.Add(c => c.CampaignId, CampaignId));
+        await WaitForTextAsync(view, "Printed draft");
+
+        var summary = view.Find(".cm-press__summary");
+        Assert.Equal("✓", summary.QuerySelector(".cm-press__mark--done")!.TextContent);
+        Assert.Empty(summary.QuerySelectorAll(".cm-press__mark--failed"));
+    }
+
+    private static void SetFinishedPressRun(PressRunService press, Guid campaignId, params RunItem[] items)
+    {
+        if (items.Length == 0)
+        {
+            items = [new RunItem("blog", true, Guid.NewGuid(), null, [], 10)];
+        }
         var flags = System.Reflection.BindingFlags.Instance
             | System.Reflection.BindingFlags.Public
             | System.Reflection.BindingFlags.NonPublic;
         var type = typeof(PressRunService);
         type.GetProperty(nameof(PressRunService.CampaignId), flags)!.SetValue(press, campaignId);
-        type.GetProperty(nameof(PressRunService.Kinds), flags)!.SetValue(press, new[] { "blog" });
+        type.GetProperty(nameof(PressRunService.Kinds), flags)!.SetValue(press, items.Select(i => i.Kind).ToArray());
         type.GetProperty(nameof(PressRunService.IsRunning), flags)!.SetValue(press, false);
         var now = DateTimeOffset.UtcNow;
         type.GetProperty(nameof(PressRunService.Progress), flags)!.SetValue(
@@ -287,9 +321,9 @@ public sealed class MillFloorLanesTests : CastmillUiTestContext
                 Guid.NewGuid(),
                 campaignId,
                 "Completed",
-                1,
-                1,
-                [new RunItem("blog", true, Guid.NewGuid(), null, [], 10)],
+                items.Length,
+                items.Length,
+                items,
                 now,
                 now));
     }
