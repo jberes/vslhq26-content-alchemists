@@ -58,7 +58,14 @@ jobs:
         env:
           # Test-only key generated per run; never a real secret.
           Jwt__SigningKey: ci-only-${{ github.run_id }}-0123456789abcdef0123456789abcdef
-        run: dotnet test Castmill.NoDesktop.slnf --no-build --configuration Release --logger "console;verbosity=normal"
+        # Republish each failing test and its message as an annotation: the run summary then
+        # names the test without anyone opening the raw log.
+        run: |
+          set -o pipefail
+          dotnet test Castmill.NoDesktop.slnf --no-build --configuration Release --logger "console;verbosity=normal" 2>&1 | tee test.log || {
+            grep -A4 "\[FAIL\]" test.log | head -60 | while IFS= read -r line; do echo "::error::${line:0:900}"; done
+            exit 1
+          }
 
   desktop-shell:
     name: Desktop shell (MAUI, Mac Catalyst)
@@ -78,7 +85,8 @@ jobs:
           dotnet --version
       - name: Select the newest Xcode
         run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          # Real bundles only: the image's Xcode_X.Y.Z.app aliases break xcodebuild's SDK lookup.
+          XCODE=$(find /Applications -maxdepth 1 -type d -name 'Xcode_*.app' | sort -V | tail -1)
           echo "::notice::Installed: $(ls -d /Applications/Xcode*.app | xargs -n1 basename | tr '\n' ' ')— selected $(basename "$XCODE")"
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
