@@ -41,7 +41,13 @@
         <!-- Unpackaged on Windows until Phase F9 does MSIX packaging (E10.4). -->
         <WindowsPackageType>None</WindowsPackageType>
 
-        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+        <!-- Apple silicon only: Whisper.net.Runtime ships its Mac Catalyst static libs for arm64
+             alone, so the x86_64 slice of a universal build cannot link (_whisper_* undefined).
+             Without this a plain Release build (CI) defaults to universal and fails. -->
+        <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">maccatalyst-arm64</RuntimeIdentifiers>
+        <!-- 17.0 (macOS 14) is the floor the Mac Catalyst 27 SDK enforces; CI installs the
+             newest workload, so a lower value fails there before it fails locally. -->
+        <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">17.0</SupportedOSPlatformVersion>
         <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
         <TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
     </PropertyGroup>

@@ -48,7 +48,10 @@ public sealed class PlanHelpersTests
         Assert.True(inside.Red < 40 && inside.Green < 40 && inside.Blue < 40, $"expected the band, got {inside}");
         Assert.Equal(SKColors.DimGray.Red, outside.Red);
 
-        using var font = new SKFont(SKTypeface.Default, 40);
+        // The bundled face the composer draws with: a bare Linux runner has no system font, so
+        // SKTypeface.Default measures every string as zero wide and nothing ever wraps.
+        using var typeface = SKTypeface.FromFile(ImageComposer.DefaultFontPath);
+        using var font = new SKFont(typeface, 40);
         var lines = ImageComposer.Wrap(font, "one two three four five six seven eight", 200);
         Assert.True(lines.Count > 1, "long text wraps");
         Assert.All(lines, line => Assert.False(string.IsNullOrWhiteSpace(line)));

@@ -155,7 +155,12 @@ public sealed class AppleLiveTranscriptionService : ILiveTranscriptionService, I
                     + "System Settings → Sound.");
             }
 
+            // Obsoleted (not removed) in the Mac Catalyst 27 bindings. Its replacement, the
+            // overload with `out NSError`, exists only in those bindings, so calling it would
+            // break every build on the 26.x workload. Switch once 27 is the floor everywhere.
+#pragma warning disable CA1422
             input.InstallTapOnBus(0, 4096, format, (buffer, _) => _request?.Append(buffer));
+#pragma warning restore CA1422
 
             _engine.Prepare();
             _engine.StartAndReturnError(out var engineError);
