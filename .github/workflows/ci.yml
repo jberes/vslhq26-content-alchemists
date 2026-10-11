@@ -87,4 +87,11 @@ jobs:
       - name: Build desktop shell
         # Proves the shared RCL still compiles into the native shell. Windows packaging
         # and the notarized macOS build arrive with Phase F9 (story 10.4).
-        run: dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj --configuration Release -p:SkipEditorInterop=true
+        # Xamarin's native-tool errors carry no MSBuild error code, so the problem matcher
+        # misses them; republish every error line as an annotation the run summary shows.
+        run: |
+          set -o pipefail
+          dotnet build src/Castmill.Desktop/Castmill.Desktop.csproj --configuration Release -p:SkipEditorInterop=true 2>&1 | tee build.log || {
+            grep -E "error" build.log | sort -u | head -30 | while IFS= read -r line; do echo "::error::${line:0:900}"; done
+            exit 1
+          }
