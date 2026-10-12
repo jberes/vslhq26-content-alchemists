@@ -89,6 +89,39 @@ public sealed class SettingsTextGenerationTests : CastmillUiTestContext
     }
 
     [Fact]
+    public async Task The_card_is_inert_until_its_stored_settings_have_loaded()
+    {
+        var release = new TaskCompletionSource();
+        Http.OnAsync(HttpMethod.Get, "api/v1/settings", async () =>
+        {
+            await release.Task;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = System.Net.Http.Json.JsonContent.Create(new List<SettingRow>
+                {
+                    new(TextGenerationSettings.ProviderKey, "openai"),
+                }),
+            };
+        });
+        var view = Render<Castmill.UI.Pages.Settings>();
+        await view.WaitForStateAsync(
+            () => view.FindAll("button[role='tab']").Count == 6, TimeSpan.FromSeconds(5));
+        await view.FindAll("button[role='tab']")
+            .Single(tab => tab.TextContent.Trim() == "Models")
+            .ClickAsync();
+
+        Assert.True(view.Find("select[aria-label='Text generation provider']").HasAttribute("disabled"));
+        Assert.True(view.FindAll("button").Single(b => b.TextContent.Contains("Save text model", StringComparison.Ordinal))
+            .HasAttribute("disabled"));
+
+        release.SetResult();
+        await view.WaitForStateAsync(
+            () => !view.Find("select[aria-label='Text generation provider']").HasAttribute("disabled"),
+            TimeSpan.FromSeconds(5));
+        Assert.Equal("openai", view.Find("select[aria-label='Text generation provider']").GetAttribute("value"));
+    }
+
+    [Fact]
     public async Task A_saved_openai_route_without_a_key_says_so()
     {
         Http.OnGet("api/v1/settings", new List<SettingRow>

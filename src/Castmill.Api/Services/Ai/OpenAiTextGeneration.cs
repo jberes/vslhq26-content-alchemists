@@ -113,6 +113,22 @@ public sealed class BackgroundReasoningChatClient(
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var materialized = messages as IList<ChatMessage> ?? [.. messages];
+        try
+        {
+            return await RunToCompletionAsync(materialized, options, cancellationToken);
+        }
+        catch (OpenAiResponseFailedException)
+        {
+            // One retry for a job OpenAI itself failed (a server-side error, not a refusal or a
+            // token ceiling, which are Incomplete and would only fail the same way again).
+            return await RunToCompletionAsync(materialized, options, cancellationToken);
+        }
+    }
+
+    private async Task<ChatResponse> RunToCompletionAsync(
+        IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
+    {
         var request = Configure(options, background: true);
         var response = await base.GetResponseAsync(messages, request, cancellationToken);
         var deadline = clock.GetUtcNow() + MaxWait;
@@ -127,6 +143,22 @@ public sealed class BackgroundReasoningChatClient(
             var poll = request.Clone();
             poll.ContinuationToken = token;
             response = await base.GetResponseAsync([], poll, cancellationToken);
+        }
+
+        // A background job that ends any way but Completed comes back as an empty reply; say
+        // why instead ("The model did not return JSON. It replied: (nothing)" told no one
+        // anything when a live repair pass failed in 4 seconds).
+        if (response.RawRepresentation is ResponseResult { Status: { } status } result
+            && status != ResponseStatus.Completed)
+        {
+            var reason = result.Error?.Message
+                ?? result.IncompleteStatusDetails?.Reason?.ToString()
+                ?? "no reason given";
+            if (status == ResponseStatus.Failed)
+            {
+                throw new OpenAiResponseFailedException($"{choice.Model} failed the request: {reason}");
+            }
+            throw new InvalidOperationException($"{choice.Model} ended the request as {status}: {reason}");
         }
         return response;
     }
@@ -163,3 +195,6 @@ public sealed class BackgroundReasoningChatClient(
         return request;
     }
 }
+
+/// <summary>OpenAI reported a background job as Failed — retried once by the caller.</summary>
+public sealed class OpenAiResponseFailedException(string message) : InvalidOperationException(message);

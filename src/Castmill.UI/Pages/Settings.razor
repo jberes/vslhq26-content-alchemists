@@ -392,7 +392,7 @@
             <div class="cm-settings__text-model-fields">
                 <label class="cm-field">
                     <span class="cm-field__label">Provider</span>
-                    <select class="cm-input" aria-label="Text generation provider" @bind="_textProviderDraft">
+                    <select class="cm-input" aria-label="Text generation provider" disabled="@(!_textLoaded)" @bind="_textProviderDraft">
                         <option value="@TextGenerationSettings.OpenAi">OpenAI direct — your OpenAI API key</option>
                         <option value="@TextGenerationSettings.Foundry">Azure AI Foundry deployments</option>
                     </select>
@@ -401,12 +401,12 @@
                 {
                     <label class="cm-field">
                         <span class="cm-field__label">Model</span>
-                        <input class="cm-input cm-mono" spellcheck="false" autocomplete="off" aria-label="Text generation model"
+                        <input class="cm-input cm-mono" spellcheck="false" autocomplete="off" aria-label="Text generation model" disabled="@(!_textLoaded)"
                                placeholder="@TextGenerationSettings.DefaultOpenAiModel" @bind="_textModelDraft" />
                     </label>
                     <label class="cm-field">
                         <span class="cm-field__label">Reasoning effort</span>
-                        <select class="cm-input" aria-label="Reasoning effort" @bind="_textEffortDraft">
+                        <select class="cm-input" aria-label="Reasoning effort" disabled="@(!_textLoaded)" @bind="_textEffortDraft">
                             @foreach (var effort in TextGenerationSettings.Efforts)
                             {
                                 <option value="@effort">@TextGenerationSettings.EffortLabel(effort) — @TextGenerationSettings.EffortHint(effort)</option>
@@ -415,12 +415,12 @@
                     </label>
                     <label class="cm-field">
                         <span class="cm-field__label">Max output tokens</span>
-                        <input class="cm-input" type="number" inputmode="numeric" aria-label="Max output tokens"
+                        <input class="cm-input" type="number" inputmode="numeric" aria-label="Max output tokens" disabled="@(!_textLoaded)"
                                min="@TextGenerationSettings.MinOutputTokens" step="1024" @bind="_textMaxTokensDraft" />
                     </label>
                 }
             </div>
-            <button type="button" class="cm-button" disabled="@_savingText" @onclick="SaveTextGenerationAsync">
+            <button type="button" class="cm-button" disabled="@(_savingText || !_textLoaded)" @onclick="SaveTextGenerationAsync">
                 @(_savingText ? "Saving…" : "Save text model")
             </button>
             @if (_status?.TextGeneration is { } route)
@@ -545,6 +545,11 @@
     private string _textEffortDraft = TextGenerationSettings.DefaultEffort;
     private int _textMaxTokensDraft = TextGenerationSettings.DefaultMaxOutputTokens;
     private bool _savingText;
+    /// <summary>
+    /// The card is inert until its stored values arrive: a choice made before then was
+    /// overwritten by the load, and Save then wrote the old route back (seen in WebKit e2e).
+    /// </summary>
+    private bool _textLoaded;
     private ExternalAuthLinksResponse? _security;
     private string? _securityError;
     private string? _securityBusyProvider;
@@ -796,6 +801,7 @@
             _textModelDraft = text.Model;
             _textEffortDraft = text.Effort;
             _textMaxTokensDraft = text.MaxOutputTokens;
+            _textLoaded = true;
             // Whisper unless saved otherwise; the browser shell cannot run it and is pinned
             // to Azure, with the control disabled and the reason stated (G3).
             _transcriptionEngineDraft = Media.CanProcessLocally

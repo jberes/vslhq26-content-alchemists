@@ -5,11 +5,17 @@ import { expect, test } from './fixtures.js';
 // then reads the AI log: every model call must have been answered by gpt-6.1-sol at OpenAI.
 // Needs an OpenAI key for the demo account: Ai:OpenAI:ApiKey in the gitignored dev config.
 const API = 'http://localhost:5015';
-const MODEL = 'gpt-6.1-sol';
+const DEFAULT_MODEL = 'gpt-6.1-sol';
+// The route is what is under test, not the model's depth: gpt-6-luna (OpenAI's cheapest listed
+// text model) at Low effort turns a ~50-minute sol/max Press Run into minutes. The sol/Max
+// defaults are still asserted on the card before they are changed — and the model field being
+// editable is exactly what this proves.
+const MODEL = 'gpt-6-luna';
+const TEST_EFFORT = 'low';
 const ROUTE_KEYS = ['ai.text.provider', 'ai.text.model', 'ai.text.effort', 'ai.text.max-output-tokens'];
 
-test('OpenAI direct writes every piece of a Press Run at max effort', async ({ page, request }, testInfo) => {
-    test.setTimeout(3 * 60 * 60 * 1000);
+test('OpenAI direct writes every piece of a Press Run', async ({ page, request }, testInfo) => {
+    test.setTimeout(60 * 60 * 1000);
     let campaignId = null;
     let accessToken = null;
     let credentials = null;
@@ -28,6 +34,10 @@ test('OpenAI direct writes every piece of a Press Run at max effort', async ({ p
         const password = await page.getByLabel('Password').inputValue();
         credentials = { email, password };
         accessToken = await freshToken();
+        // Start from the defaults even if an earlier run was killed before its cleanup.
+        for (const key of ROUTE_KEYS) {
+            await request.delete(`${API}/api/v1/settings/${key}`, { headers: bearer(accessToken), timeout: 120_000 });
+        }
         await page.getByRole('button', { name: 'Sign in' }).click();
         await expect(page).toHaveURL(/\/$/);
 
@@ -36,12 +46,14 @@ test('OpenAI direct writes every piece of a Press Run at max effort', async ({ p
         await page.getByRole('tab', { name: 'Models' }).click();
         const card = page.getByRole('article', { name: 'Which model writes every piece of text' });
         await card.getByLabel('Text generation provider', { exact: true }).selectOption('openai');
-        await expect(card.getByLabel('Text generation model', { exact: true })).toHaveValue(MODEL);
+        await expect(card.getByLabel('Text generation model', { exact: true })).toHaveValue(DEFAULT_MODEL);
+        await card.getByLabel('Text generation model', { exact: true }).fill(MODEL);
         await expect(card.getByLabel('Reasoning effort', { exact: true })).toHaveValue('max');
+        await card.getByLabel('Reasoning effort', { exact: true }).selectOption(TEST_EFFORT);
         await expect(card.getByLabel('Max output tokens', { exact: true })).toHaveValue('128000');
         await card.getByRole('button', { name: 'Save text model' }).click();
         await expect(card.getByRole('status'))
-            .toContainText(`Now: OpenAI · ${MODEL} · Max effort · 128,000 output tokens`);
+            .toContainText(`Now: OpenAI · ${MODEL} · Low effort · 128,000 output tokens`);
         await expect(card.getByRole('status')).toContainText('READY');
         await expect(card.getByRole('status')).not.toContainText('NOT READY');
 

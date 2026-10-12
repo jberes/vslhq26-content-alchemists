@@ -20,8 +20,11 @@ public sealed class EvidencePromptBudgetTests
 
         var prompt = context.ToPromptText();
 
-        Assert.Contains("Citation ID: evidence:", prompt, StringComparison.Ordinal);
+        Assert.Contains("Reveal - Prompt to Prod-4K.mp4 — timed transcript", prompt, StringComparison.Ordinal);
         Assert.True(prompt.Length <= GenerationEvidenceContext.MaxPromptCharacters);
+        // ADR-087: the bookkeeping no longer outweighs the talk — 1,067 × 48 characters of
+        // speech used to render as ~315,000 characters of prompt.
+        Assert.True(prompt.Length < 1_067 * 48 * 1.5, $"{prompt.Length} characters");
     }
 
     [Fact]

@@ -62,11 +62,13 @@ a block-count guard once refused every generator for exactly that shape.
 
 The OpenAI text-route regression (ADR-086) switches Settings → Models → Text generation to
 "OpenAI direct", checks the defaults (gpt-6.1-sol, max effort, 128,000 output tokens) and READY,
-then drives a campaign through research, report approval and Press Run with live max-effort calls.
+then switches to gpt-6-luna at Low effort (the cheapest, fastest — the route is under test, not the
+model's depth) and drives a
+campaign through research, report approval and Press Run with live calls.
 Every piece must print, and every model call in the AI log from that point must have been answered
-by `gpt-6.1-sol @ api.openai.com`, audits included. It restores the demo account's text route and
+by `gpt-6-luna @ api.openai.com`, audits included. It restores the demo account's text route and
 deletes the campaign afterwards. It needs an OpenAI key for the demo account (`Ai:OpenAI:ApiKey` in
-the gitignored dev config) and is slow by design — max effort is minutes per call.
+the gitignored dev config).
 
 The live webpage import imports `https://www.revealbi.io/ai` through the real bounded fetch and
 checks its main copy is captured, not a menu card or a JavaScript-shell verdict. It calls no model

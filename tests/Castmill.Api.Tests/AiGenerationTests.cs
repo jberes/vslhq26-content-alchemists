@@ -24,10 +24,13 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 {
     private WebApplicationFactory<Program> WithFakeModel(
         bool malformedYoutubeTaxonomy = false,
-        bool invalidYoutubeAudit = false) =>
+        bool invalidYoutubeAudit = false,
+        bool descendingYoutubeChapters = false,
+        bool invalidYoutubeRepair = false,
+        bool overlongSocialPost = false) =>
         factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
             services.Replace(ServiceDescriptor.Scoped<IFoundryClientFactory>(
-                _ => new FakeFoundryFactory(malformedYoutubeTaxonomy, invalidYoutubeAudit)))));
+                _ => new FakeFoundryFactory(malformedYoutubeTaxonomy, invalidYoutubeAudit, descendingYoutubeChapters, invalidYoutubeRepair, overlongSocialPost)))));
 
     private static async Task<(HttpClient Client, Guid CampaignId, Guid TranscriptId)> SetUpAsync(WebApplicationFactory<Program> app)
     {
@@ -286,6 +289,74 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             .GetProperty("chapters").GetArrayLength());
     }
 
+    /// <summary>
+    /// The dedicated pipeline never ran ChapterTimes (ADR-063), so a live max-effort package
+    /// with out-of-order chapters failed validation twice and the piece was lost (ADR-087).
+    /// </summary>
+    [Fact]
+    public async Task Youtube_chapters_are_snapped_onto_transcript_moments_and_made_ascending()
+    {
+        await using var app = WithFakeModel(descendingYoutubeChapters: true);
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+
+        Assert.True(result!.Success, result.Error);
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        var starts = package.RootElement.GetProperty("content").GetProperty("chapters")
+            .EnumerateArray().Select(c => c.GetProperty("startSeconds").GetDouble()).ToList();
+        Assert.Equal(0, starts[0]);
+        Assert.Equal(starts.OrderBy(s => s).Distinct(), starts);
+    }
+
+    /// <summary>
+    /// The audit is a check (ADR-087): when neither it nor its repair yields a valid package,
+    /// the valid draft stands — with a warning — instead of the piece being lost.
+    /// </summary>
+    [Fact]
+    public async Task A_youtube_audit_and_repair_that_both_fail_keep_the_valid_draft()
+    {
+        await using var app = WithFakeModel(invalidYoutubeAudit: true, invalidYoutubeRepair: true);
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/youtube",
+            new { transcriptArtifactId = transcriptId });
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+
+        Assert.True(result!.Success, result.Error);
+        Assert.Contains(result.ValidationWarnings, w => w.Contains("the draft was kept unaudited", StringComparison.Ordinal));
+        var artifact = await client.GetFromJsonAsync<ArtifactResponse>(
+            $"/api/v1/campaigns/{campaignId}/artifacts/{result.ArtifactId}");
+        using var package = JsonDocument.Parse(artifact!.ContentJson);
+        Assert.Equal(3, package.RootElement.GetProperty("content").GetProperty("chapters").GetArrayLength());
+    }
+
+    /// <summary>
+    /// A generator gets one repair, told the validator's exact error (ADR-087): a live run on a
+    /// fast cheap model wrote a 303-character X post and lost the piece to the 280 cap.
+    /// </summary>
+    [Fact]
+    public async Task A_post_over_its_hard_cap_is_repaired_once_with_the_validation_error()
+    {
+        await using var app = WithFakeModel(overlongSocialPost: true);
+        var (client, campaignId, transcriptId) = await SetUpAsync(app);
+
+        var generate = await client.PostAsJsonAsync(
+            $"/api/v1/ai/campaigns/{campaignId}/generate/social-x",
+            new { transcriptArtifactId = transcriptId });
+        var result = await generate.Content.ReadFromJsonAsync<GenerationResult>();
+
+        Assert.True(result!.Success, result.Error);
+        var log = await client.GetFromJsonAsync<List<LogEntry>>("/api/v1/ai/log");
+        Assert.Contains(log!, e => e.Kind == "social-x-repair" && e.Success);
+    }
+
     [Fact]
     public async Task Youtube_title_regeneration_merges_a_new_source_citation_into_the_package()
     {
@@ -519,7 +590,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
 
     internal sealed class FakeFoundryFactory(
         bool malformedYoutubeTaxonomy = false,
-        bool invalidYoutubeAudit = false) : IFoundryClientFactory
+        bool invalidYoutubeAudit = false,
+        bool descendingYoutubeChapters = false,
+        bool invalidYoutubeRepair = false,
+        bool overlongSocialPost = false) : IFoundryClientFactory
     {
         public Task<FoundryCredentials?> ResolveCredentialsAsync(Guid userId, CancellationToken ct) =>
             Task.FromResult<FoundryCredentials?>(new FoundryCredentials("https://fake.local", "fake", "config"));
@@ -531,7 +605,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
                 new FoundryCredentials("https://fake.local", "fake", "config"), "fake-deployment"));
 
         public Task<IChatClient> CreateChatClientAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-            Task.FromResult<IChatClient>(new FakeChatClient(malformedYoutubeTaxonomy, invalidYoutubeAudit));
+            Task.FromResult<IChatClient>(new FakeChatClient(malformedYoutubeTaxonomy, invalidYoutubeAudit, descendingYoutubeChapters, invalidYoutubeRepair, overlongSocialPost));
     }
 
     private sealed class PromptEvidenceFoundryFactory : IFoundryClientFactory
@@ -591,6 +665,40 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             Task.FromResult<IChatClient>(new GeneralizedEvidenceChatClient());
     }
 
+    /// <summary>
+    /// Every qualified citation id the prompt offers, in order: one-record-per-block evidence
+    /// ("Citation ID: …") and transcript paragraphs ("Cite a passage as {prefix}&lt;id&gt;" then
+    /// "[id 0:00] text"), the two shapes ToPromptText renders (ADR-087).
+    /// </summary>
+    internal static IEnumerable<string> PromptCitationIds(string prompt)
+    {
+        var prefix = string.Empty;
+        foreach (var raw in prompt.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("Citation ID: ", StringComparison.Ordinal))
+            {
+                yield return line["Citation ID: ".Length..].Trim();
+            }
+            else if (line.StartsWith("Cite a passage as ", StringComparison.Ordinal))
+            {
+                prefix = line["Cite a passage as ".Length..].Split("<id>")[0];
+            }
+            else if (line.StartsWith("Cite a passage by the bracketed id", StringComparison.Ordinal))
+            {
+                prefix = string.Empty;
+            }
+            else if (line.StartsWith('['))
+            {
+                foreach (System.Text.RegularExpressions.Match match in
+                    System.Text.RegularExpressions.Regex.Matches(line, @"\[(?<id>[^\s\]]+)(?: [\d:]+)?\]"))
+                {
+                    yield return prefix + match.Groups["id"].Value;
+                }
+            }
+        }
+    }
+
     private sealed class GeneralizedEvidenceChatClient : IChatClient
     {
         private readonly FakeChatClient _fallback = new();
@@ -602,10 +710,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
         {
             var materialized = messages.ToList();
             var prompt = string.Join("\n", materialized.Select(message => message.Text));
-            var citation = prompt.Split('\n')
-                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
-                .Select(line => line["Citation ID: ".Length..].Trim())
-                .FirstOrDefault();
+            var citation = PromptCitationIds(prompt).FirstOrDefault();
             if (prompt.Contains("technical editor on this artifact", StringComparison.Ordinal))
             {
                 if (citation is null)
@@ -668,10 +773,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
                 return _fallback.GetResponseAsync(materialized, options, cancellationToken);
             }
 
-            var citation = prompt.Split('\n')
-                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
-                .Select(line => line["Citation ID: ".Length..].Trim())
-                .Last();
+            var citation = PromptCitationIds(prompt).Last();
             var json = JsonSerializer.Serialize(new
             {
                 slot = "B",
@@ -704,10 +806,7 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             CancellationToken cancellationToken = default)
         {
             var prompt = string.Join("\n", messages.Select(message => message.Text));
-            var citation = prompt.Split('\n')
-                .Where(line => line.StartsWith("Citation ID: ", StringComparison.Ordinal))
-                .Select(line => line["Citation ID: ".Length..].Trim())
-                .Last();
+            var citation = PromptCitationIds(prompt).Last();
             var json = JsonSerializer.Serialize(new
             {
                 title = "Post",
@@ -733,7 +832,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
     /// <summary>Returns schema-valid canned JSON keyed off distinctive prompt text.</summary>
     internal sealed class FakeChatClient(
         bool malformedYoutubeTaxonomy = false,
-        bool invalidYoutubeAudit = false) : IChatClient
+        bool invalidYoutubeAudit = false,
+        bool descendingYoutubeChapters = false,
+        bool invalidYoutubeRepair = false,
+        bool overlongSocialPost = false) : IChatClient
     {
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -797,10 +899,20 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
             if (prompt.Contains("\"titleOptions\"", StringComparison.Ordinal))
             {
                 var package = JsonNode.Parse("""{"title":"Deployment Automation Cuts Delivery Time","titleOptions":[{"slot":"A","title":"Deployment Automation Cuts Delivery Time","angle":"seo","score":91,"rationale":"Leads with the measured result."},{"slot":"B","title":"The Deployment Workflow Behind Faster Shipping","angle":"curiosity","score":84,"rationale":"Opens a useful knowledge gap."},{"slot":"C","title":"Slow Deployments? Fix the Delivery Workflow","angle":"problem-solution","score":82,"rationale":"Names the pain directly."}],"description":"Deployment automation cut delivery time in half, and this grounded workflow shows the exact product and dashboard proof.\n\nLearn how the team shipped the product and used its dashboard.\n\nChapters:\n0:00 Deployment automation result\n0:08 Delivery dashboard proof\n0:16 Faster shipping workflow\n\n{{LINKS}}\n#devops #automation","chapters":[{"startSeconds":0,"title":"Deployment automation result"},{"startSeconds":8,"title":"Delivery dashboard proof"},{"startSeconds":16,"title":"Faster shipping workflow"}],"tags":["deployment automation","devops dashboard","shipping workflow","delivery time","product launch","faster deploys","release process","automation tool"],"suggestedPinnedComment":"The source says deployment time was cut in half after the launch—where would this workflow remove the most delay for your team?","audit":{"hookWithin125":true,"hashtagsHoisted":true,"chapterKeywordsPresent":true,"warnings":[]},"citations":["S1","S2","S3"]}""")!.AsObject();
-                if (invalidYoutubeAudit
-                    && prompt.Contains("Audit and correct this YouTube package", StringComparison.Ordinal))
+                var isAudit = prompt.Contains("Check this YouTube package", StringComparison.Ordinal);
+                var isRepair = prompt.Contains("Repair this YouTube package", StringComparison.Ordinal);
+                if ((invalidYoutubeAudit && isAudit) || (invalidYoutubeRepair && isRepair))
                 {
                     package["chapters"] = new JsonArray(package["chapters"]!.AsArray()[0]!.DeepClone());
+                }
+                if (descendingYoutubeChapters && isAudit)
+                {
+                    var chapters = package["chapters"]!.AsArray();
+                    chapters[1]!["startSeconds"] = 16;
+                    chapters[2]!["startSeconds"] = 8;
+                    package["description"] = package["description"]!.GetValue<string>()
+                        .Replace("0:08 Delivery", "0:16 Delivery", StringComparison.Ordinal)
+                        .Replace("0:16 Faster", "0:08 Faster", StringComparison.Ordinal);
                 }
                 if (malformedYoutubeTaxonomy)
                 {
@@ -838,6 +950,10 @@ public sealed class AiGenerationTests(CastmillApiFactory factory)
                 return """{"title":"Thumbnail directions","concepts":[{"name":"Speed","angle":"faster delivery","prompt":"a fast product launch with negative space","overlayText":"SHIP FASTER","reason":"Matches the deployment intent"},{"name":"Before and after","angle":"transformation","prompt":"split-screen delivery workflow","overlayText":"TIME CUT IN HALF","reason":"Shows the concrete outcome"},{"name":"Dashboard proof","angle":"product evidence","prompt":"product dashboard in an editorial composition","overlayText":"THE PROOF","reason":"Grounds the claim in the product"}],"citations":["S2","S3"]}""";
             }
             // Social posts (each platform prompt says "Write one <platform> post").
+            if (overlongSocialPost && !prompt.Contains("rejected by deterministic validation", StringComparison.Ordinal))
+            {
+                return $$"""{"title":"Post","text":"{{new string('x', 300)}}","hashtags":["#launch"],"citations":["S1"]}""";
+            }
             return """{"title":"Post","text":"Short launch post.","hashtags":["#launch"],"citations":["S1"]}""";
         }
 

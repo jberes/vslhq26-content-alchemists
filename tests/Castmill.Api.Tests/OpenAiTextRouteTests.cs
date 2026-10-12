@@ -131,6 +131,29 @@ public sealed class OpenAiTextRouteTests
         Assert.Same(token, inner.Requests[2].ContinuationToken);
     }
 
+    [Fact]
+    public async Task A_job_openai_failed_is_retried_once_and_an_incomplete_one_says_why()
+    {
+        var failed = Raw("""{"id":"r1","object":"response","created_at":1,"status":"failed","model":"m","output":[],"parallel_tool_calls":true,"tool_choice":"auto","tools":[],"error":{"code":"server_error","message":"The server had an error."}}""");
+        var ok = new ChatResponse(new ChatMessage(ChatRole.Assistant, "done"));
+        var retried = new ScriptedChatClient([failed, ok]);
+        var client = new BackgroundReasoningChatClient(retried, OpenAiChoice(), TimeProvider.System, TimeSpan.Zero);
+
+        Assert.Equal("done", (await client.GetResponseAsync("x", cancellationToken: TestContext.Current.CancellationToken)).Text);
+        Assert.Equal(2, retried.Requests.Count);
+
+        var incomplete = Raw("""{"id":"r2","object":"response","created_at":1,"status":"incomplete","model":"m","output":[],"parallel_tool_calls":true,"tool_choice":"auto","tools":[],"incomplete_details":{"reason":"max_output_tokens"}}""");
+        var stopped = new BackgroundReasoningChatClient(new ScriptedChatClient([incomplete]), OpenAiChoice(), TimeProvider.System, TimeSpan.Zero);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            stopped.GetResponseAsync("x", cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Contains("max_output_tokens", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ChatResponse Raw(string json) => new([])
+    {
+        RawRepresentation = System.ClientModel.Primitives.ModelReaderWriter.Read<ResponseResult>(BinaryData.FromString(json)),
+    };
+
     internal static TextGenerationChoice OpenAiChoice() => TextGenerationSettings.Read([
         KeyValuePair.Create(TextGenerationSettings.ProviderKey, TextGenerationSettings.OpenAi),
     ]);

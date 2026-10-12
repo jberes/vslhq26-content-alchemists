@@ -69,7 +69,44 @@ public static partial class Generators
           canonical URL points home, never at the copy.
         """;
 
-    private static readonly string[] SocialPlatforms = ["x", "linkedin", "facebook", "instagram", "threads", "bluesky"];
+    /// <summary>
+    /// The video counterpart of <see cref="AeoGuidance"/> (ADR-087). A description has no
+    /// headings to carry questions, so the blog rules — question headings, a closing FAQ, the
+    /// keyword in the first heading — turned descriptions into keyword-stuffed Q&amp;A pages.
+    /// </summary>
+    public const string VideoGuidance = """
+        VIDEO DESCRIPTION RULES
+        - Write for a viewer deciding whether to watch: what the video demonstrates and what they
+          will be able to do afterwards, in concrete capabilities and outcomes. Ordinary prose,
+          clear enough that an answer engine can quote a sentence on its own.
+        - No FAQ, no question headings, no definitions section, no heading that repeats the video
+          title and no keyword-summary heading, unless the brand template explicitly asks for one.
+        - Use the exact product, component and API names the source uses.
+        - Chapters read like useful section titles and use only real transcript times.
+        - The pinned comment points at one concrete moment and ends with a genuine question.
+        """;
+
+    /// <summary>The description's shape when the brand has no YouTube template of its own (ADR-087).</summary>
+    public const string DefaultYoutubeDescriptionStructure = """
+        DESCRIPTION STRUCTURE
+        1. Two opening sentences: the video's main demonstration and the viewer's outcome.
+        2. One short paragraph introducing the subject or application, the workflow and the named
+           technologies.
+        3. "In this video, you'll learn how to:" then 6-8 action-oriented bullets that together
+           cover the major demonstrations, in the order the video shows them.
+        4. Only if the video explains it: one short paragraph on the architecture, security,
+           governance or limitation a practitioner needs to know.
+        5. The {{LINKS}} line, then a "Chapters" section, then one relevant call to action, then
+           at most three hashtags on the final line.
+        """;
+
+    /// <summary>Asked of every YouTube draft — the check that made a hand-prompted description better.</summary>
+    public const string YoutubeSelfCheck = """
+        Before returning, silently check that the opening represents the WHOLE video, not just its
+        first minutes, and that the learning bullets cover its central demonstrations.
+        """;
+
+    private static readonly string[] SocialPlatforms =["x", "linkedin", "facebook", "instagram", "threads", "bluesky"];
 
     public static IReadOnlyList<GeneratorSpec> FanOut { get; } = BuildFanOut();
 
@@ -725,7 +762,31 @@ public static partial class Generators
         {
             warnings.Add("The first 125 characters may be too thin to work as a search hook.");
         }
+        if (HasQuestionSections(description))
+        {
+            warnings.Add("The description has question headings or an FAQ; a video description "
+                + "reads better as prose and learning bullets.");
+        }
         return new ValidationOutcome(true, warnings);
+    }
+
+    /// <summary>
+    /// An FAQ heading, or two or more lines that are nothing but a question — the shape the
+    /// blog answer-engine rules produced in descriptions. One closing question is a CTA.
+    /// </summary>
+    internal static bool HasQuestionSections(string description)
+    {
+        var lines = description.Split('\n')
+            .Select(line => line.Trim().TrimStart('#', ' ').Trim())
+            .Where(line => line.Length > 0)
+            .ToList();
+        if (lines.Any(line => line.TrimEnd(':').Equals("FAQ", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Frequently asked questions", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+        return lines.Count(line => line.EndsWith('?') && line.Length <= 120
+            && !line.StartsWith('•') && !line.StartsWith('-') && !line.StartsWith('*')) >= 2;
     }
 
     internal static ValidationOutcome ValidateYoutube(JsonElement json, TranscriptContent transcript) =>

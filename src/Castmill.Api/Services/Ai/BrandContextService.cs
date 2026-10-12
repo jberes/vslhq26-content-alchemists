@@ -31,7 +31,10 @@ public sealed record BrandContext(
     /// <summary>The brand's own RAG gateway (ADR-056); null falls back to the workspace one.</summary>
     Castmill.Api.Services.Knowledge.KnowledgeEndpoint? Knowledge = null,
     IReadOnlyList<BrandSkillText>? Skills = null,
-    IReadOnlyList<McpServerDefinition>? McpServers = null)
+    IReadOnlyList<McpServerDefinition>? McpServers = null,
+    /// <summary>The same research rendered for a video description (ADR-087): guidance, never
+    /// a checklist — see BuildVideoSeoBlock.</summary>
+    string? VideoSeoTargetBlock = null)
 {
     public static readonly BrandContext Empty = new(null, null,
         new Dictionary<string, string>(StringComparer.Ordinal), null);
@@ -72,6 +75,8 @@ public sealed class BrandContextService(
         var seoBlock = string.Join("\n\n", new[] { targetBlock, analysisBlock }
             .Where(block => !string.IsNullOrWhiteSpace(block)));
         seoBlock = string.IsNullOrWhiteSpace(seoBlock) ? null : seoBlock;
+        var videoSeoBlock = BuildVideoSeoBlock(
+            CampaignEndpoints.ParseSeoTargets(campaign.SeoTargetsJson), reportJson);
 
         if (campaign.BrandId is not { } brandId)
         {
@@ -79,6 +84,7 @@ public sealed class BrandContextService(
             {
                 CampaignContextBlock = contextBlock,
                 SeoTargetBlock = seoBlock,
+                VideoSeoTargetBlock = videoSeoBlock,
             };
         }
 
@@ -90,6 +96,7 @@ public sealed class BrandContextService(
             {
                 CampaignContextBlock = contextBlock,
                 SeoTargetBlock = seoBlock,
+                VideoSeoTargetBlock = videoSeoBlock,
             };
         }
 
@@ -138,7 +145,8 @@ public sealed class BrandContextService(
                     knowledgeRow.ProductType, knowledgeRow.ProductField),
             skills,
             mcpRows.Select(m => new McpServerDefinition(
-                m.Name, m.Url, Decrypt(m.AuthorizationCiphertext), ParseTools(m.AllowedToolsJson))).ToList());
+                m.Name, m.Url, Decrypt(m.AuthorizationCiphertext), ParseTools(m.AllowedToolsJson))).ToList(),
+            videoSeoBlock);
     }
 
     private string? Decrypt(string? ciphertext)
@@ -232,6 +240,75 @@ public sealed class BrandContextService(
         block.AppendLine("- Never invent a statistic, a date or a claim to hit a keyword. If the "
             + "source does not support it, leave it out.");
 
+        return block.ToString();
+    }
+
+    /// <summary>
+    /// The campaign's research, rendered for a video description (ADR-087). The blog rendering
+    /// says the keyword MUST sit in the title, the first heading and the first 100 words and
+    /// that every target question must be answered — a description has no headings, so a
+    /// model obeying it forced the keyword into three places and wrote the questions out as an
+    /// FAQ. Here the research is context the writer may use, and a keyword that fits the video
+    /// poorly is reported, not forced.
+    /// </summary>
+    internal static string? BuildVideoSeoBlock(SeoTargetsResponse? targets, string? reportJson)
+    {
+        SeoAnalysisReportResponse? report = null;
+        if (!string.IsNullOrWhiteSpace(reportJson))
+        {
+            try
+            {
+                report = JsonSerializer.Deserialize<SeoAnalysisReportResponse>(reportJson, Json);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        var hasTargets = targets is not null
+            && (!string.IsNullOrWhiteSpace(targets.PrimaryKeyword)
+                || targets.Keywords.Count > 0 || targets.Questions.Count > 0);
+        if (!hasTargets && report is null)
+        {
+            return null;
+        }
+
+        var block = new StringBuilder();
+        block.AppendLine("SEARCH RESEARCH FOR THIS VIDEO — guidance, never a checklist");
+        if (hasTargets && !string.IsNullOrWhiteSpace(targets!.PrimaryKeyword))
+        {
+            block.Append("- Primary search phrase: \"").Append(targets.PrimaryKeyword).AppendLine("\". Use it, or a")
+                .AppendLine("  close natural variant, in a title or the description's opening ONLY where it reads")
+                .AppendLine("  naturally and describes what the video shows. If it fits the video poorly, leave it")
+                .AppendLine("  out and say so in audit.warnings. Never repeat it to raise density.");
+        }
+        var related = (targets?.Keywords ?? [])
+            .Where(k => !string.Equals(k.Term, targets?.PrimaryKeyword, StringComparison.OrdinalIgnoreCase))
+            .Select(k => k.Term)
+            .Concat(report?.Insights?.KeywordGaps.Select(k => k.Term) ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        if (related.Count > 0)
+        {
+            block.Append("- Related terms, only where they name something the video actually demonstrates: ")
+                .AppendJoin(", ", related).AppendLine(".");
+        }
+        if (targets?.Questions is { Count: > 0 } questions)
+        {
+            block.AppendLine("- Questions searchers ask — background only. Where the video answers one, let the")
+                .AppendLine("  ordinary prose or a learning bullet carry the answer. Never write them out as")
+                .AppendLine("  question headings, an FAQ or a definitions section:");
+            foreach (var question in questions.Take(8))
+            {
+                block.Append("  • ").AppendLine(question.Question);
+            }
+        }
+        foreach (var recommendation in report?.Recommendations.Take(4) ?? [])
+        {
+            block.Append("- Research note: ").AppendLine(recommendation);
+        }
+        block.AppendLine("- Never invent a statistic, a date or a claim to fit the research.");
         return block.ToString();
     }
 

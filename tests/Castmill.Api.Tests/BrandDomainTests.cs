@@ -313,16 +313,23 @@ public sealed class BrandDomainTests(CastmillApiFactory factory)
         var youtubePasses = capture.Prompts.Where(prompt =>
             prompt.Contains("Plan a YouTube package", StringComparison.Ordinal)
             || prompt.Contains("Write the complete YouTube package", StringComparison.Ordinal)
-            || prompt.Contains("Audit and correct this YouTube package", StringComparison.Ordinal)).ToList();
+            || prompt.Contains("Check this YouTube package", StringComparison.Ordinal)).ToList();
         Assert.Equal(3, youtubePasses.Count);
         Assert.All(youtubePasses, prompt =>
         {
             Assert.Contains("PRIMARY BRAND CONTENT TEMPLATE", prompt, StringComparison.Ordinal);
             Assert.Contains("YOUTUBE-AUTHORITATIVE-END", prompt, StringComparison.Ordinal);
-            Assert.Contains("overrides conflicting generic writing guidance", prompt, StringComparison.Ordinal);
-            Assert.True(prompt.IndexOf("PRIMARY BRAND CONTENT TEMPLATE", StringComparison.Ordinal)
-                < prompt.IndexOf("GENERATOR PASS AND REQUIRED RESPONSE SHAPE", StringComparison.Ordinal));
+            Assert.Contains("the template wins", prompt, StringComparison.Ordinal);
+            // ADR-087: the template is the LAST steering block, after the pass instructions and
+            // the search research, immediately before the evidence it is applied to.
+            var templateAt = prompt.IndexOf("Treat this as the authoritative brief", StringComparison.Ordinal);
+            Assert.True(templateAt > prompt.IndexOf("GENERATOR PASS AND REQUIRED RESPONSE SHAPE", StringComparison.Ordinal));
+            Assert.True(templateAt > prompt.IndexOf("VIDEO DESCRIPTION RULES", StringComparison.Ordinal));
+            Assert.True(templateAt < prompt.IndexOf("APPROVED EVIDENCE", StringComparison.Ordinal));
         });
+        var draft = youtubePasses.Single(prompt => prompt.Contains("Write the complete YouTube package", StringComparison.Ordinal));
+        Assert.Contains("Follow the PRIMARY BRAND CONTENT TEMPLATE for the description's structure", draft, StringComparison.Ordinal);
+        Assert.DoesNotContain("DESCRIPTION STRUCTURE", draft, StringComparison.Ordinal);
     }
 
     [Fact]

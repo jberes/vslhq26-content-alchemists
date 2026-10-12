@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Castmill.Core;
 using Castmill.Core.Ai;
 using Castmill.Core.Resources;
 
@@ -42,8 +43,13 @@ public sealed record GenerationEvidenceContext(
     {
     }
 
-    public static GenerationEvidenceContext FromTranscript(TranscriptContent transcript) =>
-        new(
+    public const string LegacyTranscriptSegment = "legacy-transcript-segment";
+
+    public static GenerationEvidenceContext FromTranscript(TranscriptContent transcript)
+    {
+        // Real timings ride along, so the legacy path reads as timestamped paragraphs too.
+        var timed = transcript.Segments.Any(segment => segment.EndSeconds > 0);
+        return new(
             transcript,
             transcript.Segments.Select(segment => new GenerationEvidenceBlock(
                 null,
@@ -52,11 +58,20 @@ public sealed record GenerationEvidenceContext(
                     : segment.SourceLabel,
                 segment.Id,
                 segment.Text,
-                "legacy-transcript-segment",
-                "{}"))
+                LegacyTranscriptSegment,
+                timed
+                    ? JsonSerializer.Serialize(new { startSeconds = segment.StartSeconds, endSeconds = segment.EndSeconds })
+                    : "{}"))
             .ToList(),
             [],
             transcript.SourceAssetId);
+    }
+
+    /// <summary>Sentence-sized transcript blocks — rendered as paragraphs, not records (ADR-087).</summary>
+    private static bool IsTranscriptSegment(string locatorKind) =>
+        locatorKind is EvidenceLocatorKinds.MediaTimeRange
+            or EvidenceLocatorKinds.TextSegment
+            or LegacyTranscriptSegment;
 
     public GenerationEvidenceContext ForSelectedTranscript()
     {
@@ -138,14 +153,17 @@ public sealed record GenerationEvidenceContext(
     public string ToPromptText()
     {
         var prompt = new StringBuilder();
-        foreach (var block in Blocks)
+        for (var index = 0; index < Blocks.Count;)
         {
-            prompt.Append("Citation ID: ").AppendLine(block.CitationId);
-            prompt.Append("Source: ").AppendLine(block.SourceLabel);
-            prompt.Append("Locator: ").Append(block.LocatorKind).Append(' ')
-                .AppendLine(block.LocatorJson);
-            prompt.Append("Content: ").AppendLine(block.Content);
-            prompt.AppendLine();
+            if (IsTranscriptSegment(Blocks[index].LocatorKind))
+            {
+                index = AppendTimedTranscript(prompt, index);
+            }
+            else
+            {
+                AppendBlock(prompt, Blocks[index]);
+                index++;
+            }
             if (prompt.Length > MaxPromptCharacters)
             {
                 throw new GenerationEvidenceException(
@@ -153,6 +171,96 @@ public sealed record GenerationEvidenceContext(
             }
         }
         return prompt.ToString();
+    }
+
+    private static void AppendBlock(StringBuilder prompt, GenerationEvidenceBlock block)
+    {
+        prompt.Append("Citation ID: ").AppendLine(block.CitationId);
+        prompt.Append("Source: ").AppendLine(block.SourceLabel);
+        prompt.Append("Locator: ").Append(block.LocatorKind).Append(' ')
+            .AppendLine(block.LocatorJson);
+        prompt.Append("Content: ").AppendLine(block.Content);
+        prompt.AppendLine();
+    }
+
+    /// <summary>
+    /// A recording's run of caption blocks as readable, timestamped paragraphs (ADR-087). One
+    /// block per caption fragment, each with its own citation, source and locator lines, made
+    /// two thirds of an hour-long webinar's prompt bookkeeping and left the model reading
+    /// 1,000 shards instead of a talk. Every block keeps its id inline, so citations and clip
+    /// boundaries stay exact; the qualified id is the source's prefix plus that id.
+    /// </summary>
+    private int AppendTimedTranscript(StringBuilder prompt, int start)
+    {
+        var first = Blocks[start];
+        var prefix = first.CitationId[..^first.StableId.Length];
+        prompt.Append("Source: ").Append(first.SourceLabel)
+            .AppendLine(first.LocatorKind == EvidenceLocatorKinds.TextSegment ? " — transcript" : " — timed transcript");
+        prompt.AppendLine(prefix.Length == 0
+            ? "Cite a passage by the bracketed id that precedes it."
+            : $"Cite a passage as {prefix}<id>, using the bracketed id that precedes it (e.g. {first.CitationId}).");
+
+        var index = start;
+        double? paragraphStart = null;
+        var paragraphLength = 0;
+        while (index < Blocks.Count
+            && IsTranscriptSegment(Blocks[index].LocatorKind)
+            && Blocks[index].SourceAssetId == first.SourceAssetId
+            && Blocks[index].SourceLabel == first.SourceLabel)
+        {
+            var block = Blocks[index];
+            var seconds = StartSeconds(block.LocatorJson);
+            // A new paragraph about every minute of talk, so the model reads sections, not a wall.
+            if (paragraphLength > 0 && (paragraphLength > 900
+                || (seconds is { } at && paragraphStart is { } began && at - began >= 60)))
+            {
+                prompt.AppendLine();
+                paragraphLength = 0;
+            }
+            if (paragraphLength == 0)
+            {
+                paragraphStart = seconds;
+            }
+            else
+            {
+                prompt.Append(' ');
+            }
+            prompt.Append('[').Append(block.StableId);
+            if (seconds is { } time)
+            {
+                prompt.Append(' ').Append(Timestamp(time));
+            }
+            prompt.Append("] ").Append(block.Content.Trim());
+            paragraphLength += block.Content.Length;
+            index++;
+        }
+        prompt.AppendLine().AppendLine();
+        return index;
+    }
+
+    private static double? StartSeconds(string locatorJson)
+    {
+        try
+        {
+            using var locator = JsonDocument.Parse(locatorJson);
+            return locator.RootElement.ValueKind == JsonValueKind.Object
+                && locator.RootElement.TryGetProperty("startSeconds", out var start)
+                && start.ValueKind == JsonValueKind.Number
+                    ? start.GetDouble()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    internal static string Timestamp(double seconds)
+    {
+        var time = TimeSpan.FromSeconds(Math.Max(0, Math.Floor(seconds)));
+        return time.TotalHours >= 1
+            ? time.ToString(@"h\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture)
+            : time.ToString(@"m\:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private bool TryResolve(string value, out string canonical, out string? error)
