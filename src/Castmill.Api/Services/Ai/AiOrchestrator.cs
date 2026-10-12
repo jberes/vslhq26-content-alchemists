@@ -773,8 +773,11 @@ public sealed class AiOrchestrator(
             }
 
             // MCP servers reach the model only on the Anthropic path (the connector is theirs).
+            // The OpenAI text route (ADR-086) is not that path: every text call is its model.
             var mcpServers = brand.McpServers ?? [];
-            var useMcp = mcpServers.Count > 0 && !provider.Equals("foundry", StringComparison.OrdinalIgnoreCase);
+            var useMcp = mcpServers.Count > 0
+                && !provider.Equals("foundry", StringComparison.OrdinalIgnoreCase)
+                && !provider.Equals(OpenAiTextClientFactory.ProviderName, StringComparison.OrdinalIgnoreCase);
             var mcpBlock = useMcp
                 ? "\nTOOLS: MCP servers are attached (" + string.Join(", ", mcpServers.Select(m => m.Name))
                   + "). Use them to verify every technical claim you keep or add; prefer a tool result "
@@ -1259,12 +1262,13 @@ public sealed class AiOrchestrator(
         var stopwatch = Stopwatch.StartNew();
         var success = false;
         var responseText = string.Empty;
+        IChatClient? client = null;
         try
         {
             // Through the registry, not the Foundry factory directly: an alias mapped to a
             // ready non-Foundry text provider resolves there, everything else stays on
             // Foundry. The log entry below therefore covers both providers (ADR-020).
-            var client = await chatProviders.ResolveAsync(userId, modelAlias, ct);
+            client = await chatProviders.ResolveAsync(userId, modelAlias, ct);
             var response = await client.GetResponseAsync(prompt, cancellationToken: ct);
             responseText = response.Text;
             success = true;
@@ -1274,7 +1278,8 @@ public sealed class AiOrchestrator(
         {
             promptLog.Record(new PromptLogEntry(
                 clock.GetUtcNow(), userId, kind, modelAlias,
-                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds));
+                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds,
+                PromptLogEntry.ModelOf(client)));
         }
     }
 

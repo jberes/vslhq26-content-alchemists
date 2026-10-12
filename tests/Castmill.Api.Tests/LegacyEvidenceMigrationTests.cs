@@ -98,4 +98,42 @@ public sealed class LegacyEvidenceMigrationTests(CastmillApiFactory factory)
         Assert.Equal(7.5, locator.RootElement.GetProperty("endSeconds").GetDouble());
         Assert.Equal("recording.mp4", locator.RootElement.GetProperty("sourceLabel").GetString());
     }
+
+    /// <summary>
+    /// Observed 2026-10-11: a transcript whose campaign had been deleted failed the SourceAsset
+    /// foreign key on every attempt, and the worker's final rethrow shut the whole API down on
+    /// every start. An orphan is skipped; it is not the backfill's to repair.
+    /// </summary>
+    [Fact]
+    public async Task A_transcript_whose_campaign_is_gone_is_skipped_not_fatal()
+    {
+        using var scope = factory.CreateDbScope();
+        var options = scope.ServiceProvider.GetRequiredService<DbContextOptions<CastmillDbContext>>();
+        var tenantId = Guid.NewGuid();
+        await using var db = new CastmillDbContext(options, new FixedTenantProvider(tenantId));
+        var now = DateTimeOffset.UtcNow;
+        var orphanId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Name = "Orphan tenant", CreatedAt = now });
+        db.Artifacts.Add(new Artifact
+        {
+            Id = orphanId,
+            TenantId = tenantId,
+            CampaignId = Guid.NewGuid(),
+            Kind = "transcript",
+            Title = "Orphaned transcript",
+            ContentJson = System.Text.Json.JsonSerializer.Serialize(
+                new TranscriptContent("deleted-campaign", [new TranscriptSegment("s1", 0, 4, null, "Still here.")]),
+                TranscriptService.Json),
+            Version = 1,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await new LegacyEvidenceBackfillService(db, TimeProvider.System)
+            .BackfillAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(await db.SourceAssets.IgnoreQueryFilters()
+            .AnyAsync(source => source.LegacyArtifactId == orphanId, TestContext.Current.CancellationToken));
+    }
 }

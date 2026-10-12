@@ -1,3 +1,5 @@
+using Castmill.Core.Ai;
+
 namespace Castmill.UI.Http;
 
 /// <summary>
@@ -114,6 +116,21 @@ public sealed class SettingsClient(ApiClient api)
 
     public Task SaveTranscriptionEngineAsync(string engine, CancellationToken ct = default) =>
         api.PutAsync($"api/v1/settings/{TranscriptionEngineKey}", new SettingWrite(engine), ct);
+
+    /// <summary>Who writes every piece of text (ADR-086). Absent means the Foundry deployments.</summary>
+    public static TextGenerationChoice ReadTextGeneration(IReadOnlyList<SettingRow> rows) =>
+        TextGenerationSettings.Read(rows.Select(row => KeyValuePair.Create(row.Key, row.Value)));
+
+    public async Task SaveTextGenerationAsync(TextGenerationChoice choice, CancellationToken ct = default)
+    {
+        // Model, effort and ceiling first, the route last: a run started mid-save never sees
+        // "openai" paired with the previous model.
+        await api.PutAsync($"api/v1/settings/{TextGenerationSettings.ModelKey}", new SettingWrite(choice.Model), ct);
+        await api.PutAsync($"api/v1/settings/{TextGenerationSettings.EffortKey}", new SettingWrite(choice.Effort), ct);
+        await api.PutAsync($"api/v1/settings/{TextGenerationSettings.MaxOutputTokensKey}",
+            new SettingWrite(choice.MaxOutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture)), ct);
+        await api.PutAsync($"api/v1/settings/{TextGenerationSettings.ProviderKey}", new SettingWrite(choice.Provider), ct);
+    }
 }
 
 /// <summary>The two transcription engines, as stored in <c>media.transcription-engine</c>.</summary>

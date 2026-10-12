@@ -57,9 +57,10 @@ public sealed class VisualBriefWriter(
         var stopwatch = Stopwatch.StartNew();
         var responseText = string.Empty;
         var success = false;
+        IChatClient? client = null;
         try
         {
-            var client = await chatProviders.ResolveAsync(userId, "chat", ct);
+            client = await chatProviders.ResolveAsync(userId, "chat", ct);
             var response = await client.GetResponseAsync(prompt, cancellationToken: ct);
             responseText = response.Text.Trim();
             success = responseText.Length > 40;
@@ -76,7 +77,7 @@ public sealed class VisualBriefWriter(
                 clock.GetUtcNow(), userId, $"{request.SlotKind}-brief", "chat",
                 prompt.Length <= 600 ? prompt : prompt[..600] + "…",
                 responseText.Length <= 600 ? responseText : responseText[..600] + "…",
-                success, stopwatch.ElapsedMilliseconds));
+                success, stopwatch.ElapsedMilliseconds, PromptLogEntry.ModelOf(client)));
         }
     }
 

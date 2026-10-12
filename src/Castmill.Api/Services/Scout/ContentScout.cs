@@ -140,7 +140,8 @@ public sealed class ContentScout(
         {
             promptLog.Record(new PromptLogEntry(
                 clock.GetUtcNow(), userId, "content-scout", "chat",
-                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds));
+                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds,
+                PromptLogEntry.ModelOf(client)));
         }
     }
 

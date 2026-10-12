@@ -8,7 +8,17 @@ public sealed record PromptLogEntry(
     string PromptExcerpt,
     string ResponseExcerpt,
     bool Success,
-    long DurationMs);
+    long DurationMs,
+    /// <summary>The model that actually answered, "model @ host" (ADR-086) — the alias alone
+    /// cannot say whether a call went to Foundry or straight to OpenAI.</summary>
+    string? Model = null)
+{
+    public static string? ModelOf(Microsoft.Extensions.AI.IChatClient? client) =>
+        client?.GetService(typeof(Microsoft.Extensions.AI.ChatClientMetadata)) is Microsoft.Extensions.AI.ChatClientMetadata
+            { DefaultModelId: { Length: > 0 } model } metadata
+            ? metadata.ProviderUri is { } uri ? $"{model} @ {uri.Host}" : model
+            : null;
+}
 
 public interface IPromptLog
 {

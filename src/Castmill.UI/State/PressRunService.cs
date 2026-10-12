@@ -157,6 +157,17 @@ public sealed class PressRunService(
                 finished.Results.Count, finished.Results.Count, finished.Results,
                 Progress?.StartedAt ?? DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // HttpClient's own timeout on the long POST, not the user: the run outlives its
+            // request, so follow the run row. A max-effort run (ADR-086) passes the client's
+            // 10-minute limit routinely; read as a cancel, it ended the Press Run with every
+            // piece still "queued" while the server went on printing them.
+            if (!await ReattachAsync(campaignId, ct))
+            {
+                Error = "The server connection timed out — the board shows what printed.";
+            }
+        }
         catch (OperationCanceledException)
         {
             return;
@@ -241,6 +252,7 @@ public sealed class PressRunService(
         }
 
         var lastCompleted = Progress.Completed;
+        var lastBeat = Progress.UpdatedAt;
         var lastMovement = DateTimeOffset.UtcNow;
 
         while (!ct.IsCancellationRequested)
@@ -268,6 +280,14 @@ public sealed class PressRunService(
 
             Progress = latest;
             Changed?.Invoke();
+
+            // The server's heartbeat moves UpdatedAt while one slow piece is still thinking
+            // (ADR-086), so a long max-effort call is progress, not a stall.
+            if (latest.UpdatedAt > lastBeat)
+            {
+                lastBeat = latest.UpdatedAt;
+                lastMovement = DateTimeOffset.UtcNow;
+            }
 
             if (latest.Completed > lastCompleted)
             {

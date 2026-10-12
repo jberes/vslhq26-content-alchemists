@@ -23,9 +23,12 @@ public sealed class LegacyEvidenceBackfillService(
         const int batchSize = 50;
         for (var offset = 0; ; offset += batchSize)
         {
+            // Only transcripts whose campaign still exists: a campaign deleted mid-scan (or an
+            // orphan left behind) would fail the SourceAsset foreign key on every attempt.
             var artifacts = await db.Artifacts
                 .IgnoreQueryFilters()
-                .Where(artifact => artifact.Kind == "transcript")
+                .Where(artifact => artifact.Kind == "transcript"
+                    && db.Campaigns.IgnoreQueryFilters().Any(campaign => campaign.Id == artifact.CampaignId))
                 .OrderBy(artifact => artifact.CreatedAt)
                 .ThenBy(artifact => artifact.Id)
                 .Skip(offset)
@@ -126,7 +129,7 @@ public sealed class LegacyEvidenceBackfillService(
                     added++;
                     db.ChangeTracker.Clear();
                 }
-                catch (DbUpdateException ex) when (IsUniqueConflict(ex))
+                catch (DbUpdateException ex) when (IsUniqueConflict(ex) || IsMissingCampaign(ex))
                 {
                     db.ChangeTracker.Clear();
                 }
@@ -139,6 +142,10 @@ public sealed class LegacyEvidenceBackfillService(
         {
             Number: 2601 or 2627,
         };
+
+    /// <summary>The campaign was deleted between the scan and the insert (SQL 547, FK conflict).</summary>
+    private static bool IsMissingCampaign(DbUpdateException exception) =>
+        exception.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 547 };
 
     internal static string UniqueStableId(
         string value, int ordinal, HashSet<string> usedStableIds)
@@ -210,6 +217,13 @@ public sealed class LegacyEvidenceBackfillWorker(
                     attempt,
                     ex.Message.Split('\n')[0]);
                 await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, attempt * 2)), stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A one-off migration aid must never stop the host: an unhandled exception in a
+                // BackgroundService shuts the whole API down, and this one ran on every start.
+                logger.LogError(ex, "Legacy evidence backfill gave up after {Attempt} attempts", attempt);
+                return;
             }
         }
     }

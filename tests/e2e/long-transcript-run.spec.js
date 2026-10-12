@@ -90,6 +90,7 @@ test('an hour-long transcript prints every piece in the Press Run', async ({ pag
         if (campaignId && accessToken) {
             await request.delete(`${API}/api/v1/campaigns/${campaignId}`, {
                 headers: bearer(accessToken),
+                timeout: 120_000,
             });
         }
     }

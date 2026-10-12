@@ -1,5 +1,6 @@
 using Castmill.Api.Services.Ai;
 using Castmill.Api.Services.Secrets;
+using Castmill.Core.Ai;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -94,7 +95,9 @@ public sealed class TechEditRoutingTests
             new StubSecrets(key));
 
         return new ChatProviderRegistry(
-            new FoundryClientFactory(new StubSecrets(key), options), options, [provider]);
+            new FoundryClientFactory(new StubSecrets(key), options), options, [provider],
+            new FixedTextRoute(TextGenerationSettings.Read([])),
+            new OpenAiTextClientFactory(new StubSecrets(key), options, TimeProvider.System));
     }
 
     private sealed class StubSecrets(string? techEditKey) : IUserSecretsService

@@ -143,9 +143,10 @@ public sealed class SeoResearchAgent(
         var prompt = BuildPrompt(transcript, campaignName);
         var responseText = string.Empty;
         var success = false;
+        IChatClient? client = null;
         try
         {
-            var client = await chatProviders.ResolveAsync(userId, "chat", ct);
+            client = await chatProviders.ResolveAsync(userId, "chat", ct);
             using var agent = new ChatClientBuilder(client).UseFunctionInvocation().Build();
             var response = await agent.GetResponseAsync(prompt, new ChatOptions { Tools = tools }, ct);
             responseText = response.Text;
@@ -170,7 +171,7 @@ public sealed class SeoResearchAgent(
                 clock.GetUtcNow(), userId, "seo-research-agent", "chat",
                 prompt.Length <= 600 ? prompt : prompt[..600] + "…",
                 responseText.Length <= 600 ? responseText : responseText[..600] + "…",
-                success, stopwatch.ElapsedMilliseconds));
+                success, stopwatch.ElapsedMilliseconds, PromptLogEntry.ModelOf(client)));
         }
     }
 

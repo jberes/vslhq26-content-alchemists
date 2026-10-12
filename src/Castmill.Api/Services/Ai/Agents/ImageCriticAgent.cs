@@ -41,10 +41,11 @@ public sealed class ImageCriticAgent(
         var prompt = BuildPrompt(brief, slotKind, settings.AcceptScore);
         var responseText = string.Empty;
         var success = false;
+        IChatClient? client = null;
         try
         {
             // "chat-audit" is the cross-check alias already used for drafts; it falls back to "chat".
-            var client = await chatProviders.ResolveAsync(userId, "chat-audit", ct);
+            client = await chatProviders.ResolveAsync(userId, "chat-audit", ct);
             var message = new ChatMessage(ChatRole.User,
             [
                 new TextContent(prompt),
@@ -67,7 +68,7 @@ public sealed class ImageCriticAgent(
                 clock.GetUtcNow(), userId, $"{slotKind}-critic", "chat-audit",
                 prompt.Length <= 600 ? prompt : prompt[..600] + "…",
                 responseText.Length <= 600 ? responseText : responseText[..600] + "…",
-                success, stopwatch.ElapsedMilliseconds));
+                success, stopwatch.ElapsedMilliseconds, PromptLogEntry.ModelOf(client)));
         }
     }
 

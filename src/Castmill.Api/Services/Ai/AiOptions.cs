@@ -29,6 +29,11 @@ public sealed class AiOptions
     /// </summary>
     public Dictionary<string, TextProviderOptions> TextProviders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public SpeechOptions Speech { get; set; } = new();
+    /// <summary>
+    /// The direct OpenAI text route (ADR-086). The producer's own key (<c>OpenAiImageKey</c>)
+    /// always wins; this config key is the single-user dev fallback, like <see cref="Foundry"/>.
+    /// </summary>
+    public OpenAiTextOptions OpenAI { get; set; } = new();
     /// <summary>REST version used for multipart image edits (reference-image generation).</summary>
     public string ImageApiVersion { get; set; } = "2025-04-01-preview";
 
@@ -167,6 +172,11 @@ public sealed class AiOptions
                 : options.Credential;
         }
         return merged;
+    }
+
+    public sealed class OpenAiTextOptions
+    {
+        public string ApiKey { get; set; } = string.Empty;
     }
 
     public sealed class TextProviderOptions

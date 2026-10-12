@@ -7687,6 +7687,23 @@ body.cm-wire-dragging [data-wire-drag] {
     min-inline-size: 0;
 }
 
+/* The text-model card carries four fields, not one select: they wrap in the middle column. */
+.cm-settings__text-model-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--cm-space-2) var(--cm-space-3);
+    min-inline-size: 0;
+}
+
+.cm-settings__text-model-now {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--cm-space-2);
+    margin: 0;
+}
+
 @media (max-width: 60rem) {
     .cm-settings__default-model {
         grid-template-columns: minmax(0, 1fr);

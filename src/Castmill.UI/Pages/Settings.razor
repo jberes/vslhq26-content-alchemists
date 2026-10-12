@@ -339,8 +339,16 @@
             <ul class="cm-settings__list">
                 <li class="cm-settings__row">
                     <span class="cm-settings__name">Text generation</span>
-                    <span>@ReadinessBadge(status.EndpointConfigured)</span>
-                    <span class="cm-meta">@(status.EndpointConfigured ? status.CredentialSource : "no endpoint or key stored")</span>
+                    @if (status.TextGeneration is { } textRoute)
+                    {
+                        <span>@ReadinessBadge(textRoute.Ready)</span>
+                        <span class="cm-meta">@(textRoute.Reason ?? RouteSummary(textRoute))</span>
+                    }
+                    else
+                    {
+                        <span>@ReadinessBadge(status.EndpointConfigured)</span>
+                        <span class="cm-meta">@(status.EndpointConfigured ? status.CredentialSource : "no endpoint or key stored")</span>
+                    }
                 </li>
                 <li class="cm-settings__row">
                     <span class="cm-settings__name">Transcription</span>
@@ -370,6 +378,64 @@
     @* ---- Model aliases ---- *@
     @if (_tab == "models")
     {
+        <article class="cm-settings__default-model cm-settings__text-model" aria-labelledby="cm-text-model-title">
+            <div>
+                <span class="cm-kicker">Text generation</span>
+                <h2 id="cm-text-model-title">Which model writes every piece of text</h2>
+                <p class="cm-meta">
+                    Blogs, YouTube packages, posts, briefs, audits, the Tech Edit and every agent
+                    use this one model. OpenAI direct calls it with your own OpenAI API key
+                    (Credentials → OpenAI API key) at the reasoning effort and output ceiling
+                    below. Transcription is not affected.
+                </p>
+            </div>
+            <div class="cm-settings__text-model-fields">
+                <label class="cm-field">
+                    <span class="cm-field__label">Provider</span>
+                    <select class="cm-input" aria-label="Text generation provider" @bind="_textProviderDraft">
+                        <option value="@TextGenerationSettings.OpenAi">OpenAI direct — your OpenAI API key</option>
+                        <option value="@TextGenerationSettings.Foundry">Azure AI Foundry deployments</option>
+                    </select>
+                </label>
+                @if (_textProviderDraft == TextGenerationSettings.OpenAi)
+                {
+                    <label class="cm-field">
+                        <span class="cm-field__label">Model</span>
+                        <input class="cm-input cm-mono" spellcheck="false" autocomplete="off" aria-label="Text generation model"
+                               placeholder="@TextGenerationSettings.DefaultOpenAiModel" @bind="_textModelDraft" />
+                    </label>
+                    <label class="cm-field">
+                        <span class="cm-field__label">Reasoning effort</span>
+                        <select class="cm-input" aria-label="Reasoning effort" @bind="_textEffortDraft">
+                            @foreach (var effort in TextGenerationSettings.Efforts)
+                            {
+                                <option value="@effort">@TextGenerationSettings.EffortLabel(effort) — @TextGenerationSettings.EffortHint(effort)</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="cm-field">
+                        <span class="cm-field__label">Max output tokens</span>
+                        <input class="cm-input" type="number" inputmode="numeric" aria-label="Max output tokens"
+                               min="@TextGenerationSettings.MinOutputTokens" step="1024" @bind="_textMaxTokensDraft" />
+                    </label>
+                }
+            </div>
+            <button type="button" class="cm-button" disabled="@_savingText" @onclick="SaveTextGenerationAsync">
+                @(_savingText ? "Saving…" : "Save text model")
+            </button>
+            @if (_status?.TextGeneration is { } route)
+            {
+                <p class="cm-meta cm-settings__text-model-now" role="status">
+                    <span>Now: @RouteSummary(route)</span>
+                    @ReadinessBadge(route.Ready)
+                    @if (route.Reason is { } why)
+                    {
+                        <span>@why</span>
+                    }
+                </p>
+            }
+        </article>
+
         <article class="cm-settings__default-model">
             <div>
                 <span class="cm-kicker">Transcription engine</span>
@@ -474,6 +540,11 @@
     private bool _savingDefaultModel;
     private string _transcriptionEngineDraft = TranscriptionEngines.Whisper;
     private bool _savingEngine;
+    private string _textProviderDraft = TextGenerationSettings.Foundry;
+    private string _textModelDraft = TextGenerationSettings.DefaultOpenAiModel;
+    private string _textEffortDraft = TextGenerationSettings.DefaultEffort;
+    private int _textMaxTokensDraft = TextGenerationSettings.DefaultMaxOutputTokens;
+    private bool _savingText;
     private ExternalAuthLinksResponse? _security;
     private string? _securityError;
     private string? _securityBusyProvider;
@@ -720,6 +791,11 @@
             // render the Links tab would still say "Nothing yet".
             StateHasChanged();
             _defaultImageModel = SettingsClient.ReadDefaultImageModel(settings);
+            var text = SettingsClient.ReadTextGeneration(settings);
+            _textProviderDraft = text.Provider;
+            _textModelDraft = text.Model;
+            _textEffortDraft = text.Effort;
+            _textMaxTokensDraft = text.MaxOutputTokens;
             // Whisper unless saved otherwise; the browser shell cannot run it and is pinned
             // to Azure, with the control disabled and the reason stated (G3).
             _transcriptionEngineDraft = Media.CanProcessLocally
@@ -802,6 +878,43 @@
         }
     }
 
+    private async Task SaveTextGenerationAsync()
+    {
+        _savingText = true;
+        try
+        {
+            var choice = new TextGenerationChoice(
+                _textProviderDraft,
+                string.IsNullOrWhiteSpace(_textModelDraft) ? TextGenerationSettings.DefaultOpenAiModel : _textModelDraft.Trim(),
+                _textEffortDraft,
+                Math.Max(_textMaxTokensDraft, TextGenerationSettings.MinOutputTokens));
+            await SettingsApi.SaveTextGenerationAsync(choice);
+            _textModelDraft = choice.Model;
+            _textMaxTokensDraft = choice.MaxOutputTokens;
+            _status = await Images.GetAiStatusAsync();
+            Notifier.ShowSuccess(choice.UsesOpenAi
+                ? $"All text is now written by {choice.Model} at {TextGenerationSettings.EffortLabel(choice.Effort)} effort."
+                : "All text is now written by the Foundry deployments.");
+        }
+        catch (ApiException ex)
+        {
+            Notifier.ShowError($"Couldn't save the text model — {ex.Message}");
+        }
+        catch (HttpRequestException)
+        {
+            Notifier.ShowError("Couldn't reach the Castmill API.");
+        }
+        finally
+        {
+            _savingText = false;
+        }
+    }
+
+    private static string RouteSummary(TextGenerationStatus route) =>
+        route.Provider == TextGenerationSettings.OpenAi
+            ? $"OpenAI · {route.Model} · {TextGenerationSettings.EffortLabel(route.Effort)} effort · {route.MaxOutputTokens:N0} output tokens"
+            : $"Azure AI Foundry · {route.Model}";
+
     private async Task SaveDefaultImageModelAsync()
     {
         if (string.IsNullOrWhiteSpace(_defaultImageModelDraft))
@@ -842,7 +955,7 @@
         "BrokerToken" => "Publishing broker token",
         "ImageProviderKey" => "Image provider key (legacy, shared)",
         "NanoBananaKey" => "Nano Banana key (Google AI Studio)",
-        "OpenAiImageKey" => "gpt-image 2.5 key (OpenAI)",
+        "OpenAiImageKey" => "OpenAI API key",
         "TechEditKey" => "Tech Edit provider key (Anthropic)",
         "KnowledgeBaseToken" => "Knowledge base token",
         "GitHubToken" => "GitHub token",
@@ -852,11 +965,11 @@
     private static string Hint(string kind) => kind switch
     {
         "FoundryEndpoint" => "https://<resource>.openai.azure.com",
-        "FoundryKey" => "powers every text generation and the transcript",
+        "FoundryKey" => "powers text generation (unless Models → Text generation is OpenAI) and the transcript",
         "BrokerToken" => "needed only to schedule social posts",
         "ImageProviderKey" => "fallback for a provider with no key of its own (ADR-015)",
         "NanoBananaKey" => "AI Studio key (AIza…) — unlocks nano-banana in the studio's model list",
-        "OpenAiImageKey" => "OpenAI key (sk-…) — unlocks gpt-image-2.5 sunburst and flare, called directly, not through Foundry",
+        "OpenAiImageKey" => "OpenAI key (sk-…) — writes all text when Models → Text generation is OpenAI, and unlocks gpt-image-2.5 sunburst and flare",
         "TechEditKey" => "enables the second-pass Tech Edit (ADR-020)",
         "KnowledgeBaseToken" => "lets the Tech Edit consult your knowledge base",
         "GitHubToken" => "fine-grained PAT: Contents + Pull requests, read and write",

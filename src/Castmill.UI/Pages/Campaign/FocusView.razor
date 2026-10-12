@@ -1055,12 +1055,22 @@
         _aiStatus?.TextProviders?.FirstOrDefault(p => p.Ready)
         ?? _aiStatus?.TextProviders?.FirstOrDefault();
 
-    private string TechEditProvider => TechEditProviderStatus is { Ready: true, Name: var name } ? name : "Foundry";
+    /// <summary>The producer's OpenAI text route (ADR-086), when chosen: it serves the Tech Edit too.</summary>
+    private TextGenerationStatus? OpenAiTextRoute =>
+        _aiStatus?.TextGeneration is { Provider: TextGenerationSettings.OpenAi } route ? route : null;
 
-    private bool TechEditReady => _aiStatus?.EndpointConfigured == true;
+    private string TechEditProvider => OpenAiTextRoute is { } openAi
+        ? openAi.Model
+        : TechEditProviderStatus is { Ready: true, Name: var name } ? name : "Foundry";
+
+    private bool TechEditReady => OpenAiTextRoute is { } openAi
+        ? openAi.Ready
+        : _aiStatus?.EndpointConfigured == true;
 
     private string? TechEditReason => _aiStatus is null
         ? "Checking model configuration…"
+        : OpenAiTextRoute is { } openAi
+            ? openAi.Reason
         : !_aiStatus.EndpointConfigured
             ? "No model credentials configured, so there is nothing to run a second pass on."
             : TechEditProviderStatus is { Ready: false, Reason: { Length: > 0 } reason }

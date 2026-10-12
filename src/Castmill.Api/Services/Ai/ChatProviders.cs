@@ -1,5 +1,6 @@
 using Anthropic;
 using Castmill.Api.Services.Secrets;
+using Castmill.Core.Ai;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
@@ -25,10 +26,12 @@ public interface IChatProvider
 public interface IChatProviderRegistry
 {
     /// <summary>
-    /// Alias → chat client. An alias whose <c>Ai:Models</c> value names a ready
-    /// <c>Ai:TextProviders</c> entry resolves to that provider; anything else is a Foundry
-    /// model alias. A configured-but-not-ready provider falls back to Foundry rather than
-    /// failing, so an unset key degrades the Tech Edit to a same-family pass.
+    /// Alias → chat client. A producer who chose OpenAI for text gets that one model for EVERY
+    /// alias (ADR-086) — never a silent Foundry fallback; a missing key is an error. Otherwise an
+    /// alias whose <c>Ai:Models</c> value names a ready <c>Ai:TextProviders</c> entry resolves to
+    /// that provider, and anything else is a Foundry model alias. A configured-but-not-ready
+    /// provider falls back to Foundry rather than failing, so an unset key degrades the Tech
+    /// Edit to a same-family pass.
     /// </summary>
     Task<IChatClient> ResolveAsync(Guid userId, string modelAlias, CancellationToken ct);
 
@@ -36,12 +39,19 @@ public interface IChatProviderRegistry
     Task<string> ResolveNameAsync(Guid userId, string modelAlias, CancellationToken ct);
 
     Task<IReadOnlyList<ChatProviderStatus>> StatusAsync(Guid userId, CancellationToken ct);
+
+    /// <summary>The producer's text route and whether it can run right now. Default keeps fakes compiling.</summary>
+    Task<TextGenerationStatus> TextGenerationStatusAsync(Guid userId, CancellationToken ct) =>
+        Task.FromResult(new TextGenerationStatus(
+            TextGenerationSettings.Foundry, "chat", "deployment default", 0, true, null));
 }
 
 public sealed class ChatProviderRegistry(
     IFoundryClientFactory foundry,
     IOptions<AiOptions> options,
-    IEnumerable<IChatProvider> providers) : IChatProviderRegistry
+    IEnumerable<IChatProvider> providers,
+    ITextGenerationRoute route,
+    IOpenAiTextClientFactory openAi) : IChatProviderRegistry
 {
     private readonly AiOptions _options = options.Value;
 
@@ -50,6 +60,10 @@ public sealed class ChatProviderRegistry(
 
     public async Task<IChatClient> ResolveAsync(Guid userId, string modelAlias, CancellationToken ct)
     {
+        if (await route.ChoiceAsync(userId, ct) is { UsesOpenAi: true } choice)
+        {
+            return await openAi.CreateAsync(userId, choice, ct);
+        }
         if (await ResolveProviderAsync(userId, modelAlias, ct) is { } provider)
         {
             return await provider.CreateChatClientAsync(userId, ct);
@@ -58,7 +72,31 @@ public sealed class ChatProviderRegistry(
     }
 
     public async Task<string> ResolveNameAsync(Guid userId, string modelAlias, CancellationToken ct) =>
-        await ResolveProviderAsync(userId, modelAlias, ct) is { } provider ? provider.Name : "foundry";
+        await route.ChoiceAsync(userId, ct) is { UsesOpenAi: true }
+            ? OpenAiTextClientFactory.ProviderName
+            : await ResolveProviderAsync(userId, modelAlias, ct) is { } provider ? provider.Name : "foundry";
+
+    public async Task<TextGenerationStatus> TextGenerationStatusAsync(Guid userId, CancellationToken ct)
+    {
+        var choice = await route.ChoiceAsync(userId, ct);
+        if (!choice.UsesOpenAi)
+        {
+            var credentials = await foundry.ResolveCredentialsAsync(userId, ct);
+            return new TextGenerationStatus(
+                TextGenerationSettings.Foundry,
+                foundry.ResolveDeployment("chat") ?? "unmapped",
+                "deployment default",
+                0,
+                credentials is not null,
+                credentials is null ? "No Foundry endpoint or key stored." : null);
+        }
+
+        var key = await openAi.KeyAsync(userId, ct);
+        return new TextGenerationStatus(
+            TextGenerationSettings.OpenAi, choice.Model, choice.Effort, choice.MaxOutputTokens,
+            key is not null,
+            key is null ? "No OpenAI API key stored — add it under Credentials." : null);
+    }
 
     public async Task<IReadOnlyList<ChatProviderStatus>> StatusAsync(Guid userId, CancellationToken ct)
     {
@@ -180,6 +218,8 @@ public static class ChatProviderRegistration
                 name, options, sp.GetRequiredService<IUserSecretsService>()));
         }
 
+        services.AddScoped<ITextGenerationRoute, TextGenerationRoute>();
+        services.AddScoped<IOpenAiTextClientFactory, OpenAiTextClientFactory>();
         services.AddScoped<IChatProviderRegistry, ChatProviderRegistry>();
         return services;
     }

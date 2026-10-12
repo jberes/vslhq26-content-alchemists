@@ -145,9 +145,10 @@ public sealed class TechEditVerificationAgent(
         var prompt = BuildPrompt(kind, claims, brand);
         var responseText = string.Empty;
         var success = false;
+        IChatClient? client = null;
         try
         {
-            var client = await chatProviders.ResolveAsync(userId, FoundryClientFactory.TechEditAlias, ct);
+            client = await chatProviders.ResolveAsync(userId, FoundryClientFactory.TechEditAlias, ct);
             using var agent = new ChatClientBuilder(client).UseFunctionInvocation().Build();
             var response = await agent.GetResponseAsync(prompt, new ChatOptions { Tools = tools }, ct);
             responseText = response.Text;
@@ -165,7 +166,8 @@ public sealed class TechEditVerificationAgent(
         {
             promptLog.Record(new PromptLogEntry(
                 clock.GetUtcNow(), userId, $"{kind}-verify", FoundryClientFactory.TechEditAlias,
-                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds));
+                Excerpt(prompt), Excerpt(responseText), success, stopwatch.ElapsedMilliseconds,
+                PromptLogEntry.ModelOf(client)));
         }
     }
 

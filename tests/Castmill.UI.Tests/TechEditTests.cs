@@ -50,6 +50,35 @@ public sealed class TechEditTests : CastmillUiTestContext
         Assert.Contains("No model credentials configured", view.Markup, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// ADR-086: on the OpenAI text route the Tech Edit is that model too — named on the button,
+    /// live without any Foundry credentials, and blocked with the reason when its key is missing.
+    /// </summary>
+    [Fact]
+    public async Task On_the_openai_text_route_the_tech_edit_runs_on_that_model()
+    {
+        StubStatus(configured: false, provider: new TextProviderReadiness("anthropic", true, null),
+            text: new TextGenerationStatus("openai", "gpt-6.1-sol", "max", 128_000, true, null));
+
+        var view = await OpenAsync();
+
+        var button = TechEditButton(view);
+        Assert.Contains("Tech Edit · gpt-6.1-sol", button.TextContent, StringComparison.Ordinal);
+        Assert.False(button.HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public async Task On_the_openai_text_route_without_a_key_the_tech_edit_says_why()
+    {
+        StubStatus(configured: true, provider: null,
+            text: new TextGenerationStatus("openai", "gpt-6.1-sol", "max", 128_000, false, "No OpenAI API key stored — add it under Credentials."));
+
+        var view = await OpenAsync();
+
+        Assert.True(TechEditButton(view).HasAttribute("disabled"));
+        Assert.Contains("No OpenAI API key stored", view.Markup, StringComparison.Ordinal);
+    }
+
     /// <summary>A provider without a key is a warning, not a blocker: the pass runs on Foundry.</summary>
     [Fact]
     public async Task An_unkeyed_second_provider_still_allows_the_pass_but_says_it_will_use_foundry()
@@ -279,13 +308,15 @@ public sealed class TechEditTests : CastmillUiTestContext
     private static AngleSharp.Dom.IElement TechEditButton(IRenderedComponent<FocusView> view) =>
         view.FindAll("button").First(b => b.TextContent.Contains("Tech Edit", StringComparison.Ordinal));
 
-    private void StubStatus(bool configured, TextProviderReadiness? provider, bool knowledgeBase = false) =>
+    private void StubStatus(
+        bool configured, TextProviderReadiness? provider, bool knowledgeBase = false, TextGenerationStatus? text = null) =>
         Http.OnGet("api/v1/ai/status", new AiStatusResponse(
             configured ? "config" : "none", configured,
             new Dictionary<string, string>(), false, null,
             [new ImageProviderReadiness("foundry", true, null)],
             provider is null ? [] : [provider],
-            knowledgeBase));
+            knowledgeBase,
+            text));
 
     private void StubArtifact(long version, string markdown)
     {

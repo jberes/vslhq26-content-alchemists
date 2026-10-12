@@ -72,7 +72,9 @@ public sealed record AiStatusResponse(
     /// <summary>Per-text-provider readiness (ADR-020) — the Tech Edit button reads this.</summary>
     IReadOnlyList<TextProviderReadiness>? TextProviders = null,
     /// <summary>Whether a knowledge-base gateway is configured AND has a stored token.</summary>
-    bool KnowledgeBaseReady = false);
+    bool KnowledgeBaseReady = false,
+    /// <summary>Who writes every piece of text for this producer (ADR-086).</summary>
+    TextGenerationStatus? TextGeneration = null);
 
 public sealed record ImageProviderReadiness(
     string Name, bool Ready, string? Reason, bool SupportsReferenceImages = false, string? Model = null);

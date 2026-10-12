@@ -159,12 +159,15 @@ public static class AiEndpoints
             .GroupBy(kv => kv.Key.Replace('_', '-'), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.OrdinalIgnoreCase);
 
+        var textGeneration = await textProviders.TextGenerationStatusAsync(userId, ct);
         string? probeResult = null;
-        if (probe == true && credentials is not null && models.ContainsKey("chat"))
+        if (probe == true && textGeneration.Ready
+            && (textGeneration.Provider == TextGenerationSettings.OpenAi || models.ContainsKey("chat")))
         {
             try
             {
-                var client = await clients.CreateChatClientAsync(userId, "chat", ct);
+                // Through the registry: the probe exercises the route generation really takes.
+                var client = await textProviders.ResolveAsync(userId, "chat", ct);
                 var response = await client.GetResponseAsync("Reply with the single word: ok", cancellationToken: ct);
                 probeResult = string.IsNullOrWhiteSpace(response.Text) ? "empty response" : "ok";
             }
@@ -197,7 +200,8 @@ public static class AiEndpoints
             [.. providers.Select(p => new ImageProviderReadiness(
                 p.Name, p.Ready, p.Reason, p.SupportsReferenceImages, p.Model))],
             [.. text.Select(p => new TextProviderReadiness(p.Name, p.Ready, p.Reason))],
-            knowledgeReady));
+            knowledgeReady,
+            textGeneration));
     }
 
     private static IResult Log(ClaimsPrincipal principal, IPromptLog promptLog) =>
@@ -304,6 +308,8 @@ public static class AiEndpoints
         IContentDependencyService dependencies,
         CastmillDbContext db,
         IOptions<SeoOptions> seoOptions,
+        ITextGenerationRoute textRoute,
+        TimeProvider clock,
         HttpResponse response,
         CancellationToken ct)
     {
@@ -343,16 +349,28 @@ public static class AiEndpoints
         // a dropped connection silently truncated it part-way — "13 items promised, fewer
         // made", with the paid model calls already spent. The client recovers by polling the
         // run row; the only things that stop a run now are the app shutting down and the
-        // 30-minute cap, which exists so an orphaned run cannot burn model spend forever.
+        // cap, which exists so an orphaned run cannot burn model spend forever. Max-effort
+        // reasoning on the OpenAI route (ADR-086) is many minutes per piece, so its cap is
+        // sized for the blog and YouTube pipelines' sequential passes, not for one call.
+        var userId = AuthEndpoints.GetUserId(principal);
+        var cap = (await textRoute.ChoiceAsync(userId, ct)).UsesOpenAi
+            ? TimeSpan.FromHours(3)
+            : TimeSpan.FromMinutes(30);
         using var runScope = CancellationTokenSource.CreateLinkedTokenSource(
             response.HttpContext.RequestServices
                 .GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()
                 .ApplicationStopping);
-        runScope.CancelAfter(TimeSpan.FromMinutes(30));
+        runScope.CancelAfter(cap);
 
-        var results = await orchestrator.RunFanOutAsync(
-            AuthEndpoints.GetUserId(principal), campaign, transcript, request.Brief, request.Kinds,
-            runScope.Token, runId, request.Count);
+        IReadOnlyList<GenerationResult> results;
+        await using (new RunHeartbeat(
+            response.HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>(),
+            runId, clock, runScope.Token))
+        {
+            results = await orchestrator.RunFanOutAsync(
+                userId, campaign, transcript, request.Brief, request.Kinds,
+                runScope.Token, runId, request.Count);
+        }
 
         // Per-phase costs for the Press Run UI (G7).
         response.Headers.Append("Server-Timing",
